@@ -1,4 +1,4 @@
-package commands
+package types
 
 import (
 	"fmt"
@@ -276,7 +276,7 @@ const (
 	PURE_INSTRUCTIONS   SectionFlag = 0x80000000 /* section contains only true machine instructions */
 	NO_TOC              SectionFlag = 0x40000000 /* section contains coalesced symbols that are not to be in a ranlib table of contents */
 	STRIP_STATIC_SYMS   SectionFlag = 0x20000000 /* ok to strip static symbols in this section in files with the MH_DYLDLINK flag */
-	NO_DEAD_STRIP       SectionFlag = 0x10000000 /* no dead stripping */
+	NoDeadStrip         SectionFlag = 0x10000000 /* no dead stripping */
 	LIVE_SUPPORT        SectionFlag = 0x08000000 /* blocks are live if they reference live blocks */
 	SELF_MODIFYING_CODE SectionFlag = 0x04000000 /* Used with i386 code stubs written on by dyld */
 	/*
@@ -308,7 +308,7 @@ func (t SectionFlag) IsStripStaticSyms() bool {
 	return (t.GetAttributes() & STRIP_STATIC_SYMS) != 0
 }
 func (t SectionFlag) IsNoDeadStrip() bool {
-	return (t.GetAttributes() & NO_DEAD_STRIP) != 0
+	return (t.GetAttributes() & NoDeadStrip) != 0
 }
 func (t SectionFlag) IsLiveSupport() bool {
 	return (t.GetAttributes() & LIVE_SUPPORT) != 0

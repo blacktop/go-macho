@@ -11,22 +11,21 @@ import (
 	"io"
 	"os"
 	"strings"
+	"unsafe"
 
 	"github.com/apex/log"
-	"github.com/blacktop/go-macho/commands"
-	"github.com/blacktop/go-macho/header"
 	"github.com/blacktop/go-macho/types"
+)
+
+const (
+	pageAlign = 12 // 4096 = 1 << 12
 )
 
 type sections []*Section
 
 // A File represents an open Mach-O file.
 type File struct {
-	header.FileHeader
-	ByteOrder binary.ByteOrder
-	Loads     []Load
-	// Sections  []*Section
-	Sections sections
+	FileTOC
 
 	Symtab   *Symtab
 	Dysymtab *Dysymtab
@@ -34,290 +33,172 @@ type File struct {
 	closer io.Closer
 }
 
-// A Load represents any Mach-O load command.
-type Load interface {
-	Raw() []byte
+type FileTOC struct {
+	types.FileHeader
+	ByteOrder binary.ByteOrder
+	Loads     []Load
+	Sections  sections
 }
 
-// A LoadBytes is the uninterpreted bytes of a Mach-O load command.
-type LoadBytes []byte
-
-func (b LoadBytes) Raw() []byte { return b }
-
-// A SegmentHeader is the header for a Mach-O 32-bit or 64-bit load segment command.
-type SegmentHeader struct {
-	Cmd     commands.LoadCmd
-	Len     uint32
-	Name    string
-	Addr    uint64
-	Memsz   uint64
-	Offset  uint64
-	Filesz  uint64
-	Maxprot types.VmProtection
-	Prot    types.VmProtection
-	Nsect   uint32
-	Flag    commands.SegFlag
+func (t *FileTOC) String() string {
+	// note("Type = %s, Flags=0x%x", exem.Type, uint32(exem.Flags))
+	// for i, l := range exem.Loads {
+	// 	if s, ok := l.(*macho.Segment); ok {
+	// 		fmt.Printf("Load %d is Segment %s, offset=0x%x, filesz=%d, addr=0x%x, memsz=%d, nsect=%d\n", i, s.Name,
+	// 			s.Offset, s.Filesz, s.Addr, s.Memsz, s.Nsect)
+	// 		for j := uint32(0); j < s.Nsect; j++ {
+	// 			c := exem.Sections[j+s.Firstsect]
+	// 			fmt.Printf("   Section %s, offset=0x%x, size=%d, addr=0x%x, flags=0x%x, nreloc=%d, res1=%d, res2=%d, res3=%d\n", c.Name, c.Offset, c.Size, c.Addr, c.Flags, c.Nreloc, c.Reserved1, c.Reserved2, c.Reserved3)
+	// 		}
+	// 	} else {
+	// 		fmt.Printf("Load %d is %v\n", i, l)
+	// 	}
+	// }
+	// if exem.SizeCommands != exem.LoadSize() {
+	// 	fail("recorded command size %d does not equal computed command size %d", exem.SizeCommands, exem.LoadSize())
+	// } else {
+	// 	note("recorded command size %d, computed command size %d", exem.SizeCommands, exem.LoadSize())
+	// }
+	// note("File size is %d", exem.FileSize())
+	return ""
 }
 
-// A Segment represents a Mach-O 32-bit or 64-bit load segment command.
-type Segment struct {
-	LoadBytes
-	SegmentHeader
-
-	// Embed ReaderAt for ReadAt method.
-	// Do not embed SectionReader directly
-	// to avoid having Read and Seek.
-	// If a client wants Read and Seek it must use
-	// Open() to avoid fighting over the seek offset
-	// with other clients.
-	io.ReaderAt
-	sr *io.SectionReader
+func (t *FileTOC) AddLoad(l Load) {
+	t.Loads = append(t.Loads, l)
+	t.NCommands++
+	t.SizeCommands += l.LoadSize(t)
 }
 
-// Data reads and returns the contents of the segment.
-func (s *Segment) Data() ([]byte, error) {
-	dat := make([]byte, s.sr.Size())
-	n, err := s.sr.ReadAt(dat, 0)
-	if n == len(dat) {
-		err = nil
-	}
-	return dat[0:n], err
+// AddSegment adds segment s to the file table of contents,
+// and also zeroes out the segment information with the expectation
+// that this will be added next.
+func (t *FileTOC) AddSegment(s *Segment) {
+	t.AddLoad(s)
+	s.Nsect = 0
+	s.Firstsect = 0
 }
 
-// Open returns a new ReadSeeker reading the segment.
-func (s *Segment) Open() io.ReadSeeker { return io.NewSectionReader(s.sr, 0, 1<<63-1) }
-
-type SectionHeader struct {
-	Name   string
-	Seg    string
-	Addr   uint64
-	Size   uint64
-	Offset uint32
-	Align  uint32
-	Reloff uint32
-	Nreloc uint32
-	Flags  commands.SectionFlag
+// AddSection adds section to the most recently added Segment
+func (t *FileTOC) AddSection(s *Section) {
+	g := t.Loads[len(t.Loads)-1].(*Segment)
+	if g.Nsect == 0 {
+		g.Firstsect = uint32(len(t.Sections))
+	}
+	g.Nsect++
+	t.Sections = append(t.Sections, s)
+	sectionsize := uint32(unsafe.Sizeof(types.Section32{}))
+	if g.Command() == types.LcSegment64 {
+		sectionsize = uint32(unsafe.Sizeof(types.Section64{}))
+	}
+	t.SizeCommands += sectionsize
+	g.Len += sectionsize
 }
 
-// A Reloc represents a Mach-O relocation.
-type Reloc struct {
-	Addr  uint32
-	Value uint32
-	// when Scattered == false && Extern == true, Value is the symbol number.
-	// when Scattered == false && Extern == false, Value is the section number.
-	// when Scattered == true, Value is the value that this reloc refers to.
-	Type      uint8
-	Len       uint8 // 0=byte, 1=word, 2=long, 3=quad
-	Pcrel     bool
-	Extern    bool // valid if Scattered == false
-	Scattered bool
+// DerivedCopy returns a modified copy of the TOC, with empty loads and sections,
+// and with the specified header type and flags.
+func (t *FileTOC) DerivedCopy(Type types.HeaderType, Flags types.HeaderFlag) *FileTOC {
+	h := t.FileHeader
+	h.NCommands, h.SizeCommands, h.Type, h.Flags = 0, 0, Type, Flags
+
+	return &FileTOC{FileHeader: h, ByteOrder: t.ByteOrder}
 }
 
-type Section struct {
-	SectionHeader
-	Relocs []Reloc
-
-	// Embed ReaderAt for ReadAt method.
-	// Do not embed SectionReader directly
-	// to avoid having Read and Seek.
-	// If a client wants Read and Seek it must use
-	// Open() to avoid fighting over the seek offset
-	// with other clients.
-	io.ReaderAt
-	sr *io.SectionReader
+// TOCSize returns the size in bytes of the object file representation
+// of the header and Load Commands (including Segments and Sections, but
+// not their contents) at the beginning of a Mach-O file.  This typically
+// overlaps the text segment in the object file.
+func (t *FileTOC) TOCSize() uint32 {
+	return t.HdrSize() + t.LoadSize()
 }
 
-// Data reads and returns the contents of the Mach-O section.
-func (s *Section) Data() ([]byte, error) {
-	dat := make([]byte, s.sr.Size())
-	n, err := s.sr.ReadAt(dat, 0)
-	if n == len(dat) {
-		err = nil
+// LoadAlign returns the required alignment of Load commands in a binary.
+// This is used to add padding for necessary alignment.
+func (t *FileTOC) LoadAlign() uint64 {
+	if t.Magic == types.Magic64 {
+		return 8
 	}
-	return dat[0:n], err
+	return 4
 }
 
-// Open returns a new ReadSeeker reading the Mach-O section.
-func (s *Section) Open() io.ReadSeeker { return io.NewSectionReader(s.sr, 0, 1<<63-1) }
+// SymbolSize returns the size in bytes of a Symbol (Nlist32 or Nlist64)
+func (t *FileTOC) SymbolSize() uint32 {
+	if t.Magic == types.Magic64 {
+		return uint32(unsafe.Sizeof(types.Nlist64{}))
+	}
+	return uint32(unsafe.Sizeof(types.Nlist32{}))
+}
 
-type (
-	// A Symtab represents a Mach-O symbol table command.
-	Symtab struct {
-		LoadBytes
-		commands.SymtabCmd
-		Syms []Symbol
+// HdrSize returns the size in bytes of the Macho header for a given
+// magic number (where the magic number has been appropriately byte-swapped).
+func (t *FileTOC) HdrSize() uint32 {
+	switch t.Magic {
+	case types.Magic32:
+		return types.FileHeaderSize32
+	case types.Magic64:
+		return types.FileHeaderSize64
+	case types.MagicFat:
+		panic("MagicFat not handled yet")
+	default:
+		panic(fmt.Sprintf("Unexpected magic number 0x%x, expected Mach-O object file", t.Magic))
 	}
-	// A Symbol is a Mach-O 32-bit or 64-bit symbol table entry.
-	Symbol struct {
-		Name  string
-		Type  types.NLType
-		Sect  uint8
-		Desc  uint16
-		Value uint64
-	}
-	// #define	LC_SYMSEG	0x3	/* link-edit gdb symbol table info (obsolete) */
-	// #define	LC_THREAD	0x4	/* thread */
-	// A UnixThread represents a Mach-O unix thread command.
-	UnixThread struct {
-		LoadBytes
-	}
-	// #define	LC_LOADFVMLIB	0x6	/* load a specified fixed VM shared library */
-	// #define	LC_IDFVMLIB	0x7	/* fixed VM shared library identification */
-	// #define	LC_IDENT	0x8	/* object identification info (obsolete) */
-	// #define LC_FVMFILE	0x9	/* fixed VM file inclusion (internal use) */
-	// #define LC_PREPAGE      0xa     /* prepage command (internal use) */
-	// A Dysymtab represents a Mach-O dynamic symbol table command.
-	Dysymtab struct {
-		LoadBytes
-		commands.DysymtabCmd
-		IndirectSyms []uint32 // indices into Symtab.Syms
-	}
-	// A Dylib represents a Mach-O load dynamic library command.
-	Dylib struct {
-		LoadBytes
-		Name           string
-		Time           uint32
-		CurrentVersion string
-		CompatVersion  string
-	}
-	// A DylibID represents a Mach-O load dynamic library ident command.
-	DylibID Dylib
-	// #define LC_LOAD_DYLINKER 0xe	/* load a dynamic linker */
-	// #define LC_ID_DYLINKER	0xf	/* dynamic linker identification */
-	// #define	LC_PREBOUND_DYLIB 0x10	/* modules prebound for a dynamically */
-	// 				/*  linked shared library */
-	// #define	LC_ROUTINES	0x11	/* image routines */
+}
 
-	SubFramework struct {
-		LoadBytes
-		Framework string
+// LoadSize returns the size of all the load commands in a file's table-of contents
+// (but not their associated data, e.g., sections and symbol tables)
+func (t *FileTOC) LoadSize() uint32 {
+	cmdsz := uint32(0)
+	for _, l := range t.Loads {
+		s := l.LoadSize(t)
+		cmdsz += s
 	}
-	// #define	LC_SUB_UMBRELLA 0x13	/* sub umbrella */
-	// A SubClient is a Mach-O dynamic sub client command.
-	SubClient struct {
-		LoadBytes
-		Name string
-	}
+	return cmdsz
+}
 
-	// #define	LC_SUB_LIBRARY  0x15	/* sub library */
-	// #define	LC_TWOLEVEL_HINTS 0x16	/* two-level namespace lookup hints */
-	// #define	LC_PREBIND_CKSUM  0x17	/* prebind checksum */
+// FileSize returns the size in bytes of the header, load commands, and the
+// in-file contents of all the segments and sections included in those
+// load commands, accounting for their offsets within the file.
+func (t *FileTOC) FileSize() uint64 {
+	sz := uint64(t.LoadSize()) // ought to be contained in text segment, but just in case.
+	for _, l := range t.Loads {
+		if s, ok := l.(*Segment); ok {
+			if m := s.Offset + s.Filesz; m > sz {
+				sz = m
+			}
+		}
+	}
+	return sz
+}
 
-	// A WeakDylib represents a Mach-O load weak dynamic library command.
-	WeakDylib Dylib
+// Put writes the header and all load commands to buffer, using
+// the byte ordering specified in FileTOC t.  For sections, this
+// writes the headers that come in-line with the segment Load commands,
+// but does not write the reference data for those sections.
+func (t *FileTOC) Put(buffer []byte) int {
+	next := t.FileHeader.Put(buffer, t.ByteOrder)
+	for _, l := range t.Loads {
+		if s, ok := l.(*Segment); ok {
+			switch t.Magic {
+			case types.Magic64:
+				next += s.Put64(buffer[next:], t.ByteOrder)
+				for i := uint32(0); i < s.Nsect; i++ {
+					c := t.Sections[i+s.Firstsect]
+					next += c.Put64(buffer[next:], t.ByteOrder)
+				}
+			case types.Magic32:
+				next += s.Put32(buffer[next:], t.ByteOrder)
+				for i := uint32(0); i < s.Nsect; i++ {
+					c := t.Sections[i+s.Firstsect]
+					next += c.Put32(buffer[next:], t.ByteOrder)
+				}
+			default:
+				panic(fmt.Sprintf("Unexpected magic number 0x%x", t.Magic))
+			}
 
-	Routines64 struct {
-		LoadBytes
-		InitAddress uint64
-		InitModule  uint64
+		} else {
+			next += l.Put(buffer[next:], t.ByteOrder)
+		}
 	}
-	// A uuid represents a Mach-O uuid command.
-	UUID struct {
-		LoadBytes
-		ID string
-	}
-	// A Rpath represents a Mach-O rpath command.
-	Rpath struct {
-		LoadBytes
-		Path string
-	}
-	// #define LC_CODE_SIGNATURE 0x1d	/* local of code signature */
-	CodeSignature struct {
-		LoadBytes
-		Offset uint32
-		Size   uint32
-	}
-	// #define LC_SEGMENT_SPLIT_INFO 0x1e /* local of info to split segments */
-	SplitInfo struct {
-		LoadBytes
-		Offset uint32
-		Size   uint32
-	}
-
-	ReExportDylib Dylib
-	// #define	LC_LAZY_LOAD_DYLIB 0x20	/* delay load of dylib until first use */
-	// #define	LC_ENCRYPTION_INFO 0x21	/* encrypted segment information */
-
-	// A DyldInfo represents a Mach-O id dyld info command.
-	DyldInfo struct {
-		LoadBytes
-		RebaseOff    uint32 // file offset to rebase info
-		RebaseSize   uint32 //  size of rebase info
-		BindOff      uint32 // file offset to binding info
-		BindSize     uint32 // size of binding info
-		WeakBindOff  uint32 // file offset to weak binding info
-		WeakBindSize uint32 //  size of weak binding info
-		LazyBindOff  uint32 // file offset to lazy binding info
-		LazyBindSize uint32 //  size of lazy binding info
-		ExportOff    uint32 // file offset to export info
-		ExportSize   uint32 //  size of export info
-	}
-
-	// #define	LC_DYLD_INFO_ONLY (0x22|LC_REQ_DYLD)	/* compressed dyld information only */
-
-	// A UpwardDylib represents a Mach-O load upward dylib command.
-	UpwardDylib Dylib
-	// #define LC_VERSION_MIN_MACOSX 0x24   /* build for MacOSX min OS version */
-	VersionMinMacosx struct {
-		LoadBytes
-		Version string
-		Sdk     string
-	}
-	// #define LC_VERSION_MIN_IPHONEOS 0x25 /* build for iPhoneOS min OS version */
-	VersionMinIphoneos struct {
-		LoadBytes
-		Version string
-		Sdk     string
-	}
-	// A FunctionStarts represents a Mach-O function starts command.
-	FunctionStarts struct {
-		LoadBytes
-		Offset uint32
-		Size   uint32
-	}
-	// #define LC_DYLD_ENVIRONMENT 0x27 /* string for dyld to treat
-	// 				    like environment variable */
-	// #define LC_MAIN (0x28|LC_REQ_DYLD) /* replacement for LC_UNIXTHREAD */
-
-	// A DataInCode represents a Mach-O data in code command.
-	DataInCode struct {
-		LoadBytes
-		Entries []types.DataInCodeEntry
-	}
-
-	// A SourceVersion represents a Mach-O source version.
-	SourceVersion struct {
-		LoadBytes
-		Version string
-	}
-	// #define LC_DYLIB_CODE_SIGN_DRS 0x2B /* Code signing DRs copied from linked dylibs */
-	// #define	LC_ENCRYPTION_INFO_64 0x2C /* 64-bit encrypted segment information */
-	// #define LC_LINKER_OPTION 0x2D /* linker options in MH_OBJECT files */
-	// #define LC_LINKER_OPTIMIZATION_HINT 0x2E /* optimization hints in MH_OBJECT files */
-	// #define LC_VERSION_MIN_TVOS 0x2F /* build for AppleTV min OS version */
-	// #define LC_VERSION_MIN_WATCHOS 0x30 /* build for Watch min OS version */
-	// #define LC_NOTE 0x31 /* arbitrary data included within a Mach-O file */
-
-	// A BuildVersion represents a Mach-O build for platform min OS version.
-	BuildVersion struct {
-		LoadBytes
-		Platform    string /* platform */
-		Minos       string /* X.Y.Z is encoded in nibbles xxxx.yy.zz */
-		Sdk         string /* X.Y.Z is encoded in nibbles xxxx.yy.zz */
-		NumTools    uint32 /* number of tool entries following this */
-		Tool        string
-		ToolVersion string
-	}
-
-// #define LC_DYLD_EXPORTS_TRIE (0x33 | LC_REQ_DYLD) /* used with linkedit_data_command, payload is trie */
-// #define LC_DYLD_CHAINED_FIXUPS (0x34 | LC_REQ_DYLD) /* used with linkedit_data_command */
-)
-
-// A LinkEditData represents a Mach-O linkedit data command.
-type LinkEditData struct {
-	LoadBytes
-	Offset uint32
-	Size   uint32
+	return next
 }
 
 /*
@@ -339,6 +220,15 @@ func (e *FormatError) Error() string {
 	}
 	msg += fmt.Sprintf(" in record at byte %#x", e.off)
 	return msg
+}
+
+func loadInSlice(c types.LoadCmd, list []types.LoadCmd) bool {
+	for _, b := range list {
+		if b == c {
+			return true
+		}
+	}
+	return false
 }
 
 // Open opens the named file using os.Open and prepares it for use as a Mach-O binary.
@@ -370,7 +260,7 @@ func (f *File) Close() error {
 
 // NewFile creates a new File for accessing a Mach-O binary in an underlying reader.
 // The Mach-O binary is expected to start at position 0 in the ReaderAt.
-func NewFile(r io.ReaderAt) (*File, error) {
+func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 	f := new(File)
 	sr := io.NewSectionReader(r, 0, 1<<63-1)
 
@@ -382,13 +272,13 @@ func NewFile(r io.ReaderAt) (*File, error) {
 	}
 	be := binary.BigEndian.Uint32(ident[0:])
 	le := binary.LittleEndian.Uint32(ident[0:])
-	switch header.Magic32.Int() &^ 1 {
+	switch types.Magic32.Int() &^ 1 {
 	case be &^ 1:
 		f.ByteOrder = binary.BigEndian
-		f.Magic = header.Magic(be)
+		f.Magic = types.Magic(be)
 	case le &^ 1:
 		f.ByteOrder = binary.LittleEndian
-		f.Magic = header.Magic(le)
+		f.Magic = types.Magic(le)
 	default:
 		return nil, &FormatError{0, "invalid magic number", nil}
 	}
@@ -399,25 +289,31 @@ func NewFile(r io.ReaderAt) (*File, error) {
 	}
 
 	// Then load commands.
-	offset := int64(header.FileHeaderSize32)
-	if f.Magic == header.Magic64 {
-		offset = header.FileHeaderSize64
+	offset := int64(types.FileHeaderSize32)
+	if f.Magic == types.Magic64 {
+		offset = types.FileHeaderSize64
 	}
-	dat := make([]byte, f.Cmdsz)
+	dat := make([]byte, f.SizeCommands)
 	if _, err := r.ReadAt(dat, offset); err != nil {
 		return nil, err
 	}
-	f.Loads = make([]Load, f.Ncmd)
+	f.Loads = make([]Load, f.NCommands)
 	bo := f.ByteOrder
 	for i := range f.Loads {
 		// Each load command begins with uint32 command and length.
 		if len(dat) < 8 {
 			return nil, &FormatError{offset, "command block too small", nil}
 		}
-		cmd, siz := commands.LoadCmd(bo.Uint32(dat[0:4])), bo.Uint32(dat[4:8])
+		cmd, siz := types.LoadCmd(bo.Uint32(dat[0:4])), bo.Uint32(dat[4:8])
 		if siz < 8 || siz > uint32(len(dat)) {
 			return nil, &FormatError{offset, "invalid command block size", nil}
 		}
+
+		// skip unwanted load commands
+		if len(loads) > 0 && !loadInSlice(cmd, loads) {
+			continue
+		}
+
 		var cmddat []byte
 		cmddat, dat = dat[0:siz], dat[siz:]
 		offset += int64(siz)
@@ -426,8 +322,8 @@ func NewFile(r io.ReaderAt) (*File, error) {
 		default:
 			log.Warnf("found NEW load command: %s", cmd)
 			f.Loads[i] = LoadBytes(cmddat)
-		case commands.LoadCmdSegment:
-			var seg32 commands.Segment32
+		case types.LoadCmdSegment:
+			var seg32 types.Segment32
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &seg32); err != nil {
 				return nil, err
@@ -447,7 +343,7 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			s.Flag = seg32.Flag
 			f.Loads[i] = s
 			for i := 0; i < int(s.Nsect); i++ {
-				var sh32 commands.Section32
+				var sh32 types.Section32
 				if err := binary.Read(b, bo, &sh32); err != nil {
 					return nil, err
 				}
@@ -465,8 +361,8 @@ func NewFile(r io.ReaderAt) (*File, error) {
 					return nil, err
 				}
 			}
-		case commands.LoadCmdSegment64:
-			var seg64 commands.Segment64
+		case types.LoadCmdSegment64:
+			var seg64 types.Segment64
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &seg64); err != nil {
 				return nil, err
@@ -486,7 +382,7 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			s.Flag = seg64.Flag
 			f.Loads[i] = s
 			for i := 0; i < int(s.Nsect); i++ {
-				var sh64 commands.Section64
+				var sh64 types.Section64
 				if err := binary.Read(b, bo, &sh64); err != nil {
 					return nil, err
 				}
@@ -504,8 +400,8 @@ func NewFile(r io.ReaderAt) (*File, error) {
 					return nil, err
 				}
 			}
-		case commands.LoadCmdSymtab:
-			var hdr commands.SymtabCmd
+		case types.LoadCmdSymtab:
+			var hdr types.SymtabCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, err
@@ -516,7 +412,7 @@ func NewFile(r io.ReaderAt) (*File, error) {
 				// return nil, err
 			}
 			var symsz int
-			if f.Magic == header.Magic64 {
+			if f.Magic == types.Magic64 {
 				symsz = 16
 			} else {
 				symsz = 12
@@ -531,10 +427,10 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			}
 			f.Loads[i] = st
 			f.Symtab = st
-		// case commands.LoadCmdSymseg:
-		// case commands.LoadCmdThread:
-		case commands.LoadCmdUnixThread:
-			var ut commands.UnixThreadCmd
+		// case types.LoadCmdSymseg:
+		// case types.LoadCmdThread:
+		case types.LoadCmdUnixThread:
+			var ut types.UnixThreadCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &ut); err != nil {
 				return nil, err
@@ -542,13 +438,13 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			l := new(UnixThread)
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		// case commands.LoadCmdLoadfvmlib:
-		// case commands.LoadCmdIdfvmlib:
-		// case commands.LoadCmdIdent:
-		// case commands.LoadCmdFvmfile:
-		// case commands.LoadCmdPrepage:
-		case commands.LoadCmdDysymtab:
-			var hdr commands.DysymtabCmd
+		// case types.LoadCmdLoadfvmlib:
+		// case types.LoadCmdIdfvmlib:
+		// case types.LoadCmdIdent:
+		// case types.LoadCmdFvmfile:
+		// case types.LoadCmdPrepage:
+		case types.LoadCmdDysymtab:
+			var hdr types.DysymtabCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, err
@@ -567,8 +463,8 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			st.IndirectSyms = x
 			f.Loads[i] = st
 			f.Dysymtab = st
-		case commands.LoadCmdDylib:
-			var hdr commands.DylibCmd
+		case types.LoadCmdDylib:
+			var hdr types.DylibCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, err
@@ -583,8 +479,8 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			l.CompatVersion = hdr.CompatVersion.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case commands.LoadCmdDylibID:
-			var hdr commands.DylibCmd
+		case types.LoadCmdDylibID:
+			var hdr types.DylibCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, err
@@ -599,12 +495,12 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			l.CompatVersion = hdr.CompatVersion.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		// case commands.LoadCmdDylinker:
-		// case commands.LoadCmdDylinkerID:
-		// case commands.LoadCmdPreboundDylib:
-		// case commands.LoadCmdRoutines:
-		case commands.LoadCmdSubFramework:
-			var sf commands.SubFrameworkCmd
+		// case types.LoadCmdDylinker:
+		// case types.LoadCmdDylinkerID:
+		// case types.LoadCmdPreboundDylib:
+		// case types.LoadCmdRoutines:
+		case types.LoadCmdSubFramework:
+			var sf types.SubFrameworkCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &sf); err != nil {
 				return nil, err
@@ -616,9 +512,9 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			l.Framework = cstring(cmddat[sf.Framework:])
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		// case commands.LoadCmdSubUmbrella:
-		case commands.LoadCmdSubClient:
-			var sc commands.SubClientCmd
+		// case types.LoadCmdSubUmbrella:
+		case types.LoadCmdSubClient:
+			var sc types.SubClientCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &sc); err != nil {
 				return nil, err
@@ -630,11 +526,11 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			l.Name = cstring(cmddat[sc.Client:])
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		// case commands.LoadCmdSubLibrary:
-		// case commands.LoadCmdTwolevelHints:
-		// case commands.LoadCmdPrebindCksum:
-		case commands.LoadCmdLoadWeakDylib:
-			var hdr commands.DylibCmd
+		// case types.LoadCmdSubLibrary:
+		// case types.LoadCmdTwolevelHints:
+		// case types.LoadCmdPrebindCksum:
+		case types.LoadCmdLoadWeakDylib:
+			var hdr types.DylibCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, err
@@ -649,8 +545,8 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			l.CompatVersion = hdr.CompatVersion.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case commands.LoadCmdRoutines64:
-			var r64 commands.Routines64Cmd
+		case types.LoadCmdRoutines64:
+			var r64 types.Routines64Cmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &r64); err != nil {
 				return nil, err
@@ -660,8 +556,8 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			l.InitModule = r64.InitModule
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case commands.LoadCmdUUID:
-			var u commands.UUIDCmd
+		case types.LoadCmdUUID:
+			var u types.UUIDCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &u); err != nil {
 				return nil, err
@@ -670,8 +566,8 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			l.ID = u.UUID.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case commands.LoadCmdRpath:
-			var hdr commands.RpathCmd
+		case types.LoadCmdRpath:
+			var hdr types.RpathCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, err
@@ -683,8 +579,8 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			l.Path = cstring(cmddat[hdr.Path:])
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case commands.LoadCmdCodeSignature:
-			var hdr commands.CodeSignatureCmd
+		case types.LoadCmdCodeSignature:
+			var hdr types.CodeSignatureCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, err
@@ -694,8 +590,8 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			l.Size = hdr.Size
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case commands.LoadCmdSegmentSplitInfo:
-			var hdr commands.SegmentSplitInfoCmd
+		case types.LoadCmdSegmentSplitInfo:
+			var hdr types.SegmentSplitInfoCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, err
@@ -705,8 +601,8 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			l.Size = hdr.Size
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case commands.LoadCmdReexportDylib:
-			var hdr commands.ReExportDylibCmd
+		case types.LoadCmdReexportDylib:
+			var hdr types.ReExportDylibCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, err
@@ -721,11 +617,11 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			l.CompatVersion = hdr.CompatVersion.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		// case commands.LoadCmdLazyLoadDylib:
-		// case commands.LoadCmdEncryptionInfo:
-		case commands.LoadCmdDyldInfo:
-		case commands.LoadCmdDyldInfoOnly:
-			var info commands.DyldInfoCmd
+		// case types.LoadCmdLazyLoadDylib:
+		// case types.LoadCmdEncryptionInfo:
+		case types.LoadCmdDyldInfo:
+		case types.LoadCmdDyldInfoOnly:
+			var info types.DyldInfoCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &info); err != nil {
 				return nil, err
@@ -742,8 +638,8 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			l.ExportOff = info.ExportOff
 			l.ExportSize = info.ExportSize
 			f.Loads[i] = l
-		case commands.LoadCmdLoadUpwardDylib:
-			var hdr commands.UpwardDylibCmd
+		case types.LoadCmdLoadUpwardDylib:
+			var hdr types.UpwardDylibCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, err
@@ -758,8 +654,8 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			l.CompatVersion = hdr.CompatVersion.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case commands.LoadCmdVersionMinMacosx:
-			var verMin commands.VersionMinMacOSCmd
+		case types.LoadCmdVersionMinMacosx:
+			var verMin types.VersionMinMacOSCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &verMin); err != nil {
 				return nil, err
@@ -769,8 +665,8 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			l.Sdk = verMin.Sdk.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case commands.LoadCmdVersionMinIphoneos:
-			var verMin commands.VersionMinIPhoneOSCmd
+		case types.LoadCmdVersionMinIphoneos:
+			var verMin types.VersionMinIPhoneOSCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &verMin); err != nil {
 				return nil, err
@@ -780,8 +676,8 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			l.Sdk = verMin.Sdk.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case commands.LoadCmdFunctionStarts:
-			var led commands.LinkEditDataCmd
+		case types.LoadCmdFunctionStarts:
+			var led types.LinkEditDataCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &led); err != nil {
 				return nil, err
@@ -791,10 +687,10 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			l.Size = led.Size
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		// case commands.LoadCmdDyldEnvironment:
-		// case commands.LoadCmdMain:
-		case commands.LoadCmdDataInCode:
-			var led commands.LinkEditDataCmd
+		// case types.LoadCmdDyldEnvironment:
+		// case types.LoadCmdMain:
+		case types.LoadCmdDataInCode:
+			var led types.LinkEditDataCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &led); err != nil {
 				return nil, err
@@ -804,8 +700,8 @@ func NewFile(r io.ReaderAt) (*File, error) {
 
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case commands.LoadCmdSourceVersion:
-			var sv commands.SourceVersionCmd
+		case types.LoadCmdSourceVersion:
+			var sv types.SourceVersionCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &sv); err != nil {
 				return nil, err
@@ -814,15 +710,15 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			l.Version = sv.Version.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		// case commands.LoadCmdDylibCodeSignDrs:
-		// case commands.LoadCmdEncryptionInfo64:
-		// case commands.LoadCmdLinkerOption:
-		// case commands.LoadCmdLinkerOptimizationHint:
-		// case commands.LoadCmdVersionMinTvos:
-		// case commands.LoadCmdVersionMinWatchos:
-		// case commands.LoadCmdNote:
-		case commands.LoadCmdBuildVersion:
-			var build commands.BuildVersionCmd
+		// case types.LoadCmdDylibCodeSignDrs:
+		// case types.LoadCmdEncryptionInfo64:
+		// case types.LoadCmdLinkerOption:
+		// case types.LoadCmdLinkerOptimizationHint:
+		// case types.LoadCmdVersionMinTvos:
+		// case types.LoadCmdVersionMinWatchos:
+		// case types.LoadCmdNote:
+		case types.LoadCmdBuildVersion:
+			var build types.BuildVersionCmd
 			var buildTool types.BuildToolVersion
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &build); err != nil {
@@ -842,8 +738,8 @@ func NewFile(r io.ReaderAt) (*File, error) {
 			}
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-			// case commands.LoadCmdDyldExportsTrie:
-			// case commands.LoadCmdDyldChainedFixups:
+			// case types.LoadCmdDyldExportsTrie:
+			// case types.LoadCmdDyldChainedFixups:
 		}
 		if s != nil {
 			s.sr = io.NewSectionReader(r, int64(s.Offset), int64(s.Filesz))
@@ -853,13 +749,13 @@ func NewFile(r io.ReaderAt) (*File, error) {
 	return f, nil
 }
 
-func (f *File) parseSymtab(symdat, strtab, cmddat []byte, hdr *commands.SymtabCmd, offset int64) (*Symtab, error) {
+func (f *File) parseSymtab(symdat, strtab, cmddat []byte, hdr *types.SymtabCmd, offset int64) (*Symtab, error) {
 	bo := f.ByteOrder
 	symtab := make([]Symbol, hdr.Nsyms)
 	b := bytes.NewReader(symdat)
 	for i := range symtab {
 		var n types.Nlist64
-		if f.Magic == header.Magic64 {
+		if f.Magic == types.Magic64 {
 			if err := binary.Read(b, bo, &n); err != nil {
 				return nil, err
 			}

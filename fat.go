@@ -10,20 +10,20 @@ import (
 	"io"
 	"os"
 
-	"github.com/blacktop/go-macho/header"
+	"github.com/blacktop/go-macho/types"
 )
 
 // A FatFile is a Mach-O universal binary that contains at least one architecture.
 type FatFile struct {
-	Magic  header.Magic
+	Magic  types.Magic
 	Arches []FatArch
 	closer io.Closer
 }
 
 // A FatArchHeader represents a fat header for a specific image architecture.
 type FatArchHeader struct {
-	CPU    header.CPU
-	SubCPU header.CPUSubtype
+	CPU    types.CPU
+	SubCPU types.CPUSubtype
 	Offset uint32
 	Size   uint32
 	Align  uint32
@@ -53,13 +53,13 @@ func NewFatFile(r io.ReaderAt) (*FatFile, error) {
 	err := binary.Read(sr, binary.BigEndian, &ff.Magic)
 	if err != nil {
 		return nil, &FormatError{0, "error reading magic number", nil}
-	} else if ff.Magic != header.MagicFat {
+	} else if ff.Magic != types.MagicFat {
 		// See if this is a Mach-O file via its magic number. The magic
 		// must be converted to little endian first though.
 		var buf [4]byte
 		binary.BigEndian.PutUint32(buf[:], ff.Magic.Int())
 		leMagic := binary.LittleEndian.Uint32(buf[:])
-		if leMagic == header.Magic32.Int() || leMagic == header.Magic64.Int() {
+		if leMagic == types.Magic32.Int() || leMagic == types.Magic64.Int() {
 			return nil, ErrNotFat
 		}
 		return nil, &FormatError{0, "invalid magic number", nil}
@@ -83,7 +83,7 @@ func NewFatFile(r io.ReaderAt) (*FatFile, error) {
 	// there are not duplicate architectures.
 	seenArches := make(map[uint64]bool, narch)
 	// Make sure that all images are for the same MH_ type.
-	var machoType header.Type
+	var machoType types.HeaderType
 
 	// Following the fat_header comes narch fat_arch structs that index
 	// Mach-O images further in the file.
@@ -111,10 +111,10 @@ func NewFatFile(r io.ReaderAt) (*FatFile, error) {
 
 		// Make sure the Mach-O type matches that of the first image.
 		if i == 0 {
-			machoType = fa.Type
+			machoType = fa.HeaderType
 		} else {
-			if fa.Type != machoType {
-				return nil, &FormatError{offset, fmt.Sprintf("Mach-O type for architecture #%d (type=%#x) does not match first (type=%#x)", i, fa.Type, machoType), nil}
+			if fa.HeaderType != machoType {
+				return nil, &FormatError{offset, fmt.Sprintf("Mach-O type for architecture #%d (type=%#x) does not match first (type=%#x)", i, fa.HeaderType, machoType), nil}
 			}
 		}
 	}

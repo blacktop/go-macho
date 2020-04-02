@@ -1,8 +1,10 @@
 package types
 
-import "strings"
-
-import "fmt"
+import (
+	"encoding/binary"
+	"fmt"
+	"strings"
+)
 
 // An Nlist32 is a Mach-O 32-bit symbol table entry.
 type Nlist32 struct {
@@ -13,6 +15,15 @@ type Nlist32 struct {
 	Value uint32
 }
 
+func (n *Nlist64) Put32(b []byte, o binary.ByteOrder) uint32 {
+	o.PutUint32(b[0:], n.Name)
+	b[4] = byte(n.Type)
+	b[5] = byte(n.Sect)
+	o.PutUint16(b[6:], n.Desc)
+	o.PutUint32(b[8:], uint32(n.Value))
+	return 8 + 4
+}
+
 // An Nlist64 is a Mach-O 64-bit symbol table entry.
 type Nlist64 struct {
 	Name  uint32
@@ -20,6 +31,15 @@ type Nlist64 struct {
 	Sect  uint8
 	Desc  uint16
 	Value uint64
+}
+
+func (n *Nlist64) Put64(b []byte, o binary.ByteOrder) uint32 {
+	o.PutUint32(b[0:], n.Name)
+	b[4] = byte(n.Type)
+	b[5] = byte(n.Sect)
+	o.PutUint16(b[6:], n.Desc)
+	o.PutUint64(b[8:], n.Value)
+	return 8 + 8
 }
 
 type NLType uint8

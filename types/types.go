@@ -5,6 +5,7 @@ package types
 import (
 	"encoding/binary"
 	"fmt"
+	"strconv"
 )
 
 type VmProtection int32
@@ -113,3 +114,20 @@ const (
 	KindJumpTable32    DiceKind = 0x0004
 	KindAbsJumpTable32 DiceKind = 0x0005
 )
+
+type intName struct {
+	i uint32
+	s string
+}
+
+func stringName(i uint32, names []intName, goSyntax bool) string {
+	for _, n := range names {
+		if n.i == i {
+			if goSyntax {
+				return "macho." + n.s
+			}
+			return n.s
+		}
+	}
+	return "0x" + strconv.FormatUint(uint64(i), 16)
+}
