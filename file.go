@@ -881,6 +881,16 @@ func (f *File) Segments() []*Segment {
 	return segs
 }
 
+func (f *File) SegmentByName(segname string) *Segment {
+	for _, seg := range f.Segments() {
+		if seg.Name == segname {
+			return seg
+		}
+	}
+
+	return nil
+}
+
 // Section returns the first section with the given name, or nil if no such
 // section exists.
 func (f *File) Section(name string) *Section {
@@ -889,6 +899,16 @@ func (f *File) Section(name string) *Section {
 			return s
 		}
 	}
+	return nil
+}
+
+func (f *File) SectionByName(seg, sect string) *Section {
+	for _, sec := range f.Sections {
+		if sec.Seg == seg && sec.Name == sect {
+			return sec
+		}
+	}
+
 	return nil
 }
 
