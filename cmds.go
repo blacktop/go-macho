@@ -87,7 +87,7 @@ func (s *SegmentHeader) String() string {
 // A Segment represents a Mach-O 32-bit or 64-bit load segment command.
 type Segment struct {
 	SegmentHeader
-
+	LoadBytes
 	// Embed ReaderAt for ReadAt method.
 	// Do not embed SectionReader directly
 	// to avoid having Read and Seek.

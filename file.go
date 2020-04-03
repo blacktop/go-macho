@@ -321,8 +321,8 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 		switch cmd {
 		default:
 			log.Warnf("found NEW load command: %s", cmd)
-			f.Loads[i] = LoadBytes(cmddat)
-		case types.LoadCmdSegment:
+			f.Loads[i] = LoadCmdBytes{types.LoadCmd(cmd), LoadBytes(cmddat)}
+		case types.LcSegment:
 			var seg32 types.Segment32
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &seg32); err != nil {
@@ -330,7 +330,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			}
 			s = new(Segment)
 			s.LoadBytes = cmddat
-			s.Cmd = cmd
+			s.LoadCmd = cmd
 			s.Len = siz
 			s.Name = cstring(seg32.Name[0:])
 			s.Addr = uint64(seg32.Addr)
@@ -361,7 +361,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 					return nil, err
 				}
 			}
-		case types.LoadCmdSegment64:
+		case types.LcSegment64:
 			var seg64 types.Segment64
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &seg64); err != nil {
@@ -369,7 +369,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			}
 			s = new(Segment)
 			s.LoadBytes = cmddat
-			s.Cmd = cmd
+			s.LoadCmd = cmd
 			s.Len = siz
 			s.Name = cstring(seg64.Name[0:])
 			s.Addr = seg64.Addr
@@ -400,7 +400,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 					return nil, err
 				}
 			}
-		case types.LoadCmdSymtab:
+		case types.LcSymtab:
 			var hdr types.SymtabCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
@@ -427,9 +427,9 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			}
 			f.Loads[i] = st
 			f.Symtab = st
-		// case types.LoadCmdSymseg:
-		// case types.LoadCmdThread:
-		case types.LoadCmdUnixThread:
+		// TODO: case types.LcSymseg:
+		// TODO: case types.LcThread:
+		case types.LcUnixThread:
 			var ut types.UnixThreadCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &ut); err != nil {
@@ -438,12 +438,12 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l := new(UnixThread)
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		// case types.LoadCmdLoadfvmlib:
-		// case types.LoadCmdIdfvmlib:
-		// case types.LoadCmdIdent:
-		// case types.LoadCmdFvmfile:
-		// case types.LoadCmdPrepage:
-		case types.LoadCmdDysymtab:
+		// TODO: case types.LcLoadfvmlib:
+		// TODO: case types.LcIdfvmlib:
+		// TODO: case types.LcIdent:
+		// TODO: case types.LcFvmfile:
+		// TODO: case types.LcPrepage:
+		case types.LcDysymtab:
 			var hdr types.DysymtabCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
@@ -463,7 +463,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			st.IndirectSyms = x
 			f.Loads[i] = st
 			f.Dysymtab = st
-		case types.LoadCmdDylib:
+		case types.LcDylib:
 			var hdr types.DylibCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
@@ -479,7 +479,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.CompatVersion = hdr.CompatVersion.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case types.LoadCmdDylibID:
+		case types.LcDylibID:
 			var hdr types.DylibCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
@@ -495,11 +495,11 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.CompatVersion = hdr.CompatVersion.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		// case types.LoadCmdDylinker:
-		// case types.LoadCmdDylinkerID:
-		// case types.LoadCmdPreboundDylib:
-		// case types.LoadCmdRoutines:
-		case types.LoadCmdSubFramework:
+		// TODO: case types.LcDylinker:
+		// TODO: case types.LcDylinkerID:
+		// TODO: case types.LcPreboundDylib:
+		// TODO: case types.LcRoutines:
+		case types.LcSubFramework:
 			var sf types.SubFrameworkCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &sf); err != nil {
@@ -512,8 +512,8 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.Framework = cstring(cmddat[sf.Framework:])
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		// case types.LoadCmdSubUmbrella:
-		case types.LoadCmdSubClient:
+		// TODO: case types.LcSubUmbrella:
+		case types.LcSubClient:
 			var sc types.SubClientCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &sc); err != nil {
@@ -526,10 +526,10 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.Name = cstring(cmddat[sc.Client:])
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		// case types.LoadCmdSubLibrary:
-		// case types.LoadCmdTwolevelHints:
-		// case types.LoadCmdPrebindCksum:
-		case types.LoadCmdLoadWeakDylib:
+		// TODO: case types.LcSubLibrary:
+		// TODO: case types.LcTwolevelHints:
+		// TODO: case types.LcPrebindCksum:
+		case types.LcLoadWeakDylib:
 			var hdr types.DylibCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
@@ -545,7 +545,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.CompatVersion = hdr.CompatVersion.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case types.LoadCmdRoutines64:
+		case types.LcRoutines64:
 			var r64 types.Routines64Cmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &r64); err != nil {
@@ -556,7 +556,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.InitModule = r64.InitModule
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case types.LoadCmdUUID:
+		case types.LcUUID:
 			var u types.UUIDCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &u); err != nil {
@@ -566,7 +566,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.ID = u.UUID.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case types.LoadCmdRpath:
+		case types.LcRpath:
 			var hdr types.RpathCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
@@ -579,7 +579,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.Path = cstring(cmddat[hdr.Path:])
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case types.LoadCmdCodeSignature:
+		case types.LcCodeSignature:
 			var hdr types.CodeSignatureCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
@@ -590,7 +590,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.Size = hdr.Size
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case types.LoadCmdSegmentSplitInfo:
+		case types.LcSegmentSplitInfo:
 			var hdr types.SegmentSplitInfoCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
@@ -601,7 +601,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.Size = hdr.Size
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case types.LoadCmdReexportDylib:
+		case types.LcReexportDylib:
 			var hdr types.ReExportDylibCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
@@ -617,10 +617,10 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.CompatVersion = hdr.CompatVersion.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		// case types.LoadCmdLazyLoadDylib:
-		// case types.LoadCmdEncryptionInfo:
-		case types.LoadCmdDyldInfo:
-		case types.LoadCmdDyldInfoOnly:
+		// TODO: case types.LcLazyLoadDylib:
+		// TODO: case types.LcEncryptionInfo:
+		case types.LcDyldInfo:
+		case types.LcDyldInfoOnly:
 			var info types.DyldInfoCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &info); err != nil {
@@ -638,7 +638,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.ExportOff = info.ExportOff
 			l.ExportSize = info.ExportSize
 			f.Loads[i] = l
-		case types.LoadCmdLoadUpwardDylib:
+		case types.LcLoadUpwardDylib:
 			var hdr types.UpwardDylibCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
@@ -654,7 +654,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.CompatVersion = hdr.CompatVersion.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case types.LoadCmdVersionMinMacosx:
+		case types.LcVersionMinMacosx:
 			var verMin types.VersionMinMacOSCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &verMin); err != nil {
@@ -665,7 +665,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.Sdk = verMin.Sdk.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case types.LoadCmdVersionMinIphoneos:
+		case types.LcVersionMinIphoneos:
 			var verMin types.VersionMinIPhoneOSCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &verMin); err != nil {
@@ -676,7 +676,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.Sdk = verMin.Sdk.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case types.LoadCmdFunctionStarts:
+		case types.LcFunctionStarts:
 			var led types.LinkEditDataCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &led); err != nil {
@@ -687,9 +687,9 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.Size = led.Size
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		// case types.LoadCmdDyldEnvironment:
-		// case types.LoadCmdMain:
-		case types.LoadCmdDataInCode:
+		// TODO: case types.LcDyldEnvironment:
+		// TODO: case types.LcMain:
+		case types.LcDataInCode:
 			var led types.LinkEditDataCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &led); err != nil {
@@ -700,7 +700,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		case types.LoadCmdSourceVersion:
+		case types.LcSourceVersion:
 			var sv types.SourceVersionCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &sv); err != nil {
@@ -710,14 +710,14 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.Version = sv.Version.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		// case types.LoadCmdDylibCodeSignDrs:
-		// case types.LoadCmdEncryptionInfo64:
-		// case types.LoadCmdLinkerOption:
-		// case types.LoadCmdLinkerOptimizationHint:
-		// case types.LoadCmdVersionMinTvos:
-		// case types.LoadCmdVersionMinWatchos:
-		// case types.LoadCmdNote:
-		case types.LoadCmdBuildVersion:
+		// TODO: case types.LcDylibCodeSignDrs:
+		// TODO: case types.LcEncryptionInfo64:
+		// TODO: case types.LcLinkerOption:
+		// TODO: case types.LcLinkerOptimizationHint:
+		// TODO: case types.LcVersionMinTvos:
+		// TODO: case types.LcVersionMinWatchos:
+		// TODO: case types.LcNote:
+		case types.LcBuildVersion:
 			var build types.BuildVersionCmd
 			var buildTool types.BuildToolVersion
 			b := bytes.NewReader(cmddat)
@@ -738,8 +738,8 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			}
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-			// case types.LoadCmdDyldExportsTrie:
-			// case types.LoadCmdDyldChainedFixups:
+			// TODO: case types.LcDyldExportsTrie:
+			// TODO: case types.LcDyldChainedFixups:
 		}
 		if s != nil {
 			s.sr = io.NewSectionReader(r, int64(s.Offset), int64(s.Filesz))
@@ -772,7 +772,6 @@ func (f *File) parseSymtab(symdat, strtab, cmddat []byte, hdr *types.SymtabCmd, 
 		}
 		sym := &symtab[i]
 		if n.Name >= uint32(len(strtab)) {
-			continue // TODO: remove this
 			return nil, &FormatError{offset, "invalid name in symbol table", n.Name}
 		}
 		// We add "_" to Go symbols. Strip it here. See issue 33808.
