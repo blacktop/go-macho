@@ -320,7 +320,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 		var s *Segment
 		switch cmd {
 		default:
-			log.Warnf("found NEW load command: %s", cmd)
+			log.Warnf("found NEW load command: %s, please let the author know :)", cmd)
 			f.Loads[i] = LoadCmdBytes{types.LoadCmd(cmd), LoadBytes(cmddat)}
 		case types.LcSegment:
 			var seg32 types.Segment32

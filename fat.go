@@ -111,10 +111,10 @@ func NewFatFile(r io.ReaderAt) (*FatFile, error) {
 
 		// Make sure the Mach-O type matches that of the first image.
 		if i == 0 {
-			machoType = fa.HeaderType
+			machoType = fa.Type
 		} else {
-			if fa.HeaderType != machoType {
-				return nil, &FormatError{offset, fmt.Sprintf("Mach-O type for architecture #%d (type=%#x) does not match first (type=%#x)", i, fa.HeaderType, machoType), nil}
+			if fa.Type != machoType {
+				return nil, &FormatError{offset, fmt.Sprintf("Mach-O type for architecture #%d (type=%#x) does not match first (type=%#x)", i, fa.Type, machoType), nil}
 			}
 		}
 	}

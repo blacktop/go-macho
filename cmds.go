@@ -412,13 +412,13 @@ type Symbol struct {
  * LC_SYMSEG
  *******************************************************************************/
 
-// TODO:	LC_SYMSEG	0x3	/* link-edit gdb symbol table info (obsolete) */
+// TODO: LC_SYMSEG	0x3	/* link-edit gdb symbol table info (obsolete) */
 
 /*******************************************************************************
  * LC_THREAD
  *******************************************************************************/
 
-// TODO:	LC_THREAD	0x4	/* thread */
+// TODO: LC_THREAD	0x4	/* thread */
 
 /*******************************************************************************
  * LC_UNIXTHREAD
@@ -430,9 +430,9 @@ type UnixThread struct {
 	types.UnixThreadCmd
 }
 
-// TODO:	LC_LOADFVMLIB	0x6	/* load a specified fixed VM shared library */
-// TODO:	LC_IDFVMLIB	0x7	/* fixed VM shared library identification */
-// TODO:	LC_IDENT	0x8	/* object identification info (obsolete) */
+// TODO: LC_LOADFVMLIB	0x6	/* load a specified fixed VM shared library */
+// TODO: LC_IDFVMLIB	0x7	/* fixed VM shared library identification */
+// TODO: LC_IDENT	0x8	/* object identification info (obsolete) */
 // TODO: LC_FVMFILE	0x9	/* fixed VM file inclusion (internal use) */
 // TODO: LC_PREPAGE      0xa     /* prepage command (internal use) */
 
@@ -454,6 +454,7 @@ type Dysymtab struct {
 // A Dylib represents a Mach-O load dynamic library command.
 type Dylib struct {
 	LoadBytes
+	types.DylibCmd
 	Name           string
 	Time           uint32
 	CurrentVersion string
@@ -469,9 +470,9 @@ type DylibID Dylib
 
 // TODO: LC_LOAD_DYLINKER 0xe	/* load a dynamic linker */
 // TODO: LC_ID_DYLINKER	0xf	/* dynamic linker identification */
-// TODO:	LC_PREBOUND_DYLIB 0x10	/* modules prebound for a dynamically */
+// TODO: LC_PREBOUND_DYLIB 0x10	/* modules prebound for a dynamically */
 // 				/*  linked shared library */
-// TODO:	LC_ROUTINES	0x11	/* image routines */
+// TODO: LC_ROUTINES	0x11	/* image routines */
 
 /*******************************************************************************
  * LC_SUB_FRAMEWORK
@@ -479,10 +480,11 @@ type DylibID Dylib
 
 type SubFramework struct {
 	LoadBytes
+	types.SubFrameworkCmd
 	Framework string
 }
 
-// TODO:	LC_SUB_UMBRELLA 0x13	/* sub umbrella */
+// TODO: LC_SUB_UMBRELLA 0x13	/* sub umbrella */
 
 /*******************************************************************************
  * LC_SUB_CLIENT
@@ -491,12 +493,13 @@ type SubFramework struct {
 // A SubClient is a Mach-O dynamic sub client command.
 type SubClient struct {
 	LoadBytes
+	types.SubClientCmd
 	Name string
 }
 
-// TODO:	LC_SUB_LIBRARY  0x15	/* sub library */
-// TODO:	LC_TWOLEVEL_HINTS 0x16	/* two-level namespace lookup hints */
-// TODO:	LC_PREBIND_CKSUM  0x17	/* prebind checksum */
+// TODO: LC_SUB_LIBRARY  0x15	/* sub library */
+// TODO: LC_TWOLEVEL_HINTS 0x16	/* two-level namespace lookup hints */
+// TODO: LC_PREBIND_CKSUM  0x17	/* prebind checksum */
 
 /*******************************************************************************
  * LC_LOAD_WEAK_DYLIB
@@ -511,6 +514,7 @@ type WeakDylib Dylib
 
 type Routines64 struct {
 	LoadBytes
+	types.Routines64Cmd
 	InitAddress uint64
 	InitModule  uint64
 }
@@ -523,22 +527,22 @@ type Routines64 struct {
 type UUID struct {
 	LoadBytes
 	types.UUIDCmd
+	ID string
 }
 
 func (s *UUID) String() string {
-	return fmt.Sprintf("UUID %X-%X-%X-%X-%X",
-		s.Id[0:4], s.Id[4:6], s.Id[6:8], s.Id[8:10], s.Id[10:16])
-} // 8-4-4-4-12
+	return s.ID
+}
 func (s *UUID) Copy() *UUID {
-	return &Uuid{UuidCmd: s.UuidCmd}
+	return &UUID{UUIDCmd: s.UUIDCmd}
 }
 func (s *UUID) LoadSize(t *FileTOC) uint32 {
-	return uint32(unsafe.Sizeof(UuidCmd{}))
+	return uint32(unsafe.Sizeof(types.UUIDCmd{}))
 }
 func (s *UUID) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(s.LoadCmd))
 	o.PutUint32(b[1*4:], s.Len)
-	copy(b[2*4:], s.Id[0:])
+	copy(b[2*4:], s.UUID[0:])
 	return int(s.Len)
 }
 
@@ -549,6 +553,7 @@ func (s *UUID) Put(b []byte, o binary.ByteOrder) int {
 // A Rpath represents a Mach-O rpath command.
 type Rpath struct {
 	LoadBytes
+	types.RpathCmd
 	Path string
 }
 
@@ -558,6 +563,7 @@ type Rpath struct {
 
 type CodeSignature struct {
 	LoadBytes
+	types.CodeSignatureCmd
 	Offset uint32
 	Size   uint32
 }
@@ -568,6 +574,7 @@ type CodeSignature struct {
 
 type SplitInfo struct {
 	LoadBytes
+	types.SegmentSplitInfoCmd
 	Offset uint32
 	Size   uint32
 }
@@ -578,8 +585,8 @@ type SplitInfo struct {
 
 type ReExportDylib Dylib
 
-// TODO:	LC_LAZY_LOAD_DYLIB 0x20	/* delay load of dylib until first use */
-// TODO:	LC_ENCRYPTION_INFO 0x21	/* encrypted segment information */
+// TODO: LC_LAZY_LOAD_DYLIB 0x20	/* delay load of dylib until first use */
+// TODO: LC_ENCRYPTION_INFO 0x21	/* encrypted segment information */
 
 /*******************************************************************************
  * LC_DYLD_INFO
@@ -588,6 +595,7 @@ type ReExportDylib Dylib
 // A DyldInfo represents a Mach-O id dyld info command.
 type DyldInfo struct {
 	LoadBytes
+	types.DyldInfoCmd
 	RebaseOff    uint32 // file offset to rebase info
 	RebaseSize   uint32 //  size of rebase info
 	BindOff      uint32 // file offset to binding info
@@ -600,7 +608,7 @@ type DyldInfo struct {
 	ExportSize   uint32 //  size of export info
 }
 
-// TODO:	LC_DYLD_INFO_ONLY (0x22|LC_REQ_DYLD)	/* compressed dyld information only */
+// TODO: LC_DYLD_INFO_ONLY (0x22|LC_REQ_DYLD)	/* compressed dyld information only */
 
 /*******************************************************************************
  * LC_LOAD_UPWARD_DYLIB
@@ -615,6 +623,7 @@ type UpwardDylib Dylib
 
 type VersionMinMacosx struct {
 	LoadBytes
+	types.VersionMinMacOSCmd
 	Version string
 	Sdk     string
 }
@@ -625,6 +634,7 @@ type VersionMinMacosx struct {
 
 type VersionMinIphoneos struct {
 	LoadBytes
+	types.VersionMinIPhoneOSCmd
 	Version string
 	Sdk     string
 }
@@ -636,6 +646,7 @@ type VersionMinIphoneos struct {
 // A FunctionStarts represents a Mach-O function starts command.
 type FunctionStarts struct {
 	LoadBytes
+	types.FunctionStartsCmd
 	Offset uint32
 	Size   uint32
 }
@@ -651,6 +662,7 @@ type FunctionStarts struct {
 // A DataInCode represents a Mach-O data in code command.
 type DataInCode struct {
 	LoadBytes
+	types.DataInCodeCmd
 	Entries []types.DataInCodeEntry
 }
 
@@ -661,11 +673,12 @@ type DataInCode struct {
 // A SourceVersion represents a Mach-O source version.
 type SourceVersion struct {
 	LoadBytes
+	types.SourceVersionCmd
 	Version string
 }
 
 // TODO: LC_DYLIB_CODE_SIGN_DRS 0x2B /* Code signing DRs copied from linked dylibs */
-// TODO:	LC_ENCRYPTION_INFO_64 0x2C /* 64-bit encrypted segment information */
+// TODO: LC_ENCRYPTION_INFO_64 0x2C /* 64-bit encrypted segment information */
 // TODO: LC_LINKER_OPTION 0x2D /* linker options in MH_OBJECT files */
 // TODO: LC_LINKER_OPTIMIZATION_HINT 0x2E /* optimization hints in MH_OBJECT files */
 // TODO: LC_VERSION_MIN_TVOS 0x2F /* build for AppleTV min OS version */
@@ -679,6 +692,7 @@ type SourceVersion struct {
 // A BuildVersion represents a Mach-O build for platform min OS version.
 type BuildVersion struct {
 	LoadBytes
+	types.BuildVersionCmd
 	Platform    string /* platform */
 	Minos       string /* X.Y.Z is encoded in nibbles xxxx.yy.zz */
 	Sdk         string /* X.Y.Z is encoded in nibbles xxxx.yy.zz */
@@ -702,6 +716,7 @@ type BuildVersion struct {
 // A LinkEditData represents a Mach-O linkedit data command.
 type LinkEditData struct {
 	LoadBytes
+	types.LinkEditDataCmd
 	Offset uint32
 	Size   uint32
 }
