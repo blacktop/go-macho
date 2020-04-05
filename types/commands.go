@@ -219,9 +219,9 @@ type DylibCmd struct {
 type DylibID DylibCmd // LC_ID_DYLIB
 // A DylinkerCmd is a Mach-O dynamic load a dynamic linker command.
 type DylinkerCmd struct {
-	Cmd  LoadCmd // LC_LOAD_DYLINKER
-	Len  uint32
-	Name uint32 // dynamic linker's path name
+	LoadCmd // LC_LOAD_DYLINKER
+	Len     uint32
+	Name    uint32 // dynamic linker's path name
 }
 
 // A DylinkerIDCmd is a Mach-O dynamic linker identification command.

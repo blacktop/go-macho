@@ -477,7 +477,20 @@ func (d *Dylib) String() string {
 // A DylibID represents a Mach-O load dynamic library ident command.
 type DylibID Dylib
 
-// TODO: LC_LOAD_DYLINKER 0xe	/* load a dynamic linker */
+/*******************************************************************************
+ * LC_LOAD_DYLINKER
+ *******************************************************************************/
+
+type LoadDylinker struct {
+	LoadBytes
+	types.DylinkerCmd
+	Name string
+}
+
+func (d *LoadDylinker) String() string {
+	return d.Name
+}
+
 // TODO: LC_ID_DYLINKER	0xf	/* dynamic linker identification */
 // TODO: LC_PREBOUND_DYLIB 0x10	/* modules prebound for a dynamically */
 // 				/*  linked shared library */
@@ -573,8 +586,12 @@ type Rpath struct {
 type CodeSignature struct {
 	LoadBytes
 	types.CodeSignatureCmd
-	Offset uint32
-	Size   uint32
+	Offset        uint32
+	Size          uint32
+	ID            string
+	CodeDirectory types.CsCodeDirectory
+	Requirements  types.CsRequirementsBlob
+	CMSSignature  types.CsBlob
 }
 
 /*******************************************************************************
@@ -662,7 +679,34 @@ type FunctionStarts struct {
 
 // TODO: LC_DYLD_ENVIRONMENT 0x27 /* string for dyld to treat
 // 				    like environment variable */
-// TODO: LC_MAIN (0x28|LC_REQ_DYLD) /* replacement for LC_UNIXTHREAD */
+
+/*******************************************************************************
+ * LC_MAIN
+ *******************************************************************************/
+
+type EntryPoint struct {
+	LoadBytes
+	types.EntryPointCmd
+	EntryOffset uint64
+	StackSize   uint64
+}
+
+func (e *EntryPoint) String() string {
+	return fmt.Sprintf("Entry Point: 0x%016x, Stack Size: 0x%x", e.EntryOffset, e.StackSize)
+}
+func (e *EntryPoint) Copy() *EntryPoint {
+	return &EntryPoint{EntryPointCmd: e.EntryPointCmd}
+}
+func (e *EntryPoint) LoadSize(t *FileTOC) uint32 {
+	return uint32(unsafe.Sizeof(types.UUIDCmd{}))
+}
+func (e *EntryPoint) Put(b []byte, o binary.ByteOrder) int {
+	o.PutUint32(b[0*4:], uint32(e.LoadCmd))
+	o.PutUint32(b[1*4:], e.Len)
+	o.PutUint64(b[2*8:], e.EntryOffset)
+	o.PutUint64(b[3*8:], e.StackSize)
+	return int(e.Len)
+}
 
 /*******************************************************************************
  * LC_DATA_IN_CODE
