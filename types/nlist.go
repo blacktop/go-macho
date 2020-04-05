@@ -15,7 +15,7 @@ type Nlist32 struct {
 	Value uint32
 }
 
-func (n *Nlist64) Put32(b []byte, o binary.ByteOrder) uint32 {
+func (n *Nlist32) Put32(b []byte, o binary.ByteOrder) uint32 {
 	o.PutUint32(b[0:], n.Name)
 	b[4] = byte(n.Type)
 	b[5] = byte(n.Sect)

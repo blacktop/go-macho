@@ -1,20 +1,26 @@
 package macho
 
 import (
+	"fmt"
 	"os"
 	"testing"
 )
 
-func TestNewFile(t *testing.T) {
+func TestNewFatFile(t *testing.T) {
+
 	f, err := os.Open("/usr/lib/libcompression.dylib")
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := NewFile(f)
+
+	fat, err := NewFatFile(f)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.UUID().ID != "test" {
-		t.Errorf("macho.UUID() = %s; want test", m.UUID())
+
+	fmt.Println(fat.Arches[0].FileTOC.String())
+
+	if fat.Arches[0].UUID().ID != "test" {
+		t.Errorf("macho.UUID() = %s; want test", fat.Arches[0].UUID())
 	}
 }

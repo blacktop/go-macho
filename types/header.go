@@ -311,7 +311,7 @@ func (h FileHeader) String() string {
 
 	return fmt.Sprintf(
 		"Magic         = %s\n"+
-			"HeaderType          = %s\n"+
+			"Type          = %s\n"+
 			"CPU           = %s, %s\n"+
 			"Commands      = %d (Size: %d)\n"+
 			"Flags         = %s\n",

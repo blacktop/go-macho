@@ -165,7 +165,7 @@ func (s *Segment) CopyZeroed() *Segment {
 	r.Offset = 0
 	r.Nsect = 0
 	r.Firstsect = 0
-	if s.Command() == types.LcSegment64 {
+	if s.Command() == types.LC_SEGMENT_64 {
 		r.Len = uint32(unsafe.Sizeof(types.Segment64{}))
 	} else {
 		r.Len = uint32(unsafe.Sizeof(types.Segment32{}))
@@ -174,7 +174,7 @@ func (s *Segment) CopyZeroed() *Segment {
 }
 
 func (s *Segment) LoadSize(t *FileTOC) uint32 {
-	if s.Command() == types.LcSegment64 {
+	if s.Command() == types.LC_SEGMENT_64 {
 		return uint32(unsafe.Sizeof(types.Segment64{})) + uint32(s.Nsect)*uint32(unsafe.Sizeof(types.Section64{}))
 	}
 	return uint32(unsafe.Sizeof(types.Segment32{})) + uint32(s.Nsect)*uint32(unsafe.Sizeof(types.Section32{}))
@@ -214,6 +214,11 @@ type Reloc struct {
 	Pcrel     bool
 	Extern    bool // valid if Scattered == false
 	Scattered bool
+}
+
+type relocInfo struct {
+	Addr   uint32
+	Symnum uint32
 }
 
 type Section struct {
@@ -461,6 +466,10 @@ type Dylib struct {
 	CompatVersion  string
 }
 
+func (d *Dylib) String() string {
+	return fmt.Sprintf("%s (%s)", d.Name, d.CurrentVersion)
+}
+
 /*******************************************************************************
  * LC_ID_DYLIB
  *******************************************************************************/
@@ -677,6 +686,10 @@ type SourceVersion struct {
 	Version string
 }
 
+func (s *SourceVersion) String() string {
+	return s.Version
+}
+
 // TODO: LC_DYLIB_CODE_SIGN_DRS 0x2B /* Code signing DRs copied from linked dylibs */
 // TODO: LC_ENCRYPTION_INFO_64 0x2C /* 64-bit encrypted segment information */
 // TODO: LC_LINKER_OPTION 0x2D /* linker options in MH_OBJECT files */
@@ -699,6 +712,14 @@ type BuildVersion struct {
 	NumTools    uint32 /* number of tool entries following this */
 	Tool        string
 	ToolVersion string
+}
+
+func (b *BuildVersion) String() string {
+	return fmt.Sprintf("Platform: %s, SDK: %s, Tool: %s (%s)",
+		b.Platform,
+		b.Sdk,
+		b.Tool,
+		b.ToolVersion)
 }
 
 // TODO: LC_DYLD_EXPORTS_TRIE (0x33 | LC_REQ_DYLD) /* used with linkedit_data_command, payload is trie */

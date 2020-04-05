@@ -1,5 +1,7 @@
 package types
 
+//go:generate stringer -type=LoadCmd -output commands_string.go
+
 import (
 	"encoding/binary"
 	"fmt"
@@ -15,123 +17,65 @@ func (c LoadCmd) Put(b []byte, o binary.ByteOrder) int {
 }
 
 const (
-	LcReqDyld       LoadCmd = 0x80000000
-	LcSegment       LoadCmd = 0x1  // segment of this file to be mapped
-	LcSymtab        LoadCmd = 0x2  // link-edit stab symbol table info
-	LcSymseg        LoadCmd = 0x3  // link-edit gdb symbol table info (obsolete)
-	LcThread        LoadCmd = 0x4  // thread
-	LcUnixThread    LoadCmd = 0x5  // thread+stack
-	LcLoadfvmlib    LoadCmd = 0x6  // load a specified fixed VM shared library
-	LcIdfvmlib      LoadCmd = 0x7  // fixed VM shared library identification
-	LcIdent         LoadCmd = 0x8  // object identification info (obsolete)
-	LcFvmfile       LoadCmd = 0x9  // fixed VM file inclusion (internal use)
-	LcPrepage       LoadCmd = 0xa  // prepage command (internal use)
-	LcDysymtab      LoadCmd = 0xb  // dynamic link-edit symbol table info
-	LcDylib         LoadCmd = 0xc  // load dylib command
-	LcDylibID       LoadCmd = 0xd  // id dylib command
-	LcDylinker      LoadCmd = 0xe  // load a dynamic linker
-	LcDylinkerID    LoadCmd = 0xf  // id dylinker command (not load dylinker command)
-	LcPreboundDylib LoadCmd = 0x10 // modules prebound for a dynamically linked shared library
-	LcRoutines      LoadCmd = 0x11 // image routines
-	LcSubFramework  LoadCmd = 0x12 // sub framework
-	LcSubUmbrella   LoadCmd = 0x13 // sub umbrella
-	LcSubClient     LoadCmd = 0x14 // sub client
-	LcSubLibrary    LoadCmd = 0x15 // sub library
-	LcTwolevelHints LoadCmd = 0x16 // two-level namespace lookup hints
-	LcPrebindCksum  LoadCmd = 0x17 // prebind checksum
+	LC_REQ_DYLD       LoadCmd = 0x80000000
+	LC_SEGMENT        LoadCmd = 0x1  // segment of this file to be mapped
+	LC_SYMTAB         LoadCmd = 0x2  // link-edit stab symbol table info
+	LC_SYMSEG         LoadCmd = 0x3  // link-edit gdb symbol table info (obsolete)
+	LC_THREAD         LoadCmd = 0x4  // thread
+	LC_UNIXTHREAD     LoadCmd = 0x5  // thread+stack
+	LC_LOADFVMLIB     LoadCmd = 0x6  // load a specified fixed VM shared library
+	LC_IDFVMLIB       LoadCmd = 0x7  // fixed VM shared library identification
+	LC_IDENT          LoadCmd = 0x8  // object identification info (obsolete)
+	LC_FVMFILE        LoadCmd = 0x9  // fixed VM file inclusion (internal use)
+	LC_PREPAGE        LoadCmd = 0xa  // prepage command (internal use)
+	LC_DYSYMTAB       LoadCmd = 0xb  // dynamic link-edit symbol table info
+	LC_LOAD_DYLIB     LoadCmd = 0xc  // load dylib command
+	LC_ID_DYLIB       LoadCmd = 0xd  // id dylib command
+	LC_LOAD_DYLINKER  LoadCmd = 0xe  // load a dynamic linker
+	LC_ID_DYLINKER    LoadCmd = 0xf  // id dylinker command (not load dylinker command)
+	LC_PREBOUND_DYLIB LoadCmd = 0x10 // modules prebound for a dynamically linked shared library
+	LC_ROUTINES       LoadCmd = 0x11 // image routines
+	LC_SUB_FRAMEWORK  LoadCmd = 0x12 // sub framework
+	LC_SUB_UMBRELLA   LoadCmd = 0x13 // sub umbrella
+	LC_SUB_CLIENT     LoadCmd = 0x14 // sub client
+	LC_SUB_LIBRARY    LoadCmd = 0x15 // sub library
+	LC_TWOLEVEL_HINTS LoadCmd = 0x16 // two-level namespace lookup hints
+	LC_PREBIND_CKSUM  LoadCmd = 0x17 // prebind checksum
 	/*
 	 * load a dynamically linked shared library that is allowed to be missing
 	 * (all symbols are weak imported).
 	 */
-	LcLoadWeakDylib          LoadCmd = (0x18 | LcReqDyld)
-	LcSegment64              LoadCmd = 0x19               // 64-bit segment of this file to be mapped
-	LcRoutines64             LoadCmd = 0x1a               // 64-bit image routines
-	LcUUID                   LoadCmd = 0x1b               // the uuid
-	LcRpath                  LoadCmd = (0x1c | LcReqDyld) // runpath additions
-	LcCodeSignature          LoadCmd = 0x1d               // local of code signature
-	LcSegmentSplitInfo       LoadCmd = 0x1e               // local of info to split segments
-	LcReexportDylib          LoadCmd = (0x1f | LcReqDyld) // load and re-export dylib
-	LcLazyLoadDylib          LoadCmd = 0x20               // delay load of dylib until first use
-	LcEncryptionInfo         LoadCmd = 0x21               // encrypted segment information
-	LcDyldInfo               LoadCmd = 0x22               // compressed dyld information
-	LcDyldInfoOnly           LoadCmd = (0x22 | LcReqDyld) // compressed dyld information only
-	LcLoadUpwardDylib        LoadCmd = (0x23 | LcReqDyld) // load upward dylib
-	LcVersionMinMacosx       LoadCmd = 0x24               // build for MacOSX min OS version
-	LcVersionMinIphoneos     LoadCmd = 0x25               // build for iPhoneOS min OS version
-	LcFunctionStarts         LoadCmd = 0x26               // compressed table of function start addresses
-	LcDyldEnvironment        LoadCmd = 0x27               // string for dyld to treat like environment variable
-	LcMain                   LoadCmd = (0x28 | LcReqDyld) // replacement for LC_UNIXTHREAD
-	LcDataInCode             LoadCmd = 0x29               // table of non-instructions in __text
-	LcSourceVersion          LoadCmd = 0x2A               // source version used to build binary
-	LcDylibCodeSignDrs       LoadCmd = 0x2B               // Code signing DRs copied from linked dylibs
-	LcEncryptionInfo64       LoadCmd = 0x2C               // 64-bit encrypted segment information
-	LcLinkerOption           LoadCmd = 0x2D               // linker options in MH_OBJECT files
-	LcLinkerOptimizationHint LoadCmd = 0x2E               // optimization hints in MH_OBJECT files
-	LcVersionMinTvos         LoadCmd = 0x2F               // build for AppleTV min OS version
-	LcVersionMinWatchos      LoadCmd = 0x30               // build for Watch min OS version
-	LcNote                   LoadCmd = 0x31               // arbitrary data included within a Mach-O file
-	LcBuildVersion           LoadCmd = 0x32               // build for platform min OS version
-	LcDyldExportsTrie        LoadCmd = (0x33 | LcReqDyld) // used with linkedit_data_command, payload is trie
-	LcDyldChainedFixups      LoadCmd = (0x34 | LcReqDyld) // used with linkedit_data_command
+	LC_LOAD_WEAK_DYLIB          LoadCmd = (0x18 | LC_REQ_DYLD)
+	LC_SEGMENT_64               LoadCmd = 0x19                 // 64-bit segment of this file to be mapped
+	LC_ROUTINES_64              LoadCmd = 0x1a                 // 64-bit image routines
+	LC_UUID                     LoadCmd = 0x1b                 // the uuid
+	LC_RPATH                    LoadCmd = (0x1c | LC_REQ_DYLD) // runpath additions
+	LC_CODE_SIGNATURE           LoadCmd = 0x1d                 // local of code signature
+	LC_SEGMENT_SPLIT_INFO       LoadCmd = 0x1e                 // local of info to split segments
+	LC_REEXPORT_DYLIB           LoadCmd = (0x1f | LC_REQ_DYLD) // load and re-export dylib
+	LC_LAZY_LOAD_DYLIB          LoadCmd = 0x20                 // delay load of dylib until first use
+	LC_ENCRYPTION_INFO          LoadCmd = 0x21                 // encrypted segment information
+	LC_DYLD_INFO                LoadCmd = 0x22                 // compressed dyld information
+	LC_DYLD_INFO_ONLY           LoadCmd = (0x22 | LC_REQ_DYLD) // compressed dyld information only
+	LC_LOAD_UPWARD_DYLIB        LoadCmd = (0x23 | LC_REQ_DYLD) // load upward dylib
+	LC_VERSION_MIN_MACOSX       LoadCmd = 0x24                 // build for MacOSX min OS version
+	LC_VERSION_MIN_IPHONEOS     LoadCmd = 0x25                 // build for iPhoneOS min OS version
+	LC_FUNCTION_STARTS          LoadCmd = 0x26                 // compressed table of function start addresses
+	LC_DYLD_ENVIRONMENT         LoadCmd = 0x27                 // string for dyld to treat like environment variable
+	LC_MAIN                     LoadCmd = (0x28 | LC_REQ_DYLD) // replacement for LC_UNIXTHREAD
+	LC_DATA_IN_CODE             LoadCmd = 0x29                 // table of non-instructions in __text
+	LC_SOURCE_VERSION           LoadCmd = 0x2A                 // source version used to build binary
+	LC_DYLIB_CODE_SIGN_DRS      LoadCmd = 0x2B                 // Code signing DRs copied from linked dylibs
+	LC_ENCRYPTION_INFO_64       LoadCmd = 0x2C                 // 64-bit encrypted segment information
+	LC_LINKER_OPTION            LoadCmd = 0x2D                 // linker options in MH_OBJECT files
+	LC_LINKER_OPTIMIZATION_HINT LoadCmd = 0x2E                 // optimization hints in MH_OBJECT files
+	LC_VERSION_MIN_TVOS         LoadCmd = 0x2F                 // build for AppleTV min OS version
+	LC_VERSION_MIN_WATCHOS      LoadCmd = 0x30                 // build for Watch min OS version
+	LC_NOTE                     LoadCmd = 0x31                 // arbitrary data included within a Mach-O file
+	LC_BUILD_VERSION            LoadCmd = 0x32                 // build for platform min OS version
+	LC_DYLD_EXPORTS_TRIE        LoadCmd = (0x33 | LC_REQ_DYLD) // used with linkedit_data_command, payload is trie
+	LC_DYLD_CHAINED_FIXUPS      LoadCmd = (0x34 | LC_REQ_DYLD) // used with linkedit_data_command
 )
-
-var cmdStrings = []intName{
-	{uint32(LcSegment), "LoadCmdSegment"},
-	{uint32(LcSymtab), "LoadCmdSymtab"},
-	{uint32(LcSymseg), "LoadCmdSymseg"},
-	{uint32(LcThread), "LoadCmdThread"},
-	{uint32(LcUnixThread), "LoadCmdUnixThread"},
-	{uint32(LcLoadfvmlib), "LoadCmdLoadfvmlib"},
-	{uint32(LcIdfvmlib), "LoadCmdIdfvmlib"},
-	{uint32(LcIdent), "LoadCmdIdent"},
-	{uint32(LcFvmfile), "LoadCmdFvmfile"},
-	{uint32(LcPrepage), "LoadCmdPrepage"},
-	{uint32(LcDysymtab), "LoadCmdDysymtab"},
-	{uint32(LcDylib), "LoadCmdDylib"},
-	{uint32(LcDylibID), "LoadCmdDylibID"},
-	{uint32(LcDylinker), "LoadCmdDylinker"},
-	{uint32(LcPreboundDylib), "LoadCmdPreboundDylib"},
-	{uint32(LcRoutines), "LoadCmdRoutines"},
-	{uint32(LcSubFramework), "LoadCmdSubFramework"},
-	{uint32(LcSubUmbrella), "LoadCmdSubUmbrella"},
-	{uint32(LcSubClient), "LoadCmdSubClient"},
-	{uint32(LcSubLibrary), "LoadCmdSubLibrary"},
-	{uint32(LcTwolevelHints), "LoadCmdTwolevelHints"},
-	{uint32(LcPrebindCksum), "LoadCmdPrebindCksum"},
-	{uint32(LcLoadWeakDylib), "LoadCmdLoadWeakDylib"},
-	{uint32(LcSegment64), "LoadCmdSegment64"},
-	{uint32(LcRoutines64), "LoadCmdRoutines64"},
-	{uint32(LcUUID), "LoadCmdUUID"},
-	{uint32(LcRpath), "LoadCmdRpath"},
-	{uint32(LcCodeSignature), "LoadCmdCodeSignature"},
-	{uint32(LcSegmentSplitInfo), "LoadCmdSegmentSplitInfo"},
-	{uint32(LcReexportDylib), "LoadCmdReexportDylib"},
-	{uint32(LcLazyLoadDylib), "LoadCmdLazyLoadDylib"},
-	{uint32(LcEncryptionInfo), "LoadCmdEncryptionInfo"},
-	{uint32(LcDyldInfo), "LoadCmdDyldInfo"},
-	{uint32(LcDyldInfoOnly), "LoadCmdDyldInfoOnly"},
-	{uint32(LcLoadUpwardDylib), "LoadCmdLoadUpwardDylib"},
-	{uint32(LcVersionMinMacosx), "LoadCmdVersionMinMacosx"},
-	{uint32(LcVersionMinIphoneos), "LoadCmdVersionMinIphoneos"},
-	{uint32(LcFunctionStarts), "LoadCmdFunctionStarts"},
-	{uint32(LcDyldEnvironment), "LoadCmdDyldEnvironment"},
-	{uint32(LcMain), "LoadCmdMain"},
-	{uint32(LcDataInCode), "LoadCmdDataInCode"},
-	{uint32(LcSourceVersion), "LoadCmdSourceVersion"},
-	{uint32(LcDylibCodeSignDrs), "LoadCmdDylibCodeSignDrs"},
-	{uint32(LcEncryptionInfo64), "LoadCmdEncryptionInfo64"},
-	{uint32(LcLinkerOption), "LoadCmdLinkerOption"},
-	{uint32(LcLinkerOptimizationHint), "LoadCmdLinkerOptimizationHint"},
-	{uint32(LcVersionMinTvos), "LoadCmdVersionMinTvos"},
-	{uint32(LcVersionMinWatchos), "LoadCmdVersionMinWatchos"},
-	{uint32(LcNote), "LoadCmdNote"},
-	{uint32(LcBuildVersion), "LoadCmdBuildVersion"},
-	{uint32(LcDyldExportsTrie), "LoadCmdDyldExportsTrie"},
-	{uint32(LcDyldChainedFixups), "LoadCmdDyldChainedFixups"},
-}
-
-func (i LoadCmd) String() string   { return stringName(uint32(i), cmdStrings, false) }
-func (i LoadCmd) GoString() string { return stringName(uint32(i), cmdStrings, true) }
 
 type SegFlag uint32
 
