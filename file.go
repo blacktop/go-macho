@@ -3,6 +3,7 @@ package macho
 // High level access to low level data structures.
 
 import (
+	"bufio"
 	"bytes"
 	"compress/zlib"
 	"debug/dwarf"
@@ -511,6 +512,21 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		// TODO: case types.LcDylinker:
+		case types.LC_LOAD_DYLINKER:
+			var hdr types.DylinkerCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &hdr); err != nil {
+				return nil, err
+			}
+			l := new(LoadDylinker)
+			l.LoadCmd = cmd
+			if hdr.Name >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in load dylinker command", hdr.Name}
+			}
+			l.Name = cstring(cmddat[hdr.Name:])
+			l.LoadBytes = LoadBytes(cmddat)
+			f.Loads[i] = l
+
 		// TODO: case types.LcDylinkerID:
 		// TODO: case types.LcPreboundDylib:
 		// TODO: case types.LcRoutines:
@@ -611,6 +627,15 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.Offset = hdr.Offset
 			l.Size = hdr.Size
 			l.LoadBytes = LoadBytes(cmddat)
+			csdat := make([]byte, hdr.Size)
+			if _, err := r.ReadAt(csdat, int64(hdr.Offset)); err != nil {
+				return nil, err
+			}
+			cs, err := f.parseCodeSignature(csdat, &hdr, offset)
+			if err != nil {
+				return nil, err
+			}
+			l.ID = cs.ID
 			f.Loads[i] = l
 		case types.LC_SEGMENT_SPLIT_INFO:
 			var hdr types.SegmentSplitInfoCmd
@@ -718,6 +743,19 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			f.Loads[i] = l
 		// TODO: case types.LcDyldEnvironment:
 		// TODO: case types.LcMain:
+		case types.LC_MAIN:
+			var hdr types.EntryPointCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &hdr); err != nil {
+				return nil, err
+			}
+			l := new(EntryPoint)
+			l.LoadCmd = cmd
+			l.EntryOffset = hdr.Offset
+			l.StackSize = hdr.StackSize
+			l.LoadBytes = LoadBytes(cmddat)
+			f.Loads[i] = l
+
 		case types.LC_DATA_IN_CODE:
 			var led types.LinkEditDataCmd
 			b := bytes.NewReader(cmddat)
@@ -821,6 +859,75 @@ func (f *File) parseSymtab(symdat, strtab, cmddat []byte, hdr *types.SymtabCmd, 
 	st.LoadBytes = LoadBytes(cmddat)
 	st.Syms = symtab
 	return st, nil
+}
+
+func (f *File) parseCodeSignature(cmddat []byte, hdr *types.CodeSignatureCmd, offset int64) (*CodeSignature, error) {
+	csr := bytes.NewReader(cmddat)
+
+	cs := &CodeSignature{}
+
+	csBlob := types.CsSuperBlob{}
+	if err := binary.Read(csr, binary.BigEndian, &csBlob); err != nil {
+		return nil, err
+	}
+
+	csIndex := make([]types.CsBlobIndex, csBlob.Count)
+	if err := binary.Read(csr, binary.BigEndian, &csIndex); err != nil {
+		return nil, err
+	}
+
+	for _, index := range csIndex {
+		csr.Seek(int64(index.Offset), io.SeekStart)
+		switch index.Type {
+		case types.CSSLOT_CODEDIRECTORY:
+		case types.CSSLOT_ALTERNATE_CODEDIRECTORIES:
+			if err := binary.Read(csr, binary.BigEndian, &cs.CodeDirectory); err != nil {
+				return nil, err
+			}
+			csr.Seek(int64(index.Offset+cs.CodeDirectory.IdentOffset), io.SeekStart)
+			id, err := bufio.NewReader(csr).ReadString('\x00')
+			if err != nil {
+				return nil, fmt.Errorf("failed to read CodeDirectory ID at: %d: %v", index.Offset+cs.CodeDirectory.IdentOffset, err)
+			}
+			cs.ID = id
+		case types.CSSLOT_REQUIREMENTS:
+			if err := binary.Read(csr, binary.BigEndian, &cs.Requirements); err != nil {
+				return nil, err
+			}
+			reqData := make([]byte, cs.Requirements.Length-8)
+			if err := binary.Read(csr, binary.BigEndian, &reqData); err != nil {
+				return nil, err
+			}
+			// fmt.Println(hex.Dump(reqData))
+			rqr := bytes.NewReader(reqData)
+			reqIdx := types.CsRequirements{}
+			if err := binary.Read(rqr, binary.BigEndian, &reqIdx); err != nil {
+				return nil, err
+			}
+			// fmt.Println(reqIdx)
+		case types.CSSLOT_ENTITLEMENTS:
+			entBlob := types.CsBlob{}
+			if err := binary.Read(csr, binary.BigEndian, &entBlob); err != nil {
+				return nil, err
+			}
+			plistData := make([]byte, entBlob.Length-8)
+			if err := binary.Read(csr, binary.BigEndian, &plistData); err != nil {
+				return nil, err
+			}
+			// fmt.Println(hex.Dump(plistData))
+			// ioutil.WriteFile("entitlements.plist", plistData, 0644)
+		case types.CSSLOT_CMS_SIGNATURE:
+			if err := binary.Read(csr, binary.BigEndian, &cs.CMSSignature); err != nil {
+				return nil, err
+			}
+			cmsData := make([]byte, cs.CMSSignature.Length)
+			if err := binary.Read(csr, binary.BigEndian, &cmsData); err != nil {
+				return nil, err
+			}
+			// fmt.Println(hex.Dump(cmsData))
+		}
+	}
+	return cs, nil
 }
 
 func (f *File) pushSection(sh *Section, r io.ReaderAt) error {
