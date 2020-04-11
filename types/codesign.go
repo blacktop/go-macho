@@ -53,7 +53,7 @@ var csHashTypeStrings = []intName{
 	{uint32(CS_HASHTYPE_SHA1), "Sha1"},
 	{uint32(CS_HASHTYPE_SHA256), "Sha256"},
 	{uint32(CS_HASHTYPE_SHA256_TRUNCATED), "Sha256 (Truncated)"},
-	{uint32(CS_HASHTYPE_SHA384), "å"},
+	{uint32(CS_HASHTYPE_SHA384), "Sha384"},
 	{uint32(CS_HASHTYPE_SHA512), "Sha512"},
 }
 
