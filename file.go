@@ -16,6 +16,7 @@ import (
 	"unsafe"
 
 	"github.com/blacktop/go-macho/types"
+	"github.com/blacktop/go-macho/types/trie"
 )
 
 const (
@@ -737,9 +738,36 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			}
 			l := new(FunctionStarts)
 			l.LoadCmd = cmd
-			l.Offset = led.Offset
-			l.Size = led.Size
+			// l.Offset = led.Offset
+			// l.Size = led.Size
 			l.LoadBytes = LoadBytes(cmddat)
+			ldat := make([]byte, led.Size)
+			if _, err := r.ReadAt(ldat, int64(led.Offset)); err != nil {
+				return nil, err
+			}
+			fsr := bytes.NewReader(ldat)
+			offset, err := trie.ReadUleb128(fsr)
+			if err != nil {
+				return nil, err
+			}
+			l.StartOffset = offset
+			lastVMA, err := f.GetVMAddress(l.StartOffset)
+			if err != nil {
+				return nil, err
+			}
+			l.VMAddrs = append(l.VMAddrs, lastVMA)
+			for {
+				offset, err = trie.ReadUleb128(fsr)
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					return nil, err
+				}
+				lastVMA += offset
+				l.VMAddrs = append(l.VMAddrs, lastVMA)
+				l.NextFuncOffsets = append(l.NextFuncOffsets, offset)
+			}
 			f.Loads[i] = l
 		// TODO: case types.LcDyldEnvironment:
 		// TODO: case types.LcMain:
@@ -992,6 +1020,24 @@ func cstring(b []byte) string {
 		i = len(b)
 	}
 	return string(b[0:i])
+}
+
+func (f *File) GetOffset(address uint64) (uint64, error) {
+	for _, seg := range f.Segments() {
+		if seg.Addr <= address && address < seg.Addr+seg.Memsz {
+			return (address - seg.Addr) + seg.Offset, nil
+		}
+	}
+	return 0, fmt.Errorf("address not within any mappings adress range")
+}
+
+func (f *File) GetVMAddress(offset uint64) (uint64, error) {
+	for _, seg := range f.Segments() {
+		if seg.Offset <= offset && offset < seg.Offset+seg.Filesz {
+			return (offset - seg.Offset) + seg.Addr, nil
+		}
+	}
+	return 0, fmt.Errorf("offset not within any mappings file offset range")
 }
 
 // Segment returns the first Segment with the given name, or nil if no such segment exists.

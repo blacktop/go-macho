@@ -673,8 +673,11 @@ type VersionMinIphoneos struct {
 type FunctionStarts struct {
 	LoadBytes
 	types.FunctionStartsCmd
-	Offset uint32
-	Size   uint32
+	// Offset          uint32
+	// Size            uint32
+	StartOffset     uint64
+	NextFuncOffsets []uint64
+	VMAddrs         []uint64
 }
 
 // TODO: LC_DYLD_ENVIRONMENT 0x27 /* string for dyld to treat
