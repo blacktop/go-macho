@@ -1040,6 +1040,37 @@ func (f *File) GetVMAddress(offset uint64) (uint64, error) {
 	return 0, fmt.Errorf("offset not within any mappings file offset range")
 }
 
+func (f *File) GetCString(strVmAddr uint64) (string, error) {
+
+	for _, sec := range f.Sections {
+		if sec.Flags.IsCstringLiterals() {
+			data, err := sec.Data()
+			if err != nil {
+				return "", err
+			}
+
+			if strVmAddr > sec.Addr {
+				strOffset := strVmAddr - sec.Addr
+				if strOffset > sec.Size {
+					return "", fmt.Errorf("offset out of bounds of the cstring section")
+				}
+				csr := bytes.NewBuffer(data[strOffset:])
+
+				s, err := csr.ReadString('\x00')
+				if err != nil {
+					log.Fatal(err.Error())
+				}
+
+				if len(s) > 0 {
+					return strings.Trim(s, "\x00"), nil
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("string not found")
+}
+
 // Segment returns the first Segment with the given name, or nil if no such segment exists.
 func (f *File) Segment(name string) *Segment {
 	for _, l := range f.Loads {
@@ -1117,6 +1148,16 @@ func (f *File) BuildVersion() *BuildVersion {
 	for _, l := range f.Loads {
 		if s, ok := l.(*BuildVersion); ok {
 			return s
+		}
+	}
+	return nil
+}
+
+// FunctionStarts returns the function starts array, or nil if none exists.
+func (f *File) FunctionStarts() []uint64 {
+	for _, l := range f.Loads {
+		if s, ok := l.(*FunctionStarts); ok {
+			return s.VMAddrs
 		}
 	}
 	return nil
