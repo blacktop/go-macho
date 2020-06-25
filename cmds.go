@@ -839,6 +839,7 @@ func (cf *DyldChainedFixups) String() string {
 }
 
 // TODO: LC_DYLD_CHAINED_FIXUPS (0x34 | LC_REQ_DYLD) /* used with linkedit_data_command */
+// TODO: LC_FILESET_ENTRY            LoadCmd = (0x35 | LC_REQ_DYLD) /* used with fileset_entry_command */
 
 /*******************************************************************************
  * LC_CODE_SIGNATURE, LC_SEGMENT_SPLIT_INFO,

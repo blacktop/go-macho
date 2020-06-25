@@ -909,6 +909,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			// }
 			// fmt.Println(dcsis)
 			f.Loads[i] = l
+			// TODO: case types.LC_FILESET_ENTRY
 		}
 		if s != nil {
 			s.sr = io.NewSectionReader(r, int64(s.Offset), int64(s.Filesz))
