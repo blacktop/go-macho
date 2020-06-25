@@ -863,9 +863,11 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l := new(DyldExportsTrie)
 			l.LoadCmd = cmd
 			l.LoadBytes = LoadBytes(cmddat)
-			l.Tries, err = trie.ParseTrie(ldat, 0)
-			if err != nil {
-				return nil, err
+			if len(ldat) > 0 {
+				l.Tries, err = trie.ParseTrie(ldat, 0)
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse trie data in load dyld exports trie command at: %d: %v", offset, err)
+				}
 			}
 			f.Loads[i] = l
 		case types.LC_DYLD_CHAINED_FIXUPS:
