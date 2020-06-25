@@ -1,9 +1,12 @@
 package types
 
+import "fmt"
+
 // A CPU is a Mach-O cpu type.
 type CPU uint32
 
 const (
+	cpuArchMask = 0xff000000 //  mask for architecture bits
 	cpuArch64   = 0x01000000 // 64 bit ABI
 	cpuArch6432 = 0x02000000 // ABI for 64-bit hardware with 32-bit types; LP32
 )
@@ -65,6 +68,22 @@ const (
 	CPUSubtypeArm64E   CPUSubtype = 2
 )
 
+// Capability bits used in the definition of cpu_subtype.
+const (
+	CpuSubtypeFeatureMask      CPUSubtype = 0xff000000                         /* mask for feature flags */
+	CpuSubtypeMask                        = CPUSubtype(^CpuSubtypeFeatureMask) /* mask for cpu subtype */
+	CpuSubtypeLib64                       = 0x80000000                         /* 64 bit libraries */
+	CpuSubtypePtrauthAbi                  = 0x80000000                         /* pointer authentication with versioned ABI */
+	CpuSubtypePtrauthAbiUser              = 0x40000000                         /* pointer authentication with userspace versioned ABI */
+	CpuSubtypeArm64PtrAuthMask            = 0x0f000000
+	/*
+	 *      When selecting a slice, ANY will pick the slice with the best
+	 *      grading for the selected cpu_type_t, unlike the "ALL" subtypes,
+	 *      which are the slices that can run on any hardware for that cpu type.
+	 */
+	CpuSubtypeAny = -1
+)
+
 var cpuSubtypeX86Strings = []intName{
 	// {uint32(CPUSubtypeX86All), "x86"},
 	{uint32(CPUSubtypeX8664All), "x86_64"},
@@ -73,19 +92,19 @@ var cpuSubtypeX86Strings = []intName{
 }
 var cpuSubtypeArmStrings = []intName{
 	{uint32(CPUSubtypeArmAll), "ArmAll"},
-	{uint32(CPUSubtypeArmV4T), "ArmV4T"},
-	{uint32(CPUSubtypeArmV6), "ArmV6"},
-	{uint32(CPUSubtypeArmV5Tej), "ArmV5Tej"},
-	{uint32(CPUSubtypeArmXscale), "ArmXscale"},
-	{uint32(CPUSubtypeArmV7), "ArmV7"},
-	{uint32(CPUSubtypeArmV7F), "ArmV7F"},
-	{uint32(CPUSubtypeArmV7S), "ArmV7S"},
-	{uint32(CPUSubtypeArmV7K), "ArmV7K"},
-	{uint32(CPUSubtypeArmV8), "ArmV8"},
-	{uint32(CPUSubtypeArmV6M), "rmV6M"},
-	{uint32(CPUSubtypeArmV7M), "ArmV7M"},
-	{uint32(CPUSubtypeArmV7Em), "ArmV7Em"},
-	{uint32(CPUSubtypeArmV8M), "ArmV8M"},
+	{uint32(CPUSubtypeArmV4T), "ARMv4t"},
+	{uint32(CPUSubtypeArmV6), "ARMv6"},
+	{uint32(CPUSubtypeArmV5Tej), "ARMv5tej"},
+	{uint32(CPUSubtypeArmXscale), "ARMXScale"},
+	{uint32(CPUSubtypeArmV7), "ARMv7"},
+	{uint32(CPUSubtypeArmV7F), "ARMv7f"},
+	{uint32(CPUSubtypeArmV7S), "ARMv7s"},
+	{uint32(CPUSubtypeArmV7K), "ARMv7k"},
+	{uint32(CPUSubtypeArmV8), "ARMv8"},
+	{uint32(CPUSubtypeArmV6M), "ARMv6m"},
+	{uint32(CPUSubtypeArmV7M), "ARMv7m"},
+	{uint32(CPUSubtypeArmV7Em), "ARMv7em"},
+	{uint32(CPUSubtypeArmV8M), "ARMv8m"},
 }
 var cpuSubtypeArm64Strings = []intName{
 	{uint32(CPUSubtypeArm64All), "ARM64"},
@@ -97,25 +116,31 @@ func (st CPUSubtype) String(cpu CPU) string {
 	switch cpu {
 	case CPU386:
 	case CPUAmd64:
-		// TODO: this is a hack and this should be fully fleshed out
-		return stringName(uint32(st&0xFF), cpuSubtypeX86Strings, false)
+		return stringName(uint32(st&CpuSubtypeMask), cpuSubtypeX86Strings, false)
 	case CPUArm:
-		return stringName(uint32(st), cpuSubtypeArmStrings, false)
+		return stringName(uint32(st&CpuSubtypeMask), cpuSubtypeArmStrings, false)
 	case CPUArm64:
-		return stringName(uint32(st), cpuSubtypeArm64Strings, false)
+		var feature string
+		caps := st & CpuSubtypeFeatureMask
+		if caps&CpuSubtypePtrauthAbiUser == 0 {
+			feature = fmt.Sprintf(" caps: PAC%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
+		} else {
+			feature = fmt.Sprintf(" caps: PAK%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
+		}
+		return stringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm64Strings, false) + feature
 	}
-	return ""
+	return "UNKNOWN"
 }
 
 func (st CPUSubtype) GoString(cpu CPU) string {
 	switch cpu {
 	case CPU386:
 	case CPUAmd64:
-		return stringName(uint32(st), cpuSubtypeX86Strings, true)
+		return stringName(uint32(st&CpuSubtypeMask), cpuSubtypeX86Strings, true)
 	case CPUArm:
-		return stringName(uint32(st), cpuSubtypeArmStrings, true)
+		return stringName(uint32(st&CpuSubtypeMask), cpuSubtypeArmStrings, true)
 	case CPUArm64:
-		return stringName(uint32(st), cpuSubtypeArm64Strings, true)
+		return stringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm64Strings, true)
 	}
-	return ""
+	return "UNKNOWN"
 }

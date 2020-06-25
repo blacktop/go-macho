@@ -75,6 +75,7 @@ const (
 	LC_BUILD_VERSION            LoadCmd = 0x32                 // build for platform min OS version
 	LC_DYLD_EXPORTS_TRIE        LoadCmd = (0x33 | LC_REQ_DYLD) // used with linkedit_data_command, payload is trie
 	LC_DYLD_CHAINED_FIXUPS      LoadCmd = (0x34 | LC_REQ_DYLD) // used with linkedit_data_command
+	LC_FILESET_ENTRY            LoadCmd = (0x35 | LC_REQ_DYLD) /* used with fileset_entry_command */
 )
 
 type SegFlag uint32
@@ -420,14 +421,19 @@ type SourceVersionCmd struct {
 
 // A DylibCodeSignDrsCmd is a Mach-O code signing DRs copied from linked dylibs command.
 type DylibCodeSignDrsCmd LinkEditDataCmd // LC_DYLIB_CODE_SIGN_DRS
+
+type EncryptionSystem uint32
+
+const NOT_ENCRYPTED_YET EncryptionSystem = 0
+
 // A EncryptionInfo64Cmd is a Mach-O 64-bit encrypted segment information command.
 type EncryptionInfo64Cmd struct {
 	LoadCmd // LC_ENCRYPTION_INFO_64
 	Len     uint32
-	Offset  uint32 // file offset of encrypted range
-	Size    uint32 // file size of encrypted range
-	CryptID uint32 // which enryption system, 0 means not-encrypted yet
-	Pad     uint32 // padding to make this struct's size a multiple of 8 bytes
+	Offset  uint32           // file offset of encrypted range
+	Size    uint32           // file size of encrypted range
+	CryptID EncryptionSystem // which enryption system, 0 means not-encrypted yet
+	Pad     uint32           // padding to make this struct's size a multiple of 8 bytes
 }
 
 // A LinkerOptionCmd is a Mach-O main command.
@@ -471,3 +477,16 @@ type BuildVersionCmd struct {
 type DyldExportsTrieCmd LinkEditDataCmd // LC_DYLD_EXPORTS_TRIE
 // A DyldChainedFixupsCmd is used with linkedit_data_command command.
 type DyldChainedFixupsCmd LinkEditDataCmd // LC_DYLD_CHAINED_FIXUPS
+
+// FilesetEntryCmd commands describe constituent Mach-O files that are part
+// of a fileset. In one implementation, entries are dylibs with individual
+// mach headers and repositionable text and data segments. Each entry is
+// further described by its own mach header.
+type FilesetEntryCmd struct {
+	LoadCmd  // LC_FILESET_ENTRY
+	Len      uint32
+	Addr     uint64 // memory address of the entry
+	Offset   uint64 // file offset of the entry
+	EntryID  uint32 // contained entry id
+	Reserved uint32 // reserved
+}
