@@ -131,3 +131,62 @@ func stringName(i uint32, names []intName, goSyntax bool) string {
 	}
 	return "0x" + strconv.FormatUint(uint64(i), 16)
 }
+
+type DyldChainedImport uint32
+type DyldChainedSymbolsFmt uint32
+
+const (
+	DC_IMPORT          DyldChainedImport = 1
+	DC_IMPORT_ADDEND   DyldChainedImport = 2
+	DC_IMPORT_ADDEND64 DyldChainedImport = 3
+)
+
+const (
+	DC_SFORMAT_UNCOMPRESSED    DyldChainedSymbolsFmt = 0
+	DC_SFORMAT_ZLIB_COMPRESSED DyldChainedSymbolsFmt = 1
+)
+
+// DyldChainedFixups object is the header of the LC_DYLD_CHAINED_FIXUPS payload
+type DyldChainedFixups struct {
+	FixupsVersion uint32                // 0
+	StartsOffset  uint32                // offset of dyld_chained_starts_in_image in chain_data
+	ImportsOffset uint32                // offset of imports table in chain_data
+	SymbolsOffset uint32                // offset of symbol strings in chain_data
+	ImportsCount  uint32                // number of imported symbol names
+	ImportsFormat DyldChainedImport     // DYLD_CHAINED_IMPORT*
+	SymbolsFormat DyldChainedSymbolsFmt // 0 => uncompressed, 1 => zlib compressed
+}
+
+type DyldChainedPtrKind uint16
+
+const (
+	DYLD_CHAINED_PTR_ARM64E              DyldChainedPtrKind = 1 // stride 8, unauth target is vmaddr
+	DYLD_CHAINED_PTR_64                  DyldChainedPtrKind = 2 // target is vmaddr
+	DYLD_CHAINED_PTR_32                  DyldChainedPtrKind = 3
+	DYLD_CHAINED_PTR_32_CACHE            DyldChainedPtrKind = 4
+	DYLD_CHAINED_PTR_32_FIRMWARE         DyldChainedPtrKind = 5
+	DYLD_CHAINED_PTR_64_OFFSET           DyldChainedPtrKind = 6 // target is vm offset
+	DYLD_CHAINED_PTR_ARM64E_OFFSET       DyldChainedPtrKind = 7 // old name
+	DYLD_CHAINED_PTR_ARM64E_KERNEL       DyldChainedPtrKind = 7 // stride 4, unauth target is vm offset
+	DYLD_CHAINED_PTR_64_KERNEL_CACHE     DyldChainedPtrKind = 8
+	DYLD_CHAINED_PTR_ARM64E_USERLAND     DyldChainedPtrKind = 9      // stride 8, unauth target is vm offset
+	DYLD_CHAINED_PTR_ARM64E_FIRMWARE     DyldChainedPtrKind = 10     // stride 4, unauth target is vmaddr
+	DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE DyldChainedPtrKind = 11     // stride 1, x86_64 kernel caches
+	DYLD_CHAINED_PTR_ARM64E_USERLAND24   DyldChainedPtrKind = 12     // stride 8, unauth target is vm offset, 24-bit bind
+	DYLD_CHAINED_PTR_START_NONE          DyldChainedPtrKind = 0xFFFF // used in page_start[] to denote a page with no fixups
+	DYLD_CHAINED_PTR_START_MULTI         DyldChainedPtrKind = 0x8000 // used in page_start[] to denote a page which has multiple starts
+	DYLD_CHAINED_PTR_START_LAST          DyldChainedPtrKind = 0x8000 // used in chain_starts[] to denote last start in list for page
+)
+
+// DyldChainedStartsInSegment object is embedded in dyld_chain_starts_in_image
+// and passed down to the kernel for page-in linking
+type DyldChainedStartsInSegment struct {
+	Size            uint32             // size of this (amount kernel needs to copy)
+	PageSize        uint16             // 0x1000 or 0x4000
+	PointerFormat   DyldChainedPtrKind // DYLD_CHAINED_PTR_*
+	SegmentOffset   uint64             // offset in memory to start of segment
+	MaxValidPointer uint32             // for 32-bit OS, any value beyond this is not a pointer
+	PageCount       uint16             // how many pages are in array
+	// uint16_t    page_start[1]      // each entry is offset in each page of first element in chain
+	//                                 // or DYLD_CHAINED_PTR_START_NONE if no fixups on page
+}

@@ -808,7 +808,19 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		// TODO: case types.LcDylibCodeSignDrs:
-		// TODO: case types.LcEncryptionInfo64:
+		case types.LC_ENCRYPTION_INFO_64:
+			var ei types.EncryptionInfo64Cmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &ei); err != nil {
+				return nil, err
+			}
+			l := new(EncryptionInfo64)
+			l.LoadCmd = cmd
+			l.Offset = ei.Offset
+			l.Size = ei.Size
+			l.CryptID = ei.CryptID
+			l.LoadBytes = LoadBytes(cmddat)
+			f.Loads[i] = l
 		// TODO: case types.LcLinkerOption:
 		// TODO: case types.LcLinkerOptimizationHint:
 		// TODO: case types.LcVersionMinTvos:
@@ -827,6 +839,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.Minos = build.Minos.String()
 			l.Sdk = build.Sdk.String()
 			l.NumTools = build.NumTools
+			// TODO: handle more than one tool case
 			if build.NumTools > 0 {
 				if err := binary.Read(b, bo, &buildTool); err != nil {
 					return nil, err
@@ -836,8 +849,66 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			}
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-			// TODO: case types.LcDyldExportsTrie:
-			// TODO: case types.LcDyldChainedFixups:
+		case types.LC_DYLD_EXPORTS_TRIE:
+			var led types.LinkEditDataCmd
+			var err error
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &led); err != nil {
+				return nil, err
+			}
+			ldat := make([]byte, led.Size)
+			if _, err := r.ReadAt(ldat, int64(led.Offset)); err != nil {
+				return nil, err
+			}
+			l := new(DyldExportsTrie)
+			l.LoadCmd = cmd
+			l.LoadBytes = LoadBytes(cmddat)
+			l.Tries, err = trie.ParseTrie(ldat, 0)
+			if err != nil {
+				return nil, err
+			}
+			f.Loads[i] = l
+		case types.LC_DYLD_CHAINED_FIXUPS:
+			var led types.LinkEditDataCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &led); err != nil {
+				return nil, err
+			}
+			l := new(DyldChainedFixups)
+			l.LoadCmd = cmd
+			l.Offset = led.Offset
+			l.Size = led.Size
+			l.LoadBytes = LoadBytes(cmddat)
+
+			var dcf types.DyldChainedFixups
+			// var dcsis types.DyldChainedStartsInSegment
+			ldat := make([]byte, led.Size)
+			if _, err := r.ReadAt(ldat, int64(led.Offset)); err != nil {
+				return nil, err
+			}
+			fsr := bytes.NewReader(ldat)
+			if err := binary.Read(fsr, bo, &dcf); err != nil {
+				return nil, err
+			}
+			l.ImportsCount = dcf.ImportsCount
+			// fmt.Printf("%#v\n", dcf)
+
+			// fsr.Seek(int64(dcf.StartsOffset), io.SeekStart)
+			// var segCount uint32
+			// if err := binary.Read(fsr, bo, &segCount); err != nil {
+			// 	return nil, err
+			// }
+			// segInfoOffset := make([]uint32, segCount)
+			// if err := binary.Read(fsr, bo, &segInfoOffset); err != nil {
+			// 	return nil, err
+			// }
+			// fmt.Println(segInfoOffset)
+
+			// if err := binary.Read(fsr, bo, &dcsis); err != nil {
+			// 	return nil, err
+			// }
+			// fmt.Println(dcsis)
+			f.Loads[i] = l
 		}
 		if s != nil {
 			s.sr = io.NewSectionReader(r, int64(s.Offset), int64(s.Filesz))

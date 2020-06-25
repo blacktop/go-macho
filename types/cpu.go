@@ -140,7 +140,14 @@ func (st CPUSubtype) GoString(cpu CPU) string {
 	case CPUArm:
 		return stringName(uint32(st&CpuSubtypeMask), cpuSubtypeArmStrings, true)
 	case CPUArm64:
-		return stringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm64Strings, true)
+		var feature string
+		caps := st & CpuSubtypeFeatureMask
+		if caps&CpuSubtypePtrauthAbiUser == 0 {
+			feature = fmt.Sprintf(" caps: PAC%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
+		} else {
+			feature = fmt.Sprintf(" caps: PAK%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
+		}
+		return stringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm64Strings, true) + feature
 	}
 	return "UNKNOWN"
 }

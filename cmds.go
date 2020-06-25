@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/blacktop/go-macho/types"
+	"github.com/blacktop/go-macho/types/trie"
 )
 
 // A Load represents any Mach-O load command.
@@ -738,7 +739,43 @@ func (s *SourceVersion) String() string {
 }
 
 // TODO: LC_DYLIB_CODE_SIGN_DRS 0x2B /* Code signing DRs copied from linked dylibs */
-// TODO: LC_ENCRYPTION_INFO_64 0x2C /* 64-bit encrypted segment information */
+
+/*******************************************************************************
+ * LC_ENCRYPTION_INFO_64
+ *******************************************************************************/
+
+// A EncryptionInfo64 represents a Mach-O 64-bit encrypted segment information
+type EncryptionInfo64 struct {
+	LoadBytes
+	types.EncryptionInfo64Cmd
+	Offset  uint32                 // file offset of encrypted range
+	Size    uint32                 // file size of encrypted range
+	CryptID types.EncryptionSystem // which enryption system, 0 means not-encrypted yet
+}
+
+func (e *EncryptionInfo64) String() string {
+	if e.CryptID == 0 {
+		return fmt.Sprintf("Offset: 0x%x, Size: 0x%x (not-encrypted yet)", e.Offset, e.Size)
+	}
+	return fmt.Sprintf("Offset: 0x%x, Size: 0x%x, CryptID: 0x%x", e.Offset, e.Size, e.CryptID)
+}
+func (e *EncryptionInfo64) Copy() *EncryptionInfo64 {
+	return &EncryptionInfo64{EncryptionInfo64Cmd: e.EncryptionInfo64Cmd}
+}
+func (e *EncryptionInfo64) LoadSize(t *FileTOC) uint32 {
+	return uint32(unsafe.Sizeof(types.EncryptionInfo64Cmd{}))
+}
+func (e *EncryptionInfo64) Put(b []byte, o binary.ByteOrder) int {
+	o.PutUint32(b[0*4:], uint32(e.LoadCmd))
+	o.PutUint32(b[1*4:], e.Len)
+	o.PutUint32(b[2*4:], e.Offset)
+	o.PutUint32(b[3*4:], e.Size)
+	o.PutUint32(b[3*4:], uint32(e.CryptID))
+	o.PutUint32(b[3*4:], e.Pad)
+
+	return int(e.Len)
+}
+
 // TODO: LC_LINKER_OPTION 0x2D /* linker options in MH_OBJECT files */
 // TODO: LC_LINKER_OPTIMIZATION_HINT 0x2E /* optimization hints in MH_OBJECT files */
 // TODO: LC_VERSION_MIN_TVOS 0x2F /* build for AppleTV min OS version */
@@ -769,7 +806,38 @@ func (b *BuildVersion) String() string {
 		b.ToolVersion)
 }
 
-// TODO: LC_DYLD_EXPORTS_TRIE (0x33 | LC_REQ_DYLD) /* used with linkedit_data_command, payload is trie */
+/*******************************************************************************
+ * LC_DYLD_EXPORTS_TRIE
+ *******************************************************************************/
+
+// A DyldExportsTrie used with linkedit_data_command, payload is trie
+type DyldExportsTrie struct {
+	LoadBytes
+	types.DyldExportsTrieCmd
+	Tries []trie.TrieEntry
+}
+
+func (t *DyldExportsTrie) String() string {
+	return fmt.Sprintf("Count: %d", len(t.Tries))
+}
+
+/*******************************************************************************
+ * LC_DYLD_CHAINED_FIXUPS
+ *******************************************************************************/
+
+// A DyldChainedFixups used with linkedit_data_command
+type DyldChainedFixups struct {
+	LoadBytes
+	types.DyldChainedFixupsCmd
+	Offset       uint32
+	Size         uint32
+	ImportsCount uint32
+}
+
+func (cf *DyldChainedFixups) String() string {
+	return fmt.Sprintf("Offset: 0x%x, Size: 0x%x, Imports: %d", cf.Offset, cf.Size, cf.ImportsCount)
+}
+
 // TODO: LC_DYLD_CHAINED_FIXUPS (0x34 | LC_REQ_DYLD) /* used with linkedit_data_command */
 
 /*******************************************************************************
