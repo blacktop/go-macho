@@ -48,14 +48,18 @@ func (t *FileTOC) String() string {
 
 	for i, l := range t.Loads {
 		if s, ok := l.(*Segment); ok {
-			fTocStr += fmt.Sprintf("%02d: %s, Segment %s, offset=0x%x, filesz=%d, addr=0x%x, memsz=%d, nsect=%d\n", i, s.Command(), s.Name,
-				s.Offset, s.Filesz, s.Addr, s.Memsz, s.Nsect)
+			fTocStr += fmt.Sprintf("%02d: %s offset=0x%08x-0x%08x, addr=0x%09x-0x%09x\t%s\n", i, s.Command(), s.Offset, s.Offset+s.Filesz, s.Addr, s.Addr+s.Memsz, s.Name)
 			for j := uint32(0); j < s.Nsect; j++ {
 				c := t.Sections[j+s.Firstsect]
-				fTocStr += fmt.Sprintf("   %s.%s\toffset=0x%x, size=%d, addr=0x%x, nreloc=%d\n", s.Name, c.Name, c.Offset, c.Size, c.Addr, c.Nreloc)
+				secFlags := ""
+				if !c.Flags.IsRegular() {
+					secFlags = fmt.Sprintf("(%s)", c.Flags)
+				}
+				fTocStr += fmt.Sprintf("\toffset=0x%08x-0x%08x, addr=0x%09x-0x%09x\t\t%s.%s\t%s\t%s\n", c.Offset, uint64(c.Offset)+c.Size, c.Addr, c.Addr+c.Size, s.Name, c.Name, secFlags, c.Flags.AttributesString())
+				// fTocStr += fmt.Sprintf("   %s.%s\toffset=0x%x, size=%d, addr=0x%x, nreloc=%d\n", s.Name, c.Name, c.Offset, c.Size, c.Addr, c.Nreloc)
 			}
 		} else {
-			fTocStr += fmt.Sprintf("%02d: %s\t%v\n", i, l.Command(), l)
+			fTocStr += fmt.Sprintf("%02d: %s%s%v\n", i, l.Command(), strings.Repeat(" ", 28-len(l.Command().String())), l)
 		}
 	}
 	if t.SizeCommands != t.LoadSize() {
@@ -451,6 +455,14 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l := new(UnixThread)
 			l.LoadBytes = LoadBytes(cmddat)
 			l.LoadCmd = cmd
+			if ut.Flavor == 6 {
+				regs := make([]uint64, ut.Count/2)
+				if err := binary.Read(b, bo, &regs); err != nil {
+					return nil, err
+				}
+				// this is to get the program counter register
+				l.EntryPoint = regs[len(regs)-2]
+			}
 			f.Loads[i] = l
 		// TODO: case types.LcLoadfvmlib:
 		// TODO: case types.LcIdfvmlib:
@@ -738,8 +750,8 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			}
 			l := new(FunctionStarts)
 			l.LoadCmd = cmd
-			// l.Offset = led.Offset
-			// l.Size = led.Size
+			l.Offset = led.Offset
+			l.Size = led.Size
 			l.LoadBytes = LoadBytes(cmddat)
 			ldat := make([]byte, led.Size)
 			if _, err := r.ReadAt(ldat, int64(led.Offset)); err != nil {
@@ -792,8 +804,10 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			}
 			l := new(DataInCode)
 			l.LoadCmd = cmd
+			// TODO: finish parsing Dice entries
 			// var e DataInCodeEntry
-
+			l.Offset = led.Offset
+			l.Size = led.Size
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_SOURCE_VERSION:
@@ -959,6 +973,11 @@ func (f *File) parseSymtab(symdat, strtab, cmddat []byte, hdr *types.SymtabCmd, 
 	}
 	st := new(Symtab)
 	st.LoadBytes = LoadBytes(cmddat)
+	st.Symoff = hdr.Symoff
+	st.Nsyms = hdr.Nsyms
+	st.Stroff = hdr.Stroff
+	st.Strsize = hdr.Strsize
+	st.Len = hdr.Len
 	st.Syms = symtab
 	return st, nil
 }

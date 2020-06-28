@@ -152,6 +152,8 @@ type Thread struct {
 type UnixThreadCmd struct {
 	LoadCmd // LC_UNIXTHREAD
 	Len     uint32
+	Flavor  uint32
+	Count   uint32
 }
 
 // A LoadFvmLibCmd is a Mach-O load a specified fixed VM shared library command.

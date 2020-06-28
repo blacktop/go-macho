@@ -387,6 +387,15 @@ type Symtab struct {
 	Syms []Symbol
 }
 
+func (s *Symtab) String() string {
+	return fmt.Sprintf("Symbol offset=0x%08X, Num Syms: %d, String offset=0x%08X-0x%08X", s.Symoff, s.Nsyms, s.Stroff, s.Stroff+s.Strsize)
+}
+func (s *Symtab) Copy() *Symtab {
+	return &Symtab{SymtabCmd: s.SymtabCmd, Syms: append([]Symbol{}, s.Syms...)}
+}
+func (s *Symtab) LoadSize(t *FileTOC) uint32 {
+	return uint32(unsafe.Sizeof(types.SymtabCmd{}))
+}
 func (s *Symtab) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(s.LoadCmd))
 	o.PutUint32(b[1*4:], s.Len)
@@ -395,14 +404,6 @@ func (s *Symtab) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[4*4:], s.Stroff)
 	o.PutUint32(b[5*4:], s.Strsize)
 	return 6 * 4
-}
-
-func (s *Symtab) String() string { return fmt.Sprintf("Symtab %#v", s.SymtabCmd) }
-func (s *Symtab) Copy() *Symtab {
-	return &Symtab{SymtabCmd: s.SymtabCmd, Syms: append([]Symbol{}, s.Syms...)}
-}
-func (s *Symtab) LoadSize(t *FileTOC) uint32 {
-	return uint32(unsafe.Sizeof(types.SymtabCmd{}))
 }
 
 // A Symbol is a Mach-O 32-bit or 64-bit symbol table entry.
@@ -434,6 +435,11 @@ type Symbol struct {
 type UnixThread struct {
 	LoadBytes
 	types.UnixThreadCmd
+	EntryPoint uint64
+}
+
+func (u *UnixThread) String() string {
+	return fmt.Sprintf("Entry Point: 0x%016x", u.EntryPoint)
 }
 
 // TODO: LC_LOADFVMLIB	0x6	/* load a specified fixed VM shared library */
@@ -451,6 +457,17 @@ type Dysymtab struct {
 	LoadBytes
 	types.DysymtabCmd
 	IndirectSyms []uint32 // indices into Symtab.Syms
+}
+
+func (d *Dysymtab) String() string {
+	// TODO make this like jtool
+	// 1 local symbols at index     0
+	// 29 external symbols at index  1
+	// 709 undefined symbols at index 30
+	// No TOC
+	// No modtab
+	// 1149 Indirect symbols at offset 0x1695f0
+	return fmt.Sprintf("%d Indirect symbols at offset 0x%08X", d.Nindirectsyms, d.Indirectsymoff)
 }
 
 /*******************************************************************************
@@ -531,6 +548,10 @@ type SubClient struct {
 // A WeakDylib represents a Mach-O load weak dynamic library command.
 type WeakDylib Dylib
 
+func (d *WeakDylib) String() string {
+	return fmt.Sprintf("%s (%s)", d.Name, d.CurrentVersion)
+}
+
 /*******************************************************************************
  * LC_ROUTINES_64
  *******************************************************************************/
@@ -595,6 +616,12 @@ type CodeSignature struct {
 	CMSSignature  types.CsBlob
 }
 
+func (c *CodeSignature) String() string {
+	// TODO: fix this once codesigs are done
+	// return fmt.Sprintf("offset=0x%08x-0x%08x, size=%d, ID:   %s", c.Offset, c.Offset+c.Size, c.Size, c.ID)
+	return fmt.Sprintf("offset=0x%08x-0x%08x, size=%5d", c.Offset, c.Offset+c.Size, c.Size)
+}
+
 /*******************************************************************************
  * LC_SEGMENT_SPLIT_INFO
  *******************************************************************************/
@@ -635,7 +662,99 @@ type DyldInfo struct {
 	ExportSize   uint32 //  size of export info
 }
 
-// TODO: LC_DYLD_INFO_ONLY (0x22|LC_REQ_DYLD)	/* compressed dyld information only */
+func (d *DyldInfo) String() string {
+	return fmt.Sprintf(
+		"\n"+
+			"\t\tRebase info: %5d bytes at offset:  0x%08X -> 0x%08X\n"+
+			"\t\tBind info:   %5d bytes at offset:  0x%08X -> 0x%08X\n"+
+			"\t\tWeak info:   %5d bytes at offset:  0x%08X -> 0x%08X\n"+
+			"\t\tLazy info:   %5d bytes at offset:  0x%08X -> 0x%08X\n"+
+			"\t\tExport info: %5d bytes at offset:  0x%08X -> 0x%08X",
+		d.RebaseSize, d.RebaseOff, d.RebaseOff+d.RebaseSize,
+		d.BindSize, d.BindOff, d.BindOff+d.BindSize,
+		d.WeakBindSize, d.WeakBindOff, d.WeakBindOff+d.WeakBindSize,
+		d.LazyBindSize, d.LazyBindOff, d.LazyBindOff+d.LazyBindSize,
+		d.ExportSize, d.ExportOff, d.ExportOff+d.ExportSize,
+	)
+}
+func (d *DyldInfo) Copy() *DyldInfo {
+	return &DyldInfo{DyldInfoCmd: d.DyldInfoCmd}
+}
+func (d *DyldInfo) LoadSize(t *FileTOC) uint32 {
+	return uint32(unsafe.Sizeof(types.UUIDCmd{}))
+}
+func (d *DyldInfo) Put(b []byte, o binary.ByteOrder) int {
+	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
+	o.PutUint32(b[1*4:], d.Len)
+	o.PutUint32(b[2*4:], d.RebaseOff)
+	o.PutUint32(b[3*4:], d.RebaseSize)
+	o.PutUint32(b[4*4:], d.BindOff)
+	o.PutUint32(b[5*4:], d.BindSize)
+	o.PutUint32(b[6*4:], d.WeakBindOff)
+	o.PutUint32(b[7*4:], d.WeakBindSize)
+	o.PutUint32(b[8*4:], d.LazyBindOff)
+	o.PutUint32(b[9*4:], d.LazyBindSize)
+	o.PutUint32(b[10*4:], d.ExportOff)
+	o.PutUint32(b[11*4:], d.ExportSize)
+	return int(d.Len)
+}
+
+/*******************************************************************************
+ * LC_DYLD_INFO
+ *******************************************************************************/
+
+// DyldInfoOnly is compressed dyld information only
+type DyldInfoOnly struct {
+	LoadBytes
+	types.DyldInfoOnlyCmd
+	RebaseOff    uint32 // file offset to rebase info
+	RebaseSize   uint32 //  size of rebase info
+	BindOff      uint32 // file offset to binding info
+	BindSize     uint32 // size of binding info
+	WeakBindOff  uint32 // file offset to weak binding info
+	WeakBindSize uint32 //  size of weak binding info
+	LazyBindOff  uint32 // file offset to lazy binding info
+	LazyBindSize uint32 //  size of lazy binding info
+	ExportOff    uint32 // file offset to export info
+	ExportSize   uint32 //  size of export info
+}
+
+func (d *DyldInfoOnly) String() string {
+	return fmt.Sprintf(
+		"\n"+
+			"\t\tRebase info: %5d bytes at offset:  0x%08X -> 0x%08X\n"+
+			"\t\tBind info:   %5d bytes at offset:  0x%08X -> 0x%08X\n"+
+			"\t\tWeak info:   %5d bytes at offset:  0x%08X -> 0x%08X\n"+
+			"\t\tLazy info:   %5d bytes at offset:  0x%08X -> 0x%08X\n"+
+			"\t\tExport info: %5d bytes at offset:  0x%08X -> 0x%08X",
+		d.RebaseSize, d.RebaseOff, d.RebaseOff+d.RebaseSize,
+		d.BindSize, d.BindOff, d.BindOff+d.BindSize,
+		d.WeakBindSize, d.WeakBindOff, d.WeakBindOff+d.WeakBindSize,
+		d.LazyBindSize, d.LazyBindOff, d.LazyBindOff+d.LazyBindSize,
+		d.ExportSize, d.ExportOff, d.ExportOff+d.ExportSize,
+	)
+}
+func (d *DyldInfoOnly) Copy() *DyldInfoOnly {
+	return &DyldInfoOnly{DyldInfoOnlyCmd: d.DyldInfoOnlyCmd}
+}
+func (d *DyldInfoOnly) LoadSize(t *FileTOC) uint32 {
+	return uint32(unsafe.Sizeof(types.UUIDCmd{}))
+}
+func (d *DyldInfoOnly) Put(b []byte, o binary.ByteOrder) int {
+	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
+	o.PutUint32(b[1*4:], d.Len)
+	o.PutUint32(b[2*4:], d.RebaseOff)
+	o.PutUint32(b[3*4:], d.RebaseSize)
+	o.PutUint32(b[4*4:], d.BindOff)
+	o.PutUint32(b[5*4:], d.BindSize)
+	o.PutUint32(b[6*4:], d.WeakBindOff)
+	o.PutUint32(b[7*4:], d.WeakBindSize)
+	o.PutUint32(b[8*4:], d.LazyBindOff)
+	o.PutUint32(b[9*4:], d.LazyBindSize)
+	o.PutUint32(b[10*4:], d.ExportOff)
+	o.PutUint32(b[11*4:], d.ExportSize)
+	return int(d.Len)
+}
 
 /*******************************************************************************
  * LC_LOAD_UPWARD_DYLIB
@@ -674,11 +793,15 @@ type VersionMinIphoneos struct {
 type FunctionStarts struct {
 	LoadBytes
 	types.FunctionStartsCmd
-	// Offset          uint32
-	// Size            uint32
+	Offset          uint32
+	Size            uint32
 	StartOffset     uint64
 	NextFuncOffsets []uint64
 	VMAddrs         []uint64
+}
+
+func (f *FunctionStarts) String() string {
+	return fmt.Sprintf("offset=0x%08x-0x%08x, size=%5d, count=%d", f.Offset, f.Offset+f.Size, f.Size, len(f.VMAddrs))
 }
 
 // TODO: LC_DYLD_ENVIRONMENT 0x27 /* string for dyld to treat
@@ -720,7 +843,13 @@ func (e *EntryPoint) Put(b []byte, o binary.ByteOrder) int {
 type DataInCode struct {
 	LoadBytes
 	types.DataInCodeCmd
+	Offset  uint32
+	Size    uint32
 	Entries []types.DataInCodeEntry
+}
+
+func (d *DataInCode) String() string {
+	return fmt.Sprintf("offset=0x%08x-0x%08x, size=%5d, entries=%d", d.Offset, d.Offset+d.Size, d.Size, len(d.Entries))
 }
 
 /*******************************************************************************
