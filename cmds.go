@@ -388,6 +388,9 @@ type Symtab struct {
 }
 
 func (s *Symtab) String() string {
+	if s.Nsyms == 0 && s.Strsize == 0 {
+		return "Symbols stripped"
+	}
 	return fmt.Sprintf("Symbol offset=0x%08X, Num Syms: %d, String offset=0x%08X-0x%08X", s.Symoff, s.Nsyms, s.Stroff, s.Stroff+s.Strsize)
 }
 func (s *Symtab) Copy() *Symtab {
@@ -495,6 +498,10 @@ func (d *Dylib) String() string {
 // A DylibID represents a Mach-O load dynamic library ident command.
 type DylibID Dylib
 
+func (d *DylibID) String() string {
+	return fmt.Sprintf("%s (%s)", d.Name, d.CurrentVersion)
+}
+
 /*******************************************************************************
  * LC_LOAD_DYLINKER
  *******************************************************************************/
@@ -535,6 +542,10 @@ type SubClient struct {
 	LoadBytes
 	types.SubClientCmd
 	Name string
+}
+
+func (d *SubClient) String() string {
+	return d.Name
 }
 
 // TODO: LC_SUB_LIBRARY  0x15	/* sub library */
@@ -601,6 +612,10 @@ type Rpath struct {
 	Path string
 }
 
+func (r *Rpath) String() string {
+	return r.Path
+}
+
 /*******************************************************************************
  * LC_CODE_SIGNATURE
  *******************************************************************************/
@@ -633,11 +648,19 @@ type SplitInfo struct {
 	Size   uint32
 }
 
+func (s *SplitInfo) String() string {
+	return fmt.Sprintf("offset=0x%08x-0x%08x, size=%5d", s.Offset, s.Offset+s.Size, s.Size)
+}
+
 /*******************************************************************************
  * LC_REEXPORT_DYLIB
  *******************************************************************************/
 
 type ReExportDylib Dylib
+
+func (d *ReExportDylib) String() string {
+	return fmt.Sprintf("%s (%s)", d.Name, d.CurrentVersion)
+}
 
 // TODO: LC_LAZY_LOAD_DYLIB 0x20	/* delay load of dylib until first use */
 // TODO: LC_ENCRYPTION_INFO 0x21	/* encrypted segment information */
@@ -763,26 +786,40 @@ func (d *DyldInfoOnly) Put(b []byte, o binary.ByteOrder) int {
 // A UpwardDylib represents a Mach-O load upward dylib command.
 type UpwardDylib Dylib
 
+func (d *UpwardDylib) String() string {
+	return fmt.Sprintf("%s (%s)", d.Name, d.CurrentVersion)
+}
+
 /*******************************************************************************
  * LC_VERSION_MIN_MACOSX
  *******************************************************************************/
 
-type VersionMinMacosx struct {
+// VersionMinMacOSX build for MacOSX min OS version
+type VersionMinMacOSX struct {
 	LoadBytes
 	types.VersionMinMacOSCmd
 	Version string
 	Sdk     string
 }
 
+func (v *VersionMinMacOSX) String() string {
+	return fmt.Sprintf("Version=%s, SDK=%s", v.Version, v.Sdk)
+}
+
 /*******************************************************************************
  * LC_VERSION_MIN_IPHONEOS
  *******************************************************************************/
 
-type VersionMinIphoneos struct {
+// VersionMiniPhoneOS build for iPhoneOS min OS version
+type VersionMiniPhoneOS struct {
 	LoadBytes
 	types.VersionMinIPhoneOSCmd
 	Version string
 	Sdk     string
+}
+
+func (v *VersionMiniPhoneOS) String() string {
+	return fmt.Sprintf("Version=%s, SDK=%s", v.Version, v.Sdk)
 }
 
 /*******************************************************************************
@@ -907,8 +944,39 @@ func (e *EncryptionInfo64) Put(b []byte, o binary.ByteOrder) int {
 
 // TODO: LC_LINKER_OPTION 0x2D /* linker options in MH_OBJECT files */
 // TODO: LC_LINKER_OPTIMIZATION_HINT 0x2E /* optimization hints in MH_OBJECT files */
-// TODO: LC_VERSION_MIN_TVOS 0x2F /* build for AppleTV min OS version */
-// TODO: LC_VERSION_MIN_WATCHOS 0x30 /* build for Watch min OS version */
+
+/*******************************************************************************
+ * LC_VERSION_MIN_TVOS
+ *******************************************************************************/
+
+// VersionMinTvOS build for AppleTV min OS version
+type VersionMinTvOS struct {
+	LoadBytes
+	types.VersionMinIPhoneOSCmd
+	Version string
+	Sdk     string
+}
+
+func (v *VersionMinTvOS) String() string {
+	return fmt.Sprintf("Version=%s, SDK=%s", v.Version, v.Sdk)
+}
+
+/*******************************************************************************
+ * LC_VERSION_MIN_WATCHOS
+ *******************************************************************************/
+
+// VersionMinWatchOS build for Watch min OS version
+type VersionMinWatchOS struct {
+	LoadBytes
+	types.VersionMinIPhoneOSCmd
+	Version string
+	Sdk     string
+}
+
+func (v *VersionMinWatchOS) String() string {
+	return fmt.Sprintf("Version=%s, SDK=%s", v.Version, v.Sdk)
+}
+
 // TODO: LC_NOTE 0x31 /* arbitrary data included within a Mach-O file */
 
 /*******************************************************************************
@@ -967,8 +1035,24 @@ func (cf *DyldChainedFixups) String() string {
 	return fmt.Sprintf("Offset: 0x%x, Size: 0x%x, Imports: %d", cf.Offset, cf.Size, cf.ImportsCount)
 }
 
-// TODO: LC_DYLD_CHAINED_FIXUPS (0x34 | LC_REQ_DYLD) /* used with linkedit_data_command */
 // TODO: LC_FILESET_ENTRY            LoadCmd = (0x35 | LC_REQ_DYLD) /* used with fileset_entry_command */
+
+/*******************************************************************************
+ * LC_FILESET_ENTRY
+ *******************************************************************************/
+
+// FilesetEntry used with fileset_entry_command
+type FilesetEntry struct {
+	LoadBytes
+	types.FilesetEntryCmd
+	Addr    uint64 // memory address of the entry
+	Offset  uint64 // file offset of the entry
+	EntryID string // contained entry id
+}
+
+func (f *FilesetEntry) String() string {
+	return fmt.Sprintf("Addr: 0x%016x, Offset: 0x%09x, EntryID: %s", f.Addr, f.Offset, f.EntryID)
+}
 
 /*******************************************************************************
  * LC_CODE_SIGNATURE, LC_SEGMENT_SPLIT_INFO,

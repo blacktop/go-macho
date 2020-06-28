@@ -455,6 +455,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l := new(UnixThread)
 			l.LoadBytes = LoadBytes(cmddat)
 			l.LoadCmd = cmd
+			// TODO: handle all flavors
 			if ut.Flavor == 6 {
 				regs := make([]uint64, ut.Count/2)
 				if err := binary.Read(b, bo, &regs); err != nil {
@@ -724,7 +725,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			if err := binary.Read(b, bo, &verMin); err != nil {
 				return nil, err
 			}
-			l := new(VersionMinMacosx)
+			l := new(VersionMinMacOSX)
 			l.LoadCmd = cmd
 			l.Version = verMin.Version.String()
 			l.Sdk = verMin.Sdk.String()
@@ -736,7 +737,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			if err := binary.Read(b, bo, &verMin); err != nil {
 				return nil, err
 			}
-			l := new(VersionMinIphoneos)
+			l := new(VersionMiniPhoneOS)
 			l.LoadCmd = cmd
 			l.Version = verMin.Version.String()
 			l.Sdk = verMin.Sdk.String()
@@ -782,7 +783,6 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			}
 			f.Loads[i] = l
 		// TODO: case types.LcDyldEnvironment:
-		// TODO: case types.LcMain:
 		case types.LC_MAIN:
 			var hdr types.EntryPointCmd
 			b := bytes.NewReader(cmddat)
@@ -795,7 +795,6 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.StackSize = hdr.StackSize
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-
 		case types.LC_DATA_IN_CODE:
 			var led types.LinkEditDataCmd
 			b := bytes.NewReader(cmddat)
@@ -837,8 +836,30 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			f.Loads[i] = l
 		// TODO: case types.LcLinkerOption:
 		// TODO: case types.LcLinkerOptimizationHint:
-		// TODO: case types.LcVersionMinTvos:
-		// TODO: case types.LcVersionMinWatchos:
+		case types.LC_VERSION_MIN_TVOS:
+			var verMin types.VersionMinMacOSCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &verMin); err != nil {
+				return nil, err
+			}
+			l := new(VersionMinTvOS)
+			l.LoadCmd = cmd
+			l.Version = verMin.Version.String()
+			l.Sdk = verMin.Sdk.String()
+			l.LoadBytes = LoadBytes(cmddat)
+			f.Loads[i] = l
+		case types.LC_VERSION_MIN_WATCHOS:
+			var verMin types.VersionMinWatchOSCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &verMin); err != nil {
+				return nil, err
+			}
+			l := new(VersionMinWatchOS)
+			l.LoadCmd = cmd
+			l.Version = verMin.Version.String()
+			l.Sdk = verMin.Sdk.String()
+			l.LoadBytes = LoadBytes(cmddat)
+			f.Loads[i] = l
 		// TODO: case types.LcNote:
 		case types.LC_BUILD_VERSION:
 			var build types.BuildVersionCmd
@@ -925,7 +946,22 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			// }
 			// fmt.Println(dcsis)
 			f.Loads[i] = l
-			// TODO: case types.LC_FILESET_ENTRY
+		case types.LC_FILESET_ENTRY:
+			var hdr types.FilesetEntryCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &hdr); err != nil {
+				return nil, err
+			}
+			l := new(FilesetEntry)
+			l.LoadCmd = cmd
+			if hdr.EntryID >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in load fileset entry command", hdr.EntryID}
+			}
+			l.EntryID = cstring(cmddat[hdr.EntryID:])
+			l.Offset = hdr.Offset
+			l.Addr = hdr.Addr
+			l.LoadBytes = LoadBytes(cmddat)
+			f.Loads[i] = l
 		}
 		if s != nil {
 			s.sr = io.NewSectionReader(r, int64(s.Offset), int64(s.Filesz))
