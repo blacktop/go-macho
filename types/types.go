@@ -132,61 +132,35 @@ func stringName(i uint32, names []intName, goSyntax bool) string {
 	return "0x" + strconv.FormatUint(uint64(i), 16)
 }
 
-type DyldChainedImport uint32
-type DyldChainedSymbolsFmt uint32
-
-const (
-	DC_IMPORT          DyldChainedImport = 1
-	DC_IMPORT_ADDEND   DyldChainedImport = 2
-	DC_IMPORT_ADDEND64 DyldChainedImport = 3
-)
-
-const (
-	DC_SFORMAT_UNCOMPRESSED    DyldChainedSymbolsFmt = 0
-	DC_SFORMAT_ZLIB_COMPRESSED DyldChainedSymbolsFmt = 1
-)
-
-// DyldChainedFixups object is the header of the LC_DYLD_CHAINED_FIXUPS payload
-type DyldChainedFixups struct {
-	FixupsVersion uint32                // 0
-	StartsOffset  uint32                // offset of dyld_chained_starts_in_image in chain_data
-	ImportsOffset uint32                // offset of imports table in chain_data
-	SymbolsOffset uint32                // offset of symbol strings in chain_data
-	ImportsCount  uint32                // number of imported symbol names
-	ImportsFormat DyldChainedImport     // DYLD_CHAINED_IMPORT*
-	SymbolsFormat DyldChainedSymbolsFmt // 0 => uncompressed, 1 => zlib compressed
+var lsb64Mtable = [65]uint64{
+	0x0000000000000000, 0x0000000000000001, 0x0000000000000003,
+	0x0000000000000007, 0x000000000000000f, 0x000000000000001f,
+	0x000000000000003f, 0x000000000000007f, 0x00000000000000ff,
+	0x00000000000001ff, 0x00000000000003ff, 0x00000000000007ff,
+	0x0000000000000fff, 0x0000000000001fff, 0x0000000000003fff,
+	0x0000000000007fff, 0x000000000000ffff, 0x000000000001ffff,
+	0x000000000003ffff, 0x000000000007ffff, 0x00000000000fffff,
+	0x00000000001fffff, 0x00000000003fffff, 0x00000000007fffff,
+	0x0000000000ffffff, 0x0000000001ffffff, 0x0000000003ffffff,
+	0x0000000007ffffff, 0x000000000fffffff, 0x000000001fffffff,
+	0x000000003fffffff, 0x000000007fffffff, 0x00000000ffffffff,
+	0x00000001ffffffff, 0x00000003ffffffff, 0x00000007ffffffff,
+	0x0000000fffffffff, 0x0000001fffffffff, 0x0000003fffffffff,
+	0x0000007fffffffff, 0x000000ffffffffff, 0x000001ffffffffff,
+	0x000003ffffffffff, 0x000007ffffffffff, 0x00000fffffffffff,
+	0x00001fffffffffff, 0x00003fffffffffff, 0x00007fffffffffff,
+	0x0000ffffffffffff, 0x0001ffffffffffff, 0x0003ffffffffffff,
+	0x0007ffffffffffff, 0x000fffffffffffff, 0x001fffffffffffff,
+	0x003fffffffffffff, 0x007fffffffffffff, 0x00ffffffffffffff,
+	0x01ffffffffffffff, 0x03ffffffffffffff, 0x07ffffffffffffff,
+	0x0fffffffffffffff, 0x1fffffffffffffff, 0x3fffffffffffffff,
+	0x7fffffffffffffff, 0xffffffffffffffff,
 }
 
-type DyldChainedPtrKind uint16
+func fse_mask_lsb64(x uint64, nbits uint8) uint64 {
+	return x & lsb64Mtable[nbits]
+}
 
-const (
-	DYLD_CHAINED_PTR_ARM64E              DyldChainedPtrKind = 1 // stride 8, unauth target is vmaddr
-	DYLD_CHAINED_PTR_64                  DyldChainedPtrKind = 2 // target is vmaddr
-	DYLD_CHAINED_PTR_32                  DyldChainedPtrKind = 3
-	DYLD_CHAINED_PTR_32_CACHE            DyldChainedPtrKind = 4
-	DYLD_CHAINED_PTR_32_FIRMWARE         DyldChainedPtrKind = 5
-	DYLD_CHAINED_PTR_64_OFFSET           DyldChainedPtrKind = 6 // target is vm offset
-	DYLD_CHAINED_PTR_ARM64E_OFFSET       DyldChainedPtrKind = 7 // old name
-	DYLD_CHAINED_PTR_ARM64E_KERNEL       DyldChainedPtrKind = 7 // stride 4, unauth target is vm offset
-	DYLD_CHAINED_PTR_64_KERNEL_CACHE     DyldChainedPtrKind = 8
-	DYLD_CHAINED_PTR_ARM64E_USERLAND     DyldChainedPtrKind = 9      // stride 8, unauth target is vm offset
-	DYLD_CHAINED_PTR_ARM64E_FIRMWARE     DyldChainedPtrKind = 10     // stride 4, unauth target is vmaddr
-	DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE DyldChainedPtrKind = 11     // stride 1, x86_64 kernel caches
-	DYLD_CHAINED_PTR_ARM64E_USERLAND24   DyldChainedPtrKind = 12     // stride 8, unauth target is vm offset, 24-bit bind
-	DYLD_CHAINED_PTR_START_NONE          DyldChainedPtrKind = 0xFFFF // used in page_start[] to denote a page with no fixups
-	DYLD_CHAINED_PTR_START_MULTI         DyldChainedPtrKind = 0x8000 // used in page_start[] to denote a page which has multiple starts
-	DYLD_CHAINED_PTR_START_LAST          DyldChainedPtrKind = 0x8000 // used in chain_starts[] to denote last start in list for page
-)
-
-// DyldChainedStartsInSegment object is embedded in dyld_chain_starts_in_image
-// and passed down to the kernel for page-in linking
-type DyldChainedStartsInSegment struct {
-	Size            uint32             // size of this (amount kernel needs to copy)
-	PageSize        uint16             // 0x1000 or 0x4000
-	PointerFormat   DyldChainedPtrKind // DYLD_CHAINED_PTR_*
-	SegmentOffset   uint64             // offset in memory to start of segment
-	MaxValidPointer uint32             // for 32-bit OS, any value beyond this is not a pointer
-	PageCount       uint16             // how many pages are in array
-	// uint16_t    page_start[1]      // each entry is offset in each page of first element in chain
-	//                                 // or DYLD_CHAINED_PTR_START_NONE if no fixups on page
+func fse_extract_bits(x uint64, start, nbits int32) uint64 {
+	return fse_mask_lsb64(x>>start, uint8(nbits))
 }

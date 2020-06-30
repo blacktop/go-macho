@@ -122,6 +122,7 @@ func (st CPUSubtype) String(cpu CPU) string {
 	case CPUArm64:
 		var feature string
 		caps := st & CpuSubtypeFeatureMask
+		// TODO handle old files with NO features
 		if caps&CpuSubtypePtrauthAbiUser == 0 {
 			feature = fmt.Sprintf(" caps: PAC%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
 		} else {
