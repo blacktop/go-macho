@@ -157,10 +157,10 @@ var lsb64Mtable = [65]uint64{
 	0x7fffffffffffffff, 0xffffffffffffffff,
 }
 
-func fse_mask_lsb64(x uint64, nbits uint8) uint64 {
+func MaskLSB64(x uint64, nbits uint8) uint64 {
 	return x & lsb64Mtable[nbits]
 }
 
-func fse_extract_bits(x uint64, start, nbits int32) uint64 {
-	return fse_mask_lsb64(x>>start, uint8(nbits))
+func ExtractBits(x uint64, start, nbits int32) uint64 {
+	return MaskLSB64(x>>start, uint8(nbits))
 }

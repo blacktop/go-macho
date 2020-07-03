@@ -69,19 +69,19 @@ const (
 type DyldChainedPtrArm64eRebase uint64
 
 func (d DyldChainedPtrArm64eRebase) Target() uint64 {
-	return fse_extract_bits(uint64(d), 0, 43)
+	return ExtractBits(uint64(d), 0, 43)
 }
 func (d DyldChainedPtrArm64eRebase) High8() uint64 {
-	return fse_extract_bits(uint64(d), 43, 8)
+	return ExtractBits(uint64(d), 43, 8)
 }
 func (d DyldChainedPtrArm64eRebase) Next() uint64 {
-	return fse_extract_bits(uint64(d), 51, 11)
+	return ExtractBits(uint64(d), 51, 11)
 }
 func (d DyldChainedPtrArm64eRebase) Bind() uint64 {
-	return fse_extract_bits(uint64(d), 62, 1)
+	return ExtractBits(uint64(d), 62, 1)
 }
 func (d DyldChainedPtrArm64eRebase) Auth() uint64 {
-	return fse_extract_bits(uint64(d), 63, 1)
+	return ExtractBits(uint64(d), 63, 1)
 }
 
 // DYLD_CHAINED_PTR_ARM64E

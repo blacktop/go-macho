@@ -841,8 +841,7 @@ func (f *FunctionStarts) String() string {
 	return fmt.Sprintf("offset=0x%08x-0x%08x, size=%5d, count=%d", f.Offset, f.Offset+f.Size, f.Size, len(f.VMAddrs))
 }
 
-// TODO: LC_DYLD_ENVIRONMENT 0x27 /* string for dyld to treat
-// 				    like environment variable */
+// TODO: LC_DYLD_ENVIRONMENT 0x27 /* string for dyld to treat like environment variable */
 
 /*******************************************************************************
  * LC_MAIN
@@ -1034,8 +1033,6 @@ type DyldChainedFixups struct {
 func (cf *DyldChainedFixups) String() string {
 	return fmt.Sprintf("Offset: 0x%x, Size: 0x%x, Imports: %d", cf.Offset, cf.Size, cf.ImportsCount)
 }
-
-// TODO: LC_FILESET_ENTRY            LoadCmd = (0x35 | LC_REQ_DYLD) /* used with fileset_entry_command */
 
 /*******************************************************************************
  * LC_FILESET_ENTRY
