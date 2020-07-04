@@ -917,7 +917,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.Size = led.Size
 			l.LoadBytes = LoadBytes(cmddat)
 
-			var dcf types.DyldChainedFixups
+			var dcf types.DyldChainedFixupsHeader
 			// var dcsis types.DyldChainedStartsInSegment
 			ldat := make([]byte, led.Size)
 			if _, err := r.ReadAt(ldat, int64(led.Offset)); err != nil {
