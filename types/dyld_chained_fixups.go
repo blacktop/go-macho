@@ -65,64 +65,276 @@ const (
 	DYLD_CHAINED_PTR_START_LAST  DCPtrStart = 0x8000 // used in chain_starts[] to denote last start in list for page
 )
 
+func DyldChainedPtrArm64eIsBind(ptr uint64) bool {
+	return ExtractBits(ptr, 62, 1) != 0
+}
+
+func DyldChainedPtrArm64eIsAuth(ptr uint64) bool {
+	return ExtractBits(ptr, 63, 1) != 0
+}
+
 // DYLD_CHAINED_PTR_ARM64E
 type DyldChainedPtrArm64eRebase uint64
 
 func (d DyldChainedPtrArm64eRebase) Target() uint64 {
-	return ExtractBits(uint64(d), 0, 43)
+	return ExtractBits(uint64(d), 0, 43) // runtimeOffset
 }
 func (d DyldChainedPtrArm64eRebase) High8() uint64 {
 	return ExtractBits(uint64(d), 43, 8)
 }
 func (d DyldChainedPtrArm64eRebase) Next() uint64 {
-	return ExtractBits(uint64(d), 51, 11)
+	return ExtractBits(uint64(d), 51, 11) // 4 or 8-byte stide
 }
 func (d DyldChainedPtrArm64eRebase) Bind() uint64 {
-	return ExtractBits(uint64(d), 62, 1)
+	return ExtractBits(uint64(d), 62, 1) // == 0
 }
 func (d DyldChainedPtrArm64eRebase) Auth() uint64 {
-	return ExtractBits(uint64(d), 63, 1)
+	return ExtractBits(uint64(d), 63, 1) // == 0
 }
 
 // DYLD_CHAINED_PTR_ARM64E
 type DyldChainedPtrArm64eBind uint64
 
+func (d DyldChainedPtrArm64eBind) Ordinal() uint64 {
+	return ExtractBits(uint64(d), 0, 16)
+}
+func (d DyldChainedPtrArm64eBind) Zero() uint64 {
+	return ExtractBits(uint64(d), 16, 16)
+}
+func (d DyldChainedPtrArm64eBind) Addend() uint64 {
+	return ExtractBits(uint64(d), 32, 19) // +/-256K
+}
+func (d DyldChainedPtrArm64eBind) Next() uint64 {
+	return ExtractBits(uint64(d), 51, 11) // 4 or 8-byte stide
+}
+func (d DyldChainedPtrArm64eBind) Bind() uint64 {
+	return ExtractBits(uint64(d), 62, 1) // == 1
+}
+func (d DyldChainedPtrArm64eBind) Auth() uint64 {
+	return ExtractBits(uint64(d), 63, 1) // == 0
+}
+
 // DYLD_CHAINED_PTR_ARM64E
 type DyldChainedPtrArm64eAuthRebase uint64
+
+func (d DyldChainedPtrArm64eAuthRebase) Target() uint64 {
+	return ExtractBits(uint64(d), 0, 32)
+}
+func (d DyldChainedPtrArm64eAuthRebase) Diversity() uint64 {
+	return ExtractBits(uint64(d), 32, 16)
+}
+func (d DyldChainedPtrArm64eAuthRebase) AddrDiv() uint64 {
+	return ExtractBits(uint64(d), 48, 1)
+}
+func (d DyldChainedPtrArm64eAuthRebase) Key() uint64 {
+	return ExtractBits(uint64(d), 49, 2)
+}
+func (d DyldChainedPtrArm64eAuthRebase) Next() uint64 {
+	return ExtractBits(uint64(d), 51, 11) // 4 or 8-byte stide
+}
+func (d DyldChainedPtrArm64eAuthRebase) Bind() uint64 {
+	return ExtractBits(uint64(d), 62, 1) // == 0
+}
+func (d DyldChainedPtrArm64eAuthRebase) Auth() uint64 {
+	return ExtractBits(uint64(d), 63, 1) // == 1
+}
 
 // DYLD_CHAINED_PTR_ARM64E
 type DyldChainedPtrArm64eAuthBind uint64
 
+func (d DyldChainedPtrArm64eAuthBind) Ordinal() uint64 {
+	return ExtractBits(uint64(d), 0, 16)
+}
+func (d DyldChainedPtrArm64eAuthBind) Zero() uint64 {
+	return ExtractBits(uint64(d), 16, 16)
+}
+func (d DyldChainedPtrArm64eAuthBind) Diversity() uint64 {
+	return ExtractBits(uint64(d), 32, 16)
+}
+func (d DyldChainedPtrArm64eAuthBind) AddrDiv() uint64 {
+	return ExtractBits(uint64(d), 48, 1)
+}
+func (d DyldChainedPtrArm64eAuthBind) Key() uint64 {
+	return ExtractBits(uint64(d), 49, 2)
+}
+func (d DyldChainedPtrArm64eAuthBind) Next() uint64 {
+	return ExtractBits(uint64(d), 51, 11) // 4 or 8-byte stide
+}
+func (d DyldChainedPtrArm64eAuthBind) Bind() uint64 {
+	return ExtractBits(uint64(d), 62, 1) // == 1
+}
+func (d DyldChainedPtrArm64eAuthBind) Auth() uint64 {
+	return ExtractBits(uint64(d), 63, 1) // == 1
+}
+
 // DYLD_CHAINED_PTR_64/DYLD_CHAINED_PTR_64_OFFSET
-type DyldChainedPtr_64Rebase uint64
+type DyldChainedPtr64Rebase uint64
+
+// Target 64GB max image size (DYLD_CHAINED_PTR_64 => vmAddr, DYLD_CHAINED_PTR_64_OFFSET => runtimeOffset)
+func (d DyldChainedPtr64Rebase) Target() uint64 {
+	return ExtractBits(uint64(d), 0, 36)
+}
+
+// High8 top 8 bits set to this (DYLD_CHAINED_PTR_64 => after slide added, DYLD_CHAINED_PTR_64_OFFSET => before slide added)
+func (d DyldChainedPtr64Rebase) High8() uint64 {
+	return ExtractBits(uint64(d), 36, 8)
+}
+func (d DyldChainedPtr64Rebase) Reserved() uint64 {
+	return ExtractBits(uint64(d), 44, 7) // all zeros
+}
+func (d DyldChainedPtr64Rebase) Next() uint64 {
+	return ExtractBits(uint64(d), 51, 12) // 4-byte stride
+}
+func (d DyldChainedPtr64Rebase) Bind() uint64 {
+	return ExtractBits(uint64(d), 63, 1) // == 0
+}
 
 // DYLD_CHAINED_PTR_ARM64E_USERLAND24
 type DyldChainedPtrArm64eBind24 uint64
 
+func (d DyldChainedPtrArm64eBind24) Ordinal() uint64 {
+	return ExtractBits(uint64(d), 0, 24)
+}
+func (d DyldChainedPtrArm64eBind24) Zero() uint64 {
+	return ExtractBits(uint64(d), 24, 8)
+}
+func (d DyldChainedPtrArm64eBind24) Addend() uint64 {
+	return ExtractBits(uint64(d), 32, 19)
+}
+func (d DyldChainedPtrArm64eBind24) Next() uint64 {
+	return ExtractBits(uint64(d), 51, 11)
+}
+func (d DyldChainedPtrArm64eBind24) Bind() uint64 {
+	return ExtractBits(uint64(d), 62, 1)
+}
+func (d DyldChainedPtrArm64eBind24) Auth() uint64 {
+	return ExtractBits(uint64(d), 63, 1)
+}
+
 // DYLD_CHAINED_PTR_ARM64E_USERLAND24
 type DyldChainedPtrArm64eAuthBind24 uint64
 
+func (d DyldChainedPtrArm64eAuthBind24) Ordinal() uint64 {
+	return ExtractBits(uint64(d), 0, 24)
+}
+func (d DyldChainedPtrArm64eAuthBind24) Zero() uint64 {
+	return ExtractBits(uint64(d), 24, 8)
+}
+func (d DyldChainedPtrArm64eAuthBind24) Diversity() uint64 {
+	return ExtractBits(uint64(d), 32, 16)
+}
+func (d DyldChainedPtrArm64eAuthBind24) AddrDiv() uint64 {
+	return ExtractBits(uint64(d), 48, 1)
+}
+func (d DyldChainedPtrArm64eAuthBind24) Key() uint64 {
+	return ExtractBits(uint64(d), 49, 2)
+}
+func (d DyldChainedPtrArm64eAuthBind24) Next() uint64 {
+	return ExtractBits(uint64(d), 51, 11)
+}
+func (d DyldChainedPtrArm64eAuthBind24) Bind() uint64 {
+	return ExtractBits(uint64(d), 62, 1)
+}
+func (d DyldChainedPtrArm64eAuthBind24) Auth() uint64 {
+	return ExtractBits(uint64(d), 63, 1)
+}
+
 // DYLD_CHAINED_PTR_64
-type DyldChainedPtr_64Bind uint64
+type DyldChainedPtr64Bind uint64
+
+func (d DyldChainedPtr64Bind) Ordinal() uint64 {
+	return ExtractBits(uint64(d), 0, 24)
+}
+func (d DyldChainedPtr64Bind) Addend() uint64 {
+	return ExtractBits(uint64(d), 24, 8) // 0 thru 255
+}
+func (d DyldChainedPtr64Bind) Reserved() uint64 {
+	return ExtractBits(uint64(d), 32, 19) // all zeros
+}
+func (d DyldChainedPtr64Bind) Next() uint64 {
+	return ExtractBits(uint64(d), 51, 12) // 4-byte stride
+}
+func (d DyldChainedPtr64Bind) Bind() uint64 {
+	return ExtractBits(uint64(d), 63, 1) // == 1
+}
 
 // DYLD_CHAINED_PTR_64_KERNEL_CACHE, DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE
-type DyldChainedPtr_64KernelCacheRebase uint64
+type DyldChainedPtr64KernelCacheRebase uint64
+
+func (d DyldChainedPtr64KernelCacheRebase) Target() uint64 {
+	return ExtractBits(uint64(d), 0, 30)
+}
+func (d DyldChainedPtr64KernelCacheRebase) CacheLevel() uint64 {
+	return ExtractBits(uint64(d), 30, 2)
+}
+func (d DyldChainedPtr64KernelCacheRebase) Diversity() uint64 {
+	return ExtractBits(uint64(d), 32, 16)
+}
+func (d DyldChainedPtr64KernelCacheRebase) AddrDiv() uint64 {
+	return ExtractBits(uint64(d), 48, 1)
+}
+func (d DyldChainedPtr64KernelCacheRebase) Key() uint64 {
+	return ExtractBits(uint64(d), 49, 2)
+}
+func (d DyldChainedPtr64KernelCacheRebase) Next() uint64 {
+	return ExtractBits(uint64(d), 51, 12)
+}
+func (d DyldChainedPtr64KernelCacheRebase) IsAuth() uint64 {
+	return ExtractBits(uint64(d), 63, 1)
+}
 
 // DYLD_CHAINED_PTR_32
 // Note: for DYLD_CHAINED_PTR_32 some non-pointer values are co-opted into the chain
 // as out of range rebases.  If an entry in the chain is > max_valid_pointer, then it
 // is not a pointer.  To restore the value, subtract off the bias, which is
 // (64MB+max_valid_pointer)/2.
-type DyldChainedPtr_32Rebase uint32
+type DyldChainedPtr32Rebase uint32
+
+func (d DyldChainedPtr32Rebase) Target() uint32 {
+	return uint32(ExtractBits(uint64(d), 0, 26))
+}
+func (d DyldChainedPtr32Rebase) Next() uint32 {
+	return uint32(ExtractBits(uint64(d), 26, 5))
+}
+func (d DyldChainedPtr32Rebase) Bind() uint32 {
+	return uint32(ExtractBits(uint64(d), 31, 1))
+}
 
 // DYLD_CHAINED_PTR_32
-type DyldChainedPtr_32Bind uint32
+type DyldChainedPtr32Bind uint32
+
+func (d DyldChainedPtr32Bind) Ordinal() uint32 {
+	return uint32(ExtractBits(uint64(d), 0, 20))
+}
+func (d DyldChainedPtr32Bind) Addend() uint32 {
+	return uint32(ExtractBits(uint64(d), 20, 6))
+}
+func (d DyldChainedPtr32Bind) Next() uint32 {
+	return uint32(ExtractBits(uint64(d), 26, 5))
+}
+func (d DyldChainedPtr32Bind) Bind() uint32 {
+	return uint32(ExtractBits(uint64(d), 31, 1))
+}
 
 // DYLD_CHAINED_PTR_32_CACHE
-type DyldChainedPtr_32CacheRebase uint32
+type DyldChainedPtr32CacheRebase uint32
+
+func (d DyldChainedPtr32CacheRebase) Target() uint32 {
+	return uint32(ExtractBits(uint64(d), 0, 30))
+}
+func (d DyldChainedPtr32CacheRebase) Next() uint32 {
+	return uint32(ExtractBits(uint64(d), 30, 2))
+}
 
 // DYLD_CHAINED_PTR_32_FIRMWARE
-type DyldChainedPtr_32FirmwareRebase uint32
+type DyldChainedPtr32FirmwareRebase uint32
+
+func (d DyldChainedPtr32FirmwareRebase) Target() uint32 {
+	return uint32(ExtractBits(uint64(d), 0, 26))
+}
+func (d DyldChainedPtr32FirmwareRebase) Next() uint32 {
+	return uint32(ExtractBits(uint64(d), 26, 6))
+}
 
 // DCImportsFormat are values for dyld_chained_fixups_header.imports_format
 type DCImportsFormat uint32
@@ -136,14 +348,39 @@ const (
 // DYLD_CHAINED_IMPORT
 type DyldChainedImport uint32
 
+func (d DyldChainedImport) LibOrdinal() uint32 {
+	return uint32(ExtractBits(uint64(d), 0, 8))
+}
+func (d DyldChainedImport) WeakImport() uint32 {
+	return uint32(ExtractBits(uint64(d), 8, 1))
+}
+func (d DyldChainedImport) NameOffset() uint32 {
+	return uint32(ExtractBits(uint64(d), 9, 23))
+}
+
+type DyldChainedImport64 uint64
+
+func (d DyldChainedImport64) LibOrdinal() uint64 {
+	return ExtractBits(uint64(d), 0, 16)
+}
+func (d DyldChainedImport64) WeakImport() uint64 {
+	return ExtractBits(uint64(d), 16, 1)
+}
+func (d DyldChainedImport64) Reserved() uint64 {
+	return ExtractBits(uint64(d), 17, 15)
+}
+func (d DyldChainedImport64) NameOffset() uint64 {
+	return ExtractBits(uint64(d), 32, 32)
+}
+
 // DYLD_CHAINED_IMPORT_ADDEND
 type DyldChainedImportAddend struct {
-	Import uint32
+	Import DyldChainedImport
 	Addend int32
 }
 
 // DYLD_CHAINED_IMPORT_ADDEND64
 type DyldChainedImportAddend64 struct {
-	Import uint64
+	Import DyldChainedImport64
 	Addend uint64
 }
