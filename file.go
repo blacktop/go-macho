@@ -906,11 +906,12 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			}
 			f.Loads[i] = l
 		case types.LC_DYLD_CHAINED_FIXUPS:
-			var led types.LinkEditDataCmd
+			var led types.DyldChainedFixupsCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &led); err != nil {
 				return nil, err
 			}
+
 			l := new(DyldChainedFixups)
 			l.LoadCmd = cmd
 			l.Offset = led.Offset
@@ -918,7 +919,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.LoadBytes = LoadBytes(cmddat)
 
 			var dcf types.DyldChainedFixupsHeader
-			// var dcsis types.DyldChainedStartsInSegment
+			var segInfo types.DyldChainedStartsInSegment
 			ldat := make([]byte, led.Size)
 			if _, err := r.ReadAt(ldat, int64(led.Offset)); err != nil {
 				return nil, err
@@ -928,23 +929,80 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 				return nil, err
 			}
 			l.ImportsCount = dcf.ImportsCount
-			// fmt.Printf("%#v\n", dcf)
+			fmt.Printf("%#v\n", dcf)
 
-			// fsr.Seek(int64(dcf.StartsOffset), io.SeekStart)
-			// var segCount uint32
-			// if err := binary.Read(fsr, bo, &segCount); err != nil {
-			// 	return nil, err
-			// }
-			// segInfoOffset := make([]uint32, segCount)
-			// if err := binary.Read(fsr, bo, &segInfoOffset); err != nil {
-			// 	return nil, err
-			// }
-			// fmt.Println(segInfoOffset)
+			fsr.Seek(int64(dcf.StartsOffset), io.SeekStart)
+			var segCount uint32
+			if err := binary.Read(fsr, bo, &segCount); err != nil {
+				return nil, err
+			}
+			segInfoOffsets := make([]uint32, segCount)
+			if err := binary.Read(fsr, bo, &segInfoOffsets); err != nil {
+				return nil, err
+			}
+			fmt.Println(segInfoOffsets)
+			for _, segInfoOffset := range segInfoOffsets {
+				if segInfoOffset == 0 {
+					continue
+				}
+				fsr.Seek(int64(dcf.StartsOffset+segInfoOffset), io.SeekStart)
+				if err := binary.Read(fsr, bo, &segInfo); err != nil {
+					return nil, err
+				}
+				fmt.Println(segInfo)
+				pageStarts := make([]types.DCPtrStart, segInfo.PageCount)
+				if err := binary.Read(fsr, bo, &pageStarts); err != nil {
+					return nil, err
+				}
+				for pageIndex := uint16(0); pageIndex < segInfo.PageCount; pageIndex++ {
+					offsetInPage := pageStarts[pageIndex]
+					if offsetInPage == types.DYLD_CHAINED_PTR_START_NONE {
+						continue
+					}
+					if offsetInPage&types.DYLD_CHAINED_PTR_START_MULTI != 0 {
+						// 32-bit chains which may need multiple starts per page
+						overflowIndex := offsetInPage & ^types.DYLD_CHAINED_PTR_START_MULTI
+						chainEnd := false
+						// for !stopped && !chainEnd {
+						for !chainEnd {
+							chainEnd = (pageStarts[overflowIndex]&types.DYLD_CHAINED_PTR_START_LAST != 0)
+							offsetInPage = (pageStarts[overflowIndex] & ^types.DYLD_CHAINED_PTR_START_LAST)
+							// if walkChain(diag, segInfo, pageIndex, offsetInPage, notifyNonPointers, handler) {
+							//	stopped = true
+							// }
+							overflowIndex++
+						}
+					} else {
+						// one chain per page
+						// walkChain(diag, segInfo, pageIndex, offsetInPage, notifyNonPointers, handler);
+						pageContentStart := segInfo.SegmentOffset + uint64(pageIndex*segInfo.PageSize)
+						// pageContentStart := (uint8_t*)this + segInfo.SegmentOffset + (pageIndex * segInfo.PageSize)
+						// var dyldChainedPtrArm64e types.DyldChainedPtrArm64eRebase
+						var next uint64
+						for {
+							ptr64 := make([]byte, 8)
+							if _, err := r.ReadAt(ptr64, int64(pageContentStart+uint64(offsetInPage)+next)); err != nil {
+								return nil, err
+							}
+							dyldChainedPtrArm64e := binary.LittleEndian.Uint64(ptr64)
+							if types.DyldChainedPtrArm64eRebase(dyldChainedPtrArm64e).Next() == 0 {
+								break
+							}
+							next += uint64(types.DyldChainedPtrArm64eRebase(dyldChainedPtrArm64e).Next()) * 8
+							fmt.Println(types.DyldChainedPtrArm64eRebase(dyldChainedPtrArm64e).Target())
+							fmt.Println(types.DyldChainedPtrArm64eRebase(dyldChainedPtrArm64e).High8())
+							fmt.Println(types.DyldChainedPtrArm64eRebase(dyldChainedPtrArm64e).Next())
+							fmt.Println(types.DyldChainedPtrArm64eRebase(dyldChainedPtrArm64e).Bind())
+							fmt.Println(types.DyldChainedPtrArm64eRebase(dyldChainedPtrArm64e).Auth())
+						}
 
-			// if err := binary.Read(fsr, bo, &dcsis); err != nil {
-			// 	return nil, err
-			// }
-			// fmt.Println(dcsis)
+						// if err := binary.Read(fsr, bo, &dyldChainedPtrArm64e); err != nil {
+						// 	return nil, err
+						// }
+					}
+
+				}
+			}
 			f.Loads[i] = l
 		case types.LC_FILESET_ENTRY:
 			var hdr types.FilesetEntryCmd
@@ -1017,6 +1075,39 @@ func (f *File) parseSymtab(symdat, strtab, cmddat []byte, hdr *types.SymtabCmd, 
 	st.Syms = symtab
 	return st, nil
 }
+
+// func (f *File) parseDyldChainedFixups(cmddat []byte, hdr *types.DyldChainedFixupsCmd, offset int64) (*DyldChainedFixups, error) {
+// 	dr := bytes.NewReader(cmddat)
+
+// 	dcf := &DyldChainedFixups{}
+
+// 	var dcfHdr types.DyldChainedFixupsHdr
+// 	if err := binary.Read(dr, binary.BigEndian, &dcfHdr); err != nil {
+// 		return nil, err
+// 	}
+// 	dcf.ImportsCount = dcfHdr.ImportsCount
+// 	fmt.Printf("%#v\n", dcfHdr)
+
+// 	dr.Seek(int64(dcfHdr.StartsOffset), io.SeekStart)
+// 	var segCount uint32
+// 	if err := binary.Read(dr, binary.BigEndian, &segCount); err != nil {
+// 		return nil, err
+// 	}
+
+// 	segInfoOffset := make([]uint32, segCount)
+// 	if err := binary.Read(dr, binary.BigEndian, &segInfoOffset); err != nil {
+// 		return nil, err
+// 	}
+// 	fmt.Println(segInfoOffset)
+
+// 	var segInfo types.DyldChainedStartsInSegment
+// 	if err := binary.Read(dr, binary.BigEndian, &segInfo); err != nil {
+// 		return nil, err
+// 	}
+// 	fmt.Println(segInfo)
+
+// 	return dcf, nil
+// }
 
 func (f *File) parseCodeSignature(cmddat []byte, hdr *types.CodeSignatureCmd, offset int64) (*CodeSignature, error) {
 	csr := bytes.NewReader(cmddat)
