@@ -16,9 +16,9 @@ type ObjCImageInfo struct {
 }
 
 type MethodList_t struct {
-	EntSize         uint32
-	Count           uint32
-	MethodArrayBase uint64
+	EntSize uint32
+	Count   uint32
+	// MethodArrayBase uint64
 }
 
 type Method_t struct {

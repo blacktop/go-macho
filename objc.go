@@ -253,12 +253,7 @@ func (f *File) GetObjCMethods(vmAddr uint64) []types.ObjCMethod {
 	binary.Read(f.sr, f.ByteOrder, &methodList)
 	fmt.Printf("%#v\n", methodList)
 
-	off, err = f.GetOffset(methodList.MethodArrayBase)
-	if err != nil {
-		return nil
-	}
-
-	f.sr.Seek(int64(off), io.SeekStart)
+	// f.sr.Seek(-8, io.SeekCurrent)
 	methods := make([]types.Method_t, methodList.Count)
 	err = binary.Read(f.sr, f.ByteOrder, &methods)
 	if err != nil {
@@ -276,4 +271,27 @@ func (f *File) GetObjCMethods(vmAddr uint64) []types.ObjCMethod {
 	}
 
 	return objcMethods
+}
+
+func (f *File) GetObjCSelectorReferences() []uint64 {
+	var selRefs []uint64
+
+	for _, s := range f.Segments() {
+		if strings.HasPrefix(s.Name, "__DATA") {
+			if sec := f.Section(s.Name, "__objc_selrefs"); sec != nil {
+				dat, err := sec.Data()
+				if err != nil {
+					log.Fatal(err.Error())
+				}
+				r := bytes.NewReader(dat)
+				selRefs = make([]uint64, sec.Size/8)
+				err = binary.Read(r, f.ByteOrder, &selRefs)
+				if err != nil {
+					log.Fatal(err.Error())
+				}
+			}
+		}
+	}
+
+	return selRefs
 }
