@@ -8,6 +8,7 @@ import (
 	"compress/zlib"
 	"debug/dwarf"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -32,6 +33,7 @@ type File struct {
 	Symtab   *Symtab
 	Dysymtab *Dysymtab
 
+	sr     *io.SectionReader
 	closer io.Closer
 }
 
@@ -272,6 +274,7 @@ func (f *File) Close() error {
 func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 	f := new(File)
 	sr := io.NewSectionReader(r, 0, 1<<63-1)
+	f.sr = sr
 
 	// Read and decode Mach magic to determine byte order, size.
 	// Magic32 and Magic64 differ only in the bottom bit.
@@ -940,7 +943,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			if err := binary.Read(fsr, bo, &segInfoOffsets); err != nil {
 				return nil, err
 			}
-			fmt.Println(segInfoOffsets)
+			fmt.Printf("%#v\n", segInfoOffsets)
 			for _, segInfoOffset := range segInfoOffsets {
 				if segInfoOffset == 0 {
 					continue
@@ -949,7 +952,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 				if err := binary.Read(fsr, bo, &segInfo); err != nil {
 					return nil, err
 				}
-				fmt.Println(segInfo)
+				fmt.Printf("%#v\n", segInfo)
 				pageStarts := make([]types.DCPtrStart, segInfo.PageCount)
 				if err := binary.Read(fsr, bo, &pageStarts); err != nil {
 					return nil, err
@@ -984,16 +987,23 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 							if _, err := r.ReadAt(ptr64, int64(pageContentStart+uint64(offsetInPage)+next)); err != nil {
 								return nil, err
 							}
-							dyldChainedPtrArm64e := binary.LittleEndian.Uint64(ptr64)
-							if types.DyldChainedPtrArm64eRebase(dyldChainedPtrArm64e).Next() == 0 {
+							dcPtr := binary.LittleEndian.Uint64(ptr64)
+
+							if !types.DyldChainedPtrArm64eIsBind(dcPtr) && !types.DyldChainedPtrArm64eIsAuth(dcPtr) {
+								fmt.Println(types.DyldChainedPtrArm64eRebase(dcPtr))
+							} else if types.DyldChainedPtrArm64eIsBind(dcPtr) && !types.DyldChainedPtrArm64eIsAuth(dcPtr) {
+								fmt.Println(types.DyldChainedPtrArm64eBind(dcPtr))
+							} else if !types.DyldChainedPtrArm64eIsBind(dcPtr) && types.DyldChainedPtrArm64eIsAuth(dcPtr) {
+								fmt.Println(types.DyldChainedPtrArm64eAuthRebase(dcPtr))
+							} else {
+								fmt.Println(types.DyldChainedPtrArm64eAuthBind(dcPtr))
+							}
+
+							if types.DyldChainedPtrArm64eNext(dcPtr) == 0 {
 								break
 							}
-							next += uint64(types.DyldChainedPtrArm64eRebase(dyldChainedPtrArm64e).Next()) * 8
-							fmt.Println(types.DyldChainedPtrArm64eRebase(dyldChainedPtrArm64e).Target())
-							fmt.Println(types.DyldChainedPtrArm64eRebase(dyldChainedPtrArm64e).High8())
-							fmt.Println(types.DyldChainedPtrArm64eRebase(dyldChainedPtrArm64e).Next())
-							fmt.Println(types.DyldChainedPtrArm64eRebase(dyldChainedPtrArm64e).Bind())
-							fmt.Println(types.DyldChainedPtrArm64eRebase(dyldChainedPtrArm64e).Auth())
+
+							next += types.DyldChainedPtrArm64eNext(dcPtr) * 8
 						}
 
 						// if err := binary.Read(fsr, bo, &dyldChainedPtrArm64e); err != nil {
@@ -1002,6 +1012,20 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 					}
 
 				}
+			}
+			fsr.Seek(int64(dcf.ImportsOffset), io.SeekStart)
+			imports := make([]types.DyldChainedImport, dcf.ImportsCount)
+			if err := binary.Read(fsr, bo, &imports); err != nil {
+				return nil, err
+			}
+			symbolsPool := io.NewSectionReader(fsr, int64(dcf.SymbolsOffset), int64(led.Size-dcf.SymbolsOffset))
+			for _, i := range imports {
+				symbolsPool.Seek(int64(i.NameOffset()), io.SeekStart)
+				s, err := bufio.NewReader(symbolsPool).ReadString('\x00')
+				if err != nil {
+					return f, fmt.Errorf("failed to read string at: %d: %v", dcf.SymbolsOffset+i.NameOffset(), err)
+				}
+				fmt.Printf("ordinal: %d, is_weak: %t, %s\n", i.LibOrdinal(), i.WeakImport(), strings.Trim(s, "\x00"))
 			}
 			f.Loads[i] = l
 		case types.LC_FILESET_ENTRY:
@@ -1162,7 +1186,7 @@ func (f *File) parseCodeSignature(cmddat []byte, hdr *types.CodeSignatureCmd, of
 			if err := binary.Read(csr, binary.BigEndian, &plistData); err != nil {
 				return nil, err
 			}
-			// fmt.Println(hex.Dump(plistData))
+			fmt.Println(hex.Dump(plistData))
 			// ioutil.WriteFile("entitlements.plist", plistData, 0644)
 		case types.CSSLOT_CMS_SIGNATURE:
 			if err := binary.Read(csr, binary.BigEndian, &cs.CMSSignature); err != nil {
@@ -1260,33 +1284,38 @@ func (f *File) GetVMAddress(offset uint64) (uint64, error) {
 	return 0, fmt.Errorf("offset not within any mappings file offset range")
 }
 
-func (f *File) GetCString(strVmAddr uint64) (string, error) {
+func (f *File) GetCString(strVMAdr uint64) (string, error) {
 
-	for _, sec := range f.Sections {
-		if sec.Flags.IsCstringLiterals() {
-			data, err := sec.Data()
-			if err != nil {
-				return "", err
-			}
+	// for _, sec := range f.Sections {
+	// 	if sec.Flags.IsCstringLiterals() {
+	// 		data, err := sec.Data()
+	// 		if err != nil {
+	// 			return "", err
+	// 		}
 
-			if strVmAddr > sec.Addr {
-				strOffset := strVmAddr - sec.Addr
-				if strOffset > sec.Size {
-					return "", fmt.Errorf("offset out of bounds of the cstring section")
-				}
-				csr := bytes.NewBuffer(data[strOffset:])
-
-				s, err := csr.ReadString('\x00')
-				if err != nil {
-					log.Fatal(err.Error())
-				}
-
-				if len(s) > 0 {
-					return strings.Trim(s, "\x00"), nil
-				}
-			}
-		}
+	// 		if strVMAdr > sec.Addr {
+	// 			strOffset := strVMAdr - sec.Addr
+	// 			if strOffset > sec.Size {
+	// 				return "", fmt.Errorf("offset out of bounds of the cstring section")
+	// 			}
+	strOffset, err := f.GetOffset(strVMAdr)
+	if err != nil {
+		return "", err
 	}
+	// csr := bytes.NewBuffer(data[strOffset:])
+	f.sr.Seek(int64(strOffset), io.SeekStart)
+	s, err := bufio.NewReader(f.sr).ReadString('\x00')
+	// s, err := csr.ReadString('\x00')
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+
+	if len(s) > 0 {
+		return strings.Trim(s, "\x00"), nil
+	}
+	// 		}
+	// 	}
+	// }
 
 	return "", fmt.Errorf("string not found")
 }
@@ -1317,6 +1346,19 @@ func (f *File) Segments() []*Segment {
 func (f *File) Section(segment, section string) *Section {
 	for _, sec := range f.Sections {
 		if sec.Seg == segment && sec.Name == section {
+			return sec
+		}
+	}
+	return nil
+}
+
+// FindSectionForVMAddr returns the section containing a given virtual memory ddress.
+func (f *File) FindSectionForVMAddr(vmAddr uint64) *Section {
+	for _, sec := range f.Sections {
+		if sec.Size == 0 {
+			fmt.Printf("section %s.%s has zero size\n", sec.Seg, sec.Name)
+		}
+		if sec.Addr <= vmAddr && vmAddr < sec.Addr+sec.Size {
 			return sec
 		}
 	}
