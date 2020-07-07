@@ -164,3 +164,8 @@ func MaskLSB64(x uint64, nbits uint8) uint64 {
 func ExtractBits(x uint64, start, nbits int32) uint64 {
 	return MaskLSB64(x>>start, uint8(nbits))
 }
+
+type FilePointer struct {
+	VMAdder uint64
+	Offset  uint64
+}

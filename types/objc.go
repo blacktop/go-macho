@@ -1,5 +1,7 @@
 package types
 
+import "fmt"
+
 const (
 	C_ID       = '@'
 	C_CLASS    = '#'
@@ -95,6 +97,7 @@ type ObjCMethod struct {
 	NameLocationVMAddr uint64
 	Name               string
 	Types              string
+	Pointer            FilePointer
 }
 
 type ObjCPropertyListT struct {
@@ -165,6 +168,25 @@ type ObjCProtocol struct {
 	ProtocolType
 }
 
+func (p *ObjCProtocol) String() string {
+	var props string
+	for _, prop := range p.InstanceProperties {
+		props += fmt.Sprintf(" @property %s\n", prop.Name)
+	}
+	iMethods := "  // instance methods\n"
+	for _, meth := range p.InstanceMethods {
+		iMethods += fmt.Sprintf(" -%s\n", meth.Name)
+	}
+	return fmt.Sprintf(
+		"@protocol %s\n"+
+			"%s"+
+			"\n%s",
+		p.Name,
+		props,
+		iMethods,
+	)
+}
+
 const (
 	FAST_DATA_MASK   = 0xfffffffc
 	FAST_DATA_MASK64 = 0x00007ffffffffff8
@@ -179,9 +201,10 @@ const (
 
 type ObjCClass struct {
 	Name                  string
+	SuperClass            *ObjCClass
 	InstanceMethods       []ObjCMethod
 	Ivars                 []ObjCIvar
-	ClassPtr              uint64
+	ClassPtr              FilePointer
 	IsaVmAddr             uint64
 	SuperclassVmAddr      uint64
 	MethodCacheBuckets    uint64
@@ -190,6 +213,28 @@ type ObjCClass struct {
 	IsSwiftLegacy         bool
 	IsSwiftStable         bool
 	ReadOnlyData          ClassRO64Type
+}
+
+func (c *ObjCClass) String() string {
+	iMethods := "  // instance methods\n"
+	for _, meth := range c.InstanceMethods {
+		iMethods += fmt.Sprintf("  0x%011x -[%s %s]\n", meth.Pointer.Offset, c.Name, meth.Name)
+	}
+	if len(c.InstanceMethods) == 0 {
+		iMethods = ""
+	}
+	subClass := "<ROOT>"
+	if c.SuperClass != nil {
+		subClass = c.SuperClass.Name
+	}
+	return fmt.Sprintf(
+		"0x%011x %s : %s\n"+
+			"%s",
+		c.ClassPtr.Offset,
+		c.Name,
+		subClass,
+		iMethods,
+	)
 }
 
 type ObjcClassType struct {
