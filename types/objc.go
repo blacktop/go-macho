@@ -175,15 +175,29 @@ func (p *ObjCProtocol) String() string {
 	}
 	iMethods := "  // instance methods\n"
 	for _, meth := range p.InstanceMethods {
-		iMethods += fmt.Sprintf(" -%s\n", meth.Name)
+		iMethods += fmt.Sprintf(" -[%s %s]\n", p.Name, meth.Name)
+	}
+	if len(p.InstanceMethods) == 0 {
+		iMethods = ""
+	}
+	optMethods := "  // instance methods\n"
+	for _, meth := range p.OptionalInstanceMethods {
+		optMethods += fmt.Sprintf(" -[%s %s]\n", p.Name, meth.Name)
+	}
+	if len(p.InstanceMethods) == 0 {
+		optMethods = ""
 	}
 	return fmt.Sprintf(
 		"@protocol %s\n"+
 			"%s"+
-			"\n%s",
+			"\n%s"+
+			"\n@optional\n"+
+			"%s"+
+			"@end\n",
 		p.Name,
 		props,
 		iMethods,
+		optMethods,
 	)
 }
 
