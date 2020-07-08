@@ -1272,7 +1272,7 @@ func (f *File) GetOffset(address uint64) (uint64, error) {
 			return (address - seg.Addr) + seg.Offset, nil
 		}
 	}
-	return 0, fmt.Errorf("address not within any mappings adress range")
+	return 0, fmt.Errorf("address not within any segments adress range")
 }
 
 func (f *File) GetVMAddress(offset uint64) (uint64, error) {
@@ -1281,7 +1281,7 @@ func (f *File) GetVMAddress(offset uint64) (uint64, error) {
 			return (offset - seg.Offset) + seg.Addr, nil
 		}
 	}
-	return 0, fmt.Errorf("offset not within any mappings file offset range")
+	return 0, fmt.Errorf("offset not within any segments file offset range")
 }
 
 func (f *File) GetCString(strVMAdr uint64) (string, error) {

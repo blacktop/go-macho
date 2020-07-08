@@ -120,8 +120,9 @@ func (f *File) GetObjCClassInfo(vmAddr uint64) (*types.ClassRO64Type, error) {
 	return &classData, nil
 }
 
-func (f *File) GetObjCMethodNames() ([]string, error) {
-	var methods []string
+func (f *File) GetObjCMethodNames() (map[string]uint64, error) {
+	meth2vmaddr := make(map[string]uint64)
+
 	for _, sec := range f.FileTOC.Sections {
 		if sec.Seg == "__TEXT" && sec.Name == "__objc_methname" {
 
@@ -146,9 +147,9 @@ func (f *File) GetObjCMethodNames() ([]string, error) {
 				if err != nil {
 					return nil, fmt.Errorf("failed to read from method name string pool: %v", err)
 				}
-				methods = append(methods, strings.Trim(s, "\x00"))
+				meth2vmaddr[strings.Trim(s, "\x00")] = sec.Addr + (sec.Size - uint64(r.Len()+len(s)))
 			}
-			return methods, nil
+			return meth2vmaddr, nil
 		}
 	}
 	return nil, fmt.Errorf("file does not contain a __TEXT.__objc_methname section")
@@ -184,6 +185,38 @@ func (f *File) GetObjCClasses() ([]types.ObjCClass, error) {
 		}
 	}
 	return nil, fmt.Errorf("file does not contain a __objc_classlist section")
+}
+
+func (f *File) GetObjCPlusLoadClasses() ([]types.ObjCClass, error) {
+	var classes []types.ObjCClass
+
+	for _, s := range f.Segments() {
+		if strings.HasPrefix(s.Name, "__DATA") {
+			if sec := f.Section(s.Name, "__objc_nlclslist"); sec != nil {
+				dat, err := sec.Data()
+				if err != nil {
+					return nil, fmt.Errorf("failed to read __objc_nlclslist: %v", err)
+				}
+
+				r := bytes.NewReader(dat)
+
+				ptrs := make([]uint64, sec.Size/8)
+				if err := binary.Read(r, f.ByteOrder, &ptrs); err != nil {
+					return nil, fmt.Errorf("failed to read objc_class_t pointers: %v", err)
+				}
+
+				for _, ptr := range ptrs {
+					class, err := f.GetObjCClass(ptr)
+					if err != nil {
+						return nil, fmt.Errorf("failed to read objc_class_t at vmaddr: 0x%x; %v", ptr, err)
+					}
+					classes = append(classes, *class)
+				}
+				return classes, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("file does not contain a __objc_nlclslist section")
 }
 
 // GetObjCClass parses an ObjC class at a given virtual memory address
