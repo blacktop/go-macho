@@ -628,7 +628,7 @@ type CodeSignature struct {
 	ID            string
 	TeamID        string
 	CodeDirectory types.CsCodeDirectory
-	Requirements  types.CsRequirement
+	Requirements  []types.CsRequirement
 	CMSSignature  []byte
 	Entitlements  string
 }
@@ -843,7 +843,20 @@ func (f *FunctionStarts) String() string {
 	return fmt.Sprintf("offset=0x%08x-0x%08x, size=%5d, count=%d", f.Offset, f.Offset+f.Size, f.Size, len(f.VMAddrs))
 }
 
-// TODO: LC_DYLD_ENVIRONMENT 0x27 /* string for dyld to treat like environment variable */
+/*******************************************************************************
+ * LC_DYLD_ENVIRONMENT
+ *******************************************************************************/
+
+// A DyldEnvironment is a string for dyld to treat like environment variable
+type DyldEnvironment struct {
+	LoadBytes
+	types.DyldEnvironmentCmd
+	Name string
+}
+
+func (d *DyldEnvironment) String() string {
+	return d.Name
+}
 
 /*******************************************************************************
  * LC_MAIN

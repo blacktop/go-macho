@@ -788,7 +788,20 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 				l.NextFuncOffsets = append(l.NextFuncOffsets, offset)
 			}
 			f.Loads[i] = l
-		// TODO: case types.LcDyldEnvironment:
+		case types.LC_DYLD_ENVIRONMENT:
+			var hdr types.DyldEnvironmentCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &hdr); err != nil {
+				return nil, err
+			}
+			l := new(DyldEnvironment)
+			l.LoadCmd = cmd
+			if hdr.Name >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in dyld environment command", hdr.Name}
+			}
+			l.Name = cstring(cmddat[hdr.Name:])
+			l.LoadBytes = LoadBytes(cmddat)
+			f.Loads[i] = l
 		case types.LC_MAIN:
 			var hdr types.EntryPointCmd
 			b := bytes.NewReader(cmddat)
@@ -1273,7 +1286,7 @@ func (f *File) parseCodeSignature(cmddat []byte, hdr *types.CodeSignatureCmd, of
 						case 0x13:
 							reqPart = "named subroutine"
 						default:
-							fmt.Printf("Unknown requirement set opcode 0x%x, please notify author\n", reqOpCode)
+							// fmt.Printf("Unknown requirement set opcode 0x%x, please notify author\n", reqOpCode)
 						}
 						if len(reqPart) > 0 {
 							reqSet = append(reqSet, reqPart)
@@ -1296,7 +1309,7 @@ func (f *File) parseCodeSignature(cmddat []byte, hdr *types.CodeSignatureCmd, of
 				req.CsRequirements.Type = types.CsRequirementType(reqType)
 				req.Detail = "empty requirement set"
 			}
-			cs.Requirements = req
+			cs.Requirements = append(cs.Requirements, req)
 		case types.CSSLOT_ENTITLEMENTS:
 			entBlob := types.CsBlob{}
 			if err := binary.Read(csr, binary.BigEndian, &entBlob); err != nil {
