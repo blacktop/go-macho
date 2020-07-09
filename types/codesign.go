@@ -1,5 +1,7 @@
 package types
 
+//go:generate stringer -type=CsCodeDirectoryFlag,CDVersion,ExecSegFlag -output codesign_string.go
+
 type CsMagic uint32
 
 const (
@@ -22,7 +24,9 @@ var csMagicStrings = []intName{
 	{uint32(CSMAGIC_CODEDIRECTORY), "Codedirectory"},
 	{uint32(CSMAGIC_EMBEDDED_SIGNATURE), "Embedded Signature"},
 	{uint32(CSMAGIC_EMBEDDED_SIGNATURE_OLD), "Embedded Signature (Old)"},
+	{uint32(CSMAGIC_LIBRARY_DEPENDENCY_BLOB), "Library Dependency Blob"},
 	{uint32(CSMAGIC_EMBEDDED_ENTITLEMENTS), "Embedded Entitlements"},
+	{uint32(CSMAGIC_EMBEDDED_ENTITLEMENTS_DER), "Embedded Entitlements (DER)"},
 	{uint32(CSMAGIC_DETACHED_SIGNATURE), "Detached Signature"},
 	{uint32(CSMAGIC_BLOBWRAPPER), "Blob Wrapper"},
 }
