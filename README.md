@@ -38,7 +38,7 @@ func main() {
         panic(err)
     }
 
-    fmt.Println(m.FileTOC)
+    fmt.Println(m.FileTOC.String())
 }
 ```
 
