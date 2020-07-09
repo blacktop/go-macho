@@ -626,9 +626,11 @@ type CodeSignature struct {
 	Offset        uint32
 	Size          uint32
 	ID            string
+	TeamID        string
 	CodeDirectory types.CsCodeDirectory
-	Requirements  types.CsRequirementsBlob
-	CMSSignature  types.CsBlob
+	Requirements  types.CsRequirement
+	CMSSignature  []byte
+	Entitlements  string
 }
 
 func (c *CodeSignature) String() string {

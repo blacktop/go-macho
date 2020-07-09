@@ -43,9 +43,56 @@ type ObjCInfo struct {
 	ProtocolDefCount uint64
 }
 
+type ObjCImageInfoFlag uint32
+
+const (
+	IsReplacement              ObjCImageInfoFlag = 1 << 0 // used for Fix&Continue, now ignored
+	SupportsGC                 ObjCImageInfoFlag = 1 << 1 // image supports GC
+	RequiresGC                 ObjCImageInfoFlag = 1 << 2 // image requires GC
+	OptimizedByDyld            ObjCImageInfoFlag = 1 << 3 // image is from an optimized shared cache
+	CorrectedSynthesize        ObjCImageInfoFlag = 1 << 4 // used for an old workaround, now ignored
+	IsSimulated                ObjCImageInfoFlag = 1 << 5 // image compiled for a simulator platform
+	HasCategoryClassProperties ObjCImageInfoFlag = 1 << 6 // New ABI: category_t.classProperties fields are present, Old ABI: Set by some compilers. Not used by the runtime.
+	OptimizedByDyldClosure     ObjCImageInfoFlag = 1 << 7 // dyld (not the shared cache) optimized this.
+
+	// 1 byte Swift unstable ABI version number
+	SwiftUnstableVersionMaskShift = 8
+	SwiftUnstableVersionMask      = 0xff << SwiftUnstableVersionMaskShift
+
+	// 2 byte Swift stable ABI version number
+	SwiftStableVersionMaskShift = 16
+	SwiftStableVersionMask      = 0xffff << SwiftStableVersionMaskShift
+)
+
+func (f ObjCImageInfoFlag) SwiftVersion() string {
+	// TODO: I noticed there is some flags higher than swift version (Console has 84019008, which is a version of 0x502)
+	swiftVersion := (f >> 8) & 0xff
+	if swiftVersion != 0 {
+		switch swiftVersion {
+		case 1:
+			return "Swift 1.0"
+		case 2:
+			return "Swift 1.1"
+		case 3:
+			return "Swift 2.0"
+		case 4:
+			return "Swift 3.0"
+		case 5:
+			return "Swift 4.0"
+		case 6:
+			return "Swift 4.1/4.2"
+		case 7:
+			return "Swift 5 or later"
+		default:
+			return fmt.Sprintf("Unknown future Swift version: %d", swiftVersion)
+		}
+	}
+	return "not swift"
+}
+
 type ObjCImageInfo struct {
 	Version uint32
-	Flags   uint32
+	Flags   ObjCImageInfoFlag
 
 	// DyldPreoptimized uint32
 }
@@ -264,8 +311,51 @@ type SwiftClassMetadata struct {
 	SwiftClassFlags uint32
 }
 
+type ClassRoFlags uint32
+
+const (
+	// class is a metaclass
+	RO_META ClassRoFlags = (1 << 0)
+	// class is a root class
+	RO_ROOT ClassRoFlags = (1 << 1)
+	// class has .cxx_construct/destruct implementations
+	RO_HAS_CXX_STRUCTORS ClassRoFlags = (1 << 2)
+	// class has +load implementation
+	RO_HAS_LOAD_METHOD ClassRoFlags = (1 << 3)
+	// class has visibility=hidden set
+	RO_HIDDEN ClassRoFlags = (1 << 4)
+	// class has attributeClassRoFlags = (objc_exception): OBJC_EHTYPE_$_ThisClass is non-weak
+	RO_EXCEPTION ClassRoFlags = (1 << 5)
+	// class has ro field for Swift metadata initializer callback
+	RO_HAS_SWIFT_INITIALIZER ClassRoFlags = (1 << 6)
+	// class compiled with ARC
+	RO_IS_ARC ClassRoFlags = (1 << 7)
+	// class has .cxx_destruct but no .cxx_construct ClassRoFlags = (with RO_HAS_CXX_STRUCTORS)
+	RO_HAS_CXX_DTOR_ONLY ClassRoFlags = (1 << 8)
+	// class is not ARC but has ARC-style weak ivar layout
+	RO_HAS_WEAK_WITHOUT_ARC ClassRoFlags = (1 << 9)
+	// class does not allow associated objects on instances
+	RO_FORBIDS_ASSOCIATED_OBJECTS ClassRoFlags = (1 << 10)
+	// class is in an unloadable bundle - must never be set by compiler
+	RO_FROM_BUNDLE ClassRoFlags = (1 << 29)
+	// class is unrealized future class - must never be set by compiler
+	RO_FUTURE ClassRoFlags = (1 << 30)
+	// class is realized - must never be set by compiler
+	RO_REALIZED ClassRoFlags = (1 << 31)
+)
+
+func (f ClassRoFlags) IsMeta() bool {
+	return f&RO_META != 0
+}
+func (f ClassRoFlags) IsRoot() bool {
+	return f&RO_ROOT != 0
+}
+func (f ClassRoFlags) HasCxxStructors() bool {
+	return f&RO_HAS_CXX_STRUCTORS != 0
+}
+
 type ClassROType struct {
-	Flags                uint32
+	Flags                ClassRoFlags
 	InstanceStart        uint32
 	InstanceSize         uint32
 	_                    uint32
@@ -292,7 +382,7 @@ type SwiftClassMetadata64 struct {
 }
 
 type ClassRO64Type struct {
-	Flags         uint32
+	Flags         ClassRoFlags
 	InstanceStart uint32
 	InstanceSize  uint64
 	// _                    uint32
