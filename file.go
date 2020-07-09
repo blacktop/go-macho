@@ -63,12 +63,12 @@ func (t *FileTOC) String() string {
 			fTocStr += fmt.Sprintf("%02d: %s%s%v\n", i, l.Command(), strings.Repeat(" ", 28-len(l.Command().String())), l)
 		}
 	}
-	if t.SizeCommands != t.LoadSize() {
-		fTocStr += fmt.Sprintf("ERROR: recorded command size %d does not equal computed command size %d\n", t.SizeCommands, t.LoadSize())
-	} else {
-		fTocStr += fmt.Sprintf("NOTE: recorded command size %d, computed command size %d\n", t.SizeCommands, t.LoadSize())
-	}
-	fTocStr += fmt.Sprintf("NOTE: File size is %d\n", t.FileSize())
+	// if t.SizeCommands != t.LoadSize() {
+	// 	fTocStr += fmt.Sprintf("ERROR: recorded command size %d does not equal computed command size %d\n", t.SizeCommands, t.LoadSize())
+	// } else {
+	// 	fTocStr += fmt.Sprintf("NOTE: recorded command size %d, computed command size %d\n", t.SizeCommands, t.LoadSize())
+	// }
+	// fTocStr += fmt.Sprintf("NOTE: File size is %d\n", t.FileSize())
 
 	return fTocStr
 }
