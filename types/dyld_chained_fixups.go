@@ -1,5 +1,7 @@
 package types
 
+import "fmt"
+
 type DCSymbolsFormat uint32
 
 const (
@@ -73,6 +75,20 @@ func DyldChainedPtrArm64eIsAuth(ptr uint64) bool {
 	return ExtractBits(ptr, 63, 1) != 0
 }
 
+func DyldChainedPtrArm64eNext(ptr uint64) uint64 {
+	return ExtractBits(uint64(ptr), 51, 11)
+}
+
+// KeyName returns the chained pointer's key name
+func KeyName(keyVal uint64) string {
+	name := []string{"IA", "IB", "DA", "DB"}
+	key := uint64(keyVal >> 49 & 0x3)
+	if key >= 4 {
+		return "ERROR"
+	}
+	return name[key]
+}
+
 // DYLD_CHAINED_PTR_ARM64E
 type DyldChainedPtrArm64eRebase uint64
 
@@ -82,6 +98,9 @@ func (d DyldChainedPtrArm64eRebase) Target() uint64 {
 func (d DyldChainedPtrArm64eRebase) High8() uint64 {
 	return ExtractBits(uint64(d), 43, 8)
 }
+func (d DyldChainedPtrArm64eRebase) UnpackedTarget() uint64 {
+	return (d.High8()<<56 | d.Target())
+}
 func (d DyldChainedPtrArm64eRebase) Next() uint64 {
 	return ExtractBits(uint64(d), 51, 11) // 4 or 8-byte stide
 }
@@ -90,6 +109,9 @@ func (d DyldChainedPtrArm64eRebase) Bind() uint64 {
 }
 func (d DyldChainedPtrArm64eRebase) Auth() uint64 {
 	return ExtractBits(uint64(d), 63, 1) // == 0
+}
+func (d DyldChainedPtrArm64eRebase) String() string {
+	return fmt.Sprintf("offset: 0x%016x, next: %d", d.UnpackedTarget(), d.Next())
 }
 
 // DYLD_CHAINED_PTR_ARM64E
@@ -112,6 +134,9 @@ func (d DyldChainedPtrArm64eBind) Bind() uint64 {
 }
 func (d DyldChainedPtrArm64eBind) Auth() uint64 {
 	return ExtractBits(uint64(d), 63, 1) // == 0
+}
+func (d DyldChainedPtrArm64eBind) String() string {
+	return fmt.Sprintf("ordinal: %d, addend: %x, next: %d, is_bind: %t", d.Ordinal(), d.Addend(), d.Next(), d.Bind() == 1)
 }
 
 // DYLD_CHAINED_PTR_ARM64E
@@ -137,6 +162,15 @@ func (d DyldChainedPtrArm64eAuthRebase) Bind() uint64 {
 }
 func (d DyldChainedPtrArm64eAuthRebase) Auth() uint64 {
 	return ExtractBits(uint64(d), 63, 1) // == 1
+}
+func (d DyldChainedPtrArm64eAuthRebase) String() string {
+	return fmt.Sprintf("offset: 0x%08x, diversity: %x, has_diversity: %t, key: %s, next: %d, is_auth: %t",
+		d.Target(),
+		d.Diversity(),
+		d.AddrDiv() == 1,
+		KeyName(d.Key()),
+		d.Next(),
+		d.Auth() == 1)
 }
 
 // DYLD_CHAINED_PTR_ARM64E
@@ -166,18 +200,29 @@ func (d DyldChainedPtrArm64eAuthBind) Bind() uint64 {
 func (d DyldChainedPtrArm64eAuthBind) Auth() uint64 {
 	return ExtractBits(uint64(d), 63, 1) // == 1
 }
-
-// DYLD_CHAINED_PTR_64/DYLD_CHAINED_PTR_64_OFFSET
-type DyldChainedPtr64Rebase uint64
-
-// Target 64GB max image size (DYLD_CHAINED_PTR_64 => vmAddr, DYLD_CHAINED_PTR_64_OFFSET => runtimeOffset)
-func (d DyldChainedPtr64Rebase) Target() uint64 {
-	return ExtractBits(uint64(d), 0, 36)
+func (d DyldChainedPtrArm64eAuthBind) String() string {
+	return fmt.Sprintf("ordinal: %d, diversity: %x, has_diversity: %t, key: %s, next: %d, is_bind: %t, is_auth: %t",
+		d.Ordinal(),
+		d.Diversity(),
+		d.AddrDiv() == 1,
+		KeyName(d.Key()),
+		d.Next(),
+		d.Bind() == 1,
+		d.Auth() == 1)
 }
 
-// High8 top 8 bits set to this (DYLD_CHAINED_PTR_64 => after slide added, DYLD_CHAINED_PTR_64_OFFSET => before slide added)
+// DYLD_CHAINED_PTR_64
+type DyldChainedPtr64Rebase uint64
+
+func (d DyldChainedPtr64Rebase) Target() uint64 {
+	return ExtractBits(uint64(d), 0, 36) // runtimeOffset 64GB max image size
+}
+
 func (d DyldChainedPtr64Rebase) High8() uint64 {
-	return ExtractBits(uint64(d), 36, 8)
+	return ExtractBits(uint64(d), 36, 8) // after slide added
+}
+func (d DyldChainedPtr64Rebase) UnpackedTarget() uint64 {
+	return (d.High8()<<56 | d.Target())
 }
 func (d DyldChainedPtr64Rebase) Reserved() uint64 {
 	return ExtractBits(uint64(d), 44, 7) // all zeros
@@ -187,6 +232,34 @@ func (d DyldChainedPtr64Rebase) Next() uint64 {
 }
 func (d DyldChainedPtr64Rebase) Bind() uint64 {
 	return ExtractBits(uint64(d), 63, 1) // == 0
+}
+func (d DyldChainedPtr64Rebase) String() string {
+	return fmt.Sprintf("vmaddr: 0x%016x, next: %d", d.UnpackedTarget(), d.Next())
+}
+
+// DYLD_CHAINED_PTR_64_OFFSET
+type DyldChainedPtr64RebaseOffset uint64
+
+func (d DyldChainedPtr64RebaseOffset) Target() uint64 {
+	return ExtractBits(uint64(d), 0, 36) // vmAddr 64GB max image size
+}
+func (d DyldChainedPtr64RebaseOffset) High8() uint64 {
+	return ExtractBits(uint64(d), 36, 8) // before slide added)
+}
+func (d DyldChainedPtr64RebaseOffset) UnpackedTarget() uint64 {
+	return (d.High8()<<56 | d.Target())
+}
+func (d DyldChainedPtr64RebaseOffset) Reserved() uint64 {
+	return ExtractBits(uint64(d), 44, 7) // all zeros
+}
+func (d DyldChainedPtr64RebaseOffset) Next() uint64 {
+	return ExtractBits(uint64(d), 51, 12) // 4-byte stride
+}
+func (d DyldChainedPtr64RebaseOffset) Bind() uint64 {
+	return ExtractBits(uint64(d), 63, 1) // == 0
+}
+func (d DyldChainedPtr64RebaseOffset) String() string {
+	return fmt.Sprintf("offset: 0x%016x, next: %d", d.UnpackedTarget(), d.Next())
 }
 
 // DYLD_CHAINED_PTR_ARM64E_USERLAND24
@@ -209,6 +282,9 @@ func (d DyldChainedPtrArm64eBind24) Bind() uint64 {
 }
 func (d DyldChainedPtrArm64eBind24) Auth() uint64 {
 	return ExtractBits(uint64(d), 63, 1)
+}
+func (d DyldChainedPtrArm64eBind24) String() string {
+	return fmt.Sprintf("ordinal: %d, addend: %x, next: %d, is_bind: %t", d.Ordinal(), d.Addend(), d.Next(), d.Bind() == 1)
 }
 
 // DYLD_CHAINED_PTR_ARM64E_USERLAND24
@@ -238,6 +314,16 @@ func (d DyldChainedPtrArm64eAuthBind24) Bind() uint64 {
 func (d DyldChainedPtrArm64eAuthBind24) Auth() uint64 {
 	return ExtractBits(uint64(d), 63, 1)
 }
+func (d DyldChainedPtrArm64eAuthBind24) String() string {
+	return fmt.Sprintf("ordinal: %d, diversity: %x, has_diversity: %t, key: %s, next: %d, is_bind: %t, is_auth: %t",
+		d.Ordinal(),
+		d.Diversity(),
+		d.AddrDiv() == 1,
+		KeyName(d.Key()),
+		d.Next(),
+		d.Bind() == 1,
+		d.Auth() == 1)
+}
 
 // DYLD_CHAINED_PTR_64
 type DyldChainedPtr64Bind uint64
@@ -257,15 +343,22 @@ func (d DyldChainedPtr64Bind) Next() uint64 {
 func (d DyldChainedPtr64Bind) Bind() uint64 {
 	return ExtractBits(uint64(d), 63, 1) // == 1
 }
+func (d DyldChainedPtr64Bind) String() string {
+	return fmt.Sprintf("ordinal: %d, addend: %d, next: %d, is_bind: %t",
+		d.Ordinal(),
+		d.Addend(),
+		d.Next(),
+		d.Bind() == 1)
+}
 
 // DYLD_CHAINED_PTR_64_KERNEL_CACHE, DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE
 type DyldChainedPtr64KernelCacheRebase uint64
 
 func (d DyldChainedPtr64KernelCacheRebase) Target() uint64 {
-	return ExtractBits(uint64(d), 0, 30)
+	return ExtractBits(uint64(d), 0, 30) // basePointers[cacheLevel] + target
 }
 func (d DyldChainedPtr64KernelCacheRebase) CacheLevel() uint64 {
-	return ExtractBits(uint64(d), 30, 2)
+	return ExtractBits(uint64(d), 30, 2) // what level of cache to bind to (indexes a mach_header array)
 }
 func (d DyldChainedPtr64KernelCacheRebase) Diversity() uint64 {
 	return ExtractBits(uint64(d), 32, 16)
@@ -277,10 +370,20 @@ func (d DyldChainedPtr64KernelCacheRebase) Key() uint64 {
 	return ExtractBits(uint64(d), 49, 2)
 }
 func (d DyldChainedPtr64KernelCacheRebase) Next() uint64 {
-	return ExtractBits(uint64(d), 51, 12)
+	return ExtractBits(uint64(d), 51, 12) // 1 or 4-byte stide
 }
 func (d DyldChainedPtr64KernelCacheRebase) IsAuth() uint64 {
 	return ExtractBits(uint64(d), 63, 1)
+}
+func (d DyldChainedPtr64KernelCacheRebase) String() string {
+	return fmt.Sprintf("target: 0x%08x, cacheLevel: %d, diversity: %x, has_diversity: %t, key: %s, next: %d, is_auth: %t",
+		d.Target(),
+		d.CacheLevel(),
+		d.Diversity(),
+		d.AddrDiv() == 1,
+		KeyName(d.Key()),
+		d.Next(),
+		d.IsAuth() == 1)
 }
 
 // DYLD_CHAINED_PTR_32
@@ -291,13 +394,16 @@ func (d DyldChainedPtr64KernelCacheRebase) IsAuth() uint64 {
 type DyldChainedPtr32Rebase uint32
 
 func (d DyldChainedPtr32Rebase) Target() uint32 {
-	return uint32(ExtractBits(uint64(d), 0, 26))
+	return uint32(ExtractBits(uint64(d), 0, 26)) // vmaddr, 64MB max image size
 }
 func (d DyldChainedPtr32Rebase) Next() uint32 {
-	return uint32(ExtractBits(uint64(d), 26, 5))
+	return uint32(ExtractBits(uint64(d), 26, 5)) // 4-byte stride
 }
 func (d DyldChainedPtr32Rebase) Bind() uint32 {
-	return uint32(ExtractBits(uint64(d), 31, 1))
+	return uint32(ExtractBits(uint64(d), 31, 1)) // == 0
+}
+func (d DyldChainedPtr32Rebase) String() string {
+	return fmt.Sprintf("vmaddr: 0x%08x, next: %d", d.Target(), d.Next())
 }
 
 // DYLD_CHAINED_PTR_32
@@ -307,33 +413,42 @@ func (d DyldChainedPtr32Bind) Ordinal() uint32 {
 	return uint32(ExtractBits(uint64(d), 0, 20))
 }
 func (d DyldChainedPtr32Bind) Addend() uint32 {
-	return uint32(ExtractBits(uint64(d), 20, 6))
+	return uint32(ExtractBits(uint64(d), 20, 6)) // 0 thru 63
 }
 func (d DyldChainedPtr32Bind) Next() uint32 {
-	return uint32(ExtractBits(uint64(d), 26, 5))
+	return uint32(ExtractBits(uint64(d), 26, 5)) // 4-byte stride
 }
 func (d DyldChainedPtr32Bind) Bind() uint32 {
-	return uint32(ExtractBits(uint64(d), 31, 1))
+	return uint32(ExtractBits(uint64(d), 31, 1)) // == 1
+}
+func (d DyldChainedPtr32Bind) String() string {
+	return fmt.Sprintf("ordinal: %d, addend: %x, next: %d, is_bind: %t", d.Ordinal(), d.Addend(), d.Next(), d.Bind() == 1)
 }
 
 // DYLD_CHAINED_PTR_32_CACHE
 type DyldChainedPtr32CacheRebase uint32
 
 func (d DyldChainedPtr32CacheRebase) Target() uint32 {
-	return uint32(ExtractBits(uint64(d), 0, 30))
+	return uint32(ExtractBits(uint64(d), 0, 30)) // 1GB max dyld cache TEXT and DATA
 }
 func (d DyldChainedPtr32CacheRebase) Next() uint32 {
-	return uint32(ExtractBits(uint64(d), 30, 2))
+	return uint32(ExtractBits(uint64(d), 30, 2)) // 4-byte stride
+}
+func (d DyldChainedPtr32CacheRebase) String() string {
+	return fmt.Sprintf("offset: 0x%08x, next: %d", d.Target(), d.Next())
 }
 
 // DYLD_CHAINED_PTR_32_FIRMWARE
 type DyldChainedPtr32FirmwareRebase uint32
 
 func (d DyldChainedPtr32FirmwareRebase) Target() uint32 {
-	return uint32(ExtractBits(uint64(d), 0, 26))
+	return uint32(ExtractBits(uint64(d), 0, 26)) // 64MB max firmware TEXT and DATA
 }
 func (d DyldChainedPtr32FirmwareRebase) Next() uint32 {
-	return uint32(ExtractBits(uint64(d), 26, 6))
+	return uint32(ExtractBits(uint64(d), 26, 6)) // 4-byte stride
+}
+func (d DyldChainedPtr32FirmwareRebase) String() string {
+	return fmt.Sprintf("offset: 0x%08x, next: %d", d.Target(), d.Next())
 }
 
 // DCImportsFormat are values for dyld_chained_fixups_header.imports_format
@@ -348,11 +463,11 @@ const (
 // DYLD_CHAINED_IMPORT
 type DyldChainedImport uint32
 
-func (d DyldChainedImport) LibOrdinal() uint32 {
-	return uint32(ExtractBits(uint64(d), 0, 8))
+func (d DyldChainedImport) LibOrdinal() uint8 {
+	return uint8(ExtractBits(uint64(d), 0, 8))
 }
-func (d DyldChainedImport) WeakImport() uint32 {
-	return uint32(ExtractBits(uint64(d), 8, 1))
+func (d DyldChainedImport) WeakImport() bool {
+	return ExtractBits(uint64(d), 8, 1) == 1
 }
 func (d DyldChainedImport) NameOffset() uint32 {
 	return uint32(ExtractBits(uint64(d), 9, 23))
@@ -363,8 +478,8 @@ type DyldChainedImport64 uint64
 func (d DyldChainedImport64) LibOrdinal() uint64 {
 	return ExtractBits(uint64(d), 0, 16)
 }
-func (d DyldChainedImport64) WeakImport() uint64 {
-	return ExtractBits(uint64(d), 16, 1)
+func (d DyldChainedImport64) WeakImport() bool {
+	return ExtractBits(uint64(d), 16, 1) == 1
 }
 func (d DyldChainedImport64) Reserved() uint64 {
 	return ExtractBits(uint64(d), 17, 15)

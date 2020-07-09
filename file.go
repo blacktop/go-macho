@@ -32,6 +32,7 @@ type File struct {
 	Symtab   *Symtab
 	Dysymtab *Dysymtab
 
+	sr     *io.SectionReader
 	closer io.Closer
 }
 
@@ -272,6 +273,7 @@ func (f *File) Close() error {
 func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 	f := new(File)
 	sr := io.NewSectionReader(r, 0, 1<<63-1)
+	f.sr = sr
 
 	// Read and decode Mach magic to determine byte order, size.
 	// Magic32 and Magic64 differ only in the bottom bit.
@@ -650,6 +652,10 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 				return nil, err
 			}
 			l.ID = cs.ID
+			l.CodeDirectory = cs.CodeDirectory
+			l.Requirements = cs.Requirements
+			l.CMSSignature = cs.CMSSignature
+			l.Entitlements = cs.Entitlements
 			f.Loads[i] = l
 		case types.LC_SEGMENT_SPLIT_INFO:
 			var hdr types.SegmentSplitInfoCmd
@@ -906,28 +912,29 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			}
 			f.Loads[i] = l
 		case types.LC_DYLD_CHAINED_FIXUPS:
-			var led types.LinkEditDataCmd
+			var led types.DyldChainedFixupsCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &led); err != nil {
 				return nil, err
 			}
+
 			l := new(DyldChainedFixups)
 			l.LoadCmd = cmd
 			l.Offset = led.Offset
 			l.Size = led.Size
 			l.LoadBytes = LoadBytes(cmddat)
 
-			var dcf types.DyldChainedFixupsHeader
-			// var dcsis types.DyldChainedStartsInSegment
-			ldat := make([]byte, led.Size)
-			if _, err := r.ReadAt(ldat, int64(led.Offset)); err != nil {
-				return nil, err
-			}
-			fsr := bytes.NewReader(ldat)
-			if err := binary.Read(fsr, bo, &dcf); err != nil {
-				return nil, err
-			}
-			l.ImportsCount = dcf.ImportsCount
+			// var dcf types.DyldChainedFixupsHeader
+			// var segInfo types.DyldChainedStartsInSegment
+			// ldat := make([]byte, led.Size)
+			// if _, err := r.ReadAt(ldat, int64(led.Offset)); err != nil {
+			// 	return nil, err
+			// }
+			// fsr := bytes.NewReader(ldat)
+			// if err := binary.Read(fsr, bo, &dcf); err != nil {
+			// 	return nil, err
+			// }
+			// l.ImportsCount = dcf.ImportsCount
 			// fmt.Printf("%#v\n", dcf)
 
 			// fsr.Seek(int64(dcf.StartsOffset), io.SeekStart)
@@ -935,16 +942,94 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			// if err := binary.Read(fsr, bo, &segCount); err != nil {
 			// 	return nil, err
 			// }
-			// segInfoOffset := make([]uint32, segCount)
-			// if err := binary.Read(fsr, bo, &segInfoOffset); err != nil {
+			// segInfoOffsets := make([]uint32, segCount)
+			// if err := binary.Read(fsr, bo, &segInfoOffsets); err != nil {
 			// 	return nil, err
 			// }
-			// fmt.Println(segInfoOffset)
+			// fmt.Printf("%#v\n", segInfoOffsets)
+			// for _, segInfoOffset := range segInfoOffsets {
+			// 	if segInfoOffset == 0 {
+			// 		continue
+			// 	}
+			// 	fsr.Seek(int64(dcf.StartsOffset+segInfoOffset), io.SeekStart)
+			// 	if err := binary.Read(fsr, bo, &segInfo); err != nil {
+			// 		return nil, err
+			// 	}
+			// 	fmt.Printf("%#v\n", segInfo)
+			// 	pageStarts := make([]types.DCPtrStart, segInfo.PageCount)
+			// 	if err := binary.Read(fsr, bo, &pageStarts); err != nil {
+			// 		return nil, err
+			// 	}
+			// 	for pageIndex := uint16(0); pageIndex < segInfo.PageCount; pageIndex++ {
+			// 		offsetInPage := pageStarts[pageIndex]
+			// 		if offsetInPage == types.DYLD_CHAINED_PTR_START_NONE {
+			// 			continue
+			// 		}
+			// 		if offsetInPage&types.DYLD_CHAINED_PTR_START_MULTI != 0 {
+			// 			// 32-bit chains which may need multiple starts per page
+			// 			overflowIndex := offsetInPage & ^types.DYLD_CHAINED_PTR_START_MULTI
+			// 			chainEnd := false
+			// 			// for !stopped && !chainEnd {
+			// 			for !chainEnd {
+			// 				chainEnd = (pageStarts[overflowIndex]&types.DYLD_CHAINED_PTR_START_LAST != 0)
+			// 				offsetInPage = (pageStarts[overflowIndex] & ^types.DYLD_CHAINED_PTR_START_LAST)
+			// 				// if walkChain(diag, segInfo, pageIndex, offsetInPage, notifyNonPointers, handler) {
+			// 				//	stopped = true
+			// 				// }
+			// 				overflowIndex++
+			// 			}
+			// 		} else {
+			// 			// one chain per page
+			// 			// walkChain(diag, segInfo, pageIndex, offsetInPage, notifyNonPointers, handler);
+			// 			pageContentStart := segInfo.SegmentOffset + uint64(pageIndex*segInfo.PageSize)
+			// 			// pageContentStart := (uint8_t*)this + segInfo.SegmentOffset + (pageIndex * segInfo.PageSize)
+			// 			// var dyldChainedPtrArm64e types.DyldChainedPtrArm64eRebase
+			// 			var next uint64
+			// 			for {
+			// 				ptr64 := make([]byte, 8)
+			// 				if _, err := r.ReadAt(ptr64, int64(pageContentStart+uint64(offsetInPage)+next)); err != nil {
+			// 					return nil, err
+			// 				}
+			// 				dcPtr := binary.LittleEndian.Uint64(ptr64)
 
-			// if err := binary.Read(fsr, bo, &dcsis); err != nil {
+			// 				if !types.DyldChainedPtrArm64eIsBind(dcPtr) && !types.DyldChainedPtrArm64eIsAuth(dcPtr) {
+			// 					fmt.Println(types.DyldChainedPtrArm64eRebase(dcPtr))
+			// 				} else if types.DyldChainedPtrArm64eIsBind(dcPtr) && !types.DyldChainedPtrArm64eIsAuth(dcPtr) {
+			// 					fmt.Println(types.DyldChainedPtrArm64eBind(dcPtr))
+			// 				} else if !types.DyldChainedPtrArm64eIsBind(dcPtr) && types.DyldChainedPtrArm64eIsAuth(dcPtr) {
+			// 					fmt.Println(types.DyldChainedPtrArm64eAuthRebase(dcPtr))
+			// 				} else {
+			// 					fmt.Println(types.DyldChainedPtrArm64eAuthBind(dcPtr))
+			// 				}
+
+			// 				if types.DyldChainedPtrArm64eNext(dcPtr) == 0 {
+			// 					break
+			// 				}
+
+			// 				next += types.DyldChainedPtrArm64eNext(dcPtr) * 8
+			// 			}
+
+			// 			// if err := binary.Read(fsr, bo, &dyldChainedPtrArm64e); err != nil {
+			// 			// 	return nil, err
+			// 			// }
+			// 		}
+
+			// 	}
+			// }
+			// fsr.Seek(int64(dcf.ImportsOffset), io.SeekStart)
+			// imports := make([]types.DyldChainedImport, dcf.ImportsCount)
+			// if err := binary.Read(fsr, bo, &imports); err != nil {
 			// 	return nil, err
 			// }
-			// fmt.Println(dcsis)
+			// symbolsPool := io.NewSectionReader(fsr, int64(dcf.SymbolsOffset), int64(led.Size-dcf.SymbolsOffset))
+			// for _, i := range imports {
+			// 	symbolsPool.Seek(int64(i.NameOffset()), io.SeekStart)
+			// 	s, err := bufio.NewReader(symbolsPool).ReadString('\x00')
+			// 	if err != nil {
+			// 		return f, fmt.Errorf("failed to read string at: %d: %v", dcf.SymbolsOffset+i.NameOffset(), err)
+			// 	}
+			// 	fmt.Printf("ordinal: %d, is_weak: %t, %s\n", i.LibOrdinal(), i.WeakImport(), strings.Trim(s, "\x00"))
+			// }
 			f.Loads[i] = l
 		case types.LC_FILESET_ENTRY:
 			var hdr types.FilesetEntryCmd
@@ -1018,6 +1103,39 @@ func (f *File) parseSymtab(symdat, strtab, cmddat []byte, hdr *types.SymtabCmd, 
 	return st, nil
 }
 
+// func (f *File) parseDyldChainedFixups(cmddat []byte, hdr *types.DyldChainedFixupsCmd, offset int64) (*DyldChainedFixups, error) {
+// 	dr := bytes.NewReader(cmddat)
+
+// 	dcf := &DyldChainedFixups{}
+
+// 	var dcfHdr types.DyldChainedFixupsHdr
+// 	if err := binary.Read(dr, binary.BigEndian, &dcfHdr); err != nil {
+// 		return nil, err
+// 	}
+// 	dcf.ImportsCount = dcfHdr.ImportsCount
+// 	fmt.Printf("%#v\n", dcfHdr)
+
+// 	dr.Seek(int64(dcfHdr.StartsOffset), io.SeekStart)
+// 	var segCount uint32
+// 	if err := binary.Read(dr, binary.BigEndian, &segCount); err != nil {
+// 		return nil, err
+// 	}
+
+// 	segInfoOffset := make([]uint32, segCount)
+// 	if err := binary.Read(dr, binary.BigEndian, &segInfoOffset); err != nil {
+// 		return nil, err
+// 	}
+// 	fmt.Println(segInfoOffset)
+
+// 	var segInfo types.DyldChainedStartsInSegment
+// 	if err := binary.Read(dr, binary.BigEndian, &segInfo); err != nil {
+// 		return nil, err
+// 	}
+// 	fmt.Println(segInfo)
+
+// 	return dcf, nil
+// }
+
 func (f *File) parseCodeSignature(cmddat []byte, hdr *types.CodeSignatureCmd, offset int64) (*CodeSignature, error) {
 	csr := bytes.NewReader(cmddat)
 
@@ -1037,9 +1155,35 @@ func (f *File) parseCodeSignature(cmddat []byte, hdr *types.CodeSignatureCmd, of
 		csr.Seek(int64(index.Offset), io.SeekStart)
 		switch index.Type {
 		case types.CSSLOT_CODEDIRECTORY:
+			fallthrough
 		case types.CSSLOT_ALTERNATE_CODEDIRECTORIES:
 			if err := binary.Read(csr, binary.BigEndian, &cs.CodeDirectory); err != nil {
 				return nil, err
+			}
+			// TODO parse all the cdhashs
+			switch cs.CodeDirectory.Version {
+			case types.CS_SUPPORTS_SCATTER:
+				if cs.CodeDirectory.ScatterOffset > 0 {
+					csr.Seek(int64(index.Offset+cs.CodeDirectory.ScatterOffset), io.SeekStart)
+					scatter := types.CsScatter{}
+					if err := binary.Read(csr, binary.BigEndian, &scatter); err != nil {
+						return nil, err
+					}
+					fmt.Printf("%#v\n", scatter)
+				}
+			case types.CS_SUPPORTS_TEAMID:
+				csr.Seek(int64(index.Offset+cs.CodeDirectory.TeamOffset), io.SeekStart)
+				teamID, err := bufio.NewReader(csr).ReadString('\x00')
+				if err != nil {
+					return nil, fmt.Errorf("failed to read CS_SUPPORTS_TEAMID at: %d: %v", index.Offset+cs.CodeDirectory.TeamOffset, err)
+				}
+				cs.TeamID = strings.Trim(teamID, "\x00")
+			case types.CS_SUPPORTS_CODELIMIT64:
+				// TODO 🤷‍♂️
+			case types.CS_SUPPORTS_EXECSEG:
+				// TODO 🤷‍♂️
+			default:
+				fmt.Printf("Unknown code directory version 0x%x, please notify author\n", cs.CodeDirectory.Version)
 			}
 			csr.Seek(int64(index.Offset+cs.CodeDirectory.IdentOffset), io.SeekStart)
 			id, err := bufio.NewReader(csr).ReadString('\x00')
@@ -1048,20 +1192,111 @@ func (f *File) parseCodeSignature(cmddat []byte, hdr *types.CodeSignatureCmd, of
 			}
 			cs.ID = id
 		case types.CSSLOT_REQUIREMENTS:
-			if err := binary.Read(csr, binary.BigEndian, &cs.Requirements); err != nil {
+			req := types.CsRequirement{}
+			csReqBlob := types.CsRequirementsBlob{}
+			if err := binary.Read(csr, binary.BigEndian, &csReqBlob); err != nil {
 				return nil, err
 			}
-			reqData := make([]byte, cs.Requirements.Length-8)
+			req.CsRequirementsBlob = csReqBlob
+			reqData := make([]byte, csReqBlob.Length-8)
 			if err := binary.Read(csr, binary.BigEndian, &reqData); err != nil {
 				return nil, err
 			}
-			// fmt.Println(hex.Dump(reqData))
 			rqr := bytes.NewReader(reqData)
-			reqIdx := types.CsRequirements{}
-			if err := binary.Read(rqr, binary.BigEndian, &reqIdx); err != nil {
-				return nil, err
+			var reqs types.CsRequirements
+			if rqr.Len() >= binary.Size(reqs) {
+				if err := binary.Read(rqr, binary.BigEndian, &reqs); err != nil {
+					return nil, err
+				}
+				req.CsRequirements = reqs
+				rqr.Seek(int64(reqs.Offset), io.SeekStart)
+				switch reqs.Type {
+				case types.DesignatedRequirementType:
+					// NOTE: codesign -d -r- MACHO (to display requirement sets)
+					var reqOpCode uint32
+					var conditional string
+					var reqSet []string
+					for {
+						var reqPart string
+						err := binary.Read(rqr, binary.BigEndian, &reqOpCode)
+						if err == io.EOF {
+							break
+						}
+						if err != nil {
+							return nil, err
+						}
+						switch reqOpCode {
+						case 0:
+							break
+						case 1:
+							break
+						case 2:
+							var idLength uint32
+							err := binary.Read(rqr, binary.BigEndian, &idLength)
+							if err != nil {
+								return nil, err
+							}
+							// 4 byte align length
+							idLength = uint32(RoundUp(uint64(idLength), 4))
+							reID := make([]byte, idLength)
+							_, err = rqr.Read(reID)
+							if err != nil {
+								return nil, err
+							}
+							reqPart = fmt.Sprintf("identifier \"%s\"", reID)
+						case 3:
+							reqPart = "anchor apple"
+						case 4:
+							reqPart = "anchor hash"
+						case 5:
+							reqPart = "infokeyvalue (legacy)"
+						case 6:
+							conditional = "AND"
+						case 7:
+							conditional = "OR"
+						case 8:
+							reqPart = "cdhash"
+						case 9:
+							reqPart = "NOT"
+						case 10:
+							reqPart = "info plist"
+						case 0xc:
+							reqPart = "trusted cert"
+						case 0xd:
+							reqPart = "trusted certs"
+						case 0xf:
+							reqPart = "anchor apple (generic)"
+						case 0x11:
+							reqPart = "cert policy"
+						case 0x12:
+							reqPart = "named anchor"
+						case 0x13:
+							reqPart = "named subroutine"
+						default:
+							fmt.Printf("Unknown requirement set opcode 0x%x, please notify author\n", reqOpCode)
+						}
+						if len(reqPart) > 0 {
+							reqSet = append(reqSet, reqPart)
+							if len(conditional) > 0 {
+								reqSet = append(reqSet, conditional)
+								conditional = ""
+							}
+						}
+					}
+					req.Detail = strings.Join(reqSet, " ")
+				default:
+					fmt.Printf("Found unsupported codesign requirement type %s, please notify author\n", reqs.Type)
+				}
+			} else {
+				var reqType uint32
+				if err := binary.Read(rqr, binary.BigEndian, &reqType); err != nil {
+					// return nil, err
+					fmt.Printf("Got weird cs.Requirements: %#v\n", cs.Requirements)
+				}
+				req.CsRequirements.Type = types.CsRequirementType(reqType)
+				req.Detail = "empty requirement set"
 			}
-			// fmt.Println(reqIdx)
+			cs.Requirements = req
 		case types.CSSLOT_ENTITLEMENTS:
 			entBlob := types.CsBlob{}
 			if err := binary.Read(csr, binary.BigEndian, &entBlob); err != nil {
@@ -1071,17 +1306,20 @@ func (f *File) parseCodeSignature(cmddat []byte, hdr *types.CodeSignatureCmd, of
 			if err := binary.Read(csr, binary.BigEndian, &plistData); err != nil {
 				return nil, err
 			}
-			// fmt.Println(hex.Dump(plistData))
-			// ioutil.WriteFile("entitlements.plist", plistData, 0644)
+			cs.Entitlements = string(plistData)
 		case types.CSSLOT_CMS_SIGNATURE:
-			if err := binary.Read(csr, binary.BigEndian, &cs.CMSSignature); err != nil {
+			cmsBlob := types.CsBlob{}
+			if err := binary.Read(csr, binary.BigEndian, &cmsBlob); err != nil {
 				return nil, err
 			}
-			cmsData := make([]byte, cs.CMSSignature.Length)
+			cmsData := make([]byte, cmsBlob.Length)
 			if err := binary.Read(csr, binary.BigEndian, &cmsData); err != nil {
 				return nil, err
 			}
+			cs.CMSSignature = cmsData
 			// fmt.Println(hex.Dump(cmsData))
+		default:
+			fmt.Printf("Found unsupported codesign slot %s, please notify author\n", index.Type)
 		}
 	}
 	return cs, nil
@@ -1157,7 +1395,7 @@ func (f *File) GetOffset(address uint64) (uint64, error) {
 			return (address - seg.Addr) + seg.Offset, nil
 		}
 	}
-	return 0, fmt.Errorf("address not within any mappings adress range")
+	return 0, fmt.Errorf("address not within any segments adress range")
 }
 
 func (f *File) GetVMAddress(offset uint64) (uint64, error) {
@@ -1166,36 +1404,41 @@ func (f *File) GetVMAddress(offset uint64) (uint64, error) {
 			return (offset - seg.Offset) + seg.Addr, nil
 		}
 	}
-	return 0, fmt.Errorf("offset not within any mappings file offset range")
+	return 0, fmt.Errorf("offset not within any segments file offset range")
 }
 
-func (f *File) GetCString(strVmAddr uint64) (string, error) {
+func (f *File) GetCString(strVMAdr uint64) (string, error) {
 
-	for _, sec := range f.Sections {
-		if sec.Flags.IsCstringLiterals() {
-			data, err := sec.Data()
-			if err != nil {
-				return "", err
-			}
+	// for _, sec := range f.Sections {
+	// 	if sec.Flags.IsCstringLiterals() {
+	// 		data, err := sec.Data()
+	// 		if err != nil {
+	// 			return "", err
+	// 		}
 
-			if strVmAddr > sec.Addr {
-				strOffset := strVmAddr - sec.Addr
-				if strOffset > sec.Size {
-					return "", fmt.Errorf("offset out of bounds of the cstring section")
-				}
-				csr := bytes.NewBuffer(data[strOffset:])
-
-				s, err := csr.ReadString('\x00')
-				if err != nil {
-					log.Fatal(err.Error())
-				}
-
-				if len(s) > 0 {
-					return strings.Trim(s, "\x00"), nil
-				}
-			}
-		}
+	// 		if strVMAdr > sec.Addr {
+	// 			strOffset := strVMAdr - sec.Addr
+	// 			if strOffset > sec.Size {
+	// 				return "", fmt.Errorf("offset out of bounds of the cstring section")
+	// 			}
+	strOffset, err := f.GetOffset(strVMAdr)
+	if err != nil {
+		return "", err
 	}
+	// csr := bytes.NewBuffer(data[strOffset:])
+	f.sr.Seek(int64(strOffset), io.SeekStart)
+	s, err := bufio.NewReader(f.sr).ReadString('\x00')
+	// s, err := csr.ReadString('\x00')
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+
+	if len(s) > 0 {
+		return strings.Trim(s, "\x00"), nil
+	}
+	// 		}
+	// 	}
+	// }
 
 	return "", fmt.Errorf("string not found")
 }
@@ -1226,6 +1469,19 @@ func (f *File) Segments() []*Segment {
 func (f *File) Section(segment, section string) *Section {
 	for _, sec := range f.Sections {
 		if sec.Seg == segment && sec.Name == section {
+			return sec
+		}
+	}
+	return nil
+}
+
+// FindSectionForVMAddr returns the section containing a given virtual memory ddress.
+func (f *File) FindSectionForVMAddr(vmAddr uint64) *Section {
+	for _, sec := range f.Sections {
+		if sec.Size == 0 {
+			fmt.Printf("section %s.%s has zero size\n", sec.Seg, sec.Name)
+		}
+		if sec.Addr <= vmAddr && vmAddr < sec.Addr+sec.Size {
 			return sec
 		}
 	}
@@ -1287,6 +1543,16 @@ func (f *File) FunctionStarts() []uint64 {
 	for _, l := range f.Loads {
 		if s, ok := l.(*FunctionStarts); ok {
 			return s.VMAddrs
+		}
+	}
+	return nil
+}
+
+// CodeSignature returns the code signature, or nil if none exists.
+func (f *File) CodeSignature() *CodeSignature {
+	for _, l := range f.Loads {
+		if s, ok := l.(*CodeSignature); ok {
+			return s
 		}
 	}
 	return nil

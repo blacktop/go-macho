@@ -4,14 +4,16 @@ type CsMagic uint32
 
 const (
 	// Magic numbers used by Code Signing
-	CSMAGIC_REQUIREMENT            CsMagic = 0xfade0c00 // single Requirement blob
-	CSMAGIC_REQUIREMENTS           CsMagic = 0xfade0c01 // Requirements vector (internal requirements)
-	CSMAGIC_CODEDIRECTORY          CsMagic = 0xfade0c02 // CodeDirectory blob
-	CSMAGIC_EMBEDDED_SIGNATURE     CsMagic = 0xfade0cc0 // embedded form of signature data
-	CSMAGIC_EMBEDDED_SIGNATURE_OLD CsMagic = 0xfade0b02 /* XXX */
-	CSMAGIC_EMBEDDED_ENTITLEMENTS  CsMagic = 0xfade7171 /* embedded entitlements */
-	CSMAGIC_DETACHED_SIGNATURE     CsMagic = 0xfade0cc1 // multi-arch collection of embedded signatures
-	CSMAGIC_BLOBWRAPPER            CsMagic = 0xfade0b01 // used for the cms blob
+	CSMAGIC_REQUIREMENT               CsMagic = 0xfade0c00 // single Requirement blob
+	CSMAGIC_REQUIREMENTS              CsMagic = 0xfade0c01 // Requirements vector (internal requirements)
+	CSMAGIC_CODEDIRECTORY             CsMagic = 0xfade0c02 // CodeDirectory blob
+	CSMAGIC_EMBEDDED_SIGNATURE        CsMagic = 0xfade0cc0 // embedded form of signature data
+	CSMAGIC_EMBEDDED_SIGNATURE_OLD    CsMagic = 0xfade0b02 /* XXX */
+	CSMAGIC_LIBRARY_DEPENDENCY_BLOB   CsMagic = 0xfade0c05
+	CSMAGIC_EMBEDDED_ENTITLEMENTS     CsMagic = 0xfade7171 /* embedded entitlements */
+	CSMAGIC_EMBEDDED_ENTITLEMENTS_DER CsMagic = 0xfade7172 /* embedded entitlements */
+	CSMAGIC_DETACHED_SIGNATURE        CsMagic = 0xfade0cc1 // multi-arch collection of embedded signatures
+	CSMAGIC_BLOBWRAPPER               CsMagic = 0xfade0b01 // used for the cms blob
 )
 
 var csMagicStrings = []intName{
@@ -69,6 +71,10 @@ const (
 	CS_SIGNER_TYPE_LEGACYVPN     = 5
 	CS_SIGNER_TYPE_MAC_APP_STORE = 6
 
+	CS_SUPPL_SIGNER_TYPE_UNKNOWN    = 0
+	CS_SUPPL_SIGNER_TYPE_TRUSTCACHE = 7
+	CS_SUPPL_SIGNER_TYPE_LOCAL      = 8
+
 	CSTYPE_INDEX_REQUIREMENTS = 0x00000002 /* compat with amfi */
 	CSTYPE_INDEX_ENTITLEMENTS = 0x00000005 /* compat with amfi */
 
@@ -102,7 +108,7 @@ var csSlotTypeStrings = []intName{
 	{uint32(CSSLOT_ALTERNATE_CODEDIRECTORIES), "AlternateCodeDirectories"},
 	{uint32(CSSLOT_ALTERNATE_CODEDIRECTORY_MAX), "AlternateCodeDirectoryMax"},
 	{uint32(CSSLOT_ALTERNATE_CODEDIRECTORY_LIMIT), "AlternateCodeDirectoryLimit"},
-	{uint32(CSSLOT_CMS_SIGNATURE), "CmsSignature"},
+	{uint32(CSSLOT_CMS_SIGNATURE), "CMS (RFC3852) signature"},
 	{uint32(CSSLOT_IDENTIFICATIONSLOT), "IdentificationSlot"},
 	{uint32(CSSLOT_TICKETSLOT), "TicketSlot"},
 }
@@ -140,8 +146,6 @@ func (cm CsRequirementType) GoString() string {
 	return stringName(uint32(cm), csRequirementTypeStrings, true)
 }
 
-const CS_REQUIRE_LV = 0x0002000 // require library validation
-
 // Structure of a SuperBlob
 type CsBlobIndex struct {
 	Type   CsSlotType // type of entry
@@ -156,22 +160,77 @@ type CsSuperBlob struct {
 	// followed by Blobs in no particular order as indicated by offsets in index
 }
 
+type CDVersion uint32
+
+const (
+	CS_SUPPORTS_SCATTER     CDVersion = 0x20100
+	CS_SUPPORTS_TEAMID      CDVersion = 0x20200
+	CS_SUPPORTS_CODELIMIT64 CDVersion = 0x20300
+	CS_SUPPORTS_EXECSEG     CDVersion = 0x20400
+	CS_SUPPORTS_RUNTIME     CDVersion = 0x20500
+	CS_SUPPORTS_LINKAGE     CDVersion = 0x20600
+)
+
+type CsCodeDirectoryFlag uint32
+
+const (
+	/* code signing attributes of a process */
+	CS_VALID          CsCodeDirectoryFlag = 0x00000001 /* dynamically valid */
+	CS_ADHOC          CsCodeDirectoryFlag = 0x00000002 /* ad hoc signed */
+	CS_GET_TASK_ALLOW CsCodeDirectoryFlag = 0x00000004 /* has get-task-allow entitlement */
+	CS_INSTALLER      CsCodeDirectoryFlag = 0x00000008 /* has installer entitlement */
+
+	CS_FORCED_LV       CsCodeDirectoryFlag = 0x00000010 /* Library Validation required by Hardened System Policy */
+	CS_INVALID_ALLOWED CsCodeDirectoryFlag = 0x00000020 /* (macOS Only) Page invalidation allowed by task port policy */
+
+	CS_HARD             CsCodeDirectoryFlag = 0x00000100 /* don't load invalid pages */
+	CS_KILL             CsCodeDirectoryFlag = 0x00000200 /* kill process if it becomes invalid */
+	CS_CHECK_EXPIRATION CsCodeDirectoryFlag = 0x00000400 /* force expiration checking */
+	CS_RESTRICT         CsCodeDirectoryFlag = 0x00000800 /* tell dyld to treat restricted */
+
+	CS_ENFORCEMENT            CsCodeDirectoryFlag = 0x00001000 /* require enforcement */
+	CS_REQUIRE_LV             CsCodeDirectoryFlag = 0x00002000 /* require library validation */
+	CS_ENTITLEMENTS_VALIDATED CsCodeDirectoryFlag = 0x00004000 /* code signature permits restricted entitlements */
+	CS_NVRAM_UNRESTRICTED     CsCodeDirectoryFlag = 0x00008000 /* has com.apple.rootless.restricted-nvram-variables.heritable entitlement */
+
+	CS_RUNTIME CsCodeDirectoryFlag = 0x00010000 /* Apply hardened runtime policies */
+
+	CS_ALLOWED_MACHO CsCodeDirectoryFlag = (CS_ADHOC | CS_HARD | CS_KILL | CS_CHECK_EXPIRATION | CS_RESTRICT | CS_ENFORCEMENT | CS_REQUIRE_LV | CS_RUNTIME)
+
+	CS_EXEC_SET_HARD        CsCodeDirectoryFlag = 0x00100000 /* set CS_HARD on any exec'ed process */
+	CS_EXEC_SET_KILL        CsCodeDirectoryFlag = 0x00200000 /* set CS_KILL on any exec'ed process */
+	CS_EXEC_SET_ENFORCEMENT CsCodeDirectoryFlag = 0x00400000 /* set CS_ENFORCEMENT on any exec'ed process */
+	CS_EXEC_INHERIT_SIP     CsCodeDirectoryFlag = 0x00800000 /* set CS_INSTALLER on any exec'ed process */
+
+	CS_KILLED          CsCodeDirectoryFlag = 0x01000000 /* was killed by kernel for invalidity */
+	CS_DYLD_PLATFORM   CsCodeDirectoryFlag = 0x02000000 /* dyld used to load this is a platform binary */
+	CS_PLATFORM_BINARY CsCodeDirectoryFlag = 0x04000000 /* this is a platform binary */
+	CS_PLATFORM_PATH   CsCodeDirectoryFlag = 0x08000000 /* platform binary by the fact of path (osx only) */
+
+	CS_DEBUGGED             CsCodeDirectoryFlag = 0x10000000 /* process is currently or has previously been debugged and allowed to run with invalid pages */
+	CS_SIGNED               CsCodeDirectoryFlag = 0x20000000 /* process has a signature (may have gone invalid) */
+	CS_DEV_CODE             CsCodeDirectoryFlag = 0x40000000 /* code is dev signed, cannot be loaded into prod signed code (will go away with rdar://problem/28322552) */
+	CS_DATAVAULT_CONTROLLER CsCodeDirectoryFlag = 0x80000000 /* has Data Vault controller entitlement */
+
+	CS_ENTITLEMENT_FLAGS CsCodeDirectoryFlag = (CS_GET_TASK_ALLOW | CS_INSTALLER | CS_DATAVAULT_CONTROLLER | CS_NVRAM_UNRESTRICTED)
+)
+
 // C form of a CodeDirectory.
 type CsCodeDirectory struct {
-	Magic         CsMagic    // magic number (CSMAGIC_CODEDIRECTORY) */
-	Length        uint32     // total length of CodeDirectory blob
-	Version       uint32     // compatibility version
-	Flags         uint32     // setup and mode flags
-	HashOffset    uint32     // offset of hash slot element at index zero
-	IdentOffset   uint32     // offset of identifier string
-	NSpecialSlots uint32     // number of special hash slots
-	NCodeSlots    uint32     // number of ordinary (code) hash slots
-	CodeLimit     uint32     // limit to main image signature range
-	HashSize      uint8      // size of each hash in bytes
-	HashType      CsHashType // type of hash (cdHashType* constants)
-	Platform      uint8      // platform identifier zero if not platform binary
-	PageSize      uint8      // log2(page size in bytes) 0 => infinite
-	Spare2        uint32     // unused (must be zero)
+	Magic         CsMagic             // magic number (CSMAGIC_CODEDIRECTORY) */
+	Length        uint32              // total length of CodeDirectory blob
+	Version       CDVersion           // compatibility version
+	Flags         CsCodeDirectoryFlag // setup and mode flags
+	HashOffset    uint32              // offset of hash slot element at index zero
+	IdentOffset   uint32              // offset of identifier string
+	NSpecialSlots uint32              // number of special hash slots
+	NCodeSlots    uint32              // number of ordinary (code) hash slots
+	CodeLimit     uint32              // limit to main image signature range
+	HashSize      uint8               // size of each hash in bytes
+	HashType      CsHashType          // type of hash (cdHashType* constants)
+	Platform      uint8               // platform identifier zero if not platform binary
+	PageSize      uint8               // log2(page size in bytes) 0 => infinite
+	Spare2        uint32              // unused (must be zero)
 
 	EndEarliest [0]uint8
 
@@ -189,12 +248,33 @@ type CsCodeDirectory struct {
 	EndWithCodeLimit64 [0]uint8
 
 	/* Version 0x20400 */
-	ExecSegBase    uint64 /* offset of executable segment */
-	ExecSegLimit   uint64 /* limit of executable segment */
-	ExecSegFlags   uint64 /* exec segment flags */
+	ExecSegBase    uint64      /* offset of executable segment */
+	ExecSegLimit   uint64      /* limit of executable segment */
+	ExecSegFlags   ExecSegFlag /* exec segment flags */
 	EndWithExecSeg [0]uint8
 
 	/* followed by dynamic content as located by offset fields above */
+}
+
+type ExecSegFlag uint64
+
+/* executable segment flags */
+const (
+	CS_EXECSEG_MAIN_BINARY     ExecSegFlag = 0x1   /* executable segment denotes main binary */
+	CS_EXECSEG_ALLOW_UNSIGNED  ExecSegFlag = 0x10  /* allow unsigned pages (for debugging) */
+	CS_EXECSEG_DEBUGGER        ExecSegFlag = 0x20  /* main binary is debugger */
+	CS_EXECSEG_JIT             ExecSegFlag = 0x40  /* JIT enabled */
+	CS_EXECSEG_SKIP_LV         ExecSegFlag = 0x80  /* OBSOLETE: skip library validation */
+	CS_EXECSEG_CAN_LOAD_CDHASH ExecSegFlag = 0x100 /* can bless cdhash for execution */
+	CS_EXECSEG_CAN_EXEC_CDHASH ExecSegFlag = 0x200 /* can execute blessed cdhash */
+)
+
+/* Version 0x20400 */
+type CsCodeDirExecSeg struct {
+	ExecSegBase    uint64      /* offset of executable segment */
+	ExecSegLimit   uint64      /* limit of executable segment */
+	ExecSegFlags   ExecSegFlag /* exec segment flags */
+	EndWithExecSeg [0]uint8
 }
 
 type CsBlob struct {
@@ -211,6 +291,12 @@ type CsRequirementsBlob struct {
 type CsRequirements struct {
 	Type   CsRequirementType // type of entry
 	Offset uint32            // offset of entry
+}
+
+type CsRequirement struct {
+	Detail string
+	CsRequirementsBlob
+	CsRequirements
 }
 
 type CsScatter struct {
