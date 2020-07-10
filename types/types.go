@@ -120,7 +120,24 @@ type intName struct {
 	s string
 }
 
+type int64Name struct {
+	i uint64
+	s string
+}
+
 func stringName(i uint32, names []intName, goSyntax bool) string {
+	for _, n := range names {
+		if n.i == i {
+			if goSyntax {
+				return "macho." + n.s
+			}
+			return n.s
+		}
+	}
+	return "0x" + strconv.FormatUint(uint64(i), 16)
+}
+
+func stringName64(i uint64, names []int64Name, goSyntax bool) string {
 	for _, n := range names {
 		if n.i == i {
 			if goSyntax {

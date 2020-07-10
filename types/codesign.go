@@ -1,7 +1,5 @@
 package types
 
-//go:generate stringer -type=CsCodeDirectoryFlag,CDVersion,ExecSegFlag -output codesign_string.go
-
 type CsMagic uint32
 
 const (
@@ -109,9 +107,9 @@ var csSlotTypeStrings = []intName{
 	{uint32(CSSLOT_RESOURCEDIR), "ResourceDir"},
 	{uint32(CSSLOT_APPLICATION), "Application"},
 	{uint32(CSSLOT_ENTITLEMENTS), "Entitlements"},
-	{uint32(CSSLOT_ALTERNATE_CODEDIRECTORIES), "AlternateCodeDirectories"},
-	{uint32(CSSLOT_ALTERNATE_CODEDIRECTORY_MAX), "AlternateCodeDirectoryMax"},
-	{uint32(CSSLOT_ALTERNATE_CODEDIRECTORY_LIMIT), "AlternateCodeDirectoryLimit"},
+	{uint32(CSSLOT_ALTERNATE_CODEDIRECTORIES), "Alternate CodeDirectories"},
+	{uint32(CSSLOT_ALTERNATE_CODEDIRECTORY_MAX), "Alternate CodeDirectory Max"},
+	{uint32(CSSLOT_ALTERNATE_CODEDIRECTORY_LIMIT), "Alternate CodeDirectory Limit"},
 	{uint32(CSSLOT_CMS_SIGNATURE), "CMS (RFC3852) signature"},
 	{uint32(CSSLOT_IDENTIFICATIONSLOT), "IdentificationSlot"},
 	{uint32(CSSLOT_TICKETSLOT), "TicketSlot"},
@@ -175,10 +173,27 @@ const (
 	CS_SUPPORTS_LINKAGE     CDVersion = 0x20600
 )
 
+var csVersionypeStrings = []intName{
+	{uint32(CS_SUPPORTS_SCATTER), "Scatter"},
+	{uint32(CS_SUPPORTS_TEAMID), "TeamID"},
+	{uint32(CS_SUPPORTS_CODELIMIT64), "Codelimit64"},
+	{uint32(CS_SUPPORTS_EXECSEG), "ExecSeg"},
+	{uint32(CS_SUPPORTS_RUNTIME), "Runtime"},
+	{uint32(CS_SUPPORTS_LINKAGE), "Linkage"},
+}
+
+func (v CDVersion) String() string {
+	return stringName(uint32(v), csVersionypeStrings, false)
+}
+func (v CDVersion) GoString() string {
+	return stringName(uint32(v), csVersionypeStrings, true)
+}
+
 type CsCodeDirectoryFlag uint32
 
 const (
 	/* code signing attributes of a process */
+	CS_NONE           CsCodeDirectoryFlag = 0x00000000 /* no flags */
 	CS_VALID          CsCodeDirectoryFlag = 0x00000001 /* dynamically valid */
 	CS_ADHOC          CsCodeDirectoryFlag = 0x00000002 /* ad hoc signed */
 	CS_GET_TASK_ALLOW CsCodeDirectoryFlag = 0x00000004 /* has get-task-allow entitlement */
@@ -218,6 +233,46 @@ const (
 
 	CS_ENTITLEMENT_FLAGS CsCodeDirectoryFlag = (CS_GET_TASK_ALLOW | CS_INSTALLER | CS_DATAVAULT_CONTROLLER | CS_NVRAM_UNRESTRICTED)
 )
+
+var cdFlagStrings = []intName{
+	{uint32(CS_NONE), "None"},
+	{uint32(CS_VALID), "Valid"},
+	{uint32(CS_ADHOC), "Adhoc"},
+	{uint32(CS_GET_TASK_ALLOW), "GetTaskAllow"},
+	{uint32(CS_INSTALLER), "Installer"},
+	{uint32(CS_FORCED_LV), "ForcedLv"},
+	{uint32(CS_INVALID_ALLOWED), "InvalidAllowed"},
+	{uint32(CS_HARD), "Hard"},
+	{uint32(CS_KILL), "Kill"},
+	{uint32(CS_CHECK_EXPIRATION), "CheckExpiration"},
+	{uint32(CS_RESTRICT), "Restrict"},
+	{uint32(CS_ENFORCEMENT), "Enforcement"},
+	{uint32(CS_REQUIRE_LV), "RequireLv"},
+	{uint32(CS_ENTITLEMENTS_VALIDATED), "EntitlementsValidated"},
+	{uint32(CS_NVRAM_UNRESTRICTED), "NvramUnrestricted"},
+	{uint32(CS_RUNTIME), "Runtime"},
+	{uint32(CS_ALLOWED_MACHO), "AllowedMacho"},
+	{uint32(CS_EXEC_SET_HARD), "ExecSetHard"},
+	{uint32(CS_EXEC_SET_KILL), "ExecSetKill"},
+	{uint32(CS_EXEC_SET_ENFORCEMENT), "ExecSetEnforcement"},
+	{uint32(CS_EXEC_INHERIT_SIP), "ExecInheritSip"},
+	{uint32(CS_KILLED), "Killed"},
+	{uint32(CS_DYLD_PLATFORM), "DyldPlatform"},
+	{uint32(CS_PLATFORM_BINARY), "PlatformBinary"},
+	{uint32(CS_PLATFORM_PATH), "PlatformPath"},
+	{uint32(CS_DEBUGGED), "Debugged"},
+	{uint32(CS_SIGNED), "Signed"},
+	{uint32(CS_DEV_CODE), "DevCode"},
+	{uint32(CS_DATAVAULT_CONTROLLER), "DatavaultController"},
+	{uint32(CS_ENTITLEMENT_FLAGS), "EntitlementFlags"},
+}
+
+func (f CsCodeDirectoryFlag) String() string {
+	return stringName(uint32(f), cdFlagStrings, false)
+}
+func (f CsCodeDirectoryFlag) GoString() string {
+	return stringName(uint32(f), cdFlagStrings, true)
+}
 
 // C form of a CodeDirectory.
 type CsCodeDirectory struct {
@@ -272,6 +327,23 @@ const (
 	CS_EXECSEG_CAN_LOAD_CDHASH ExecSegFlag = 0x100 /* can bless cdhash for execution */
 	CS_EXECSEG_CAN_EXEC_CDHASH ExecSegFlag = 0x200 /* can execute blessed cdhash */
 )
+
+var csExecSegFlagStrings = []int64Name{
+	{uint64(CS_EXECSEG_MAIN_BINARY), "Main Binary"},
+	{uint64(CS_EXECSEG_ALLOW_UNSIGNED), "Allow Unsigned"},
+	{uint64(CS_EXECSEG_DEBUGGER), "Debugger"},
+	{uint64(CS_EXECSEG_JIT), "JIT"},
+	{uint64(CS_EXECSEG_SKIP_LV), "Skip LV"},
+	{uint64(CS_EXECSEG_CAN_LOAD_CDHASH), "Can Load Cdhash"},
+	{uint64(CS_EXECSEG_CAN_EXEC_CDHASH), "Can Exec Cdhash"},
+}
+
+func (f ExecSegFlag) String() string {
+	return stringName64(uint64(f), csExecSegFlagStrings, false)
+}
+func (f ExecSegFlag) GoString() string {
+	return stringName64(uint64(f), csExecSegFlagStrings, true)
+}
 
 /* Version 0x20400 */
 type CsCodeDirExecSeg struct {
