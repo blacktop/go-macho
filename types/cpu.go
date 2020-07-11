@@ -21,7 +21,7 @@ const (
 	CPUPpc64   CPU = CPUPpc | cpuArch64
 )
 
-var cpuStrings = []intName{
+var cpuStrings = []IntName{
 	{uint32(CPU386), "i386"},
 	{uint32(CPUAmd64), "Amd64"},
 	{uint32(CPUArm), "ARM"},
@@ -30,8 +30,8 @@ var cpuStrings = []intName{
 	{uint32(CPUPpc64), "PowerPC 64"},
 }
 
-func (i CPU) String() string   { return stringName(uint32(i), cpuStrings, false) }
-func (i CPU) GoString() string { return stringName(uint32(i), cpuStrings, true) }
+func (i CPU) String() string   { return StringName(uint32(i), cpuStrings, false) }
+func (i CPU) GoString() string { return StringName(uint32(i), cpuStrings, true) }
 
 type CPUSubtype uint32
 
@@ -84,13 +84,13 @@ const (
 	CpuSubtypeAny = -1
 )
 
-var cpuSubtypeX86Strings = []intName{
+var cpuSubtypeX86Strings = []IntName{
 	// {uint32(CPUSubtypeX86All), "x86"},
 	{uint32(CPUSubtypeX8664All), "x86_64"},
 	{uint32(CPUSubtypeX86Arch1), "x86 Arch1"},
 	{uint32(CPUSubtypeX86_64H), "x86_64 (Haswell)"},
 }
-var cpuSubtypeArmStrings = []intName{
+var cpuSubtypeArmStrings = []IntName{
 	{uint32(CPUSubtypeArmAll), "ArmAll"},
 	{uint32(CPUSubtypeArmV4T), "ARMv4t"},
 	{uint32(CPUSubtypeArmV6), "ARMv6"},
@@ -106,7 +106,7 @@ var cpuSubtypeArmStrings = []intName{
 	{uint32(CPUSubtypeArmV7Em), "ARMv7em"},
 	{uint32(CPUSubtypeArmV8M), "ARMv8m"},
 }
-var cpuSubtypeArm64Strings = []intName{
+var cpuSubtypeArm64Strings = []IntName{
 	{uint32(CPUSubtypeArm64All), "ARM64"},
 	{uint32(CPUSubtypeArm64V8), "ARM64 (ARMv8)"},
 	{uint32(CPUSubtypeArm64E), "ARM64e (ARMv8.3)"},
@@ -115,10 +115,11 @@ var cpuSubtypeArm64Strings = []intName{
 func (st CPUSubtype) String(cpu CPU) string {
 	switch cpu {
 	case CPU386:
+		fallthrough
 	case CPUAmd64:
-		return stringName(uint32(st&CpuSubtypeMask), cpuSubtypeX86Strings, false)
+		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeX86Strings, false)
 	case CPUArm:
-		return stringName(uint32(st&CpuSubtypeMask), cpuSubtypeArmStrings, false)
+		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeArmStrings, false)
 	case CPUArm64:
 		var feature string
 		caps := st & CpuSubtypeFeatureMask
@@ -128,7 +129,7 @@ func (st CPUSubtype) String(cpu CPU) string {
 		} else {
 			feature = fmt.Sprintf(" caps: PAK%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
 		}
-		return stringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm64Strings, false) + feature
+		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm64Strings, false) + feature
 	}
 	return "UNKNOWN"
 }
@@ -136,10 +137,11 @@ func (st CPUSubtype) String(cpu CPU) string {
 func (st CPUSubtype) GoString(cpu CPU) string {
 	switch cpu {
 	case CPU386:
+		fallthrough
 	case CPUAmd64:
-		return stringName(uint32(st&CpuSubtypeMask), cpuSubtypeX86Strings, true)
+		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeX86Strings, true)
 	case CPUArm:
-		return stringName(uint32(st&CpuSubtypeMask), cpuSubtypeArmStrings, true)
+		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeArmStrings, true)
 	case CPUArm64:
 		var feature string
 		caps := st & CpuSubtypeFeatureMask
@@ -148,7 +150,7 @@ func (st CPUSubtype) GoString(cpu CPU) string {
 		} else {
 			feature = fmt.Sprintf(" caps: PAK%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
 		}
-		return stringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm64Strings, true) + feature
+		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm64Strings, true) + feature
 	}
 	return "UNKNOWN"
 }

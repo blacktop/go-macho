@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/blacktop/go-macho/types"
+	"github.com/blacktop/go-macho/types/codesign"
 	"github.com/blacktop/go-macho/types/trie"
 )
 
@@ -108,7 +109,7 @@ func (s *Segment) String() string {
 func (s *Segment) Put32(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(s.LoadCmd))
 	o.PutUint32(b[1*4:], s.Len)
-	putAtMost16Bytes(b[2*4:], s.Name)
+	types.PutAtMost16Bytes(b[2*4:], s.Name)
 	o.PutUint32(b[6*4:], uint32(s.Addr))
 	o.PutUint32(b[7*4:], uint32(s.Memsz))
 	o.PutUint32(b[8*4:], uint32(s.Offset))
@@ -123,7 +124,7 @@ func (s *Segment) Put32(b []byte, o binary.ByteOrder) int {
 func (s *Segment) Put64(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(s.LoadCmd))
 	o.PutUint32(b[1*4:], s.Len)
-	putAtMost16Bytes(b[2*4:], s.Name)
+	types.PutAtMost16Bytes(b[2*4:], s.Name)
 	o.PutUint64(b[6*4+0*8:], s.Addr)
 	o.PutUint64(b[6*4+1*8:], s.Memsz)
 	o.PutUint64(b[6*4+2*8:], s.Offset)
@@ -247,8 +248,8 @@ func (s *Section) Data() ([]byte, error) {
 }
 
 func (s *Section) Put32(b []byte, o binary.ByteOrder) int {
-	putAtMost16Bytes(b[0:], s.Name)
-	putAtMost16Bytes(b[16:], s.Seg)
+	types.PutAtMost16Bytes(b[0:], s.Name)
+	types.PutAtMost16Bytes(b[16:], s.Seg)
 	o.PutUint32(b[8*4:], uint32(s.Addr))
 	o.PutUint32(b[9*4:], uint32(s.Size))
 	o.PutUint32(b[10*4:], s.Offset)
@@ -263,8 +264,8 @@ func (s *Section) Put32(b []byte, o binary.ByteOrder) int {
 }
 
 func (s *Section) Put64(b []byte, o binary.ByteOrder) int {
-	putAtMost16Bytes(b[0:], s.Name)
-	putAtMost16Bytes(b[16:], s.Seg)
+	types.PutAtMost16Bytes(b[0:], s.Name)
+	types.PutAtMost16Bytes(b[16:], s.Seg)
 	o.PutUint64(b[8*4+0*8:], s.Addr)
 	o.PutUint64(b[8*4+1*8:], s.Size)
 	o.PutUint32(b[8*4+2*8:], s.Offset)
@@ -627,8 +628,8 @@ type CodeSignature struct {
 	Size          uint32
 	ID            string
 	TeamID        string
-	CodeDirectory types.CsCodeDirectory
-	Requirements  []types.CsRequirement
+	CodeDirectory codesign.CodeDirectory
+	Requirements  []codesign.Requirement
 	CMSSignature  []byte
 	Entitlements  string
 }
@@ -1081,20 +1082,4 @@ type LinkEditData struct {
 	types.LinkEditDataCmd
 	Offset uint32
 	Size   uint32
-}
-
-/*******
-HELPERS
-********/
-func putAtMost16Bytes(b []byte, n string) {
-	for i := range n { // at most 16 bytes
-		if i == 16 {
-			break
-		}
-		b[i] = n[i]
-	}
-}
-
-func RoundUp(x, align uint64) uint64 {
-	return uint64((x + align - 1) & -align)
 }

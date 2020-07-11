@@ -115,35 +115,51 @@ const (
 	KindAbsJumpTable32 DiceKind = 0x0005
 )
 
-type intName struct {
-	i uint32
-	s string
+/*******
+HELPERS
+********/
+func PutAtMost16Bytes(b []byte, n string) {
+	for i := range n { // at most 16 bytes
+		if i == 16 {
+			break
+		}
+		b[i] = n[i]
+	}
 }
 
-type int64Name struct {
-	i uint64
-	s string
+func RoundUp(x, align uint64) uint64 {
+	return uint64((x + align - 1) & -align)
 }
 
-func stringName(i uint32, names []intName, goSyntax bool) string {
+type IntName struct {
+	I uint32
+	S string
+}
+
+type Int64Name struct {
+	I uint64
+	S string
+}
+
+func StringName(i uint32, names []IntName, goSyntax bool) string {
 	for _, n := range names {
-		if n.i == i {
+		if n.I == i {
 			if goSyntax {
-				return "macho." + n.s
+				return "macho." + n.S
 			}
-			return n.s
+			return n.S
 		}
 	}
 	return "0x" + strconv.FormatUint(uint64(i), 16)
 }
 
-func stringName64(i uint64, names []int64Name, goSyntax bool) string {
+func StringName64(i uint64, names []Int64Name, goSyntax bool) string {
 	for _, n := range names {
-		if n.i == i {
+		if n.I == i {
 			if goSyntax {
-				return "macho." + n.s
+				return "macho." + n.S
 			}
-			return n.s
+			return n.S
 		}
 	}
 	return "0x" + strconv.FormatUint(uint64(i), 16)

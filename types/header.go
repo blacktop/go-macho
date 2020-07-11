@@ -47,15 +47,15 @@ const (
 	MagicFat Magic = 0xcafebabe
 )
 
-var magicStrings = []intName{
+var magicStrings = []IntName{
 	{uint32(Magic32), "32-bit MachO"},
 	{uint32(Magic64), "64-bit MachO"},
 	{uint32(MagicFat), "Fat MachO"},
 }
 
 func (i Magic) Int() uint32      { return uint32(i) }
-func (i Magic) String() string   { return stringName(uint32(i), magicStrings, false) }
-func (i Magic) GoString() string { return stringName(uint32(i), magicStrings, true) }
+func (i Magic) String() string   { return StringName(uint32(i), magicStrings, false) }
+func (i Magic) GoString() string { return StringName(uint32(i), magicStrings, true) }
 
 // A HeaderType is the Mach-O file type, e.g. an object file, executable, or dynamic library.
 type HeaderType uint32
