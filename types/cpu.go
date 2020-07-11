@@ -123,11 +123,12 @@ func (st CPUSubtype) String(cpu CPU) string {
 	case CPUArm64:
 		var feature string
 		caps := st & CpuSubtypeFeatureMask
-		// TODO handle old files with NO features
-		if caps&CpuSubtypePtrauthAbiUser == 0 {
-			feature = fmt.Sprintf(" caps: PAC%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
-		} else {
-			feature = fmt.Sprintf(" caps: PAK%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
+		if caps > 0 {
+			if caps&CpuSubtypePtrauthAbiUser == 0 {
+				feature = fmt.Sprintf(" caps: PAC%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
+			} else {
+				feature = fmt.Sprintf(" caps: PAK%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
+			}
 		}
 		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm64Strings, false) + feature
 	}
@@ -145,10 +146,12 @@ func (st CPUSubtype) GoString(cpu CPU) string {
 	case CPUArm64:
 		var feature string
 		caps := st & CpuSubtypeFeatureMask
-		if caps&CpuSubtypePtrauthAbiUser == 0 {
-			feature = fmt.Sprintf(" caps: PAC%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
-		} else {
-			feature = fmt.Sprintf(" caps: PAK%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
+		if caps > 0 {
+			if caps&CpuSubtypePtrauthAbiUser == 0 {
+				feature = fmt.Sprintf(" caps: PAC%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
+			} else {
+				feature = fmt.Sprintf(" caps: PAK%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
+			}
 		}
 		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm64Strings, true) + feature
 	}
