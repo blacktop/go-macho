@@ -8,12 +8,11 @@ import (
 	"io"
 	"strings"
 
-	"github.com/blacktop/go-macho/types"
 	"github.com/blacktop/go-macho/types/codesign"
 )
 
 // ParseCodeSignature parses the LC_CODE_SIGNATURE data
-func ParseCodeSignature(cmddat []byte, hdr *types.CodeSignatureCmd, offset int64) (*CodeSignature, error) {
+func ParseCodeSignature(cmddat []byte) (*CodeSignature, error) {
 	r := bytes.NewReader(cmddat)
 
 	cs := &CodeSignature{}

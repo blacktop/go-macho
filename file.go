@@ -647,7 +647,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			if _, err := r.ReadAt(csdat, int64(hdr.Offset)); err != nil {
 				return nil, err
 			}
-			cs, err := ParseCodeSignature(csdat, &hdr, offset)
+			cs, err := ParseCodeSignature(csdat)
 			if err != nil {
 				return nil, err
 			}
