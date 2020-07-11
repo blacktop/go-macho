@@ -1,4 +1,4 @@
-package codesign
+package types
 
 import (
 	"bytes"
@@ -8,8 +8,15 @@ import (
 	"math"
 	"strings"
 
-	"github.com/blacktop/go-macho/types"
+	mtypes "github.com/blacktop/go-macho/types"
 )
+
+// Requirement object
+type Requirement struct {
+	Detail string
+	RequirementsBlob
+	Requirements
+}
 
 // RequirementsBlob object
 type RequirementsBlob struct {
@@ -24,11 +31,29 @@ type Requirements struct {
 	Offset uint32          // offset of entry
 }
 
-// Requirement object
-type Requirement struct {
-	Detail string
-	RequirementsBlob
-	Requirements
+type RequirementType uint32
+
+const (
+	HostRequirementType       RequirementType = 1 /* what hosts may run us */
+	GuestRequirementType                      = 2 /* what guests we may run */
+	DesignatedRequirementType                 = 3 /* designated requirement */
+	LibraryRequirementType                    = 4 /* what libraries we may link against */
+	PluginRequirementType                     = 5 /* what plug-ins we may load */
+)
+
+var requirementTypeStrings = []mtypes.IntName{
+	{uint32(HostRequirementType), "Host Requirement"},
+	{uint32(GuestRequirementType), "Guest Requirement"},
+	{uint32(DesignatedRequirementType), "Designated Requirement"},
+	{uint32(LibraryRequirementType), "Library Requirement"},
+	{uint32(PluginRequirementType), "Plugin Requirement"},
+}
+
+func (cm RequirementType) String() string {
+	return mtypes.StringName(uint32(cm), requirementTypeStrings, false)
+}
+func (cm RequirementType) GoString() string {
+	return mtypes.StringName(uint32(cm), requirementTypeStrings, true)
 }
 
 // NOTE: https://opensource.apple.com/source/libsecurity_codesigning/libsecurity_codesigning-36591/lib/requirement.h.auto.html
@@ -135,31 +160,6 @@ func (o matchOp) String() string {
 	}[0]
 }
 
-type RequirementType uint32
-
-const (
-	HostRequirementType       RequirementType = 1 /* what hosts may run us */
-	GuestRequirementType                      = 2 /* what guests we may run */
-	DesignatedRequirementType                 = 3 /* designated requirement */
-	LibraryRequirementType                    = 4 /* what libraries we may link against */
-	PluginRequirementType                     = 5 /* what plug-ins we may load */
-)
-
-var requirementTypeStrings = []types.IntName{
-	{uint32(HostRequirementType), "Host Requirement"},
-	{uint32(GuestRequirementType), "Guest Requirement"},
-	{uint32(DesignatedRequirementType), "Designated Requirement"},
-	{uint32(LibraryRequirementType), "Library Requirement"},
-	{uint32(PluginRequirementType), "Plugin Requirement"},
-}
-
-func (cm RequirementType) String() string {
-	return types.StringName(uint32(cm), requirementTypeStrings, false)
-}
-func (cm RequirementType) GoString() string {
-	return types.StringName(uint32(cm), requirementTypeStrings, true)
-}
-
 func getData(r *bytes.Reader) ([]byte, error) {
 	var idLength uint32
 
@@ -169,7 +169,7 @@ func getData(r *bytes.Reader) ([]byte, error) {
 	}
 
 	// 4 byte align length
-	alignedLength := uint32(types.RoundUp(uint64(idLength), 4))
+	alignedLength := uint32(mtypes.RoundUp(uint64(idLength), 4))
 
 	data := make([]byte, alignedLength)
 
@@ -297,6 +297,9 @@ func getOid(r *bytes.Reader) (uint32, error) {
 	return result, nil
 }
 
+// NOTE:
+// ref https://opensource.apple.com/source/Security/Security-59306.80.4/
+// ref http://oid-info.com/get/1.2.840.113635.100.6.2.6
 func toOID(data []byte) string {
 	var oidStr string
 

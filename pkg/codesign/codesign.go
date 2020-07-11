@@ -1,4 +1,4 @@
-package macho
+package codesign
 
 import (
 	"bufio"
@@ -8,21 +8,21 @@ import (
 	"io"
 	"strings"
 
-	"github.com/blacktop/go-macho/types/codesign"
+	"github.com/blacktop/go-macho/pkg/codesign/types"
 )
 
 // ParseCodeSignature parses the LC_CODE_SIGNATURE data
-func ParseCodeSignature(cmddat []byte) (*CodeSignature, error) {
+func ParseCodeSignature(cmddat []byte) (*types.CodeSignature, error) {
 	r := bytes.NewReader(cmddat)
 
-	cs := &CodeSignature{}
+	cs := &types.CodeSignature{}
 
-	csBlob := codesign.SuperBlob{}
+	csBlob := types.SuperBlob{}
 	if err := binary.Read(r, binary.BigEndian, &csBlob); err != nil {
 		return nil, err
 	}
 
-	csIndex := make([]codesign.BlobIndex, csBlob.Count)
+	csIndex := make([]types.BlobIndex, csBlob.Count)
 	if err := binary.Read(r, binary.BigEndian, &csIndex); err != nil {
 		return nil, err
 	}
@@ -32,33 +32,33 @@ func ParseCodeSignature(cmddat []byte) (*CodeSignature, error) {
 		r.Seek(int64(index.Offset), io.SeekStart)
 
 		switch index.Type {
-		case codesign.CSSLOT_CODEDIRECTORY:
+		case types.CSSLOT_CODEDIRECTORY:
 			fallthrough
-		case codesign.CSSLOT_ALTERNATE_CODEDIRECTORIES:
+		case types.CSSLOT_ALTERNATE_CODEDIRECTORIES:
 			if err := binary.Read(r, binary.BigEndian, &cs.CodeDirectory); err != nil {
 				return nil, err
 			}
 			// TODO parse all the cdhashs
 			switch cs.CodeDirectory.Version {
-			case codesign.SUPPORTS_SCATTER:
+			case types.SUPPORTS_SCATTER:
 				if cs.CodeDirectory.ScatterOffset > 0 {
 					r.Seek(int64(index.Offset+cs.CodeDirectory.ScatterOffset), io.SeekStart)
-					scatter := codesign.Scatter{}
+					scatter := types.Scatter{}
 					if err := binary.Read(r, binary.BigEndian, &scatter); err != nil {
 						return nil, err
 					}
 					fmt.Printf("%#v\n", scatter)
 				}
-			case codesign.SUPPORTS_TEAMID:
+			case types.SUPPORTS_TEAMID:
 				r.Seek(int64(index.Offset+cs.CodeDirectory.TeamOffset), io.SeekStart)
 				teamID, err := bufio.NewReader(r).ReadString('\x00')
 				if err != nil {
 					return nil, fmt.Errorf("failed to read SUPPORTS_TEAMID at: %d: %v", index.Offset+cs.CodeDirectory.TeamOffset, err)
 				}
 				cs.TeamID = strings.Trim(teamID, "\x00")
-			case codesign.SUPPORTS_CODELIMIT64:
+			case types.SUPPORTS_CODELIMIT64:
 				// TODO 🤷‍♂️
-			case codesign.SUPPORTS_EXECSEG:
+			case types.SUPPORTS_EXECSEG:
 				// TODO 🤷‍♂️
 			default:
 				fmt.Printf("Unknown code directory version 0x%x, please notify author\n", cs.CodeDirectory.Version)
@@ -69,55 +69,47 @@ func ParseCodeSignature(cmddat []byte) (*CodeSignature, error) {
 				return nil, fmt.Errorf("failed to read CodeDirectory ID at: %d: %v", index.Offset+cs.CodeDirectory.IdentOffset, err)
 			}
 			cs.ID = id
-		case codesign.CSSLOT_REQUIREMENTS:
-			var err error
-			req := codesign.Requirement{}
-			csReqBlob := codesign.RequirementsBlob{}
-			if err := binary.Read(r, binary.BigEndian, &csReqBlob); err != nil {
+		case types.CSSLOT_REQUIREMENTS:
+			// TODO find out if there can be more than one requirement(s)
+			req := types.Requirement{}
+			if err := binary.Read(r, binary.BigEndian, &req.RequirementsBlob); err != nil {
 				return nil, err
 			}
-			req.RequirementsBlob = csReqBlob
-			reqData := make([]byte, int(csReqBlob.Length)-binary.Size(codesign.RequirementsBlob{}))
-			if err := binary.Read(r, binary.BigEndian, &reqData); err != nil {
-				return nil, err
-			}
-			rqr := bytes.NewReader(reqData)
-			var reqs codesign.Requirements
-			if rqr.Len() >= binary.Size(reqs) {
-				if err := binary.Read(rqr, binary.BigEndian, &reqs); err != nil {
+			datLen := int(req.RequirementsBlob.Length) - binary.Size(types.RequirementsBlob{})
+			if datLen > 0 {
+				reqData := make([]byte, datLen)
+				if err := binary.Read(r, binary.BigEndian, &reqData); err != nil {
 					return nil, err
 				}
-				req.Requirements = reqs
-			} else {
-				var reqType uint32
-				if err := binary.Read(rqr, binary.BigEndian, &reqType); err != nil {
-					// return nil, err
-					fmt.Printf("Got weird cs.Requirements: %#v\n", cs.Requirements)
+				rqr := bytes.NewReader(reqData)
+				if err := binary.Read(rqr, binary.BigEndian, &req.Requirements); err != nil {
+					return nil, err
 				}
-				req.Requirements.Type = codesign.RequirementType(reqType)
+				detail, err := types.ParseRequirements(rqr, req.Requirements)
+				if err != nil {
+					return nil, err
+				}
+				req.Detail = detail
+			} else {
 				req.Detail = "empty requirement set"
 			}
-			req.Detail, err = codesign.ParseRequirements(rqr, reqs)
-			if err != nil {
-				return nil, err
-			}
 			cs.Requirements = append(cs.Requirements, req)
-		case codesign.CSSLOT_ENTITLEMENTS:
-			entBlob := codesign.Blob{}
+		case types.CSSLOT_ENTITLEMENTS:
+			entBlob := types.Blob{}
 			if err := binary.Read(r, binary.BigEndian, &entBlob); err != nil {
 				return nil, err
 			}
-			plistData := make([]byte, entBlob.Length-8)
+			plistData := make([]byte, int(entBlob.Length)-binary.Size(entBlob))
 			if err := binary.Read(r, binary.BigEndian, &plistData); err != nil {
 				return nil, err
 			}
 			cs.Entitlements = string(plistData)
-		case codesign.CSSLOT_CMS_SIGNATURE:
-			cmsBlob := codesign.Blob{}
+		case types.CSSLOT_CMS_SIGNATURE:
+			cmsBlob := types.Blob{}
 			if err := binary.Read(r, binary.BigEndian, &cmsBlob); err != nil {
 				return nil, err
 			}
-			cmsData := make([]byte, cmsBlob.Length)
+			cmsData := make([]byte, int(cmsBlob.Length)-binary.Size(cmsBlob))
 			if err := binary.Read(r, binary.BigEndian, &cmsData); err != nil {
 				return nil, err
 			}

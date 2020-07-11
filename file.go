@@ -15,8 +15,9 @@ import (
 	"strings"
 	"unsafe"
 
+	"github.com/blacktop/go-macho/pkg/codesign"
+	"github.com/blacktop/go-macho/pkg/trie"
 	"github.com/blacktop/go-macho/types"
-	"github.com/blacktop/go-macho/types/trie"
 )
 
 const (
@@ -647,7 +648,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			if _, err := r.ReadAt(csdat, int64(hdr.Offset)); err != nil {
 				return nil, err
 			}
-			cs, err := ParseCodeSignature(csdat)
+			cs, err := codesign.ParseCodeSignature(csdat)
 			if err != nil {
 				return nil, err
 			}

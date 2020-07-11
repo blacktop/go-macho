@@ -1,6 +1,8 @@
-package codesign
+package types
 
-import "github.com/blacktop/go-macho/types"
+import (
+	mtypes "github.com/blacktop/go-macho/types"
+)
 
 type hashType uint8
 
@@ -22,7 +24,7 @@ const (
 	HASH_MAX_SIZE = 48 /* max size of the hash we'll support */
 )
 
-var csHashTypeStrings = []types.IntName{
+var csHashTypeStrings = []mtypes.IntName{
 	{uint32(HASHTYPE_NOHASH), "No Hash"},
 	{uint32(HASHTYPE_SHA1), "Sha1"},
 	{uint32(HASHTYPE_SHA256), "Sha256"},
@@ -31,8 +33,8 @@ var csHashTypeStrings = []types.IntName{
 	{uint32(HASHTYPE_SHA512), "Sha512"},
 }
 
-func (c hashType) String() string   { return types.StringName(uint32(c), csHashTypeStrings, false) }
-func (c hashType) GoString() string { return types.StringName(uint32(c), csHashTypeStrings, true) }
+func (c hashType) String() string   { return mtypes.StringName(uint32(c), csHashTypeStrings, false) }
+func (c hashType) GoString() string { return mtypes.StringName(uint32(c), csHashTypeStrings, true) }
 
 type cdVersion uint32
 
@@ -45,7 +47,7 @@ const (
 	SUPPORTS_LINKAGE     cdVersion = 0x20600
 )
 
-var csVersionypeStrings = []types.IntName{
+var csVersionypeStrings = []mtypes.IntName{
 	{uint32(SUPPORTS_SCATTER), "Scatter"},
 	{uint32(SUPPORTS_TEAMID), "TeamID"},
 	{uint32(SUPPORTS_CODELIMIT64), "Codelimit64"},
@@ -55,10 +57,10 @@ var csVersionypeStrings = []types.IntName{
 }
 
 func (v cdVersion) String() string {
-	return types.StringName(uint32(v), csVersionypeStrings, false)
+	return mtypes.StringName(uint32(v), csVersionypeStrings, false)
 }
 func (v cdVersion) GoString() string {
-	return types.StringName(uint32(v), csVersionypeStrings, true)
+	return mtypes.StringName(uint32(v), csVersionypeStrings, true)
 }
 
 type cdFlag uint32
@@ -106,7 +108,7 @@ const (
 	ENTITLEMENT_FLAGS cdFlag = (GET_TASK_ALLOW | INSTALLER | DATAVAULT_CONTROLLER | NVRAM_UNRESTRICTED)
 )
 
-var cdFlagStrings = []types.IntName{
+var cdFlagStrings = []mtypes.IntName{
 	{uint32(NONE), "None"},
 	{uint32(VALID), "Valid"},
 	{uint32(ADHOC), "Adhoc"},
@@ -140,10 +142,10 @@ var cdFlagStrings = []types.IntName{
 }
 
 func (f cdFlag) String() string {
-	return types.StringName(uint32(f), cdFlagStrings, false)
+	return mtypes.StringName(uint32(f), cdFlagStrings, false)
 }
 func (f cdFlag) GoString() string {
-	return types.StringName(uint32(f), cdFlagStrings, true)
+	return mtypes.StringName(uint32(f), cdFlagStrings, true)
 }
 
 // C form of a CodeDirectory.
@@ -208,7 +210,7 @@ const (
 	EXECSEG_CAN_EXEC_CDHASH execSegFlag = 0x200 /* can execute blessed cdhash */
 )
 
-var execSegFlagStrings = []types.Int64Name{
+var execSegFlagStrings = []mtypes.Int64Name{
 	{uint64(EXECSEG_MAIN_BINARY), "Main Binary"},
 	{uint64(EXECSEG_ALLOW_UNSIGNED), "Allow Unsigned"},
 	{uint64(EXECSEG_DEBUGGER), "Debugger"},
@@ -219,8 +221,8 @@ var execSegFlagStrings = []types.Int64Name{
 }
 
 func (f execSegFlag) String() string {
-	return types.StringName64(uint64(f), execSegFlagStrings, false)
+	return mtypes.StringName64(uint64(f), execSegFlagStrings, false)
 }
 func (f execSegFlag) GoString() string {
-	return types.StringName64(uint64(f), execSegFlagStrings, true)
+	return mtypes.StringName64(uint64(f), execSegFlagStrings, true)
 }

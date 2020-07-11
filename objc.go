@@ -10,6 +10,7 @@ import (
 	"github.com/blacktop/go-macho/types"
 )
 
+// TODO refactor into a pkg
 func (f *File) HasObjC() bool {
 	for _, s := range f.Segments() {
 		if strings.HasPrefix(s.Name, "__DATA") {

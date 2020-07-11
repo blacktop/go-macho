@@ -1,8 +1,20 @@
-package codesign
+package types
 
-import "github.com/blacktop/go-macho/types"
+import (
+	mtypes "github.com/blacktop/go-macho/types"
+)
 
 type magic uint32
+
+// CodeSignature highlevel object
+type CodeSignature struct {
+	ID            string
+	TeamID        string
+	CodeDirectory CodeDirectory
+	Requirements  []Requirement
+	CMSSignature  []byte
+	Entitlements  string
+}
 
 // SuperBlob object
 type SuperBlob struct {
@@ -39,7 +51,7 @@ const (
 	MAGIC_BLOBWRAPPER               magic = 0xfade0b01 // used for the cms blob
 )
 
-var magicStrings = []types.IntName{
+var magicStrings = []mtypes.IntName{
 	{uint32(MAGIC_REQUIREMENT), "Requirement"},
 	{uint32(MAGIC_REQUIREMENTS), "Requirements"},
 	{uint32(MAGIC_CODEDIRECTORY), "Codedirectory"},
@@ -52,8 +64,8 @@ var magicStrings = []types.IntName{
 	{uint32(MAGIC_BLOBWRAPPER), "Blob Wrapper"},
 }
 
-func (cm magic) String() string   { return types.StringName(uint32(cm), magicStrings, false) }
-func (cm magic) GoString() string { return types.StringName(uint32(cm), magicStrings, true) }
+func (cm magic) String() string   { return mtypes.StringName(uint32(cm), magicStrings, false) }
+func (cm magic) GoString() string { return mtypes.StringName(uint32(cm), magicStrings, true) }
 
 const (
 	/*
@@ -91,7 +103,7 @@ const (
 	CSSLOT_TICKETSLOT                    slotType = 0x10002
 )
 
-var slotTypeStrings = []types.IntName{
+var slotTypeStrings = []mtypes.IntName{
 	{uint32(CSSLOT_CODEDIRECTORY), "CodeDirectory"},
 	{uint32(CSSLOT_INFOSLOT), "InfoSlot"},
 	{uint32(CSSLOT_REQUIREMENTS), "Requirements"},
@@ -107,8 +119,8 @@ var slotTypeStrings = []types.IntName{
 }
 
 func (c slotType) String() string {
-	return types.StringName(uint32(c), slotTypeStrings, false)
+	return mtypes.StringName(uint32(c), slotTypeStrings, false)
 }
 func (c slotType) GoString() string {
-	return types.StringName(uint32(c), slotTypeStrings, true)
+	return mtypes.StringName(uint32(c), slotTypeStrings, true)
 }

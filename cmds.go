@@ -8,9 +8,9 @@ import (
 	"strings"
 	"unsafe"
 
+	ctypes "github.com/blacktop/go-macho/pkg/codesign/types"
+	"github.com/blacktop/go-macho/pkg/trie"
 	"github.com/blacktop/go-macho/types"
-	"github.com/blacktop/go-macho/types/codesign"
-	"github.com/blacktop/go-macho/types/trie"
 )
 
 // A Load represents any Mach-O load command.
@@ -628,8 +628,8 @@ type CodeSignature struct {
 	Size          uint32
 	ID            string
 	TeamID        string
-	CodeDirectory codesign.CodeDirectory
-	Requirements  []codesign.Requirement
+	CodeDirectory ctypes.CodeDirectory
+	Requirements  []ctypes.Requirement
 	CMSSignature  []byte
 	Entitlements  string
 }
