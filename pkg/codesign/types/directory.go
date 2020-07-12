@@ -216,8 +216,8 @@ var execSegFlagStrings = []mtypes.Int64Name{
 	{uint64(EXECSEG_DEBUGGER), "Debugger"},
 	{uint64(EXECSEG_JIT), "JIT"},
 	{uint64(EXECSEG_SKIP_LV), "Skip LV"},
-	{uint64(EXECSEG_CAN_LOAD_CDHASH), "Can Load Cdhash"},
-	{uint64(EXECSEG_CAN_EXEC_CDHASH), "Can Exec Cdhash"},
+	{uint64(EXECSEG_CAN_LOAD_CDHASH), "Can Load CDHash"},
+	{uint64(EXECSEG_CAN_EXEC_CDHASH), "Can Exec CDHash"},
 }
 
 func (f execSegFlag) String() string {

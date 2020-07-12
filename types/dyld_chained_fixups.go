@@ -9,6 +9,43 @@ const (
 	DC_SFORMAT_ZLIB_COMPRESSED DCSymbolsFormat = 1
 )
 
+type DyldChainedFixups struct {
+	DyldChainedFixupsHeader
+	Imports []DcfImport
+	Fixups  []interface{}
+}
+
+type DcfImport struct {
+	Name    string
+	Pointer DyldChainedImport
+}
+
+func (i DcfImport) String() string {
+	return fmt.Sprintf("ordinal: %d, is_weak: %t, %s", i.Pointer.LibOrdinal(), i.Pointer.WeakImport(), i.Name)
+}
+
+func (dcf *DyldChainedFixups) PrintFixups() {
+	for _, v := range dcf.Fixups {
+		fmt.Println(v)
+		// if v == nil {
+		// 	fmt.Println("ptr is a nil")
+		// } else {
+		// 	switch v.(type) {
+		// 	case DyldChainedPtrArm64eRebase:
+		// 		fmt.Println(DyldChainedPtrArm64eRebase(v.(uint64)))
+		// 	case DyldChainedPtrArm64eBind:
+		// 		fmt.Println(DyldChainedPtrArm64eBind(v.(uint64)))
+		// 	case DyldChainedPtrArm64eAuthRebase:
+		// 		fmt.Println(DyldChainedPtrArm64eAuthRebase(v.(uint64)))
+		// 	case DyldChainedPtrArm64eAuthBind:
+		// 		fmt.Println(v)
+		// 	default:
+		// 		fmt.Println("unknown ptr type")
+		// 	}
+		// }
+	}
+}
+
 // DyldChainedFixupsHeader object is the header of the LC_DYLD_CHAINED_FIXUPS payload
 type DyldChainedFixupsHeader struct {
 	FixupsVersion uint32          // 0
@@ -125,6 +162,13 @@ func (d DyldChainedPtrArm64eBind) Zero() uint64 {
 }
 func (d DyldChainedPtrArm64eBind) Addend() uint64 {
 	return ExtractBits(uint64(d), 32, 19) // +/-256K
+}
+func (d DyldChainedPtrArm64eBind) SignExtendedAddend() uint64 {
+	addend19 := ExtractBits(uint64(d), 32, 19) // +/-256K
+	if (addend19 & 0x40000) != 0 {
+		return addend19 | 0xFFFFFFFFFFFC0000
+	}
+	return addend19
 }
 func (d DyldChainedPtrArm64eBind) Next() uint64 {
 	return ExtractBits(uint64(d), 51, 11) // 4 or 8-byte stide
@@ -273,6 +317,13 @@ func (d DyldChainedPtrArm64eBind24) Zero() uint64 {
 }
 func (d DyldChainedPtrArm64eBind24) Addend() uint64 {
 	return ExtractBits(uint64(d), 32, 19)
+}
+func (d DyldChainedPtrArm64eBind24) SignExtendedAddend() uint64 {
+	addend19 := ExtractBits(uint64(d), 32, 19) // +/-256K
+	if (addend19 & 0x40000) != 0 {
+		return addend19 | 0xFFFFFFFFFFFC0000
+	}
+	return addend19
 }
 func (d DyldChainedPtrArm64eBind24) Next() uint64 {
 	return ExtractBits(uint64(d), 51, 11)

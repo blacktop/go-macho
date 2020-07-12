@@ -115,6 +115,16 @@ func ParseCodeSignature(cmddat []byte) (*types.CodeSignature, error) {
 			}
 			// NOTE: openssl pkcs7 -inform DER -in <cmsData> -print_certs -text -noout
 			cs.CMSSignature = cmsData
+		case types.CSSLOT_INFOSLOT:
+			fallthrough // TODO 🤷‍♂️
+		case types.CSSLOT_RESOURCEDIR:
+			fallthrough // TODO 🤷‍♂️
+		case types.CSSLOT_APPLICATION:
+			fallthrough // TODO 🤷‍♂️
+		case types.CSSLOT_IDENTIFICATIONSLOT:
+			fallthrough // TODO 🤷‍♂️
+		case types.CSSLOT_TICKETSLOT:
+			fallthrough // TODO 🤷‍♂️
 		default:
 			fmt.Printf("Found unsupported codesign slot %s, please notify author\n", index.Type)
 		}

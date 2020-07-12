@@ -506,19 +506,18 @@ func evalExpression(r *bytes.Reader, syntaxLevel int) (string, error) {
 		}
 		return fmt.Sprintf("(%s)", string(data)), nil
 	default:
-		// if (op & opGenericFalse) != 0 {
-		// 	return fmt.Sprintf(" false /* opcode %d */", op & ^opFlagMask), nil
-		// } else if (op & opGenericSkip) != 0 {
-		// 	return fmt.Sprintf(" /* opcode %d */", op & ^opFlagMask), nil
-		// }
-		return fmt.Sprintf("OPCODE 0x%x NOT UNDERSTOOD (ending print)", uint32(op)), nil
+		if (op & opGenericFalse) != 0 {
+			return fmt.Sprintf(" false /* opcode %d */", op & ^opFlagMask), nil
+		} else if (op & opGenericSkip) != 0 {
+			return fmt.Sprintf(" /* opcode %d */", op & ^opFlagMask), nil
+		}
+		return fmt.Sprintf("OPCODE %d NOT UNDERSTOOD (ending print)", op), nil
 	}
 }
 
 // ParseRequirements parses the requirements set bytes
-// NOTE: codesign -d -r- MACHO (to display requirement sets)
 func ParseRequirements(r *bytes.Reader, reqs Requirements) (string, error) {
-
+	// NOTE: codesign -d -r- MACHO (to display requirement sets)
 	r.Seek(int64(reqs.Offset), io.SeekStart)
 
 	switch reqs.Type {

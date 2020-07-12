@@ -1041,13 +1041,14 @@ func (t *DyldExportsTrie) String() string {
 type DyldChainedFixups struct {
 	LoadBytes
 	types.DyldChainedFixupsCmd
-	Offset       uint32
-	Size         uint32
-	ImportsCount uint32
+	Offset  uint32
+	Size    uint32
+	Imports []types.DcfImport
+	Fixups  []interface{}
 }
 
 func (cf *DyldChainedFixups) String() string {
-	return fmt.Sprintf("Offset: 0x%x, Size: 0x%x, Imports: %d", cf.Offset, cf.Size, cf.ImportsCount)
+	return fmt.Sprintf("Offset: 0x%x, Size: 0x%x, Imports: %d", cf.Offset, cf.Size, len(cf.Imports))
 }
 
 /*******************************************************************************
