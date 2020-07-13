@@ -438,7 +438,17 @@ func TestNewFatFile(t *testing.T) {
 }
 
 func TestNewFile(t *testing.T) {
-	f, err := os.Open("/System/Library/PrivateFrameworks/PackageKit.framework/Resources/installd")
+	// f, err := os.Open("/System/Library/PrivateFrameworks/PackageKit.framework/Resources/installd")
+	// f, err := os.Open("/Users/blacktop/Downloads/hello-mte-master/hello-mte")
+	// f, err := os.Open("/System/Library/PrivateFrameworks/ApplePushService.framework/apsd")
+	// f, err := os.Open("/Users/blacktop/Documents/GitHub/blacktop/ipsw/test-caches/iPhone12,5_D431AP_18A5301v/kernelcache.development")
+	// f, err := os.Open("/System/Applications/Utilities/Console.app/Contents/MacOS/Console")
+	// f, err := os.Open("/Users/blacktop/Documents/GitHub/blacktop/ipsw/test-caches/iPhone11,2_D321AP_18A5301v/usr/lib/libobjc.A.dylib")
+	// f, err := os.Open("/Users/blacktop/Documents/GitHub/blacktop/ipsw/test-caches/amfid")
+	// f, err := os.Open("./libobjc.A.dylib")
+	// f, err := os.Open("/Users/blacktop/Documents/GitHub/blacktop/ipsw/test-caches/iPhone10,4_D201AP_17D50/kernelcache.production")
+	// f, err := os.Open("/Applications/Safari.app/Contents/MacOS/Safari")
+	f, err := os.Open("/Users/blacktop/Documents/GitHub/blacktop/ipsw/test-caches/iPhone11,2_D321AP_18A5301v/System/Library/PrivateFrameworks/WebCore.framework/WebCore")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,6 +456,9 @@ func TestNewFile(t *testing.T) {
 	if err != nil {
 		t.Errorf("NewFile() error = %v", err)
 		return
+	}
+	if got.CodeSignature() != nil {
+		fmt.Println(got.CodeSignature().Requirements[0].Detail)
 	}
 	fmt.Println(got.FileTOC.String())
 
