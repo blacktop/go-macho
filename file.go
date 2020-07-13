@@ -944,8 +944,9 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse DyldChainedFixups data in load LC_DYLD_CHAINED_FIXUPS command at: %d: %v", offset, err)
 			}
-			for _, i := range dcf.Imports {
-				fmt.Println(i)
+			for idx, i := range dcf.Imports {
+				fmt.Println("Import", i)
+				fmt.Println("Fixup", dcf.Fixups[idx])
 			}
 			l.Imports = dcf.Imports
 			l.Fixups = dcf.Fixups
@@ -1026,8 +1027,6 @@ func (f *File) parseDyldChainedFixups(r *bytes.Reader) (*types.DyldChainedFixups
 
 	dcf := &types.DyldChainedFixups{}
 
-	var segInfo types.DyldChainedStartsInSegment
-
 	if err := binary.Read(r, f.ByteOrder, &dcf.DyldChainedFixupsHeader); err != nil {
 		return nil, err
 	}
@@ -1048,15 +1047,15 @@ func (f *File) parseDyldChainedFixups(r *bytes.Reader) (*types.DyldChainedFixups
 			continue
 		}
 		r.Seek(int64(dcf.DyldChainedFixupsHeader.StartsOffset+segInfoOffset), io.SeekStart)
-		if err := binary.Read(r, f.ByteOrder, &segInfo); err != nil {
+		if err := binary.Read(r, f.ByteOrder, &dcf.DyldChainedStartsInSegment); err != nil {
 			return nil, err
 		}
-		fmt.Printf("%#v\n", segInfo)
-		pageStarts := make([]types.DCPtrStart, segInfo.PageCount)
+		fmt.Printf("%#v\n", dcf.DyldChainedStartsInSegment)
+		pageStarts := make([]types.DCPtrStart, dcf.DyldChainedStartsInSegment.PageCount)
 		if err := binary.Read(r, f.ByteOrder, &pageStarts); err != nil {
 			return nil, err
 		}
-		for pageIndex := uint16(0); pageIndex < segInfo.PageCount; pageIndex++ {
+		for pageIndex := uint16(0); pageIndex < dcf.DyldChainedStartsInSegment.PageCount; pageIndex++ {
 			offsetInPage := pageStarts[pageIndex]
 			if offsetInPage == types.DYLD_CHAINED_PTR_START_NONE {
 				continue
@@ -1077,7 +1076,7 @@ func (f *File) parseDyldChainedFixups(r *bytes.Reader) (*types.DyldChainedFixups
 			} else {
 				// one chain per page
 				// walkChain(diag, segInfo, pageIndex, offsetInPage, notifyNonPointers, handler);
-				pageContentStart := segInfo.SegmentOffset + uint64(pageIndex*segInfo.PageSize)
+				pageContentStart := dcf.DyldChainedStartsInSegment.SegmentOffset + uint64(pageIndex*dcf.DyldChainedStartsInSegment.PageSize)
 				var next uint64
 				for {
 					ptr64 := make([]byte, 8)

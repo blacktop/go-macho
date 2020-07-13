@@ -11,6 +11,7 @@ const (
 
 type DyldChainedFixups struct {
 	DyldChainedFixupsHeader
+	DyldChainedStartsInSegment
 	Imports []DcfImport
 	Fixups  []interface{}
 }
