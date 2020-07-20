@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 
 	"github.com/blacktop/go-macho/pkg/codesign/types"
@@ -63,12 +64,38 @@ func ParseCodeSignature(cmddat []byte) (*types.CodeSignature, error) {
 			default:
 				fmt.Printf("Unknown code directory version 0x%x, please notify author\n", cs.CodeDirectory.Version)
 			}
+			// Parse Indentity
 			r.Seek(int64(index.Offset+cs.CodeDirectory.IdentOffset), io.SeekStart)
 			id, err := bufio.NewReader(r).ReadString('\x00')
 			if err != nil {
 				return nil, fmt.Errorf("failed to read CodeDirectory ID at: %d: %v", index.Offset+cs.CodeDirectory.IdentOffset, err)
 			}
 			cs.ID = id
+			// Parse Special Slots
+			r.Seek(int64(index.Offset+cs.CodeDirectory.HashOffset-(cs.CodeDirectory.NSpecialSlots*uint32(cs.CodeDirectory.HashSize))), io.SeekStart)
+			hash := make([]byte, cs.CodeDirectory.HashSize)
+			for slot := cs.CodeDirectory.NSpecialSlots; slot > 0; slot-- {
+				if err := binary.Read(r, binary.BigEndian, &hash); err != nil {
+					return nil, err
+				}
+				if !bytes.Equal(hash, make([]byte, cs.CodeDirectory.HashSize)) {
+					fmt.Printf("Special Slot   %d %s:\t%x\n", slot, types.SlotType(slot), hash)
+				} else {
+					fmt.Printf("Special Slot   %d %s:\tNot Bound\n", slot, types.SlotType(slot))
+				}
+			}
+			pageSize := uint32(math.Pow(2, float64(cs.CodeDirectory.PageSize)))
+			// Parse Slots
+			for slot := uint32(0); slot < cs.CodeDirectory.NCodeSlots; slot++ {
+				if err := binary.Read(r, binary.BigEndian, &hash); err != nil {
+					return nil, err
+				}
+				if bytes.Equal(hash, types.NULL_PAGE_SHA256_HASH) && cs.CodeDirectory.HashType == types.HASHTYPE_SHA256 {
+					fmt.Printf("Slot   %d (File page @0x%04X):\tNULL PAGE HASH\n", slot, slot*pageSize)
+				} else {
+					fmt.Printf("Slot   %d (File page @0x%04X):\t%x\n", slot, slot*pageSize, hash)
+				}
+			}
 		case types.CSSLOT_REQUIREMENTS:
 			// TODO find out if there can be more than one requirement(s)
 			req := types.Requirement{}

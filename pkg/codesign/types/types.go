@@ -27,7 +27,7 @@ type SuperBlob struct {
 
 // BlobIndex object
 type BlobIndex struct {
-	Type   slotType // type of entry
+	Type   SlotType // type of entry
 	Offset uint32   // offset of entry
 }
 
@@ -86,30 +86,32 @@ const (
 	kSecCodeSignatureAdhoc = 2
 )
 
-type slotType uint32
+var NULL_PAGE_SHA256_HASH = []byte{0xad, 0x7f, 0xac, 0xb2, 0x58, 0x6f, 0xc6, 0xe9, 0x66, 0xc0, 0x04, 0xd7, 0xd1, 0xd1, 0x6b, 0x02, 0x4f, 0x58, 0x05, 0xff, 0x7c, 0xb4, 0x7c, 0x7a, 0x85, 0xda, 0xbd, 0x8b, 0x48, 0x89, 0x2c, 0xa7}
+
+type SlotType uint32
 
 const (
-	CSSLOT_CODEDIRECTORY                 slotType = 0
-	CSSLOT_INFOSLOT                      slotType = 1
-	CSSLOT_REQUIREMENTS                  slotType = 2
-	CSSLOT_RESOURCEDIR                   slotType = 3
-	CSSLOT_APPLICATION                   slotType = 4
-	CSSLOT_ENTITLEMENTS                  slotType = 5
-	CSSLOT_ALTERNATE_CODEDIRECTORIES     slotType = 0x1000
+	CSSLOT_CODEDIRECTORY                 SlotType = 0
+	CSSLOT_INFOSLOT                      SlotType = 1
+	CSSLOT_REQUIREMENTS                  SlotType = 2
+	CSSLOT_RESOURCEDIR                   SlotType = 3
+	CSSLOT_APPLICATION                   SlotType = 4
+	CSSLOT_ENTITLEMENTS                  SlotType = 5
+	CSSLOT_ALTERNATE_CODEDIRECTORIES     SlotType = 0x1000
 	CSSLOT_ALTERNATE_CODEDIRECTORY_MAX            = 5
 	CSSLOT_ALTERNATE_CODEDIRECTORY_LIMIT          = CSSLOT_ALTERNATE_CODEDIRECTORIES + CSSLOT_ALTERNATE_CODEDIRECTORY_MAX
-	CSSLOT_CMS_SIGNATURE                 slotType = 0x10000
-	CSSLOT_IDENTIFICATIONSLOT            slotType = 0x10001
-	CSSLOT_TICKETSLOT                    slotType = 0x10002
+	CSSLOT_CMS_SIGNATURE                 SlotType = 0x10000
+	CSSLOT_IDENTIFICATIONSLOT            SlotType = 0x10001
+	CSSLOT_TICKETSLOT                    SlotType = 0x10002
 )
 
 var slotTypeStrings = []mtypes.IntName{
 	{uint32(CSSLOT_CODEDIRECTORY), "CodeDirectory"},
-	{uint32(CSSLOT_INFOSLOT), "InfoSlot"},
-	{uint32(CSSLOT_REQUIREMENTS), "Requirements"},
-	{uint32(CSSLOT_RESOURCEDIR), "ResourceDir"},
-	{uint32(CSSLOT_APPLICATION), "Application"},
-	{uint32(CSSLOT_ENTITLEMENTS), "Entitlements"},
+	{uint32(CSSLOT_INFOSLOT), "Bound Info.plist"},
+	{uint32(CSSLOT_REQUIREMENTS), "Requirements Blob"},
+	{uint32(CSSLOT_RESOURCEDIR), "Resource Directory"},
+	{uint32(CSSLOT_APPLICATION), "Application Specific"},
+	{uint32(CSSLOT_ENTITLEMENTS), "Entitlements Blob"},
 	{uint32(CSSLOT_ALTERNATE_CODEDIRECTORIES), "Alternate CodeDirectories"},
 	{uint32(CSSLOT_ALTERNATE_CODEDIRECTORY_MAX), "Alternate CodeDirectory Max"},
 	{uint32(CSSLOT_ALTERNATE_CODEDIRECTORY_LIMIT), "Alternate CodeDirectory Limit"},
@@ -118,9 +120,9 @@ var slotTypeStrings = []mtypes.IntName{
 	{uint32(CSSLOT_TICKETSLOT), "TicketSlot"},
 }
 
-func (c slotType) String() string {
+func (c SlotType) String() string {
 	return mtypes.StringName(uint32(c), slotTypeStrings, false)
 }
-func (c slotType) GoString() string {
+func (c SlotType) GoString() string {
 	return mtypes.StringName(uint32(c), slotTypeStrings, true)
 }

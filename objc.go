@@ -593,7 +593,7 @@ func (f *File) GetObjCIvars(vmAddr uint64) ([]types.ObjCIvar, error) {
 
 func (f *File) GetObjCProperties(vmAddr uint64) ([]types.ObjCProperty, error) {
 
-	var propList types.ObjCPropertyListT
+	var propList types.ObjCPropertyListType
 	var objcProperties []types.ObjCProperty
 
 	off, err := f.GetOffset(vmAddr)
@@ -606,7 +606,7 @@ func (f *File) GetObjCProperties(vmAddr uint64) ([]types.ObjCProperty, error) {
 		return nil, fmt.Errorf("failed to read objc_property_list_t: %v", err)
 	}
 
-	properties := make([]types.ObjCPropertyT, propList.Count)
+	properties := make([]types.ObjCPropertyType, propList.Count)
 	if err := binary.Read(f.sr, f.ByteOrder, &properties); err != nil {
 		return nil, fmt.Errorf("failed to read objc_property_t: %v", err)
 	}
@@ -621,9 +621,9 @@ func (f *File) GetObjCProperties(vmAddr uint64) ([]types.ObjCProperty, error) {
 			return nil, fmt.Errorf("failed to read cstring at 0x%x; %v", prop.AttributesVMAddr, err)
 		}
 		objcProperties = append(objcProperties, types.ObjCProperty{
-			ObjCPropertyT: prop,
-			Name:          name,
-			Attributes:    attrib,
+			ObjCPropertyType: prop,
+			Name:             name,
+			Attributes:       attrib,
 		})
 	}
 

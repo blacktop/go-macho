@@ -147,18 +147,18 @@ type ObjCMethod struct {
 	Pointer            FilePointer
 }
 
-type ObjCPropertyListT struct {
+type ObjCPropertyListType struct {
 	EntSize uint32
 	Count   uint32
 }
 
-type ObjCPropertyT struct {
+type ObjCPropertyType struct {
 	NameVMAddr       uint64
 	AttributesVMAddr uint64
 }
 
 type ObjCProperty struct {
-	ObjCPropertyT
+	ObjCPropertyType
 	Name       string
 	Attributes string
 }
