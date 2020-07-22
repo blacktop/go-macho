@@ -16,7 +16,6 @@ import (
 
 // ParseCodeSignature parses the LC_CODE_SIGNATURE data
 func ParseCodeSignature(cmddat []byte) (*types.CodeSignature, error) {
-	var err error
 	r := bytes.NewReader(cmddat)
 	cs := &types.CodeSignature{}
 
@@ -36,15 +35,13 @@ func ParseCodeSignature(cmddat []byte) (*types.CodeSignature, error) {
 
 		switch index.Type {
 		case types.CSSLOT_CODEDIRECTORY:
-			cs.CodeDirectory, err = parseCodeDirectory(r, index.Offset)
-			if err != nil {
-				return nil, err
-			}
+			fallthrough
 		case types.CSSLOT_ALTERNATE_CODEDIRECTORIES:
-			cs.AltCodeDirectory, err = parseCodeDirectory(r, index.Offset)
+			cd, err := parseCodeDirectory(r, index.Offset)
 			if err != nil {
 				return nil, err
 			}
+			cs.CodeDirectories = append(cs.CodeDirectories, *cd)
 		case types.CSSLOT_REQUIREMENTS:
 			req := types.Requirement{}
 			if err := binary.Read(r, binary.BigEndian, &req.RequirementsBlob); err != nil {
@@ -68,7 +65,7 @@ func ParseCodeSignature(cmddat []byte) (*types.CodeSignature, error) {
 			} else {
 				req.Detail = "empty requirement set"
 			}
-			cs.Requirements = &req
+			cs.Requirements = append(cs.Requirements, req)
 		case types.CSSLOT_ENTITLEMENTS:
 			entBlob := types.Blob{}
 			if err := binary.Read(r, binary.BigEndian, &entBlob); err != nil {

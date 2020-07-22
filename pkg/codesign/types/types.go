@@ -6,11 +6,10 @@ import (
 
 // CodeSignature highlevel object
 type CodeSignature struct {
-	CodeDirectory    *CodeDirectory
-	AltCodeDirectory *CodeDirectory
-	Requirements     *Requirement
-	CMSSignature     []byte
-	Entitlements     string
+	CodeDirectories []CodeDirectory
+	Requirements    []Requirement
+	CMSSignature    []byte
+	Entitlements    string
 }
 
 type magic uint32

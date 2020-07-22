@@ -451,7 +451,7 @@ func TestNewFile(t *testing.T) {
 
 	cs := got.CodeSignature()
 	if cs != nil {
-		fmt.Println(cs.Requirements.Detail)
+		fmt.Println(cs.Requirements[0].Detail)
 	}
 
 	fmt.Println(got.FileTOC.String())
