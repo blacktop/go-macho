@@ -3,6 +3,7 @@ package codesign
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -39,7 +40,16 @@ func ParseCodeSignature(cmddat []byte) (*types.CodeSignature, error) {
 			if err := binary.Read(r, binary.BigEndian, &cs.CodeDirectory); err != nil {
 				return nil, err
 			}
-			// TODO parse all the cdhashs
+			// Calculate the cdhashs
+			r.Seek(int64(index.Offset), io.SeekStart)
+			cdData := make([]byte, cs.CodeDirectory.Length)
+			if err := binary.Read(r, binary.LittleEndian, &cdData); err != nil {
+				return nil, err
+			}
+			h := sha256.New()
+			h.Write(cdData)
+			cs.CDHash = fmt.Sprintf("%x", h.Sum(nil))
+			// Parse version
 			switch cs.CodeDirectory.Version {
 			case types.SUPPORTS_SCATTER:
 				if cs.CodeDirectory.ScatterOffset > 0 {
@@ -97,7 +107,6 @@ func ParseCodeSignature(cmddat []byte) (*types.CodeSignature, error) {
 				}
 			}
 		case types.CSSLOT_REQUIREMENTS:
-			// TODO find out if there can be more than one requirement(s)
 			req := types.Requirement{}
 			if err := binary.Read(r, binary.BigEndian, &req.RequirementsBlob); err != nil {
 				return nil, err
@@ -120,7 +129,7 @@ func ParseCodeSignature(cmddat []byte) (*types.CodeSignature, error) {
 			} else {
 				req.Detail = "empty requirement set"
 			}
-			cs.Requirements = append(cs.Requirements, req)
+			cs.Requirements = req
 		case types.CSSLOT_ENTITLEMENTS:
 			entBlob := types.Blob{}
 			if err := binary.Read(r, binary.BigEndian, &entBlob); err != nil {

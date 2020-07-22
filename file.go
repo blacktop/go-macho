@@ -653,6 +653,8 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 				return nil, err
 			}
 			l.ID = cs.ID
+			l.TeamID = cs.TeamID
+			l.CDHash = cs.CDHash
 			l.CodeDirectory = cs.CodeDirectory
 			l.Requirements = cs.Requirements
 			l.CMSSignature = cs.CMSSignature

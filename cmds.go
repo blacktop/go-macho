@@ -628,8 +628,9 @@ type CodeSignature struct {
 	Size          uint32
 	ID            string
 	TeamID        string
+	CDHash        string
 	CodeDirectory ctypes.CodeDirectory
-	Requirements  []ctypes.Requirement
+	Requirements  ctypes.Requirement
 	CMSSignature  []byte
 	Entitlements  string
 }

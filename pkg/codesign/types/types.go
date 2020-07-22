@@ -10,8 +10,9 @@ type magic uint32
 type CodeSignature struct {
 	ID            string
 	TeamID        string
+	CDHash        string
 	CodeDirectory CodeDirectory
-	Requirements  []Requirement
+	Requirements  Requirement
 	CMSSignature  []byte
 	Entitlements  string
 }
