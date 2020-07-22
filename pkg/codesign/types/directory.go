@@ -4,6 +4,29 @@ import (
 	mtypes "github.com/blacktop/go-macho/types"
 )
 
+// CodeDirectory object
+type CodeDirectory struct {
+	ID           string
+	TeamID       string
+	CDHash       string
+	SpecialSlots []SpecialSlot
+	CodeSlots    []CodeSlot
+	Header       CodeDirectoryType
+}
+
+type SpecialSlot struct {
+	Index uint32
+	Hash  []byte
+	Desc  string
+}
+
+type CodeSlot struct {
+	Index uint32
+	Page  uint32
+	Hash  []byte
+	Desc  string
+}
+
 type hashType uint8
 
 const (
@@ -148,8 +171,8 @@ func (f cdFlag) GoString() string {
 	return mtypes.StringName(uint32(f), cdFlagStrings, true)
 }
 
-// C form of a CodeDirectory.
-type CodeDirectory struct {
+// CodeDirectoryType header
+type CodeDirectoryType struct {
 	Magic         magic     // magic number (CSMAGIC_CODEDIRECTORY) */
 	Length        uint32    // total length of CodeDirectory blob
 	Version       cdVersion // compatibility version

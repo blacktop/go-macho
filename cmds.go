@@ -624,15 +624,9 @@ func (r *Rpath) String() string {
 type CodeSignature struct {
 	LoadBytes
 	types.CodeSignatureCmd
-	Offset        uint32
-	Size          uint32
-	ID            string
-	TeamID        string
-	CDHash        string
-	CodeDirectory ctypes.CodeDirectory
-	Requirements  ctypes.Requirement
-	CMSSignature  []byte
-	Entitlements  string
+	Offset uint32
+	Size   uint32
+	ctypes.CodeSignature
 }
 
 func (c *CodeSignature) String() string {

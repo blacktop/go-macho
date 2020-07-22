@@ -4,18 +4,16 @@ import (
 	mtypes "github.com/blacktop/go-macho/types"
 )
 
-type magic uint32
-
 // CodeSignature highlevel object
 type CodeSignature struct {
-	ID            string
-	TeamID        string
-	CDHash        string
-	CodeDirectory CodeDirectory
-	Requirements  Requirement
-	CMSSignature  []byte
-	Entitlements  string
+	CodeDirectory    *CodeDirectory
+	AltCodeDirectory *CodeDirectory
+	Requirements     Requirement
+	CMSSignature     []byte
+	Entitlements     string
 }
+
+type magic uint32
 
 // SuperBlob object
 type SuperBlob struct {

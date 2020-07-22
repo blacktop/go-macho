@@ -652,13 +652,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			if err != nil {
 				return nil, err
 			}
-			l.ID = cs.ID
-			l.TeamID = cs.TeamID
-			l.CDHash = cs.CDHash
-			l.CodeDirectory = cs.CodeDirectory
-			l.Requirements = cs.Requirements
-			l.CMSSignature = cs.CMSSignature
-			l.Entitlements = cs.Entitlements
+			l.CodeSignature = *cs
 			f.Loads[i] = l
 		case types.LC_SEGMENT_SPLIT_INFO:
 			var hdr types.SegmentSplitInfoCmd

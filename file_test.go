@@ -449,8 +449,9 @@ func TestNewFile(t *testing.T) {
 		return
 	}
 
-	if got.CodeSignature() != nil {
-		fmt.Println(got.CodeSignature().Requirements.Detail)
+	cs := got.CodeSignature()
+	if cs != nil {
+		fmt.Println(cs.Requirements.Detail)
 	}
 
 	fmt.Println(got.FileTOC.String())
