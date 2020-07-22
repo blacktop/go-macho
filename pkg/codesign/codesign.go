@@ -68,7 +68,7 @@ func ParseCodeSignature(cmddat []byte) (*types.CodeSignature, error) {
 			} else {
 				req.Detail = "empty requirement set"
 			}
-			cs.Requirements = req
+			cs.Requirements = &req
 		case types.CSSLOT_ENTITLEMENTS:
 			entBlob := types.Blob{}
 			if err := binary.Read(r, binary.BigEndian, &entBlob); err != nil {

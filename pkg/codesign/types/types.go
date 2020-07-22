@@ -8,7 +8,7 @@ import (
 type CodeSignature struct {
 	CodeDirectory    *CodeDirectory
 	AltCodeDirectory *CodeDirectory
-	Requirements     Requirement
+	Requirements     *Requirement
 	CMSSignature     []byte
 	Entitlements     string
 }
