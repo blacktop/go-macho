@@ -47,23 +47,8 @@ type FileTOC struct {
 func (t *FileTOC) String() string {
 
 	fTocStr := t.FileHeader.String()
+	fTocStr += t.LoadsString()
 
-	for i, l := range t.Loads {
-		if s, ok := l.(*Segment); ok {
-			fTocStr += fmt.Sprintf("%02d: %s offset=0x%08x-0x%08x, addr=0x%09x-0x%09x\t%s\n", i, s.Command(), s.Offset, s.Offset+s.Filesz, s.Addr, s.Addr+s.Memsz, s.Name)
-			for j := uint32(0); j < s.Nsect; j++ {
-				c := t.Sections[j+s.Firstsect]
-				secFlags := ""
-				if !c.Flags.IsRegular() {
-					secFlags = fmt.Sprintf("(%s)", c.Flags)
-				}
-				fTocStr += fmt.Sprintf("\toffset=0x%08x-0x%08x, addr=0x%09x-0x%09x\t\t%s.%s\t%s\t%s\n", c.Offset, uint64(c.Offset)+c.Size, c.Addr, c.Addr+c.Size, s.Name, c.Name, secFlags, c.Flags.AttributesString())
-				// fTocStr += fmt.Sprintf("   %s.%s\toffset=0x%x, size=%d, addr=0x%x, nreloc=%d\n", s.Name, c.Name, c.Offset, c.Size, c.Addr, c.Nreloc)
-			}
-		} else {
-			fTocStr += fmt.Sprintf("%02d: %s%s%v\n", i, l.Command(), strings.Repeat(" ", 28-len(l.Command().String())), l)
-		}
-	}
 	// if t.SizeCommands != t.LoadSize() {
 	// 	fTocStr += fmt.Sprintf("ERROR: recorded command size %d does not equal computed command size %d\n", t.SizeCommands, t.LoadSize())
 	// } else {
@@ -72,6 +57,29 @@ func (t *FileTOC) String() string {
 	// fTocStr += fmt.Sprintf("NOTE: File size is %d\n", t.FileSize())
 
 	return fTocStr
+}
+
+// LoadsString returns a string representation of all the MachO's load commands
+func (t *FileTOC) LoadsString() string {
+	var loadsStr string
+	for i, l := range t.Loads {
+		if s, ok := l.(*Segment); ok {
+			loadsStr += fmt.Sprintf("%02d: %s offset=0x%08x-0x%08x, addr=0x%09x-0x%09x\t%s\n", i, s.Command(), s.Offset, s.Offset+s.Filesz, s.Addr, s.Addr+s.Memsz, s.Name)
+			for j := uint32(0); j < s.Nsect; j++ {
+				c := t.Sections[j+s.Firstsect]
+				secFlags := ""
+				if !c.Flags.IsRegular() {
+					secFlags = fmt.Sprintf("(%s)", c.Flags)
+				}
+				loadsStr += fmt.Sprintf("\toffset=0x%08x-0x%08x, addr=0x%09x-0x%09x\t\t%s.%s\t%s\t%s\n", c.Offset, uint64(c.Offset)+c.Size, c.Addr, c.Addr+c.Size, s.Name, c.Name, secFlags, c.Flags.AttributesString())
+			}
+		} else {
+			if l != nil {
+				loadsStr += fmt.Sprintf("%02d: %s%s%v\n", i, l.Command(), strings.Repeat(" ", 28-len(l.Command().String())), l)
+			}
+		}
+	}
+	return loadsStr
 }
 
 func (t *FileTOC) AddLoad(l Load) {
@@ -321,15 +329,16 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			return nil, &FormatError{offset, "invalid command block size", nil}
 		}
 
+		var cmddat []byte
+		cmddat, dat = dat[0:siz], dat[siz:]
+		offset += int64(siz)
+		var s *Segment
+
 		// skip unwanted load commands
 		if len(loads) > 0 && !loadInSlice(cmd, loads) {
 			continue
 		}
 
-		var cmddat []byte
-		cmddat, dat = dat[0:siz], dat[siz:]
-		offset += int64(siz)
-		var s *Segment
 		switch cmd {
 		default:
 			log.Printf("found NEW load command: %s, please let the author know :)", cmd)
@@ -940,10 +949,10 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse DyldChainedFixups data in load LC_DYLD_CHAINED_FIXUPS command at: %d: %v", offset, err)
 			}
-			for idx, i := range dcf.Imports {
-				fmt.Println("Import", i)
-				fmt.Println("Fixup", dcf.Fixups[idx])
-			}
+			// for idx, i := range dcf.Imports {
+			// 	fmt.Println("Import", i)
+			// 	fmt.Println("Fixup", dcf.Fixups[idx])
+			// }
 			l.Imports = dcf.Imports
 			l.Fixups = dcf.Fixups
 			f.Loads[i] = l
@@ -1026,7 +1035,7 @@ func (f *File) parseDyldChainedFixups(r *bytes.Reader) (*types.DyldChainedFixups
 	if err := binary.Read(r, f.ByteOrder, &dcf.DyldChainedFixupsHeader); err != nil {
 		return nil, err
 	}
-	fmt.Printf("%#v\n", dcf.DyldChainedFixupsHeader)
+	// fmt.Printf("%#v\n", dcf.DyldChainedFixupsHeader)
 
 	r.Seek(int64(dcf.DyldChainedFixupsHeader.StartsOffset), io.SeekStart)
 	var segCount uint32
@@ -1037,7 +1046,7 @@ func (f *File) parseDyldChainedFixups(r *bytes.Reader) (*types.DyldChainedFixups
 	if err := binary.Read(r, f.ByteOrder, &segInfoOffsets); err != nil {
 		return nil, err
 	}
-	fmt.Printf("%#v\n", segInfoOffsets)
+	// fmt.Printf("%#v\n", segInfoOffsets)
 	for _, segInfoOffset := range segInfoOffsets {
 		if segInfoOffset == 0 {
 			continue
@@ -1046,7 +1055,7 @@ func (f *File) parseDyldChainedFixups(r *bytes.Reader) (*types.DyldChainedFixups
 		if err := binary.Read(r, f.ByteOrder, &dcf.DyldChainedStartsInSegment); err != nil {
 			return nil, err
 		}
-		fmt.Printf("%#v\n", dcf.DyldChainedStartsInSegment)
+		// fmt.Printf("%#v\n", dcf.DyldChainedStartsInSegment)
 		pageStarts := make([]types.DCPtrStart, dcf.DyldChainedStartsInSegment.PageCount)
 		if err := binary.Read(r, f.ByteOrder, &pageStarts); err != nil {
 			return nil, err
@@ -1095,7 +1104,11 @@ func (f *File) parseDyldChainedFixups(r *bytes.Reader) (*types.DyldChainedFixups
 						break
 					}
 
-					next += types.DyldChainedPtrArm64eNext(dcPtr) * 8
+					if dcf.DyldChainedStartsInSegment.PointerFormat == types.DYLD_CHAINED_PTR_ARM64E_KERNEL {
+						next += types.DyldChainedPtr64KernelCacheRebase(dcPtr).Next() * 4
+					} else {
+						next += types.DyldChainedPtrArm64eNext(dcPtr) * 8
+					}
 				}
 			}
 
@@ -1355,6 +1368,16 @@ func (f *File) CodeSignature() *CodeSignature {
 	return nil
 }
 
+// DyldChainedFixups returns the dyld chained fixups, or nil if none exists.
+func (f *File) DyldChainedFixups() *DyldChainedFixups {
+	for _, l := range f.Loads {
+		if s, ok := l.(*DyldChainedFixups); ok {
+			return s
+		}
+	}
+	return nil
+}
+
 // DWARF returns the DWARF debug information for the Mach-O file.
 func (f *File) DWARF() (*dwarf.Data, error) {
 	dwarfSuffix := func(s *Section) string {
@@ -1363,6 +1386,8 @@ func (f *File) DWARF() (*dwarf.Data, error) {
 			return s.Name[8:]
 		case strings.HasPrefix(s.Name, "__zdebug_"):
 			return s.Name[9:]
+		case strings.HasPrefix(s.Name, "__apple_"):
+			return s.Name[8:]
 		default:
 			return ""
 		}
