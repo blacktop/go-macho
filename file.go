@@ -115,7 +115,7 @@ func (t *FileTOC) AddSection(s *Section) {
 
 // DerivedCopy returns a modified copy of the TOC, with empty loads and sections,
 // and with the specified header type and flags.
-func (t *FileTOC) DerivedCopy(Type types.HeaderType, Flags types.HeaderFlag) *FileTOC {
+func (t *FileTOC) DerivedCopy(Type types.HeaderFileType, Flags types.HeaderFlag) *FileTOC {
 	h := t.FileHeader
 	h.NCommands, h.SizeCommands, h.Type, h.Flags = 0, 0, Type, Flags
 

@@ -83,7 +83,7 @@ func NewFatFile(r io.ReaderAt) (*FatFile, error) {
 	// there are not duplicate architectures.
 	seenArches := make(map[uint64]bool, narch)
 	// Make sure that all images are for the same MH_ type.
-	var machoType types.HeaderType
+	var machoType types.HeaderFileType
 
 	// Following the fat_header comes narch fat_arch structs that index
 	// Mach-O images further in the file.

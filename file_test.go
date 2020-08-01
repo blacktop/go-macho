@@ -27,7 +27,7 @@ type fileTest struct {
 var fileTests = []fileTest{
 	{
 		"internal/testdata/gcc-386-darwin-exec.base64",
-		types.FileHeader{0xfeedface, types.CPU386, 0x3, 0x2, 0xc, 0x3c0, 0x85},
+		types.FileHeader{0xfeedface, types.CPU386, 0x3, 0x2, 0xc, 0x3c0, 0x85, 0x0},
 		[]interface{}{
 			&SegmentHeader{types.LC_SEGMENT, 0x38, "__PAGEZERO", 0x0, 0x1000, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0},
 			&SegmentHeader{types.LC_SEGMENT, 0xc0, "__TEXT", 0x1000, 0x1000, 0x0, 0x1000, 0x7, 0x5, 0x2, 0x0, 0},
@@ -53,7 +53,7 @@ var fileTests = []fileTest{
 	},
 	{
 		"internal/testdata/gcc-amd64-darwin-exec.base64",
-		types.FileHeader{0xfeedfacf, types.CPUAmd64, 0x80000003, 0x2, 0xb, 0x568, 0x85},
+		types.FileHeader{0xfeedfacf, types.CPUAmd64, 0x80000003, 0x2, 0xb, 0x568, 0x85, 0x0},
 		[]interface{}{
 			&SegmentHeader{types.LC_SEGMENT_64, 0x48, "__PAGEZERO", 0x0, 0x100000000, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0},
 			&SegmentHeader{types.LC_SEGMENT_64, 0x1d8, "__TEXT", 0x100000000, 0x1000, 0x0, 0x1000, 0x7, 0x5, 0x5, 0x0, 0},
@@ -81,7 +81,7 @@ var fileTests = []fileTest{
 	},
 	{
 		"internal/testdata/gcc-amd64-darwin-exec-debug.base64",
-		types.FileHeader{0xfeedfacf, types.CPUAmd64, 0x80000003, 0xa, 0x4, 0x5a0, 0},
+		types.FileHeader{0xfeedfacf, types.CPUAmd64, 0x80000003, 0xa, 0x4, 0x5a0, 0, 0x0},
 		[]interface{}{
 			nil, // LC_UUID
 			&SegmentHeader{types.LC_SEGMENT_64, 0x1d8, "__TEXT", 0x100000000, 0x1000, 0x0, 0x0, 0x7, 0x5, 0x5, 0x0, 0},
@@ -109,7 +109,7 @@ var fileTests = []fileTest{
 	},
 	{
 		"internal/testdata/clang-386-darwin-exec-with-rpath.base64",
-		types.FileHeader{0xfeedface, types.CPU386, 0x3, 0x2, 0x10, 0x42c, 0x1200085},
+		types.FileHeader{0xfeedface, types.CPU386, 0x3, 0x2, 0x10, 0x42c, 0x1200085, 0x0},
 		[]interface{}{
 			nil, // LC_SEGMENT
 			nil, // LC_SEGMENT
@@ -133,7 +133,7 @@ var fileTests = []fileTest{
 	},
 	{
 		"internal/testdata/clang-amd64-darwin-exec-with-rpath.base64",
-		types.FileHeader{0xfeedfacf, types.CPUAmd64, 0x80000003, 0x2, 0x10, 0x4c8, 0x200085},
+		types.FileHeader{0xfeedfacf, types.CPUAmd64, 0x80000003, 0x2, 0x10, 0x4c8, 0x200085, 0x0},
 		[]interface{}{
 			nil, // LC_SEGMENT
 			nil, // LC_SEGMENT
@@ -157,7 +157,7 @@ var fileTests = []fileTest{
 	},
 	{
 		"internal/testdata/clang-386-darwin.obj.base64",
-		types.FileHeader{0xfeedface, types.CPU386, 0x3, 0x1, 0x4, 0x138, 0x2000},
+		types.FileHeader{0xfeedface, types.CPU386, 0x3, 0x1, 0x4, 0x138, 0x2000, 0x0},
 		nil,
 		nil,
 		map[string][]Reloc{
@@ -192,7 +192,7 @@ var fileTests = []fileTest{
 	},
 	{
 		"internal/testdata/clang-amd64-darwin.obj.base64",
-		types.FileHeader{0xfeedfacf, types.CPUAmd64, 0x3, 0x1, 0x4, 0x200, 0x2000},
+		types.FileHeader{0xfeedfacf, types.CPUAmd64, 0x3, 0x1, 0x4, 0x200, 0x2000, 0x0},
 		nil,
 		nil,
 		map[string][]Reloc{
@@ -438,7 +438,10 @@ func TestNewFatFile(t *testing.T) {
 }
 
 func TestNewFile(t *testing.T) {
-	f, err := os.Open("/System/Library/PrivateFrameworks/PackageKit.framework/Resources/installd")
+	// f, err := os.Open("/System/Library/PrivateFrameworks/PackageKit.framework/Resources/installd")
+	// f, err := os.Open("/Library/Developer/KDKs/KDK_11.0_20A5323l.kdk/System/Library/Kernels/kernel.development.t8020.dSYM/Contents/Resources/DWARF/kernel.development.t8020")
+	f, err := os.Open("/Library/Developer/KDKs/KDK_11.0_20A5323l.kdk/System/Library/Kernels/kernel.development.t8020")
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -453,6 +456,20 @@ func TestNewFile(t *testing.T) {
 	if cs != nil {
 		fmt.Println(cs.Requirements[0].Detail)
 	}
+
+	if got.DyldChainedFixups() != nil {
+		dcf := got.DyldChainedFixups()
+		for _, fixup := range dcf.Fixups {
+			fmt.Println(fixup)
+		}
+	}
+
+	// dwarf, err := got.DWARF()
+	// if err != nil {
+	// 	t.Errorf("DWARF() error = %v", err)
+	// 	return
+	// }
+	// fmt.Println(dwarf)
 
 	fmt.Println(got.FileTOC.String())
 

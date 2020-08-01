@@ -1,6 +1,6 @@
 package types
 
-//go:generate stringer -type=HeaderType,HeaderFlag -output header_string.go
+//go:generate stringer -type=HeaderFileType,HeaderFlag -output header_string.go
 
 import (
 	"encoding/binary"
@@ -13,10 +13,11 @@ type FileHeader struct {
 	Magic        Magic
 	CPU          CPU
 	SubCPU       CPUSubtype
-	Type         HeaderType
+	Type         HeaderFileType
 	NCommands    uint32
 	SizeCommands uint32
 	Flags        HeaderFlag
+	Reserved     uint32
 }
 
 func (h *FileHeader) Put(b []byte, o binary.ByteOrder) int {
@@ -57,26 +58,28 @@ func (i Magic) Int() uint32      { return uint32(i) }
 func (i Magic) String() string   { return StringName(uint32(i), magicStrings, false) }
 func (i Magic) GoString() string { return StringName(uint32(i), magicStrings, true) }
 
-// A HeaderType is the Mach-O file type, e.g. an object file, executable, or dynamic library.
-type HeaderType uint32
+// A HeaderFileType is the Mach-O file type, e.g. an object file, executable, or dynamic library.
+type HeaderFileType uint32
 
 const (
-	Obj        HeaderType = 1
-	Exec       HeaderType = 2
-	FVMLib     HeaderType = 3
-	Core       HeaderType = 4
-	Preload    HeaderType = 5 /* preloaded executable file */
-	Dylib      HeaderType = 6 /* dynamically bound shared library */
-	Dylinker   HeaderType = 7 /* dynamic link editor */
-	Bundle     HeaderType = 8
-	DylibStub  HeaderType = 0x9 /* shared library stub for static */
-	Dsym       HeaderType = 0xa /* companion file with only debug */
-	KextBundle HeaderType = 0xb /* x86_64 kexts */
+	Obj        HeaderFileType = 1
+	Exec       HeaderFileType = 2
+	FVMLib     HeaderFileType = 3
+	Core       HeaderFileType = 4
+	Preload    HeaderFileType = 5 /* preloaded executable file */
+	Dylib      HeaderFileType = 6 /* dynamically bound shared library */
+	Dylinker   HeaderFileType = 7 /* dynamic link editor */
+	Bundle     HeaderFileType = 8
+	DylibStub  HeaderFileType = 0x9 /* shared library stub for static */
+	Dsym       HeaderFileType = 0xa /* companion file with only debug */
+	KextBundle HeaderFileType = 0xb /* x86_64 kexts */
+	FileSet    HeaderFileType = 0xc /* a file composed of other Mach-Os to be run in the same userspace sharing a single linkedit. */
 )
 
 type HeaderFlag uint32
 
 const (
+	None                       HeaderFlag = 0x0
 	NoUndefs                   HeaderFlag = 0x1
 	IncrLink                   HeaderFlag = 0x2
 	DyldLink                   HeaderFlag = 0x4
