@@ -448,9 +448,9 @@ func (u *UnixThread) String() string {
 
 // TODO: LC_LOADFVMLIB	0x6	/* load a specified fixed VM shared library */
 // TODO: LC_IDFVMLIB	0x7	/* fixed VM shared library identification */
-// TODO: LC_IDENT	0x8	/* object identification info (obsolete) */
-// TODO: LC_FVMFILE	0x9	/* fixed VM file inclusion (internal use) */
-// TODO: LC_PREPAGE      0xa     /* prepage command (internal use) */
+// TODO: LC_IDENT	    0x8	/* object identification info (obsolete) */
+// TODO: LC_FVMFILE	    0x9	/* fixed VM file inclusion (internal use) */
+// TODO: LC_PREPAGE     0xa /* prepage command (internal use) */
 
 /*******************************************************************************
  * LC_DYSYMTAB
