@@ -695,6 +695,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 		// TODO: case types.LcLazyLoadDylib:
 		// TODO: case types.LcEncryptionInfo:
 		case types.LC_DYLD_INFO:
+			fallthrough
 		case types.LC_DYLD_INFO_ONLY:
 			var info types.DyldInfoCmd
 			b := bytes.NewReader(cmddat)
@@ -911,24 +912,25 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			f.Loads[i] = l
 		case types.LC_DYLD_EXPORTS_TRIE:
 			var led types.LinkEditDataCmd
-			var err error
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &led); err != nil {
 				return nil, err
 			}
-			ldat := make([]byte, led.Size)
-			if _, err := r.ReadAt(ldat, int64(led.Offset)); err != nil {
-				return nil, err
-			}
+			// ldat := make([]byte, led.Size)
+			// if _, err := r.ReadAt(ldat, int64(led.Offset)); err != nil {
+			// 	return nil, err
+			// }
 			l := new(DyldExportsTrie)
 			l.LoadCmd = cmd
 			l.LoadBytes = LoadBytes(cmddat)
-			if len(ldat) > 0 {
-				l.Tries, err = trie.ParseTrie(ldat, 0)
-				if err != nil {
-					return nil, fmt.Errorf("failed to parse trie data in load dyld exports trie command at: %d: %v", offset, err)
-				}
-			}
+			l.Offset = led.Offset
+			l.Size = led.Size
+			// if len(ldat) > 0 {
+			// 	l.Tries, err = trie.ParseTrie(ldat, 0)
+			// 	if err != nil {
+			// 		return nil, fmt.Errorf("failed to parse trie data in load dyld exports trie command at: %d: %v", offset, err)
+			// 	}
+			// }
 			f.Loads[i] = l
 		case types.LC_DYLD_CHAINED_FIXUPS:
 			var led types.DyldChainedFixupsCmd
@@ -1322,6 +1324,16 @@ func (f *File) DylibID() *DylibID {
 func (f *File) DyldInfo() *DyldInfo {
 	for _, l := range f.Loads {
 		if s, ok := l.(*DyldInfo); ok {
+			return s
+		}
+	}
+	return nil
+}
+
+// DyldExportsTrie returns the dyld export trie load command, or nil if no dyld info exists.
+func (f *File) DyldExportsTrie() *DyldExportsTrie {
+	for _, l := range f.Loads {
+		if s, ok := l.(*DyldExportsTrie); ok {
 			return s
 		}
 	}

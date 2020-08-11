@@ -9,7 +9,6 @@ import (
 	"unsafe"
 
 	ctypes "github.com/blacktop/go-macho/pkg/codesign/types"
-	"github.com/blacktop/go-macho/pkg/trie"
 	"github.com/blacktop/go-macho/types"
 )
 
@@ -1021,11 +1020,12 @@ func (b *BuildVersion) String() string {
 type DyldExportsTrie struct {
 	LoadBytes
 	types.DyldExportsTrieCmd
-	Tries []trie.TrieEntry
+	Offset uint32
+	Size   uint32
 }
 
 func (t *DyldExportsTrie) String() string {
-	return fmt.Sprintf("Count: %d", len(t.Tries))
+	return fmt.Sprintf("Offset: 0x%x, Size: 0x%x", t.Offset, t.Size)
 }
 
 /*******************************************************************************
