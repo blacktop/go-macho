@@ -921,10 +921,10 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.LoadBytes = LoadBytes(cmddat)
 			l.Offset = led.Offset
 			l.Size = led.Size
-			l.Data = make([]byte, led.Size)
-			if _, err := r.ReadAt(l.Data, int64(led.Offset)); err != nil {
-				return nil, err
-			}
+			// l.Data = make([]byte, led.Size)
+			// if _, err := r.ReadAt(l.Data, int64(led.Offset)); err != nil {
+			// 	return nil, err
+			// }
 			f.Loads[i] = l
 		case types.LC_DYLD_CHAINED_FIXUPS:
 			var led types.DyldChainedFixupsCmd
@@ -1012,294 +1012,6 @@ func (f *File) parseSymtab(symdat, strtab, cmddat []byte, hdr *types.SymtabCmd, 
 	st.Len = hdr.Len
 	st.Syms = symtab
 	return st, nil
-}
-
-func (f *File) parseDyldChainedFixups(r *bytes.Reader) (*types.DyldChainedFixups, error) {
-
-	dcf := &types.DyldChainedFixups{}
-
-	if err := binary.Read(r, f.ByteOrder, &dcf.DyldChainedFixupsHeader); err != nil {
-		return nil, err
-	}
-
-	r.Seek(int64(dcf.DyldChainedFixupsHeader.StartsOffset), io.SeekStart)
-	var segCount uint32
-	if err := binary.Read(r, f.ByteOrder, &segCount); err != nil {
-		return nil, err
-	}
-	segInfoOffsets := make([]uint32, segCount)
-	if err := binary.Read(r, f.ByteOrder, &segInfoOffsets); err != nil {
-		return nil, err
-	}
-
-	for _, segInfoOffset := range segInfoOffsets {
-		if segInfoOffset == 0 {
-			continue
-		}
-		r.Seek(int64(dcf.DyldChainedFixupsHeader.StartsOffset+segInfoOffset), io.SeekStart)
-		if err := binary.Read(r, f.ByteOrder, &dcf.DyldChainedStartsInSegment); err != nil {
-			return nil, err
-		}
-
-		pageStarts := make([]types.DCPtrStart, dcf.DyldChainedStartsInSegment.PageCount)
-		if err := binary.Read(r, f.ByteOrder, &pageStarts); err != nil {
-			return nil, err
-		}
-		for pageIndex := uint16(0); pageIndex < dcf.DyldChainedStartsInSegment.PageCount; pageIndex++ {
-			offsetInPage := pageStarts[pageIndex]
-			if offsetInPage == types.DYLD_CHAINED_PTR_START_NONE {
-				continue
-			}
-			// TODO: handle this case
-			if offsetInPage&types.DYLD_CHAINED_PTR_START_MULTI != 0 {
-				// 32-bit chains which may need multiple starts per page
-				overflowIndex := offsetInPage & ^types.DYLD_CHAINED_PTR_START_MULTI
-				chainEnd := false
-				// for !stopped && !chainEnd {
-				for !chainEnd {
-					chainEnd = (pageStarts[overflowIndex]&types.DYLD_CHAINED_PTR_START_LAST != 0)
-					offsetInPage = (pageStarts[overflowIndex] & ^types.DYLD_CHAINED_PTR_START_LAST)
-					// if err := f.walkDcFixupChain(dcf, pageContentStart, offsetInPage); err != nil {
-					// 	return nil, err
-					// }
-					// if walkChain(diag, segInfo, pageIndex, offsetInPage, notifyNonPointers, handler) {
-					//	stopped = true
-					// }
-					overflowIndex++
-				}
-			} else {
-				// one chain per page
-				pageContentStart := dcf.DyldChainedStartsInSegment.SegmentOffset + uint64(pageIndex*dcf.DyldChainedStartsInSegment.PageSize)
-				if err := f.walkDcFixupChain(dcf, pageContentStart, offsetInPage); err != nil {
-					return nil, err
-				}
-			}
-		}
-	}
-
-	// Parse Imports
-	switch dcf.DyldChainedFixupsHeader.ImportsFormat {
-	case types.DC_IMPORT:
-		r.Seek(int64(dcf.ImportsOffset), io.SeekStart)
-		imports := make([]types.DyldChainedImport, dcf.ImportsCount)
-		if err := binary.Read(r, f.ByteOrder, &imports); err != nil {
-			return nil, err
-		}
-		symbolsPool := io.NewSectionReader(r, int64(dcf.SymbolsOffset), r.Size()-int64(dcf.SymbolsOffset))
-		for _, i := range imports {
-			symbolsPool.Seek(int64(i.NameOffset()), io.SeekStart)
-			s, err := bufio.NewReader(symbolsPool).ReadString('\x00')
-			if err != nil {
-				return nil, fmt.Errorf("failed to read string at: %d: %v", dcf.SymbolsOffset+i.NameOffset(), err)
-			}
-			dcf.Imports = append(dcf.Imports, types.DcfImport{
-				Name:    strings.Trim(s, "\x00"),
-				Pointer: i,
-			})
-		}
-	case types.DC_IMPORT_ADDEND:
-		r.Seek(int64(dcf.ImportsOffset), io.SeekStart)
-		imports := make([]types.DyldChainedImportAddend, dcf.ImportsCount)
-		if err := binary.Read(r, f.ByteOrder, &imports); err != nil {
-			return nil, err
-		}
-		symbolsPool := io.NewSectionReader(r, int64(dcf.SymbolsOffset), r.Size()-int64(dcf.SymbolsOffset))
-		for _, i := range imports {
-			symbolsPool.Seek(int64(i.Import.NameOffset()), io.SeekStart)
-			s, err := bufio.NewReader(symbolsPool).ReadString('\x00')
-			if err != nil {
-				return nil, fmt.Errorf("failed to read string at: %d: %v", dcf.SymbolsOffset+i.Import.NameOffset(), err)
-			}
-			dcf.Imports = append(dcf.Imports, types.DcfImport{
-				Name:    strings.Trim(s, "\x00"),
-				Pointer: i,
-			})
-		}
-	case types.DC_IMPORT_ADDEND64:
-		r.Seek(int64(dcf.ImportsOffset), io.SeekStart)
-		imports := make([]types.DyldChainedImportAddend64, dcf.ImportsCount)
-		if err := binary.Read(r, f.ByteOrder, &imports); err != nil {
-			return nil, err
-		}
-		symbolsPool := io.NewSectionReader(r, int64(dcf.SymbolsOffset), r.Size()-int64(dcf.SymbolsOffset))
-		for _, i := range imports {
-			symbolsPool.Seek(int64(i.Import.NameOffset()), io.SeekStart)
-			s, err := bufio.NewReader(symbolsPool).ReadString('\x00')
-			if err != nil {
-				return nil, fmt.Errorf("failed to read string at: %d: %v", uint64(dcf.SymbolsOffset)+i.Import.NameOffset(), err)
-			}
-			dcf.Imports = append(dcf.Imports, types.DcfImport{
-				Name:    strings.Trim(s, "\x00"),
-				Pointer: i,
-			})
-		}
-	}
-
-	return dcf, nil
-}
-
-func (f *File) walkDcFixupChain(dcf *types.DyldChainedFixups, pageContentStart uint64, offsetInPage types.DCPtrStart) error {
-	var next uint64
-	chainEnd := false
-	for !chainEnd {
-
-		switch dcf.DyldChainedStartsInSegment.PointerFormat {
-		case types.DYLD_CHAINED_PTR_32:
-			dcPtr, err := f.readLeUint32(int64(pageContentStart + uint64(offsetInPage) + next))
-			if err != nil {
-				return err
-			}
-			if types.Generic32IsBind(dcPtr) {
-				dcf.Binds = append(dcf.Binds, types.DyldChainedPtr32Bind(dcPtr))
-			} else {
-				dcf.Rebases = append(dcf.Rebases, types.DyldChainedPtr32Rebase(dcPtr))
-			}
-			if types.Generic32Next(dcPtr) == 0 {
-				chainEnd = true
-			}
-			next += types.Generic32Next(dcPtr) * 4
-		case types.DYLD_CHAINED_PTR_32_CACHE:
-			dcPtr, err := f.readLeUint32(int64(pageContentStart + uint64(offsetInPage) + next))
-			if err != nil {
-				return err
-			}
-			dcf.Rebases = append(dcf.Rebases, types.DyldChainedPtr32CacheRebase(dcPtr))
-			if types.Generic32Next(dcPtr) == 0 {
-				chainEnd = true
-			}
-			next += types.Generic32Next(dcPtr) * 4
-		case types.DYLD_CHAINED_PTR_32_FIRMWARE:
-			dcPtr, err := f.readLeUint32(int64(pageContentStart + uint64(offsetInPage) + next))
-			if err != nil {
-				return err
-			}
-			dcf.Rebases = append(dcf.Rebases, types.DyldChainedPtr32FirmwareRebase(dcPtr))
-			if types.Generic32Next(dcPtr) == 0 {
-				chainEnd = true
-			}
-			next += types.Generic32Next(dcPtr) * 4
-		case types.DYLD_CHAINED_PTR_64: // target is vmaddr
-			dcPtr, err := f.readLeUint64(int64(pageContentStart + uint64(offsetInPage) + next))
-			if err != nil {
-				return err
-			}
-			if types.Generic64IsBind(dcPtr) {
-				dcf.Binds = append(dcf.Binds, types.DyldChainedPtr64Bind(dcPtr))
-			} else {
-				dcf.Rebases = append(dcf.Rebases, types.DyldChainedPtr64Rebase(dcPtr))
-			}
-			if types.Generic64Next(dcPtr) == 0 {
-				chainEnd = true
-			}
-			next += types.Generic64Next(dcPtr) * 4
-		case types.DYLD_CHAINED_PTR_64_OFFSET: // target is vm offset
-			dcPtr, err := f.readLeUint64(int64(pageContentStart + uint64(offsetInPage) + next))
-			if err != nil {
-				return err
-			}
-			dcf.Rebases = append(dcf.Rebases, types.DyldChainedPtr64RebaseOffset(dcPtr))
-			if types.Generic64Next(dcPtr) == 0 {
-				chainEnd = true
-			}
-			next += types.Generic64Next(dcPtr) * 4
-		case types.DYLD_CHAINED_PTR_64_KERNEL_CACHE:
-			dcPtr, err := f.readLeUint64(int64(pageContentStart + uint64(offsetInPage) + next))
-			if err != nil {
-				return err
-			}
-			dcf.Rebases = append(dcf.Rebases, types.DyldChainedPtr64KernelCacheRebase(dcPtr))
-			if types.Generic64Next(dcPtr) == 0 {
-				chainEnd = true
-			}
-			next += types.Generic64Next(dcPtr) * 4
-		case types.DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE: // stride 1, x86_64 kernel caches
-			dcPtr, err := f.readLeUint64(int64(pageContentStart + uint64(offsetInPage) + next))
-			if err != nil {
-				return err
-			}
-			dcf.Rebases = append(dcf.Rebases, types.DyldChainedPtr64KernelCacheRebase(dcPtr))
-			if types.Generic64Next(dcPtr) == 0 {
-				chainEnd = true
-			}
-			next += types.Generic64Next(dcPtr)
-		case types.DYLD_CHAINED_PTR_ARM64E_KERNEL: // stride 4, unauth target is vm offset
-			dcPtr, err := f.readLeUint64(int64(pageContentStart + uint64(offsetInPage) + next))
-			if err != nil {
-				return err
-			}
-			if !types.DcpArm64eIsBind(dcPtr) && !types.DcpArm64eIsAuth(dcPtr) {
-				dcf.Rebases = append(dcf.Rebases, types.DyldChainedPtrArm64eRebase(dcPtr))
-			} else if types.DcpArm64eIsBind(dcPtr) && !types.DcpArm64eIsAuth(dcPtr) {
-				dcf.Binds = append(dcf.Binds, types.DyldChainedPtrArm64eBind(dcPtr))
-			} else if !types.DcpArm64eIsBind(dcPtr) && types.DcpArm64eIsAuth(dcPtr) {
-				dcf.Rebases = append(dcf.Rebases, types.DyldChainedPtrArm64eAuthRebase(dcPtr))
-			} else {
-				dcf.Binds = append(dcf.Binds, types.DyldChainedPtrArm64eAuthBind(dcPtr))
-			}
-			if types.DcpArm64eNext(dcPtr) == 0 {
-				chainEnd = true
-			}
-			next += types.DcpArm64eNext(dcPtr) * 4
-		case types.DYLD_CHAINED_PTR_ARM64E_FIRMWARE: // stride 4, unauth target is vmaddr
-			dcPtr, err := f.readLeUint64(int64(pageContentStart + uint64(offsetInPage) + next))
-			if err != nil {
-				return err
-			}
-			if !types.DcpArm64eIsBind(dcPtr) && !types.DcpArm64eIsAuth(dcPtr) {
-				dcf.Rebases = append(dcf.Rebases, types.DyldChainedPtrArm64eRebase(dcPtr))
-			} else if types.DcpArm64eIsBind(dcPtr) && !types.DcpArm64eIsAuth(dcPtr) {
-				dcf.Binds = append(dcf.Binds, types.DyldChainedPtrArm64eBind(dcPtr))
-			} else if !types.DcpArm64eIsBind(dcPtr) && types.DcpArm64eIsAuth(dcPtr) {
-				dcf.Rebases = append(dcf.Rebases, types.DyldChainedPtrArm64eAuthRebase(dcPtr))
-			} else {
-				dcf.Binds = append(dcf.Binds, types.DyldChainedPtrArm64eAuthBind(dcPtr))
-			}
-			if types.DcpArm64eNext(dcPtr) == 0 {
-				chainEnd = true
-			}
-			next += types.DcpArm64eNext(dcPtr) * 4
-		case types.DYLD_CHAINED_PTR_ARM64E: // stride 8, unauth target is vmaddr
-			fallthrough
-		case types.DYLD_CHAINED_PTR_ARM64E_USERLAND: // stride 8, unauth target is vm offset
-			dcPtr, err := f.readLeUint64(int64(pageContentStart + uint64(offsetInPage) + next))
-			if err != nil {
-				return err
-			}
-			if !types.DcpArm64eIsBind(dcPtr) && !types.DcpArm64eIsAuth(dcPtr) {
-				dcf.Rebases = append(dcf.Rebases, types.DyldChainedPtrArm64eRebase(dcPtr))
-			} else if types.DcpArm64eIsBind(dcPtr) && !types.DcpArm64eIsAuth(dcPtr) {
-				dcf.Binds = append(dcf.Binds, types.DyldChainedPtrArm64eBind(dcPtr))
-			} else if !types.DcpArm64eIsBind(dcPtr) && types.DcpArm64eIsAuth(dcPtr) {
-				dcf.Rebases = append(dcf.Rebases, types.DyldChainedPtrArm64eAuthRebase(dcPtr))
-			} else {
-				dcf.Binds = append(dcf.Binds, types.DyldChainedPtrArm64eAuthBind(dcPtr))
-			}
-			if types.DcpArm64eNext(dcPtr) == 0 {
-				chainEnd = true
-			}
-			next += types.DcpArm64eNext(dcPtr) * 8
-		case types.DYLD_CHAINED_PTR_ARM64E_USERLAND24: // stride 8, unauth target is vm offset, 24-bit bind
-			dcPtr, err := f.readLeUint64(int64(pageContentStart + uint64(offsetInPage) + next))
-			if err != nil {
-				return err
-			}
-			if types.DcpArm64eIsBind(dcPtr) && types.DcpArm64eIsAuth(dcPtr) {
-				dcf.Binds = append(dcf.Binds, types.DyldChainedPtrArm64eAuthBind24(dcPtr))
-			} else if types.DcpArm64eIsBind(dcPtr) && !types.DcpArm64eIsAuth(dcPtr) {
-				dcf.Binds = append(dcf.Binds, types.DyldChainedPtrArm64eBind24(dcPtr))
-			} else {
-				return fmt.Errorf("unknown DYLD_CHAINED_PTR_ARM64E_USERLAND24 pointer typr 0x%04X", dcPtr)
-			}
-			if types.DcpArm64eNext(dcPtr) == 0 {
-				chainEnd = true
-			}
-			next += types.DcpArm64eNext(dcPtr) * 8
-		default:
-			return fmt.Errorf("unknown pointer format 0x%04X", dcf.DyldChainedStartsInSegment.PointerFormat)
-		}
-	}
-
-	return nil
 }
 
 func (f *File) pushSection(sh *Section, r io.ReaderAt) error {
@@ -1559,30 +1271,20 @@ func (f *File) CodeSignature() *CodeSignature {
 }
 
 // DyldExportsTrie returns the dyld export trie load command, or nil if no dyld info exists.
-func (f *File) DyldExportsTrie() []trie.TrieEntry {
+func (f *File) DyldExportsTrie() *DyldExportsTrie {
 	for _, l := range f.Loads {
 		if s, ok := l.(*DyldExportsTrie); ok {
-			if len(s.Data) > 0 {
-				tries, err := trie.ParseTrie(s.Data, 0)
-				if err != nil {
-					return nil
-				}
-				return tries
-			}
+			return s
 		}
 	}
 	return nil
 }
 
-// DyldChainedFixups returns the dyld chained fixups, or nil if none exists.
-func (f *File) DyldChainedFixups() *types.DyldChainedFixups {
+// DyldChainedFixups returns the dyld chained fixups load command, or nil if none exists.
+func (f *File) DyldChainedFixups() *DyldChainedFixups {
 	for _, l := range f.Loads {
 		if s, ok := l.(*DyldChainedFixups); ok {
-			dcf, err := f.parseDyldChainedFixups(bytes.NewReader(s.Data))
-			if err != nil {
-				return nil
-			}
-			return dcf
+			return s
 		}
 	}
 	return nil
