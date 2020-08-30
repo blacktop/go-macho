@@ -9,9 +9,9 @@ import (
 // An Nlist32 is a Mach-O 32-bit symbol table entry.
 type Nlist32 struct {
 	Name  uint32
-	Type  NLType
+	Type  NType
 	Sect  uint8
-	Desc  uint16
+	Desc  NDescType
 	Value uint32
 }
 
@@ -19,7 +19,7 @@ func (n *Nlist32) Put32(b []byte, o binary.ByteOrder) uint32 {
 	o.PutUint32(b[0:], n.Name)
 	b[4] = byte(n.Type)
 	b[5] = byte(n.Sect)
-	o.PutUint16(b[6:], n.Desc)
+	o.PutUint16(b[6:], uint16(n.Desc))
 	o.PutUint32(b[8:], uint32(n.Value))
 	return 8 + 4
 }
@@ -27,9 +27,9 @@ func (n *Nlist32) Put32(b []byte, o binary.ByteOrder) uint32 {
 // An Nlist64 is a Mach-O 64-bit symbol table entry.
 type Nlist64 struct {
 	Name  uint32
-	Type  NLType
+	Type  NType
 	Sect  uint8
-	Desc  uint16
+	Desc  NDescType
 	Value uint64
 }
 
@@ -37,12 +37,12 @@ func (n *Nlist64) Put64(b []byte, o binary.ByteOrder) uint32 {
 	o.PutUint32(b[0:], n.Name)
 	b[4] = byte(n.Type)
 	b[5] = byte(n.Sect)
-	o.PutUint16(b[6:], n.Desc)
+	o.PutUint16(b[6:], uint16(n.Desc))
 	o.PutUint64(b[8:], n.Value)
 	return 8 + 8
 }
 
-type NLType uint8
+type NType uint8
 
 /*
  * The n_type field really contains four fields:
@@ -53,127 +53,152 @@ type NLType uint8
  * which are used via the following masks.
  */
 const (
-	N_STAB NLType = 0xe0 /* if any of these bits set, a symbolic debugging entry */
-	N_PEXT NLType = 0x10 /* private external symbol bit */
-	N_TYPE NLType = 0x0e /* mask for the type bits */
-	N_EXT  NLType = 0x01 /* external symbol bit, set for external symbols */
+	N_STAB NType = 0xe0 /* if any of these bits set, a symbolic debugging entry */
+	N_PEXT NType = 0x10 /* private external symbol bit */
+	N_TYPE NType = 0x0e /* mask for the type bits */
+	N_EXT  NType = 0x01 /* external symbol bit, set for external symbols */
 )
 
 /*
  * Values for N_TYPE bits of the n_type field.
  */
 const (
-	N_UNDF NLType = 0x0 /* undefined, n_sect == NO_SECT */
-	N_ABS  NLType = 0x2 /* absolute, n_sect == NO_SECT */
-	N_SECT NLType = 0xe /* defined in section number n_sect */
-	N_PBUD NLType = 0xc /* prebound undefined (defined in a dylib) */
-	N_INDR NLType = 0xa /* indirect */
+	N_UNDF NType = 0x0 /* undefined, n_sect == NO_SECT */
+	N_ABS  NType = 0x2 /* absolute, n_sect == NO_SECT */
+	N_SECT NType = 0xe /* defined in section number n_sect */
+	N_PBUD NType = 0xc /* prebound undefined (defined in a dylib) */
+	N_INDR NType = 0xa /* indirect */
 )
 
-func (t NLType) IsDebugSym() bool {
+func (t NType) IsDebugSym() bool {
 	return (t & N_STAB) != 0
 }
 
-func (t NLType) IsPrivateExternalSym() bool {
+func (t NType) IsPrivateExternalSym() bool {
 	return (t & N_PEXT) != 0
 }
 
-func (t NLType) IsExternalSym() bool {
+func (t NType) IsExternalSym() bool {
 	return (t & N_EXT) != 0
 }
 
-func (t NLType) IsUndefinedSym() bool {
+func (t NType) IsUndefinedSym() bool {
 	return (t & N_TYPE) == N_UNDF
 }
-func (t NLType) IsAbsoluteSym() bool {
+func (t NType) IsAbsoluteSym() bool {
 	return (t & N_TYPE) == N_ABS
 }
-func (t NLType) IsDefinedInSection() bool {
+func (t NType) IsDefinedInSection() bool {
 	return (t & N_TYPE) == N_SECT
 }
-func (t NLType) IsPreboundUndefinedSym() bool {
+func (t NType) IsPreboundUndefinedSym() bool {
 	return (t & N_TYPE) == N_PBUD
 }
-func (t NLType) IsIndirectSym() bool {
+func (t NType) IsIndirectSym() bool {
 	return (t & N_TYPE) == N_INDR
 }
 
-func (t NLType) String(secName string) string {
+func (t NType) String(secName string) string {
 	var tStr string
 	if t.IsDebugSym() {
 		tStr += "debug|"
 	}
 	if t.IsPrivateExternalSym() {
-		tStr += "private_external|"
+		tStr += "priv_ext|"
 	}
 	if t.IsExternalSym() {
-		tStr += "external|"
+		tStr += "ext|"
 	}
 	if t.IsUndefinedSym() {
-		tStr += "undefined|"
+		tStr += "undef|"
 	}
 	if t.IsAbsoluteSym() {
-		tStr += "absolute|"
+		tStr += "abs|"
 	}
 	if t.IsDefinedInSection() {
 		tStr += fmt.Sprintf("%s|", secName)
 	}
 	if t.IsPreboundUndefinedSym() {
-		tStr += "prebound_undefined|"
+		tStr += "prebound_undef|"
 	}
 	if t.IsIndirectSym() {
-		tStr += "indirect|"
+		tStr += "indir|"
 	}
 	return strings.TrimSuffix(tStr, "|")
 }
 
-type nListDesc uint16
+type NDescType uint16
 
-func (d nListDesc) GetCommAlign() nListDesc {
+func (d NDescType) GetCommAlign() NDescType {
 	return (d >> 8) & 0x0f
 }
 
-const REFERENCE_TYPE nListDesc = 0x7
+const REFERENCE_TYPE NDescType = 0x7
 
 const (
 	/* types of references */
-	REFERENCE_FLAG_UNDEFINED_NON_LAZY         nListDesc = 0
-	REFERENCE_FLAG_UNDEFINED_LAZY             nListDesc = 1
-	REFERENCE_FLAG_DEFINED                    nListDesc = 2
-	REFERENCE_FLAG_PRIVATE_DEFINED            nListDesc = 3
-	REFERENCE_FLAG_PRIVATE_UNDEFINED_NON_LAZY nListDesc = 4
-	REFERENCE_FLAG_PRIVATE_UNDEFINED_LAZY     nListDesc = 5
+	REFERENCE_FLAG_UNDEFINED_NON_LAZY         NDescType = 0
+	REFERENCE_FLAG_UNDEFINED_LAZY             NDescType = 1
+	REFERENCE_FLAG_DEFINED                    NDescType = 2
+	REFERENCE_FLAG_PRIVATE_DEFINED            NDescType = 3
+	REFERENCE_FLAG_PRIVATE_UNDEFINED_NON_LAZY NDescType = 4
+	REFERENCE_FLAG_PRIVATE_UNDEFINED_LAZY     NDescType = 5
 )
 
-func (d nListDesc) IsUndefinedNonLazy() bool {
+func (d NDescType) IsUndefinedNonLazy() bool {
 	return (d & REFERENCE_TYPE) == REFERENCE_FLAG_UNDEFINED_NON_LAZY
 }
-func (d nListDesc) IsUndefinedLazy() bool {
+func (d NDescType) IsUndefinedLazy() bool {
 	return (d & REFERENCE_TYPE) == REFERENCE_FLAG_UNDEFINED_LAZY
 }
-func (d nListDesc) IsDefined() bool {
+func (d NDescType) IsDefined() bool {
 	return (d & REFERENCE_TYPE) == REFERENCE_FLAG_DEFINED
 }
-func (d nListDesc) IsPrivateDefined() bool {
+func (d NDescType) IsPrivateDefined() bool {
 	return (d & REFERENCE_TYPE) == REFERENCE_FLAG_PRIVATE_DEFINED
 }
-func (d nListDesc) IsPrivateUndefinedNonLazy() bool {
+func (d NDescType) IsPrivateUndefinedNonLazy() bool {
 	return (d & REFERENCE_TYPE) == REFERENCE_FLAG_PRIVATE_UNDEFINED_NON_LAZY
 }
-func (d nListDesc) IsPrivateUndefinedLazy() bool {
+func (d NDescType) IsPrivateUndefinedLazy() bool {
 	return (d & REFERENCE_TYPE) == REFERENCE_FLAG_PRIVATE_UNDEFINED_LAZY
 }
-
-func (d nListDesc) GetLibraryOrdinal() nListDesc {
+func (d NDescType) GetLibraryOrdinal() NDescType {
 	return (d >> 8) & 0xff
 }
 
+func (t NDescType) String() string {
+	var tStr string
+	if t.IsUndefinedNonLazy() {
+		tStr += "undef_nonlazy|"
+	}
+	if t.IsUndefinedLazy() {
+		tStr += "undef_lazy|"
+	}
+	if t.IsDefined() {
+		tStr += "def|"
+	}
+	if t.IsPrivateDefined() {
+		tStr += "priv_def|"
+	}
+	if t.IsPrivateUndefinedNonLazy() {
+		tStr += "pri_undef_nonlazy|"
+	}
+	if t.IsPrivateUndefinedLazy() {
+		tStr += "priv_undef_lazy|"
+	}
+	// tStr += fmt.Sprintf("libord=%d", t.GetLibraryOrdinal())
+	return strings.TrimSuffix(tStr, "|")
+}
+
 const (
-	SELF_LIBRARY_ORDINAL   nListDesc = 0x0
-	MAX_LIBRARY_ORDINAL    nListDesc = 0xfd
-	DYNAMIC_LOOKUP_ORDINAL nListDesc = 0xfe
-	EXECUTABLE_ORDINAL     nListDesc = 0xff
+	SELF_LIBRARY_ORDINAL   NDescType = 0x0
+	MAX_LIBRARY_ORDINAL    NDescType = 0xfd
+	DYNAMIC_LOOKUP_ORDINAL NDescType = 0xfe
+	EXECUTABLE_ORDINAL     NDescType = 0xff
 )
+
+// TODO: add these flags to the NDescType String output
 
 const (
 	/*
@@ -181,21 +206,21 @@ const (
 	 * relocatable .o file (MH_OBJECT filetype). And is used to indicate to the
 	 * static link editor it is never to dead strip the symbol.
 	 */
-	NO_DEAD_STRIP nListDesc = 0x0020 /* symbol is not to be dead stripped */
+	NO_DEAD_STRIP NDescType = 0x0020 /* symbol is not to be dead stripped */
 
 	/*
 	 * The N_DESC_DISCARDED bit of the n_desc field never appears in linked image.
 	 * But is used in very rare cases by the dynamic link editor to mark an in
 	 * memory symbol as discared and longer used for linking.
 	 */
-	DESC_DISCARDED nListDesc = 0x0020 /* symbol is discarded */
+	DESC_DISCARDED NDescType = 0x0020 /* symbol is discarded */
 
 	/*
 	 * The N_WEAK_REF bit of the n_desc field indicates to the dynamic linker that
 	 * the undefined symbol is allowed to be missing and is to have the address of
 	 * zero when missing.
 	 */
-	WEAK_REF nListDesc = 0x0040 /* symbol is weak referenced */
+	WEAK_REF NDescType = 0x0040 /* symbol is weak referenced */
 
 	/*
 	 * The N_WEAK_DEF bit of the n_desc field indicates to the static and dynamic
@@ -203,19 +228,19 @@ const (
 	 * also be used which causes the weak definition to be discared.  Currently this
 	 * is only supported for symbols in coalesed sections.
 	 */
-	WEAK_DEF nListDesc = 0x0080 /* coalesed symbol is a weak definition */
+	WEAK_DEF NDescType = 0x0080 /* coalesed symbol is a weak definition */
 
 	/*
 	 * The N_REF_TO_WEAK bit of the n_desc field indicates to the dynamic linker
 	 * that the undefined symbol should be resolved using flat namespace searching.
 	 */
-	REF_TO_WEAK nListDesc = 0x0080 /* reference to a weak symbol */
+	REF_TO_WEAK NDescType = 0x0080 /* reference to a weak symbol */
 
 	/*
 	 * The N_ARM_THUMB_DEF bit of the n_desc field indicates that the symbol is
 	 * a defintion of a Thumb function.
 	 */
-	ARM_THUMB_DEF nListDesc = 0x0008 /* symbol is a Thumb function (ARM) */
+	ARM_THUMB_DEF NDescType = 0x0008 /* symbol is a Thumb function (ARM) */
 
 	/*
 	 * The N_SYMBOL_RESOLVER bit of the n_desc field indicates that the
@@ -223,19 +248,19 @@ const (
 	 * be called to get the address of the real function to use.
 	 * This bit is only available in .o files (MH_OBJECT filetype)
 	 */
-	SYMBOL_RESOLVER nListDesc = 0x0100
+	SYMBOL_RESOLVER NDescType = 0x0100
 
 	/*
 	 * The N_ALT_ENTRY bit of the n_desc field indicates that the
 	 * symbol is pinned to the previous content.
 	 */
-	ALT_ENTRY nListDesc = 0x0200
+	ALT_ENTRY NDescType = 0x0200
 
 	/*
 	 * The N_COLD_FUNC bit of the n_desc field indicates that the symbol is used
 	 * infrequently and the linker should order it towards the end of the section.
 	 */
-	N_COLD_FUNC nListDesc = 0x0400
+	N_COLD_FUNC NDescType = 0x0400
 )
 
 /*

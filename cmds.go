@@ -412,10 +412,18 @@ func (s *Symtab) Put(b []byte, o binary.ByteOrder) int {
 // A Symbol is a Mach-O 32-bit or 64-bit symbol table entry.
 type Symbol struct {
 	Name  string
-	Type  types.NLType
+	Type  types.NType
 	Sect  uint8
-	Desc  uint16
+	Desc  types.NDescType
 	Value uint64
+}
+
+func (s Symbol) String(m *File) string {
+	var sec string
+	if s.Sect > 0 && int(s.Sect) <= len(m.Sections) {
+		sec = fmt.Sprintf("%s.%s", m.Sections[s.Sect-1].Seg, m.Sections[s.Sect-1].Name)
+	}
+	return fmt.Sprintf("0x%016X \t <type:%s,desc:%s> \t %s", s.Value, s.Type.String(sec), s.Desc, s.Name)
 }
 
 /*******************************************************************************
@@ -529,6 +537,10 @@ type SubFramework struct {
 	LoadBytes
 	types.SubFrameworkCmd
 	Framework string
+}
+
+func (s *SubFramework) String() string {
+	return fmt.Sprintf("%s", s.Framework)
 }
 
 // TODO: LC_SUB_UMBRELLA 0x13	/* sub umbrella */
@@ -1022,6 +1034,7 @@ type DyldExportsTrie struct {
 	types.DyldExportsTrieCmd
 	Offset uint32
 	Size   uint32
+	Data   []byte
 }
 
 func (t *DyldExportsTrie) String() string {
@@ -1036,14 +1049,13 @@ func (t *DyldExportsTrie) String() string {
 type DyldChainedFixups struct {
 	LoadBytes
 	types.DyldChainedFixupsCmd
-	Offset  uint32
-	Size    uint32
-	Imports []types.DcfImport
-	Fixups  []interface{}
+	Offset uint32
+	Size   uint32
+	Data   []byte
 }
 
 func (cf *DyldChainedFixups) String() string {
-	return fmt.Sprintf("Offset: 0x%x, Size: 0x%x, Imports: %d", cf.Offset, cf.Size, len(cf.Imports))
+	return fmt.Sprintf("Offset: 0x%x, Size: 0x%x", cf.Offset, cf.Size)
 }
 
 /*******************************************************************************
