@@ -35,20 +35,24 @@ func Parse(lcdat *bytes.Reader, sr *io.SectionReader, bo binary.ByteOrder) (*Dyl
 		if segInfoOffset == 0 {
 			continue
 		}
+
 		lcdat.Seek(int64(dcf.DyldChainedFixupsHeader.StartsOffset+segInfoOffset), io.SeekStart)
 		if err := binary.Read(lcdat, bo, &dcf.Starts[segIdx].DyldChainedStartsInSegment); err != nil {
 			return nil, err
 		}
-		fmt.Println(dcf.Starts[segIdx].DyldChainedStartsInSegment)
+
 		dcf.Starts[segIdx].PageStarts = make([]DCPtrStart, dcf.Starts[segIdx].DyldChainedStartsInSegment.PageCount)
 		if err := binary.Read(lcdat, bo, &dcf.Starts[segIdx].PageStarts); err != nil {
 			return nil, err
 		}
+
 		for pageIndex := uint16(0); pageIndex < dcf.Starts[segIdx].DyldChainedStartsInSegment.PageCount; pageIndex++ {
 			offsetInPage := dcf.Starts[segIdx].PageStarts[pageIndex]
+
 			if offsetInPage == DYLD_CHAINED_PTR_START_NONE {
 				continue
 			}
+
 			if offsetInPage&DYLD_CHAINED_PTR_START_MULTI != 0 {
 				// 32-bit chains which may need multiple starts per page
 				overflowIndex := offsetInPage & ^DYLD_CHAINED_PTR_START_MULTI
@@ -61,6 +65,7 @@ func Parse(lcdat *bytes.Reader, sr *io.SectionReader, bo binary.ByteOrder) (*Dyl
 					}
 					overflowIndex++
 				}
+
 			} else {
 				// one chain per page
 				if err := dcf.walkDcFixupChain(sr, bo, segIdx, pageIndex, offsetInPage); err != nil {

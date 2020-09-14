@@ -141,7 +141,7 @@ func (d DyldChainedPtrArm64eRebase) High8() uint64 {
 	return types.ExtractBits(uint64(d), 43, 8)
 }
 func (d DyldChainedPtrArm64eRebase) UnpackTarget() uint64 {
-	// TODO: this is supposed to be the offset - prefered load addr, but it can have the auth bit reset? high8 = 0x80
+	// TODO: this is supposed to be the (offset - prefered load addr), but it can have the auth bit reset? high8 = 0x80
 	return d.High8()<<56 | uint64(d.Offset())
 }
 func (d DyldChainedPtrArm64eRebase) Next() uint64 {
