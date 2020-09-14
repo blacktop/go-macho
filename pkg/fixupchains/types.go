@@ -6,19 +6,10 @@ import (
 	"github.com/blacktop/go-macho/types"
 )
 
-type DCSymbolsFormat uint32
-
-const (
-	DC_SFORMAT_UNCOMPRESSED    DCSymbolsFormat = 0
-	DC_SFORMAT_ZLIB_COMPRESSED DCSymbolsFormat = 1
-)
-
 type DyldChainedFixups struct {
 	DyldChainedFixupsHeader
-	DyldChainedStartsInSegment
+	Starts  []DyldChainedStarts
 	Imports []DcfImport
-	Rebases []Rebase
-	Binds   []Bind
 }
 
 type Rebase interface {
@@ -29,14 +20,12 @@ type Bind interface {
 	Ordinal() uint
 }
 
-type DcfImport struct {
-	Name    string
-	Pointer interface{}
-}
+type DCSymbolsFormat uint32
 
-func (i DcfImport) String() string {
-	return fmt.Sprintf("%s, %s", i.Pointer, i.Name)
-}
+const (
+	DC_SFORMAT_UNCOMPRESSED    DCSymbolsFormat = 0
+	DC_SFORMAT_ZLIB_COMPRESSED DCSymbolsFormat = 1
+)
 
 // DyldChainedFixupsHeader object is the header of the LC_DYLD_CHAINED_FIXUPS payload
 type DyldChainedFixupsHeader struct {
@@ -45,14 +34,14 @@ type DyldChainedFixupsHeader struct {
 	ImportsOffset uint32          // offset of imports table in chain_data
 	SymbolsOffset uint32          // offset of symbol strings in chain_data
 	ImportsCount  uint32          // number of imported symbol names
-	ImportsFormat DCImportsFormat // DYLD_CHAINED_IMPORT*
+	ImportsFormat ImportFormat    // DYLD_CHAINED_IMPORT*
 	SymbolsFormat DCSymbolsFormat // 0 => uncompressed, 1 => zlib compressed
 }
 
 // DyldChainedStartsInImage this struct is embedded in LC_DYLD_CHAINED_FIXUPS payload
 type DyldChainedStartsInImage struct {
 	SegCount       uint32
-	SegInfoOffset1 uint32 // []uint32 ARRAY each entry is offset into this struct for that segment
+	SegInfoOffsets []uint32 // []uint32 ARRAY each entry is offset into this struct for that segment
 	// followed by pool of dyld_chain_starts_in_segment data
 }
 
@@ -74,6 +63,14 @@ const (
 	DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE DCPtrKind = 11 // stride 1, x86_64 kernel caches
 	DYLD_CHAINED_PTR_ARM64E_USERLAND24   DCPtrKind = 12 // stride 8, unauth target is vm offset, 24-bit bind
 )
+
+type DyldChainedStarts struct {
+	DyldChainedStartsInSegment
+	PageStarts  []DCPtrStart
+	ChainStarts []uint16
+	Rebases     []Rebase
+	Binds       []Bind
+}
 
 // DyldChainedStartsInSegment object is embedded in dyld_chain_starts_in_image
 // and passed down to the kernel for page-in linking
@@ -103,11 +100,9 @@ const (
 func DcpArm64eIsBind(ptr uint64) bool {
 	return types.ExtractBits(ptr, 62, 1) != 0
 }
-
 func DcpArm64eIsAuth(ptr uint64) bool {
 	return types.ExtractBits(ptr, 63, 1) != 0
 }
-
 func DcpArm64eNext(ptr uint64) uint64 {
 	return types.ExtractBits(uint64(ptr), 51, 11)
 }
@@ -122,7 +117,6 @@ func Generic64IsBind(ptr uint64) bool {
 func Generic32Next(ptr uint32) uint64 {
 	return types.ExtractBits(uint64(ptr), 26, 5)
 }
-
 func Generic32IsBind(ptr uint32) bool {
 	return types.ExtractBits(uint64(ptr), 31, 1) != 0
 }
@@ -140,14 +134,15 @@ func KeyName(keyVal uint64) string {
 // DYLD_CHAINED_PTR_ARM64E
 type DyldChainedPtrArm64eRebase uint64
 
-func (d DyldChainedPtrArm64eRebase) Target() uint64 {
-	return types.ExtractBits(uint64(d), 0, 43) // runtimeOffset
+func (d DyldChainedPtrArm64eRebase) Offset() uint {
+	return uint(types.ExtractBits(uint64(d), 0, 43)) // runtimeOffset
 }
 func (d DyldChainedPtrArm64eRebase) High8() uint64 {
 	return types.ExtractBits(uint64(d), 43, 8)
 }
-func (d DyldChainedPtrArm64eRebase) Offset() uint {
-	return uint(d.High8()<<56 | d.Target())
+func (d DyldChainedPtrArm64eRebase) UnpackTarget() uint64 {
+	// TODO: this is supposed to be the offset - prefered load addr, but it can have the auth bit reset? high8 = 0x80
+	return d.High8()<<56 | uint64(d.Offset())
 }
 func (d DyldChainedPtrArm64eRebase) Next() uint64 {
 	return types.ExtractBits(uint64(d), 51, 11) // 4 or 8-byte stide
@@ -174,7 +169,6 @@ func (d DyldChainedPtrArm64eBind) Zero() uint64 {
 func (d DyldChainedPtrArm64eBind) Addend() uint64 {
 	return types.ExtractBits(uint64(d), 32, 19) // +/-256K
 }
-
 func (d DyldChainedPtrArm64eBind) SignExtendedAddend() uint64 {
 	addend19 := types.ExtractBits(uint64(d), 32, 19) // +/-256K
 	if (addend19 & 0x40000) != 0 {
@@ -192,7 +186,7 @@ func (d DyldChainedPtrArm64eBind) Auth() uint64 {
 	return types.ExtractBits(uint64(d), 63, 1) // == 0
 }
 func (d DyldChainedPtrArm64eBind) String() string {
-	return fmt.Sprintf("ordinal: %d, addend: %x, next: %d, type: bind", d.Ordinal(), d.Addend(), d.Next())
+	return fmt.Sprintf("ordinal: %d, zero: %d, addend: %x, next: %d, type: bind", d.Ordinal(), d.Zero(), d.Addend(), d.Next())
 }
 
 // DYLD_CHAINED_PTR_ARM64E
@@ -220,7 +214,7 @@ func (d DyldChainedPtrArm64eAuthRebase) Auth() uint64 {
 	return types.ExtractBits(uint64(d), 63, 1) // == 1
 }
 func (d DyldChainedPtrArm64eAuthRebase) String() string {
-	return fmt.Sprintf("offset: 0x%08x, diversity: %x, has_diversity: %t, key: %s, next: %d, is_auth: %t, type: rebase",
+	return fmt.Sprintf("offset: 0x%08x, diversity: %x, has_div: %t, key: %s, next: %d, is_auth: %t, type: rebase",
 		d.Offset(),
 		d.Diversity(),
 		d.AddrDiv() == 1,
@@ -257,7 +251,7 @@ func (d DyldChainedPtrArm64eAuthBind) Auth() uint64 {
 	return types.ExtractBits(uint64(d), 63, 1) // == 1
 }
 func (d DyldChainedPtrArm64eAuthBind) String() string {
-	return fmt.Sprintf("ordinal: %d, diversity: %x, has_diversity: %t, key: %s, next: %d, is_auth: %t, type: bind",
+	return fmt.Sprintf("ordinal: %d, diversity: %x, has_div: %t, key: %s, next: %d, is_auth: %t, type: bind",
 		d.Ordinal(),
 		d.Diversity(),
 		d.AddrDiv() == 1,
@@ -376,7 +370,7 @@ func (d DyldChainedPtrArm64eAuthBind24) Auth() uint64 {
 	return types.ExtractBits(uint64(d), 63, 1)
 }
 func (d DyldChainedPtrArm64eAuthBind24) String() string {
-	return fmt.Sprintf("ordinal: %d, diversity: %x, has_diversity: %t, key: %s, next: %d, is_bind: %t, is_auth: %t",
+	return fmt.Sprintf("ordinal: %d, diversity: %x, has_div: %t, key: %s, next: %d, is_bind: %t, is_auth: %t",
 		d.Ordinal(),
 		d.Diversity(),
 		d.AddrDiv() == 1,
@@ -437,7 +431,7 @@ func (d DyldChainedPtr64KernelCacheRebase) IsAuth() uint64 {
 	return types.ExtractBits(uint64(d), 63, 1)
 }
 func (d DyldChainedPtr64KernelCacheRebase) String() string {
-	return fmt.Sprintf("offset: 0x%08x, cacheLevel: %d, diversity: %x, has_diversity: %t, key: %s, next: %d, is_auth: %t",
+	return fmt.Sprintf("offset: 0x%08x, cacheLevel: %d, diversity: %x, has_div: %t, key: %s, next: %d, is_auth: %t",
 		d.Offset(),
 		d.CacheLevel(),
 		d.Diversity(),
@@ -510,69 +504,4 @@ func (d DyldChainedPtr32FirmwareRebase) Next() uint32 {
 }
 func (d DyldChainedPtr32FirmwareRebase) String() string {
 	return fmt.Sprintf("offset: 0x%08x, next: %d", d.Offset(), d.Next())
-}
-
-// DCImportsFormat are values for dyld_chained_fixups_header.imports_format
-type DCImportsFormat uint32
-
-const (
-	DC_IMPORT          DCImportsFormat = 1
-	DC_IMPORT_ADDEND   DCImportsFormat = 2
-	DC_IMPORT_ADDEND64 DCImportsFormat = 3
-)
-
-// DYLD_CHAINED_IMPORT
-type DyldChainedImport uint32
-
-func (d DyldChainedImport) LibOrdinal() uint8 {
-	return uint8(types.ExtractBits(uint64(d), 0, 8))
-}
-func (d DyldChainedImport) WeakImport() bool {
-	return types.ExtractBits(uint64(d), 8, 1) == 1
-}
-func (d DyldChainedImport) NameOffset() uint32 {
-	return uint32(types.ExtractBits(uint64(d), 9, 23))
-}
-
-func (i DyldChainedImport) String() string {
-	return fmt.Sprintf("lib ordinal: %d, is_weak: %t", i.LibOrdinal(), i.WeakImport())
-}
-
-type DyldChainedImport64 uint64
-
-func (d DyldChainedImport64) LibOrdinal() uint64 {
-	return types.ExtractBits(uint64(d), 0, 16)
-}
-func (d DyldChainedImport64) WeakImport() bool {
-	return types.ExtractBits(uint64(d), 16, 1) == 1
-}
-func (d DyldChainedImport64) Reserved() uint64 {
-	return types.ExtractBits(uint64(d), 17, 15)
-}
-func (d DyldChainedImport64) NameOffset() uint64 {
-	return types.ExtractBits(uint64(d), 32, 32)
-}
-
-func (i DyldChainedImport64) String() string {
-	return fmt.Sprintf("lib ordinal: %d, is_weak: %t", i.LibOrdinal(), i.WeakImport())
-}
-
-// DYLD_CHAINED_IMPORT_ADDEND
-type DyldChainedImportAddend struct {
-	Import DyldChainedImport
-	Addend int32
-}
-
-func (i DyldChainedImportAddend) String() string {
-	return fmt.Sprintf("lib ordinal: %d, is_weak: %t, addend: 0x%08x", i.Import.LibOrdinal(), i.Import.WeakImport(), i.Addend)
-}
-
-// DYLD_CHAINED_IMPORT_ADDEND64
-type DyldChainedImportAddend64 struct {
-	Import DyldChainedImport64
-	Addend uint64
-}
-
-func (i DyldChainedImportAddend64) String() string {
-	return fmt.Sprintf("lib ordinal: %d, is_weak: %t, addend: 0x%016x", i.Import.LibOrdinal(), i.Import.WeakImport(), i.Addend)
 }

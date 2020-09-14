@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+
+	"github.com/blacktop/go-macho/types"
 )
 
 func ReadUleb128(r *bytes.Reader) (uint64, error) {
@@ -66,7 +68,7 @@ func ReadUleb128FromBuffer(buf *bytes.Buffer) (uint64, int, error) {
 
 type TrieEntry struct {
 	Name         string
-	Flags        CacheExportFlag
+	Flags        types.ExportFlag
 	Other        uint64
 	Address      uint64
 	FoundInDylib string
@@ -123,7 +125,7 @@ func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {
 				return nil, err
 			}
 
-			flags := CacheExportFlag(symFlagInt)
+			flags := types.ExportFlag(symFlagInt)
 
 			if flags.ReExport() {
 				symOtherInt, err = ReadUleb128(r)

@@ -1078,6 +1078,29 @@ func cstring(b []byte) string {
 	return string(b[0:i])
 }
 
+func (f *File) is64bit() bool {
+	if f.FileHeader.Magic == types.Magic64 {
+		return true
+	}
+	return false
+}
+
+func (f *File) preferredLoadAddress() uint64 {
+	for _, s := range f.Segments() {
+		if strings.EqualFold(s.Name, "__TEXT") {
+			return s.Addr
+		}
+	}
+	return 0
+}
+
+func (f *File) hasChainedFixups() bool {
+	if f.DyldChainedFixups() != nil {
+		return true
+	}
+	return false
+}
+
 func (f *File) readLeUint32(offset int64) (uint32, error) {
 	u32 := make([]byte, 4)
 	if _, err := f.sr.ReadAt(u32, offset); err != nil {
@@ -1112,11 +1135,8 @@ func (f *File) GetVMAddress(offset uint64) (uint64, error) {
 	return 0, fmt.Errorf("offset not within any segments file offset range")
 }
 
-func (f *File) GetBaseAddress() (uint64, error) {
-	for _, seg := range f.Segments() {
-		return seg.Addr, nil
-	}
-	return 0, fmt.Errorf("failed to get first segment addr")
+func (f *File) GetBaseAddress() uint64 {
+	return f.preferredLoadAddress()
 }
 
 func (f *File) GetCString(strVMAdr uint64) (string, error) {
@@ -1415,6 +1435,9 @@ func (f *File) ImportedLibraries() ([]string, error) {
 	var all []string
 	for _, l := range f.Loads {
 		if lib, ok := l.(*Dylib); ok {
+			all = append(all, lib.Name)
+		}
+		if lib, ok := l.(*WeakDylib); ok {
 			all = append(all, lib.Name)
 		}
 	}

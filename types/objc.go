@@ -108,7 +108,7 @@ const (
 type MethodListType struct {
 	EntSizeAndFlags uint32
 	Count           uint32
-	// Space   uint32
+	// Space           uint32
 	// MethodArrayBase uint64
 }
 
@@ -121,6 +121,9 @@ func (ml MethodListType) FixedUp() bool {
 func (ml MethodListType) EntSize() uint32 {
 	return ml.EntSizeAndFlags & 0xfffc
 }
+func (ml MethodListType) String() string {
+	return fmt.Sprintf("entrysize=0x%08x, fixed_up=%t, uniqued=%t", ml.EntSize(), ml.FixedUp(), ml.IsUniqued())
+}
 
 type MethodType struct {
 	NameVMAddr  uint64 // SEL
@@ -128,10 +131,10 @@ type MethodType struct {
 	ImpVMAddr   uint64 // IMP
 }
 
-type Method2Type struct {
-	NameOffset  uint32 // SEL
-	TypesOffset uint32 // const char *
-	ImpOffset   uint32 // IMP
+type MethodSmallType struct {
+	NameOffset  int32 // SEL
+	TypesOffset int32 // const char *
+	ImpOffset   int32 // IMP
 }
 
 type ObjCMethod struct {
