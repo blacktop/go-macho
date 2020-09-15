@@ -524,7 +524,21 @@ func (d *LoadDylinker) String() string {
 	return d.Name
 }
 
-// TODO: LC_ID_DYLINKER	0xf	/* dynamic linker identification */
+/*******************************************************************************
+ * LC_ID_DYLINKER
+ *******************************************************************************/
+
+// DylinkerID dynamic linker identification
+type DylinkerID struct {
+	LoadBytes
+	types.DylinkerIDCmd
+	Name string
+}
+
+func (d *DylinkerID) String() string {
+	return d.Name
+}
+
 // TODO: LC_PREBOUND_DYLIB 0x10	/* modules prebound for a dynamically */
 // 				/*  linked shared library */
 // TODO: LC_ROUTINES	0x11	/* image routines */

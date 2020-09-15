@@ -537,7 +537,6 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.CompatVersion = hdr.CompatVersion.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		// TODO: case types.LcDylinker:
 		case types.LC_LOAD_DYLINKER:
 			var hdr types.DylinkerCmd
 			b := bytes.NewReader(cmddat)
@@ -552,8 +551,20 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.Name = cstring(cmddat[hdr.Name:])
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-
-		// TODO: case types.LcDylinkerID:
+		case types.LC_ID_DYLINKER:
+			var hdr types.DylinkerIDCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &hdr); err != nil {
+				return nil, err
+			}
+			l := new(DylinkerID)
+			l.LoadCmd = cmd
+			if hdr.Name >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in load dylinker command", hdr.Name}
+			}
+			l.Name = cstring(cmddat[hdr.Name:])
+			l.LoadBytes = LoadBytes(cmddat)
+			f.Loads[i] = l
 		// TODO: case types.LcPreboundDylib:
 		// TODO: case types.LcRoutines:
 		case types.LC_SUB_FRAMEWORK:
@@ -1094,7 +1105,7 @@ func (f *File) preferredLoadAddress() uint64 {
 	return 0
 }
 
-func (f *File) hasChainedFixups() bool {
+func (f *File) HasFixups() bool {
 	if f.DyldChainedFixups() != nil {
 		return true
 	}
