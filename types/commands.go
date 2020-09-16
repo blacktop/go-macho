@@ -363,9 +363,9 @@ type LazyLoadDylibCmd DylibCmd // LC_LAZY_LOAD_DYLIB
 type EncryptionInfoCmd struct {
 	LoadCmd // LC_ENCRYPTION_INFO
 	Len     uint32
-	Offset  uint32 // file offset of encrypted range
-	Size    uint32 // file size of encrypted range
-	CryptID uint32 // which enryption system, 0 means not-encrypted yet
+	Offset  uint32           // file offset of encrypted range
+	Size    uint32           // file size of encrypted range
+	CryptID EncryptionSystem // which enryption system, 0 means not-encrypted yet
 }
 
 // A DyldInfoCmd is a Mach-O id dyld info command.

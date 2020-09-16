@@ -539,8 +539,7 @@ func (d *DylinkerID) String() string {
 	return d.Name
 }
 
-// TODO: LC_PREBOUND_DYLIB 0x10	/* modules prebound for a dynamically */
-// 				/*  linked shared library */
+// TODO: LC_PREBOUND_DYLIB 0x10	/* modules prebound for a dynamically linked shared library */
 // TODO: LC_ROUTINES	0x11	/* image routines */
 
 /*******************************************************************************
@@ -685,8 +684,50 @@ func (d *ReExportDylib) String() string {
 	return fmt.Sprintf("%s (%s)", d.Name, d.CurrentVersion)
 }
 
-// TODO: LC_LAZY_LOAD_DYLIB 0x20	/* delay load of dylib until first use */
-// TODO: LC_ENCRYPTION_INFO 0x21	/* encrypted segment information */
+/*******************************************************************************
+ * LC_LAZY_LOAD_DYLIB - delay load of dylib until first use
+ *******************************************************************************/
+
+type LazyLoadDylib Dylib
+
+func (d *LazyLoadDylib) String() string {
+	return fmt.Sprintf("%s (%s)", d.Name, d.CurrentVersion)
+}
+
+/*******************************************************************************
+ * LC_ENCRYPTION_INFO
+ *******************************************************************************/
+
+// A EncryptionInfo represents a Mach-O 32-bit encrypted segment information
+type EncryptionInfo struct {
+	LoadBytes
+	types.EncryptionInfoCmd
+	Offset  uint32                 // file offset of encrypted range
+	Size    uint32                 // file size of encrypted range
+	CryptID types.EncryptionSystem // which enryption system, 0 means not-encrypted yet
+}
+
+func (e *EncryptionInfo) String() string {
+	if e.CryptID == 0 {
+		return fmt.Sprintf("Offset: 0x%x, Size: 0x%x (not-encrypted yet)", e.Offset, e.Size)
+	}
+	return fmt.Sprintf("Offset: 0x%x, Size: 0x%x, CryptID: 0x%x", e.Offset, e.Size, e.CryptID)
+}
+func (e *EncryptionInfo) Copy() *EncryptionInfo {
+	return &EncryptionInfo{EncryptionInfoCmd: e.EncryptionInfoCmd}
+}
+func (e *EncryptionInfo) LoadSize(t *FileTOC) uint32 {
+	return uint32(unsafe.Sizeof(types.EncryptionInfoCmd{}))
+}
+func (e *EncryptionInfo) Put(b []byte, o binary.ByteOrder) int {
+	o.PutUint32(b[0*4:], uint32(e.LoadCmd))
+	o.PutUint32(b[1*4:], e.Len)
+	o.PutUint32(b[2*4:], e.Offset)
+	o.PutUint32(b[3*4:], e.Size)
+	o.PutUint32(b[3*4:], uint32(e.CryptID))
+
+	return int(e.Len)
+}
 
 /*******************************************************************************
  * LC_DYLD_INFO

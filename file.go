@@ -703,8 +703,36 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.CompatVersion = hdr.CompatVersion.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		// TODO: case types.LcLazyLoadDylib:
-		// TODO: case types.LcEncryptionInfo:
+		case types.LC_LAZY_LOAD_DYLIB:
+			var hdr types.LazyLoadDylibCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &hdr); err != nil {
+				return nil, err
+			}
+			l := new(LazyLoadDylib)
+			l.LoadCmd = cmd
+			if hdr.Name >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in load upwardl dylib command", hdr.Name}
+			}
+			l.Name = cstring(cmddat[hdr.Name:])
+			l.Time = hdr.Time
+			l.CurrentVersion = hdr.CurrentVersion.String()
+			l.CompatVersion = hdr.CompatVersion.String()
+			l.LoadBytes = LoadBytes(cmddat)
+			f.Loads[i] = l
+		case types.LC_ENCRYPTION_INFO:
+			var ei types.EncryptionInfoCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &ei); err != nil {
+				return nil, err
+			}
+			l := new(EncryptionInfo)
+			l.LoadCmd = cmd
+			l.Offset = ei.Offset
+			l.Size = ei.Size
+			l.CryptID = ei.CryptID
+			l.LoadBytes = LoadBytes(cmddat)
+			f.Loads[i] = l
 		case types.LC_DYLD_INFO:
 			fallthrough
 		case types.LC_DYLD_INFO_ONLY:
