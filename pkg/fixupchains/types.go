@@ -134,15 +134,14 @@ func KeyName(keyVal uint64) string {
 // DYLD_CHAINED_PTR_ARM64E
 type DyldChainedPtrArm64eRebase uint64
 
-func (d DyldChainedPtrArm64eRebase) Offset() uint {
-	return uint(types.ExtractBits(uint64(d), 0, 43)) // runtimeOffset
+func (d DyldChainedPtrArm64eRebase) Target() uint64 {
+	return types.ExtractBits(uint64(d), 0, 43) // runtimeOffset
 }
 func (d DyldChainedPtrArm64eRebase) High8() uint64 {
 	return types.ExtractBits(uint64(d), 43, 8)
 }
-func (d DyldChainedPtrArm64eRebase) UnpackTarget() uint64 {
-	// TODO: this is supposed to be the (offset - prefered load addr), but it can have the auth bit reset? high8 = 0x80
-	return d.High8()<<56 | uint64(d.Offset())
+func (d DyldChainedPtrArm64eRebase) Offset() uint {
+	return uint(d.High8()<<56 | uint64(d.Target()))
 }
 func (d DyldChainedPtrArm64eRebase) Next() uint64 {
 	return types.ExtractBits(uint64(d), 51, 11) // 4 or 8-byte stide

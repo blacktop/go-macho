@@ -16,6 +16,7 @@ import (
 	"unsafe"
 
 	"github.com/blacktop/go-macho/pkg/codesign"
+	"github.com/blacktop/go-macho/pkg/fixupchains"
 	"github.com/blacktop/go-macho/pkg/trie"
 	"github.com/blacktop/go-macho/types"
 )
@@ -1133,13 +1134,6 @@ func (f *File) preferredLoadAddress() uint64 {
 	return 0
 }
 
-func (f *File) HasFixups() bool {
-	if f.DyldChainedFixups() != nil {
-		return true
-	}
-	return false
-}
-
 func (f *File) readLeUint32(offset int64) (uint32, error) {
 	u32 := make([]byte, 4)
 	if _, err := f.sr.ReadAt(u32, offset); err != nil {
@@ -1339,14 +1333,24 @@ func (f *File) DyldExportsTrie() *DyldExportsTrie {
 	return nil
 }
 
-// DyldChainedFixups returns the dyld chained fixups load command, or nil if none exists.
-func (f *File) DyldChainedFixups() *DyldChainedFixups {
+// HasFixups does macho contain a LC_DYLD_CHAINED_FIXUPS load command
+func (f *File) HasFixups() bool {
 	for _, l := range f.Loads {
-		if s, ok := l.(*DyldChainedFixups); ok {
-			return s
+		if _, ok := l.(*DyldChainedFixups); ok {
+			return true
 		}
 	}
-	return nil
+	return false
+}
+
+// DyldChainedFixups returns the dyld chained fixups.
+func (f *File) DyldChainedFixups() (*fixupchains.DyldChainedFixups, error) {
+	for _, l := range f.Loads {
+		if dcf, ok := l.(*DyldChainedFixups); ok {
+			return fixupchains.Parse(bytes.NewReader(dcf.Data), f.sr, f.ByteOrder)
+		}
+	}
+	return nil, fmt.Errorf("macho does not contain dyld chained fixups")
 }
 
 // DWARF returns the DWARF debug information for the Mach-O file.

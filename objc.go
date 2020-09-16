@@ -224,7 +224,7 @@ func (f *File) GetObjCPlusLoadClasses() ([]types.ObjCClass, error) {
 func (f *File) GetObjCClass(vmaddr uint64) (*types.ObjCClass, error) {
 	var classPtr types.SwiftClassMetadata64
 
-	off, err := f.GetOffset(vmaddr)
+	off, err := f.GetOffset(vmaddr & types.FAST_DATA_MASK64)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert vmaddr 0x%x to offset: %v", vmaddr, err)
 	}
@@ -452,49 +452,72 @@ func (f *File) GetObjCMethodList() ([]types.ObjCMethod, error) {
 
 	for _, sec := range f.FileTOC.Sections {
 		if sec.Seg == "__TEXT" && sec.Name == "__objc_methlist" {
-			f.sr.Seek(int64(sec.Offset), io.SeekStart)
-			if err := binary.Read(f.sr, f.ByteOrder, &methodList); err != nil {
-				return nil, fmt.Errorf("failed to read method_list_t (v2): %v", err)
-			}
 
-			methods := make([]types.Method2Type, methodList.Count)
+			mlr := io.NewSectionReader(f.sr, int64(sec.Offset), int64(sec.Size))
 
-			if err := binary.Read(f.sr, f.ByteOrder, &methods); err != nil {
-				return nil, fmt.Errorf("failed to read method_t(s) (v2): %v", err)
-			}
+			var nextOffset int64
 
-			for _, method := range methods {
-				nameVMAddr, err := f.GetVMAddress(uint64(method.NameOffset))
-				if err != nil {
-					return nil, fmt.Errorf("failed to convert offset 0x%x to vmaddr; %v", method.NameOffset, err)
+			for {
+
+				mlr.Seek(nextOffset, io.SeekStart)
+
+				err := binary.Read(mlr, f.ByteOrder, &methodList)
+
+				if err == io.EOF {
+					break
 				}
-				typesVMAddr, err := f.GetVMAddress(uint64(method.TypesOffset))
+
 				if err != nil {
-					return nil, fmt.Errorf("failed to convert offset 0x%x to vmaddr; %v", method.TypesOffset, err)
+					return nil, fmt.Errorf("failed to read method_list_t (small): %v", err)
 				}
-				impVMAddr, err := f.GetVMAddress(uint64(method.ImpOffset))
-				if err != nil {
-					return nil, fmt.Errorf("failed to convert offset 0x%x to vmaddr; %v", method.ImpOffset, err)
+
+				currOffset, _ := mlr.Seek(0, io.SeekCurrent)
+				nextOffset = currOffset + int64(methodList.EntSize())
+
+				methods := make([]types.MethodSmallType, methodList.Count)
+				if err := binary.Read(mlr, f.ByteOrder, &methods); err != nil {
+					return nil, fmt.Errorf("failed to read method_t(s) (small): %v", err)
 				}
-				n, err := f.GetCString(nameVMAddr)
-				if err != nil {
-					return nil, fmt.Errorf("failed to read cstring at 0x%x; %v", nameVMAddr, err)
+
+				for _, method := range methods {
+					var nameAddr uint32
+					f.sr.Seek(int64(method.NameOffset)+currOffset, io.SeekStart)
+					if err := binary.Read(f.sr, f.ByteOrder, &nameAddr); err != nil {
+						return nil, fmt.Errorf("failed to read method_list_t (small): %v", err)
+					}
+					n, err := f.GetCString(uint64(nameAddr))
+					if err != nil {
+						return nil, fmt.Errorf("failed to read cstring at 0x%x; %v", nameAddr, err)
+					}
+
+					typesVMAddr, err := f.GetVMAddress(uint64(method.TypesOffset) + uint64(currOffset+4))
+					if err != nil {
+						return nil, fmt.Errorf("failed to convert offset 0x%x to vmaddr; %v", method.TypesOffset, err)
+					}
+					t, err := f.GetCString(typesVMAddr)
+					if err != nil {
+						return nil, fmt.Errorf("failed to read cstring at 0x%x; %v", typesVMAddr, err)
+					}
+
+					impVMAddr, err := f.GetVMAddress(uint64(method.ImpOffset) + uint64(currOffset+8))
+					if err != nil {
+						return nil, fmt.Errorf("failed to convert offset 0x%x to vmaddr; %v", method.ImpOffset, err)
+					}
+
+					objcMethods = append(objcMethods, types.ObjCMethod{
+						NameVMAddr:  uint64(nameAddr),
+						TypesVMAddr: typesVMAddr,
+						ImpVMAddr:   impVMAddr,
+						Name:        n,
+						Types:       t,
+						Pointer: types.FilePointer{
+							VMAdder: impVMAddr,
+							// Offset:  0,
+							// Offset:  uint64(method.ImpOffset),
+						},
+					})
 				}
-				t, err := f.GetCString(typesVMAddr)
-				if err != nil {
-					return nil, fmt.Errorf("failed to read cstring at 0x%x; %v", typesVMAddr, err)
-				}
-				objcMethods = append(objcMethods, types.ObjCMethod{
-					NameVMAddr:  nameVMAddr,
-					TypesVMAddr: typesVMAddr,
-					ImpVMAddr:   impVMAddr,
-					Name:        n,
-					Types:       t,
-					Pointer: types.FilePointer{
-						VMAdder: impVMAddr,
-						Offset:  uint64(method.ImpOffset),
-					},
-				})
+
 			}
 
 			return objcMethods, nil
