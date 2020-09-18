@@ -20,6 +20,7 @@ type Rebase interface {
 type Bind interface {
 	Offset() uint64
 	Ordinal() uint64
+	Addend() uint64
 }
 
 type DCSymbolsFormat uint32
@@ -276,6 +277,9 @@ type DyldChainedPtrArm64eAuthBind struct {
 func (d DyldChainedPtrArm64eAuthBind) Offset() uint64 {
 	return d.Fixup
 }
+func (d DyldChainedPtrArm64eAuthBind) Addend() uint64 {
+	return 0
+}
 func (d DyldChainedPtrArm64eAuthBind) Ordinal() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 0, 16)
 }
@@ -448,6 +452,9 @@ type DyldChainedPtrArm64eAuthBind24 struct {
 func (d DyldChainedPtrArm64eAuthBind24) Offset() uint64 {
 	return d.Fixup
 }
+func (d DyldChainedPtrArm64eAuthBind24) Addend() uint64 {
+	return 0
+}
 func (d DyldChainedPtrArm64eAuthBind24) Ordinal() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 0, 24)
 }
@@ -614,8 +621,8 @@ func (d DyldChainedPtr32Bind) Offset() uint64 {
 func (d DyldChainedPtr32Bind) Ordinal() uint64 {
 	return uint64(types.ExtractBits(uint64(d.Pointer), 0, 20))
 }
-func (d DyldChainedPtr32Bind) Addend() uint32 {
-	return uint32(types.ExtractBits(uint64(d.Pointer), 20, 6)) // 0 thru 63
+func (d DyldChainedPtr32Bind) Addend() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 20, 6) // 0 thru 63
 }
 func (d DyldChainedPtr32Bind) Next() uint32 {
 	return uint32(types.ExtractBits(uint64(d.Pointer), 26, 5)) // 4-byte stride
