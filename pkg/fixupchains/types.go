@@ -159,8 +159,18 @@ func (d DyldChainedPtrArm64eRebase) Bind() uint64 {
 func (d DyldChainedPtrArm64eRebase) Auth() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 63, 1) // == 0
 }
+func (d DyldChainedPtrArm64eRebase) Kind() string {
+	return "rebase"
+}
 func (d DyldChainedPtrArm64eRebase) String() string {
-	return fmt.Sprintf("0x%08x:  raw: 0x%016x       rebase: (next: %03d, target: 0x%011x, high8: 0x%02x)", d.Fixup, d.Pointer, d.Next(), d.UnpackTarget(), d.High8())
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: 0x%011x, high8: 0x%02x)",
+		d.Fixup,
+		d.Pointer,
+		d.Kind(),
+		d.Next(),
+		d.UnpackTarget(),
+		d.High8(),
+	)
 }
 
 // DYLD_CHAINED_PTR_ARM64E
@@ -197,8 +207,18 @@ func (d DyldChainedPtrArm64eBind) Bind() uint64 {
 func (d DyldChainedPtrArm64eBind) Auth() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 63, 1) // == 0
 }
+func (d DyldChainedPtrArm64eBind) Kind() string {
+	return "bind"
+}
 func (d DyldChainedPtrArm64eBind) String() string {
-	return fmt.Sprintf("0x%08x:  raw: 0x%016x         bind: (next: %03d, ordinal: %03d, addend: %d)", d.Fixup, d.Pointer, d.Next(), d.Ordinal(), d.SignExtendedAddend())
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, ordinal: %03d, addend: %d)",
+		d.Fixup,
+		d.Pointer,
+		d.Kind(),
+		d.Next(),
+		d.Ordinal(),
+		d.SignExtendedAddend(),
+	)
 }
 
 // DYLD_CHAINED_PTR_ARM64E
@@ -231,15 +251,20 @@ func (d DyldChainedPtrArm64eAuthRebase) Bind() uint64 {
 func (d DyldChainedPtrArm64eAuthRebase) Auth() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 63, 1) // == 1
 }
+func (d DyldChainedPtrArm64eAuthRebase) Kind() string {
+	return "auth-rebase"
+}
 func (d DyldChainedPtrArm64eAuthRebase) String() string {
-	return fmt.Sprintf("0x%08x:  raw: 0x%016x  auth-rebase: (next: %03d, key: %s, addrDiv: %d, diversity: 0x%04x, target: 0x%08x)",
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: 0x%011x, key: %s, addrDiv: %d, diversity: 0x%04x)",
 		d.Fixup,
 		d.Pointer,
+		d.Kind(),
 		d.Next(),
+		d.Target(),
 		KeyName(d.Key()),
 		d.AddrDiv(),
 		d.Diversity(),
-		d.Target())
+	)
 }
 
 // DYLD_CHAINED_PTR_ARM64E
@@ -275,15 +300,20 @@ func (d DyldChainedPtrArm64eAuthBind) Bind() uint64 {
 func (d DyldChainedPtrArm64eAuthBind) Auth() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 63, 1) // == 1
 }
+func (d DyldChainedPtrArm64eAuthBind) Kind() string {
+	return "auth-bind"
+}
 func (d DyldChainedPtrArm64eAuthBind) String() string {
-	return fmt.Sprintf("0x%08x:  raw: 0x%016x    auth-bind: (next: %03d, key: %s, addrDiv: %d, diversity: 0x%04x, ordinal: %03d)",
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, ordinal: %03d, key: %s, addrDiv: %d, diversity: 0x%04x)",
 		d.Fixup,
 		d.Pointer,
+		d.Kind(),
 		d.Next(),
+		d.Ordinal(),
 		KeyName(d.Key()),
 		d.AddrDiv(),
 		d.Diversity(),
-		d.Ordinal())
+	)
 }
 
 // DYLD_CHAINED_PTR_64
@@ -313,10 +343,14 @@ func (d DyldChainedPtr64Rebase) Next() uint64 {
 func (d DyldChainedPtr64Rebase) Bind() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 63, 1) // == 0
 }
+func (d DyldChainedPtr64Rebase) Kind() string {
+	return "ptr64-rebase"
+}
 func (d DyldChainedPtr64Rebase) String() string {
-	return fmt.Sprintf("0x%08x:  raw: 0x%016x ptr64-rebase: (next: %03d, target: 0x%011x, high8: 0x%02x)",
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: 0x%011x, high8: 0x%02x)",
 		d.Fixup,
 		d.Pointer,
+		d.Kind(),
 		d.Next(),
 		d.Target(),
 		d.High8(),
@@ -350,10 +384,14 @@ func (d DyldChainedPtr64RebaseOffset) Next() uint64 {
 func (d DyldChainedPtr64RebaseOffset) Bind() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 63, 1) // == 0
 }
+func (d DyldChainedPtr64RebaseOffset) Kind() string {
+	return "rebase-offset"
+}
 func (d DyldChainedPtr64RebaseOffset) String() string {
-	return fmt.Sprintf("0x%08x:  raw: 0x%016x rebase-offset: (next: %03d, target: 0x%011x, high8: 0x%02x)",
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: 0x%011x, high8: 0x%02x)",
 		d.Fixup,
 		d.Pointer,
+		d.Kind(),
 		d.Next(),
 		d.Target(),
 		d.High8(),
@@ -394,8 +432,11 @@ func (d DyldChainedPtrArm64eBind24) Bind() uint64 {
 func (d DyldChainedPtrArm64eBind24) Auth() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 63, 1)
 }
+func (d DyldChainedPtrArm64eBind24) Kind() string {
+	return "arm64e bind24"
+}
 func (d DyldChainedPtrArm64eBind24) String() string {
-	return fmt.Sprintf("0x%08x:  raw: 0x%016x       bind24: (next: %03d, ordinal: %03d, addend: %d)", d.Fixup, d.Pointer, d.Next(), d.Ordinal(), d.SignExtendedAddend())
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, ordinal: %03d, addend: %d)", d.Fixup, d.Pointer, d.Kind(), d.Next(), d.Ordinal(), d.SignExtendedAddend())
 }
 
 // DYLD_CHAINED_PTR_ARM64E_USERLAND24
@@ -431,15 +472,20 @@ func (d DyldChainedPtrArm64eAuthBind24) Bind() uint64 {
 func (d DyldChainedPtrArm64eAuthBind24) Auth() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 63, 1)
 }
+func (d DyldChainedPtrArm64eAuthBind24) Kind() string {
+	return "auth-bind24"
+}
 func (d DyldChainedPtrArm64eAuthBind24) String() string {
-	return fmt.Sprintf("0x%08x:  raw: 0x%016x  auth-bind24: (next: %03d, key: %s, addrDiv: %d, diversity: 0x%04x, ordinal: %03d)",
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, key: %s, addrDiv: %d, diversity: 0x%04x, ordinal: %03d)",
 		d.Fixup,
 		d.Pointer,
+		d.Kind(),
 		d.Next(),
 		KeyName(d.Key()),
 		d.AddrDiv(),
 		d.Diversity(),
-		d.Ordinal())
+		d.Ordinal(),
+	)
 }
 
 // DYLD_CHAINED_PTR_64
@@ -466,10 +512,14 @@ func (d DyldChainedPtr64Bind) Next() uint64 {
 func (d DyldChainedPtr64Bind) Bind() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 63, 1) // == 1
 }
+func (d DyldChainedPtr64Bind) Kind() string {
+	return "ptr64-bind"
+}
 func (d DyldChainedPtr64Bind) String() string {
-	return fmt.Sprintf("0x%08x:  raw: 0x%016x   ptr64-bind: (next: %03d, ordinal: %06x, addend: %d)",
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, ordinal: %06x, addend: %d)",
 		d.Fixup,
 		d.Pointer,
+		d.Kind(),
 		d.Next(),
 		d.Ordinal(),
 		d.Addend(),
@@ -506,10 +556,14 @@ func (d DyldChainedPtr64KernelCacheRebase) Next() uint64 {
 func (d DyldChainedPtr64KernelCacheRebase) IsAuth() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 63, 1)
 }
+func (d DyldChainedPtr64KernelCacheRebase) Kind() string {
+	return "kcache-rebase"
+}
 func (d DyldChainedPtr64KernelCacheRebase) String() string {
-	return fmt.Sprintf("0x%08x:  raw: 0x%016x kcache-rebase: (next: %03d, key: %s, addrDiv: %d, diversity: 0x%04x, target: 0x%08x, cacheLevel: %d)",
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, key: %s, addrDiv: %d, diversity: 0x%04x, target: 0x%08x, cacheLevel: %d)",
 		d.Fixup,
 		d.Pointer,
+		d.Kind(),
 		d.Next(),
 		KeyName(d.Key()),
 		d.AddrDiv(),
@@ -541,8 +595,11 @@ func (d DyldChainedPtr32Rebase) Next() uint32 {
 func (d DyldChainedPtr32Rebase) Bind() uint32 {
 	return uint32(types.ExtractBits(uint64(d.Pointer), 31, 1)) // == 0
 }
+func (d DyldChainedPtr32Rebase) Kind() string {
+	return "ptr32-rebase"
+}
 func (d DyldChainedPtr32Rebase) String() string {
-	return fmt.Sprintf("0x%08x:  raw: 0x%08x  rebase: (next:%02d target: 0x%07x)", d.Fixup, d.Pointer, d.Next(), d.Target())
+	return fmt.Sprintf("0x%08x:  raw: 0x%08x %16s: (next:%02d target: 0x%07x)", d.Fixup, d.Pointer, d.Kind(), d.Next(), d.Target())
 }
 
 // DYLD_CHAINED_PTR_32
@@ -566,8 +623,11 @@ func (d DyldChainedPtr32Bind) Next() uint32 {
 func (d DyldChainedPtr32Bind) Bind() uint32 {
 	return uint32(types.ExtractBits(uint64(d.Pointer), 31, 1)) // == 1
 }
+func (d DyldChainedPtr32Bind) Kind() string {
+	return "ptr32-bind"
+}
 func (d DyldChainedPtr32Bind) String() string {
-	return fmt.Sprintf("0x%08x:  raw: 0x%08x    bind: (next:%02d ordinal:%05x addend:%d)", d.Fixup, d.Pointer, d.Next(), d.Ordinal(), d.Addend())
+	return fmt.Sprintf("0x%08x:  raw: 0x%08x %16s: (next:%02d ordinal:%05x addend:%d)", d.Fixup, d.Pointer, d.Kind(), d.Next(), d.Ordinal(), d.Addend())
 }
 
 // DYLD_CHAINED_PTR_32_CACHE
@@ -585,8 +645,11 @@ func (d DyldChainedPtr32CacheRebase) Target() uint64 {
 func (d DyldChainedPtr32CacheRebase) Next() uint32 {
 	return uint32(types.ExtractBits(uint64(d.Pointer), 30, 2)) // 4-byte stride
 }
+func (d DyldChainedPtr32CacheRebase) Kind() string {
+	return "cache-rebase"
+}
 func (d DyldChainedPtr32CacheRebase) String() string {
-	return fmt.Sprintf("0x%08x:  raw: 0x%08x  rebase: (next:%02d target: 0x%07x)", d.Fixup, d.Pointer, d.Next(), d.Target())
+	return fmt.Sprintf("0x%08x:  raw: 0x%08x %16s: (next:%02d target: 0x%07x)", d.Fixup, d.Pointer, d.Kind(), d.Next(), d.Target())
 }
 
 // DYLD_CHAINED_PTR_32_FIRMWARE
@@ -604,6 +667,9 @@ func (d DyldChainedPtr32FirmwareRebase) Target() uint64 {
 func (d DyldChainedPtr32FirmwareRebase) Next() uint32 {
 	return uint32(types.ExtractBits(uint64(d.Pointer), 26, 6)) // 4-byte stride
 }
+func (d DyldChainedPtr32FirmwareRebase) Kind() string {
+	return "firmware-rebase"
+}
 func (d DyldChainedPtr32FirmwareRebase) String() string {
-	return fmt.Sprintf("0x%08x:  raw: 0x%08x  rebase: (next:%02d target: 0x%07x)", d.Fixup, d.Pointer, d.Next(), d.Target())
+	return fmt.Sprintf("0x%08x:  raw: 0x%08x %16s: (next:%02d target: 0x%07x)", d.Fixup, d.Pointer, d.Kind(), d.Next(), d.Target())
 }
