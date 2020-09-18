@@ -19,6 +19,7 @@ type Import interface {
 	LibOrdinal() int
 	WeakImport() bool
 	NameOffset() uint64
+	Addend() uint64
 }
 
 type DcfImport struct {
@@ -42,15 +43,17 @@ func (d DyldChainedImport) WeakImport() bool {
 func (d DyldChainedImport) NameOffset() uint64 {
 	return types.ExtractBits(uint64(d), 9, 23)
 }
-
+func (d DyldChainedImport) Addend() uint64 {
+	return 0
+}
 func (i DyldChainedImport) String() string {
 	return fmt.Sprintf("lib ordinal: %2d, is_weak: %t", i.LibOrdinal(), i.WeakImport())
 }
 
 // DYLD_CHAINED_IMPORT_ADDEND
 type DyldChainedImportAddend struct {
-	Import DyldChainedImport
-	Addend int32
+	Import    DyldChainedImport
+	AddendVal int32
 }
 
 func (d DyldChainedImportAddend) LibOrdinal() int {
@@ -61,6 +64,9 @@ func (d DyldChainedImportAddend) WeakImport() bool {
 }
 func (d DyldChainedImportAddend) NameOffset() uint64 {
 	return d.Import.NameOffset()
+}
+func (d DyldChainedImportAddend) Addend() uint64 {
+	return uint64(d.AddendVal)
 }
 
 func (i DyldChainedImportAddend) String() string {
@@ -81,15 +87,17 @@ func (d DyldChainedImport64) Reserved() uint64 {
 func (d DyldChainedImport64) NameOffset() uint64 {
 	return types.ExtractBits(uint64(d), 32, 32)
 }
-
+func (d DyldChainedImport64) Addend() uint64 {
+	return 0
+}
 func (i DyldChainedImport64) String() string {
 	return fmt.Sprintf("lib ordinal: %2d, is_weak: %t", i.LibOrdinal(), i.WeakImport())
 }
 
 // DYLD_CHAINED_IMPORT_ADDEND64
 type DyldChainedImportAddend64 struct {
-	Import DyldChainedImport64
-	Addend uint64
+	Import    DyldChainedImport64
+	AddendVal uint64
 }
 
 func (d DyldChainedImportAddend64) LibOrdinal() int {
@@ -101,7 +109,9 @@ func (d DyldChainedImportAddend64) WeakImport() bool {
 func (d DyldChainedImportAddend64) NameOffset() uint64 {
 	return d.Import.NameOffset()
 }
-
+func (d DyldChainedImportAddend64) Addend() uint64 {
+	return d.AddendVal
+}
 func (i DyldChainedImportAddend64) String() string {
 	return fmt.Sprintf("lib ordinal: %2d, is_weak: %t, addend: 0x%016x", i.LibOrdinal(), i.WeakImport(), i.Addend)
 }
