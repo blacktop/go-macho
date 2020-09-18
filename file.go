@@ -1474,7 +1474,7 @@ func (f *File) ImportedSymbolNames() ([]string, error) {
 // ImportedLibraries returns the paths of all libraries
 // referred to by the binary f that are expected to be
 // linked with the binary at dynamic link time.
-func (f *File) ImportedLibraries() ([]string, error) {
+func (f *File) ImportedLibraries() []string {
 	var all []string
 	for _, l := range f.Loads {
 		if lib, ok := l.(*Dylib); ok {
@@ -1484,7 +1484,34 @@ func (f *File) ImportedLibraries() ([]string, error) {
 			all = append(all, lib.Name)
 		}
 	}
-	return all, nil
+	return all
+}
+
+// LibraryOrdinalName returns the depancy library oridinal's name
+func (f *File) LibraryOrdinalName(libraryOrdinal int) string {
+	dylibs := f.ImportedLibraries()
+
+	if libraryOrdinal > 0 {
+		path := dylibs[libraryOrdinal-1]
+		if libraryOrdinal > len(dylibs) {
+			return "ordinal-too-large"
+		}
+		parts := strings.Split(path, "/")
+		return parts[len(parts)-1]
+	}
+
+	switch libraryOrdinal {
+	case types.BIND_SPECIAL_DYLIB_SELF:
+		return "this-image"
+	case types.BIND_SPECIAL_DYLIB_MAIN_EXECUTABLE:
+		return "main-executable"
+	case types.BIND_SPECIAL_DYLIB_FLAT_LOOKUP:
+		return "flat-namespace"
+	case types.BIND_SPECIAL_DYLIB_WEAK_LOOKUP:
+		return "weak-coalesce"
+	default:
+		return "unknown-ordinal"
+	}
 }
 
 func (f *File) FindSymbolAddress(symbol string) (uint64, error) {
