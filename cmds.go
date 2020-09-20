@@ -666,12 +666,20 @@ func (c *CodeSignature) String() string {
 type SplitInfo struct {
 	LoadBytes
 	types.SegmentSplitInfoCmd
-	Offset uint32
-	Size   uint32
+	Offset  uint32
+	Size    uint32
+	Version uint8
+	Offsets []uint64
 }
 
 func (s *SplitInfo) String() string {
-	return fmt.Sprintf("offset=0x%08x-0x%08x, size=%5d", s.Offset, s.Offset+s.Size, s.Size)
+	version := "1"
+	if s.Version == types.DYLD_CACHE_ADJ_V2_FORMAT {
+		version = "format=v2"
+	} else {
+		version = fmt.Sprintf("kind=0x%x", s.Version)
+	}
+	return fmt.Sprintf("offset=0x%08x-0x%08x, size=%5d, %s", s.Offset, s.Offset+s.Size, s.Size, version)
 }
 
 /*******************************************************************************

@@ -686,6 +686,29 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.Offset = hdr.Offset
 			l.Size = hdr.Size
 			l.LoadBytes = LoadBytes(cmddat)
+			ldat := make([]byte, l.Size)
+			if _, err := r.ReadAt(ldat, int64(l.Offset)); err != nil {
+				return nil, err
+			}
+			fsr := bytes.NewReader(ldat)
+			if err := binary.Read(fsr, bo, &l.Version); err != nil {
+				return nil, err
+			}
+			// var offset uint64
+			// for {
+			// 	o, err := trie.ReadUleb128(fsr)
+			// 	if err == io.EOF {
+			// 		break
+			// 	}
+			// 	if err != nil {
+			// 		return nil, err
+			// 	}
+			// 	// if o == 0 {
+			// 	// 	break
+			// 	// }
+			// 	offset += o
+			// 	l.Offsets = append(l.Offsets, offset)
+			// }
 			f.Loads[i] = l
 		case types.LC_REEXPORT_DYLIB:
 			var hdr types.ReExportDylibCmd
@@ -1481,6 +1504,9 @@ func (f *File) ImportedLibraries() []string {
 			all = append(all, lib.Name)
 		}
 		if lib, ok := l.(*WeakDylib); ok {
+			all = append(all, lib.Name)
+		}
+		if lib, ok := l.(*ReExportDylib); ok {
 			all = append(all, lib.Name)
 		}
 	}
