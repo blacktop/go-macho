@@ -1369,8 +1369,23 @@ func (f *File) HasFixups() bool {
 // DyldChainedFixups returns the dyld chained fixups.
 func (f *File) DyldChainedFixups() (*fixupchains.DyldChainedFixups, error) {
 	for _, l := range f.Loads {
-		if dcf, ok := l.(*DyldChainedFixups); ok {
-			return fixupchains.Parse(bytes.NewReader(dcf.Data), f.sr, f.ByteOrder)
+		if dcfLC, ok := l.(*DyldChainedFixups); ok {
+			dcf := fixupchains.NewChainedFixups(bytes.NewReader(dcfLC.Data), f.sr, f.ByteOrder)
+			if err := dcf.ParseStarts(); err != nil {
+				return nil, err
+			}
+			segs := f.Segments()
+			for idx, start := range dcf.Starts {
+				if start.PageStarts != nil {
+					// Replacing SegmentOffset(vmaddr) with FileOffset
+					// (for static analysis of binaries with split segs
+					// since we aren't actually loading the MachO
+					// ref: void Adjustor<P>::adjustChainedFixups() in
+					// dyld-750.6/dyld3/shared-cache/AdjustDylibSegments.cpp
+					dcf.Starts[idx].SegmentOffset = segs[idx].Offset
+				}
+			}
+			return dcf.Parse()
 		}
 	}
 	return nil, fmt.Errorf("macho does not contain dyld chained fixups")

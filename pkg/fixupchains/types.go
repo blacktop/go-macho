@@ -1,7 +1,10 @@
 package fixupchains
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
+	"io"
 
 	"github.com/blacktop/go-macho/types"
 )
@@ -10,6 +13,9 @@ type DyldChainedFixups struct {
 	DyldChainedFixupsHeader
 	Starts  []DyldChainedStarts
 	Imports []DcfImport
+	r       *bytes.Reader
+	sr      *io.SectionReader
+	bo      binary.ByteOrder
 }
 
 type Rebase interface {

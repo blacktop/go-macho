@@ -9,45 +9,32 @@ import (
 	"strings"
 )
 
+// NewChainedFixups creates a new DyldChainedFixups instance
+func NewChainedFixups(lcdat *bytes.Reader, sr *io.SectionReader, bo binary.ByteOrder) *DyldChainedFixups {
+	return &DyldChainedFixups{
+		r:  lcdat,
+		sr: sr,
+		bo: bo,
+	}
+}
+
 // Parse parses a LC_DYLD_CHAINED_FIXUPS load command
-func Parse(lcdat *bytes.Reader, sr *io.SectionReader, bo binary.ByteOrder) (*DyldChainedFixups, error) {
+func (dcf *DyldChainedFixups) Parse() (*DyldChainedFixups, error) {
 
-	dcf := &DyldChainedFixups{}
-
-	if err := binary.Read(lcdat, bo, &dcf.DyldChainedFixupsHeader); err != nil {
-		return nil, err
+	if dcf.Starts == nil {
+		if err := dcf.ParseStarts(); err != nil {
+			return nil, err
+		}
 	}
 
-	lcdat.Seek(int64(dcf.DyldChainedFixupsHeader.StartsOffset), io.SeekStart)
+	for segIdx, start := range dcf.Starts {
 
-	var segCount uint32
-	if err := binary.Read(lcdat, bo, &segCount); err != nil {
-		return nil, err
-	}
-
-	dcf.Starts = make([]DyldChainedStarts, segCount)
-	segInfoOffsets := make([]uint32, segCount)
-	if err := binary.Read(lcdat, bo, &segInfoOffsets); err != nil {
-		return nil, err
-	}
-
-	for segIdx, segInfoOffset := range segInfoOffsets {
-		if segInfoOffset == 0 {
+		if start.PageStarts == nil {
 			continue
 		}
 
-		lcdat.Seek(int64(dcf.DyldChainedFixupsHeader.StartsOffset+segInfoOffset), io.SeekStart)
-		if err := binary.Read(lcdat, bo, &dcf.Starts[segIdx].DyldChainedStartsInSegment); err != nil {
-			return nil, err
-		}
-
-		dcf.Starts[segIdx].PageStarts = make([]DCPtrStart, dcf.Starts[segIdx].DyldChainedStartsInSegment.PageCount)
-		if err := binary.Read(lcdat, bo, &dcf.Starts[segIdx].PageStarts); err != nil {
-			return nil, err
-		}
-
-		for pageIndex := uint16(0); pageIndex < dcf.Starts[segIdx].DyldChainedStartsInSegment.PageCount; pageIndex++ {
-			offsetInPage := dcf.Starts[segIdx].PageStarts[pageIndex]
+		for pageIndex := uint16(0); pageIndex < start.DyldChainedStartsInSegment.PageCount; pageIndex++ {
+			offsetInPage := start.PageStarts[pageIndex]
 
 			if offsetInPage == DYLD_CHAINED_PTR_START_NONE {
 				continue
@@ -58,9 +45,9 @@ func Parse(lcdat *bytes.Reader, sr *io.SectionReader, bo binary.ByteOrder) (*Dyl
 				overflowIndex := offsetInPage & ^DYLD_CHAINED_PTR_START_MULTI
 				chainEnd := false
 				for !chainEnd {
-					chainEnd = (dcf.Starts[segIdx].PageStarts[overflowIndex]&DYLD_CHAINED_PTR_START_LAST != 0)
-					offsetInPage = (dcf.Starts[segIdx].PageStarts[overflowIndex] & ^DYLD_CHAINED_PTR_START_LAST)
-					if err := dcf.walkDcFixupChain(sr, bo, segIdx, pageIndex, offsetInPage); err != nil {
+					chainEnd = (start.PageStarts[overflowIndex]&DYLD_CHAINED_PTR_START_LAST != 0)
+					offsetInPage = (start.PageStarts[overflowIndex] & ^DYLD_CHAINED_PTR_START_LAST)
+					if err := dcf.walkDcFixupChain(segIdx, pageIndex, offsetInPage); err != nil {
 						return nil, err
 					}
 					overflowIndex++
@@ -68,7 +55,7 @@ func Parse(lcdat *bytes.Reader, sr *io.SectionReader, bo binary.ByteOrder) (*Dyl
 
 			} else {
 				// one chain per page
-				if err := dcf.walkDcFixupChain(sr, bo, segIdx, pageIndex, offsetInPage); err != nil {
+				if err := dcf.walkDcFixupChain(segIdx, pageIndex, offsetInPage); err != nil {
 					return nil, err
 				}
 			}
@@ -76,27 +63,67 @@ func Parse(lcdat *bytes.Reader, sr *io.SectionReader, bo binary.ByteOrder) (*Dyl
 	}
 
 	// Parse Imports
-	dcf.parseImports(lcdat, bo)
+	dcf.parseImports()
 
 	return dcf, nil
 }
 
-func (dcf *DyldChainedFixups) walkDcFixupChain(sr *io.SectionReader, bo binary.ByteOrder, segIdx int, pageIndex uint16, offsetInPage DCPtrStart) error {
+// ParseStarts parses the DyldChainedStartsInSegment(s)
+func (dcf *DyldChainedFixups) ParseStarts() error {
+
+	if err := binary.Read(dcf.r, dcf.bo, &dcf.DyldChainedFixupsHeader); err != nil {
+		return err
+	}
+
+	dcf.r.Seek(int64(dcf.DyldChainedFixupsHeader.StartsOffset), io.SeekStart)
+
+	var segCount uint32
+	if err := binary.Read(dcf.r, dcf.bo, &segCount); err != nil {
+		return err
+	}
+
+	dcf.Starts = make([]DyldChainedStarts, segCount)
+	segInfoOffsets := make([]uint32, segCount)
+	if err := binary.Read(dcf.r, dcf.bo, &segInfoOffsets); err != nil {
+		return err
+	}
+
+	for segIdx, segInfoOffset := range segInfoOffsets {
+		if segInfoOffset == 0 {
+			continue
+		}
+
+		dcf.r.Seek(int64(dcf.DyldChainedFixupsHeader.StartsOffset+segInfoOffset), io.SeekStart)
+		if err := binary.Read(dcf.r, dcf.bo, &dcf.Starts[segIdx].DyldChainedStartsInSegment); err != nil {
+			return err
+		}
+
+		dcf.Starts[segIdx].PageStarts = make([]DCPtrStart, dcf.Starts[segIdx].DyldChainedStartsInSegment.PageCount)
+		if err := binary.Read(dcf.r, dcf.bo, &dcf.Starts[segIdx].PageStarts); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, offsetInPage DCPtrStart) error {
 
 	var dcPtr uint32
 	var dcPtr64 uint64
 	var next uint64
 
 	chainEnd := false
+
 	pageContentStart := dcf.Starts[segIdx].DyldChainedStartsInSegment.SegmentOffset + uint64(pageIndex*dcf.Starts[segIdx].DyldChainedStartsInSegment.PageSize)
 
 	for !chainEnd {
 		fixupLocation := pageContentStart + uint64(offsetInPage) + next
-		sr.Seek(int64(fixupLocation), io.SeekStart)
+		dcf.sr.Seek(int64(fixupLocation), io.SeekStart)
 
 		switch dcf.Starts[segIdx].DyldChainedStartsInSegment.PointerFormat {
 		case DYLD_CHAINED_PTR_32:
-			if err := binary.Read(sr, bo, &dcPtr); err != nil {
+			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr); err != nil {
 				return err
 			}
 			if Generic32IsBind(dcPtr) {
@@ -115,7 +142,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(sr *io.SectionReader, bo binary.B
 			}
 			next += Generic32Next(dcPtr) * 4
 		case DYLD_CHAINED_PTR_32_CACHE:
-			if err := binary.Read(sr, bo, &dcPtr); err != nil {
+			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr); err != nil {
 				return err
 			}
 			dcf.Starts[segIdx].Rebases = append(dcf.Starts[segIdx].Rebases, DyldChainedPtr32CacheRebase{
@@ -127,7 +154,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(sr *io.SectionReader, bo binary.B
 			}
 			next += Generic32Next(dcPtr) * 4
 		case DYLD_CHAINED_PTR_32_FIRMWARE:
-			if err := binary.Read(sr, bo, &dcPtr); err != nil {
+			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr); err != nil {
 				return err
 			}
 			dcf.Starts[segIdx].Rebases = append(dcf.Starts[segIdx].Rebases, DyldChainedPtr32FirmwareRebase{
@@ -139,7 +166,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(sr *io.SectionReader, bo binary.B
 			}
 			next += Generic32Next(dcPtr) * 4
 		case DYLD_CHAINED_PTR_64: // target is vmaddr
-			if err := binary.Read(sr, bo, &dcPtr64); err != nil {
+			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr64); err != nil {
 				return err
 			}
 			if Generic64IsBind(dcPtr64) {
@@ -158,7 +185,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(sr *io.SectionReader, bo binary.B
 			}
 			next += Generic64Next(dcPtr64) * 4
 		case DYLD_CHAINED_PTR_64_OFFSET: // target is vm offset
-			if err := binary.Read(sr, bo, &dcPtr64); err != nil {
+			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr64); err != nil {
 				return err
 			}
 			dcf.Starts[segIdx].Rebases = append(dcf.Starts[segIdx].Rebases, DyldChainedPtr64RebaseOffset{
@@ -170,7 +197,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(sr *io.SectionReader, bo binary.B
 			}
 			next += Generic64Next(dcPtr64) * 4
 		case DYLD_CHAINED_PTR_64_KERNEL_CACHE:
-			if err := binary.Read(sr, bo, &dcPtr64); err != nil {
+			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr64); err != nil {
 				return err
 			}
 			dcf.Starts[segIdx].Rebases = append(dcf.Starts[segIdx].Rebases, DyldChainedPtr64KernelCacheRebase{
@@ -182,7 +209,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(sr *io.SectionReader, bo binary.B
 			}
 			next += Generic64Next(dcPtr64) * 4
 		case DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE: // stride 1, x86_64 kernel caches
-			if err := binary.Read(sr, bo, &dcPtr64); err != nil {
+			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr64); err != nil {
 				return err
 			}
 			dcf.Starts[segIdx].Rebases = append(dcf.Starts[segIdx].Rebases, DyldChainedPtr64KernelCacheRebase{
@@ -194,7 +221,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(sr *io.SectionReader, bo binary.B
 			}
 			next += Generic64Next(dcPtr64)
 		case DYLD_CHAINED_PTR_ARM64E_KERNEL: // stride 4, unauth target is vm offset
-			if err := binary.Read(sr, bo, &dcPtr64); err != nil {
+			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr64); err != nil {
 				return err
 			}
 			if !DcpArm64eIsBind(dcPtr64) && !DcpArm64eIsAuth(dcPtr64) {
@@ -223,7 +250,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(sr *io.SectionReader, bo binary.B
 			}
 			next += DcpArm64eNext(dcPtr64) * 4
 		case DYLD_CHAINED_PTR_ARM64E_FIRMWARE: // stride 4, unauth target is vmaddr
-			if err := binary.Read(sr, bo, &dcPtr64); err != nil {
+			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr64); err != nil {
 				return err
 			}
 			if !DcpArm64eIsBind(dcPtr64) && !DcpArm64eIsAuth(dcPtr64) {
@@ -254,7 +281,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(sr *io.SectionReader, bo binary.B
 		case DYLD_CHAINED_PTR_ARM64E: // stride 8, unauth target is vmaddr
 			fallthrough
 		case DYLD_CHAINED_PTR_ARM64E_USERLAND: // stride 8, unauth target is vm offset
-			if err := binary.Read(sr, bo, &dcPtr64); err != nil {
+			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr64); err != nil {
 				return err
 			}
 			if !DcpArm64eIsBind(dcPtr64) && !DcpArm64eIsAuth(dcPtr64) {
@@ -283,7 +310,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(sr *io.SectionReader, bo binary.B
 			}
 			next += DcpArm64eNext(dcPtr64) * 8
 		case DYLD_CHAINED_PTR_ARM64E_USERLAND24: // stride 8, unauth target is vm offset, 24-bit bind
-			if err := binary.Read(sr, bo, &dcPtr64); err != nil {
+			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr64); err != nil {
 				return err
 			}
 			if DcpArm64eIsBind(dcPtr64) && DcpArm64eIsAuth(dcPtr64) {
@@ -311,16 +338,16 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(sr *io.SectionReader, bo binary.B
 	return nil
 }
 
-func (dcf *DyldChainedFixups) parseImports(r *bytes.Reader, bo binary.ByteOrder) error {
+func (dcf *DyldChainedFixups) parseImports() error {
 
 	var imports []Import
 
-	r.Seek(int64(dcf.ImportsOffset), io.SeekStart)
+	dcf.r.Seek(int64(dcf.ImportsOffset), io.SeekStart)
 
 	switch dcf.DyldChainedFixupsHeader.ImportsFormat {
 	case DC_IMPORT:
 		ii := make([]DyldChainedImport, dcf.ImportsCount)
-		if err := binary.Read(r, bo, &ii); err != nil {
+		if err := binary.Read(dcf.r, dcf.bo, &ii); err != nil {
 			return err
 		}
 		for _, i := range ii {
@@ -328,7 +355,7 @@ func (dcf *DyldChainedFixups) parseImports(r *bytes.Reader, bo binary.ByteOrder)
 		}
 	case DC_IMPORT_ADDEND:
 		ii := make([]DyldChainedImportAddend, dcf.ImportsCount)
-		if err := binary.Read(r, bo, &ii); err != nil {
+		if err := binary.Read(dcf.r, dcf.bo, &ii); err != nil {
 			return err
 		}
 		for _, i := range ii {
@@ -336,7 +363,7 @@ func (dcf *DyldChainedFixups) parseImports(r *bytes.Reader, bo binary.ByteOrder)
 		}
 	case DC_IMPORT_ADDEND64:
 		ii := make([]DyldChainedImportAddend64, dcf.ImportsCount)
-		if err := binary.Read(r, bo, &ii); err != nil {
+		if err := binary.Read(dcf.r, dcf.bo, &ii); err != nil {
 			return err
 		}
 		for _, i := range ii {
@@ -344,7 +371,7 @@ func (dcf *DyldChainedFixups) parseImports(r *bytes.Reader, bo binary.ByteOrder)
 		}
 	}
 
-	symbolsPool := io.NewSectionReader(r, int64(dcf.SymbolsOffset), r.Size()-int64(dcf.SymbolsOffset))
+	symbolsPool := io.NewSectionReader(dcf.r, int64(dcf.SymbolsOffset), dcf.r.Size()-int64(dcf.SymbolsOffset))
 	for _, i := range imports {
 		symbolsPool.Seek(int64(i.NameOffset()), io.SeekStart)
 		s, err := bufio.NewReader(symbolsPool).ReadString('\x00')
