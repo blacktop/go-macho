@@ -100,9 +100,10 @@ type ObjCImageInfo struct {
 type MLFlags uint32
 
 const (
-	METHOD_LIST_FLAGS_MASK         = 3
+	METHOD_LIST_FLAGS_MASK uint32  = 0xffff0003
 	METHOD_LIST_IS_UNIQUED MLFlags = 1
 	METHOD_LIST_FIXED_UP   MLFlags = 3
+	METHOD_LIST_SMALL              = 0x80000000
 )
 
 type MethodListType struct {
@@ -113,16 +114,19 @@ type MethodListType struct {
 }
 
 func (ml MethodListType) IsUniqued() bool {
-	return MLFlags(ml.EntSizeAndFlags&METHOD_LIST_FLAGS_MASK)&METHOD_LIST_IS_UNIQUED != 0
+	return MLFlags(ml.EntSizeAndFlags&METHOD_LIST_FLAGS_MASK)&METHOD_LIST_IS_UNIQUED == 1
 }
 func (ml MethodListType) FixedUp() bool {
-	return MLFlags(ml.EntSizeAndFlags)&METHOD_LIST_FLAGS_MASK == METHOD_LIST_FIXED_UP
+	return MLFlags(ml.EntSizeAndFlags&METHOD_LIST_FLAGS_MASK)&METHOD_LIST_FIXED_UP == 1
+}
+func (ml MethodListType) IsSmal() bool {
+	return ml.EntSizeAndFlags&METHOD_LIST_SMALL == METHOD_LIST_SMALL
 }
 func (ml MethodListType) EntSize() uint32 {
-	return ml.EntSizeAndFlags & 0xfffc
+	return ml.EntSizeAndFlags & ^METHOD_LIST_FLAGS_MASK
 }
 func (ml MethodListType) String() string {
-	return fmt.Sprintf("entrysize=0x%08x, fixed_up=%t, uniqued=%t", ml.EntSize(), ml.FixedUp(), ml.IsUniqued())
+	return fmt.Sprintf("entrysize=0x%08x, fixed_up=%t, uniqued=%t, small=%t", ml.EntSize(), ml.FixedUp(), ml.IsUniqued(), ml.IsSmal())
 }
 
 type MethodType struct {

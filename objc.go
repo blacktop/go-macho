@@ -455,13 +455,13 @@ func (f *File) GetObjCMethodList() ([]types.ObjCMethod, error) {
 
 			mlr := io.NewSectionReader(f.sr, int64(sec.Offset), int64(sec.Size))
 
-			var nextOffset int64
-
 			for {
 
-				mlr.Seek(nextOffset, io.SeekStart)
+				currOffset, _ := mlr.Seek(0, io.SeekCurrent)
+				currOffset += int64(sec.Offset) + int64(binary.Size(types.MethodListType{}))
 
 				err := binary.Read(mlr, f.ByteOrder, &methodList)
+				fmt.Println(methodList)
 
 				if err == io.EOF {
 					break
@@ -470,9 +470,6 @@ func (f *File) GetObjCMethodList() ([]types.ObjCMethod, error) {
 				if err != nil {
 					return nil, fmt.Errorf("failed to read method_list_t (small): %v", err)
 				}
-
-				currOffset, _ := mlr.Seek(0, io.SeekCurrent)
-				nextOffset = currOffset + int64(methodList.EntSize())
 
 				methods := make([]types.MethodSmallType, methodList.Count)
 				if err := binary.Read(mlr, f.ByteOrder, &methods); err != nil {
@@ -504,6 +501,8 @@ func (f *File) GetObjCMethodList() ([]types.ObjCMethod, error) {
 						return nil, fmt.Errorf("failed to convert offset 0x%x to vmaddr; %v", method.ImpOffset, err)
 					}
 
+					currOffset += int64(methodList.EntSize())
+
 					objcMethods = append(objcMethods, types.ObjCMethod{
 						NameVMAddr:  uint64(nameAddr),
 						TypesVMAddr: typesVMAddr,
@@ -518,6 +517,9 @@ func (f *File) GetObjCMethodList() ([]types.ObjCMethod, error) {
 					})
 				}
 
+				curr, _ := mlr.Seek(0, io.SeekCurrent)
+				align := types.RoundUp(uint64(curr), 8)
+				mlr.Seek(int64(align), io.SeekStart)
 			}
 
 			return objcMethods, nil
