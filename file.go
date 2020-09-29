@@ -1148,6 +1148,13 @@ func (f *File) is64bit() bool {
 	return false
 }
 
+func (f *File) pointerSize() uint64 {
+	if f.is64bit() {
+		return 8
+	}
+	return 4
+}
+
 func (f *File) preferredLoadAddress() uint64 {
 	for _, s := range f.Segments() {
 		if strings.EqualFold(s.Name, "__TEXT") {

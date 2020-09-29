@@ -1,59 +1,30 @@
-package types
+package objc
 
-import "fmt"
+import (
+	"fmt"
 
-const (
-	C_ID       = '@'
-	C_CLASS    = '#'
-	C_SEL      = ':'
-	C_CHR      = 'c'
-	C_UCHR     = 'C'
-	C_SHT      = 's'
-	C_USHT     = 'S'
-	C_INT      = 'i'
-	C_UINT     = 'I'
-	C_LNG      = 'l'
-	C_ULNG     = 'L'
-	C_LNG_LNG  = 'q'
-	C_ULNG_LNG = 'Q'
-	C_FLT      = 'f'
-	C_DBL      = 'd'
-	C_BFLD     = 'b'
-	C_BOOL     = 'B'
-	C_VOID     = 'v'
-	C_UNDEF    = '?'
-	C_PTR      = '^'
-	C_CHARPTR  = '*'
-	C_ATOM     = '%'
-	C_ARY_B    = '['
-	C_ARY_E    = ']'
-	C_UNION_B  = '('
-	C_UNION_E  = ')'
-	C_STRUCT_B = '{'
-	C_STRUCT_E = '}'
-	C_VECTOR   = '!'
-	C_CONST    = 'r'
+	"github.com/blacktop/go-macho/types"
 )
 
 const IsDyldPreoptimized = 1 << 7
 
-type ObjCInfo struct {
+type Info struct {
 	SelRefCount      uint64
 	ClassDefCount    uint64
 	ProtocolDefCount uint64
 }
 
-type ObjCImageInfoFlag uint32
+type ImageInfoFlag uint32
 
 const (
-	IsReplacement              ObjCImageInfoFlag = 1 << 0 // used for Fix&Continue, now ignored
-	SupportsGC                 ObjCImageInfoFlag = 1 << 1 // image supports GC
-	RequiresGC                 ObjCImageInfoFlag = 1 << 2 // image requires GC
-	OptimizedByDyld            ObjCImageInfoFlag = 1 << 3 // image is from an optimized shared cache
-	CorrectedSynthesize        ObjCImageInfoFlag = 1 << 4 // used for an old workaround, now ignored
-	IsSimulated                ObjCImageInfoFlag = 1 << 5 // image compiled for a simulator platform
-	HasCategoryClassProperties ObjCImageInfoFlag = 1 << 6 // New ABI: category_t.classProperties fields are present, Old ABI: Set by some compilers. Not used by the runtime.
-	OptimizedByDyldClosure     ObjCImageInfoFlag = 1 << 7 // dyld (not the shared cache) optimized this.
+	IsReplacement              ImageInfoFlag = 1 << 0 // used for Fix&Continue, now ignored
+	SupportsGC                 ImageInfoFlag = 1 << 1 // image supports GC
+	RequiresGC                 ImageInfoFlag = 1 << 2 // image requires GC
+	OptimizedByDyld            ImageInfoFlag = 1 << 3 // image is from an optimized shared cache
+	CorrectedSynthesize        ImageInfoFlag = 1 << 4 // used for an old workaround, now ignored
+	IsSimulated                ImageInfoFlag = 1 << 5 // image compiled for a simulator platform
+	HasCategoryClassProperties ImageInfoFlag = 1 << 6 // New ABI: category_t.classProperties fields are present, Old ABI: Set by some compilers. Not used by the runtime.
+	OptimizedByDyldClosure     ImageInfoFlag = 1 << 7 // dyld (not the shared cache) optimized this.
 
 	// 1 byte Swift unstable ABI version number
 	SwiftUnstableVersionMaskShift = 8
@@ -64,7 +35,7 @@ const (
 	SwiftStableVersionMask      = 0xffff << SwiftStableVersionMaskShift
 )
 
-func (f ObjCImageInfoFlag) SwiftVersion() string {
+func (f ImageInfoFlag) SwiftVersion() string {
 	// TODO: I noticed there is some flags higher than swift version (Console has 84019008, which is a version of 0x502)
 	swiftVersion := (f >> 8) & 0xff
 	if swiftVersion != 0 {
@@ -90,9 +61,9 @@ func (f ObjCImageInfoFlag) SwiftVersion() string {
 	return "not swift"
 }
 
-type ObjCImageInfo struct {
+type ImageInfo struct {
 	Version uint32
-	Flags   ObjCImageInfoFlag
+	Flags   ImageInfoFlag
 
 	// DyldPreoptimized uint32
 }
@@ -106,42 +77,42 @@ const (
 	METHOD_LIST_SMALL              = 0x80000000
 )
 
-type MethodListType struct {
+type MethodList struct {
 	EntSizeAndFlags uint32
 	Count           uint32
 	// Space           uint32
 	// MethodArrayBase uint64
 }
 
-func (ml MethodListType) IsUniqued() bool {
+func (ml MethodList) IsUniqued() bool {
 	return MLFlags(ml.EntSizeAndFlags&METHOD_LIST_FLAGS_MASK)&METHOD_LIST_IS_UNIQUED == 1
 }
-func (ml MethodListType) FixedUp() bool {
+func (ml MethodList) FixedUp() bool {
 	return MLFlags(ml.EntSizeAndFlags&METHOD_LIST_FLAGS_MASK)&METHOD_LIST_FIXED_UP == 1
 }
-func (ml MethodListType) IsSmal() bool {
+func (ml MethodList) IsSmal() bool {
 	return ml.EntSizeAndFlags&METHOD_LIST_SMALL == METHOD_LIST_SMALL
 }
-func (ml MethodListType) EntSize() uint32 {
+func (ml MethodList) EntSize() uint32 {
 	return ml.EntSizeAndFlags & ^METHOD_LIST_FLAGS_MASK
 }
-func (ml MethodListType) String() string {
+func (ml MethodList) String() string {
 	return fmt.Sprintf("entrysize=0x%08x, fixed_up=%t, uniqued=%t, small=%t", ml.EntSize(), ml.FixedUp(), ml.IsUniqued(), ml.IsSmal())
 }
 
-type MethodType struct {
+type MethodT struct {
 	NameVMAddr  uint64 // SEL
 	TypesVMAddr uint64 // const char *
 	ImpVMAddr   uint64 // IMP
 }
 
-type MethodSmallType struct {
+type MethodSmallT struct {
 	NameOffset  int32 // SEL
 	TypesOffset int32 // const char *
 	ImpOffset   int32 // IMP
 }
 
-type ObjCMethod struct {
+type Method struct {
 	NameVMAddr  uint64 // & SEL
 	TypesVMAddr uint64 // & const char *
 	ImpVMAddr   uint64 // & IMP
@@ -151,26 +122,41 @@ type ObjCMethod struct {
 	NameLocationVMAddr uint64
 	Name               string
 	Types              string
-	Pointer            FilePointer
+	Pointer            types.FilePointer
 }
 
-type ObjCPropertyListType struct {
+func (m *Method) NumberOfArguments() int {
+	if m == nil {
+		return 0
+	}
+	return getNumberOfArguments(m.Types)
+}
+
+func (m *Method) ReturnType() string {
+	return getReturnType(m.Types)
+}
+
+// func (m *Method) ArgumentType(index int) string {
+// 	return getArgumentType(m.Types, index)
+// }
+
+type PropertyList struct {
 	EntSize uint32
 	Count   uint32
 }
 
-type ObjCPropertyType struct {
+type PropertyT struct {
 	NameVMAddr       uint64
 	AttributesVMAddr uint64
 }
 
-type ObjCProperty struct {
-	ObjCPropertyType
+type Property struct {
+	PropertyT
 	Name       string
 	Attributes string
 }
 
-type ObjCCategoryType struct {
+type CategoryT struct {
 	NameVMAddr               uint64
 	ClsVMAddr                uint64
 	InstanceMethodsVMAddr    uint64
@@ -179,9 +165,9 @@ type ObjCCategoryType struct {
 	InstancePropertiesVMAddr uint64
 }
 
-type ObjCCategory struct {
+type Category struct {
 	Name string
-	ObjCCategoryType
+	CategoryT
 }
 
 const (
@@ -193,7 +179,7 @@ const (
 	PROTOCOL_FIXED_UP_MASK = (PROTOCOL_FIXED_UP_1 | PROTOCOL_FIXED_UP_2)
 )
 
-type ProtocolType struct {
+type ProtocolT struct {
 	IsaVMAddr                     uint64
 	NameVMAddr                    uint64
 	ProtocolsVMAddr               uint64
@@ -210,19 +196,19 @@ type ProtocolType struct {
 	ClassPropertiesVMAddr     uint64
 }
 
-type ObjCProtocol struct {
+type Protocol struct {
 	Name                    string
-	InstanceMethods         []ObjCMethod
-	InstanceProperties      []ObjCProperty
-	ClassMethods            []ObjCMethod
-	OptionalInstanceMethods []ObjCMethod
-	OptionalClassMethods    []ObjCMethod
+	InstanceMethods         []Method
+	InstanceProperties      []Property
+	ClassMethods            []Method
+	OptionalInstanceMethods []Method
+	OptionalClassMethods    []Method
 	ExtendedMethodTypes     string
 	DemangledName           string
-	ProtocolType
+	ProtocolT
 }
 
-func (p *ObjCProtocol) String() string {
+func (p *Protocol) String() string {
 	var props string
 	for _, prop := range p.InstanceProperties {
 		props += fmt.Sprintf(" @property %s\n", prop.Name)
@@ -267,23 +253,23 @@ const (
 	IsSwiftPreStableABI = 0x1
 )
 
-type ObjCClass struct {
+type Class struct {
 	Name                  string
-	SuperClass            *ObjCClass
-	InstanceMethods       []ObjCMethod
-	Ivars                 []ObjCIvar
-	ClassPtr              FilePointer
-	IsaVmAddr             uint64
-	SuperclassVmAddr      uint64
+	SuperClass            *Class
+	InstanceMethods       []Method
+	Ivars                 []Ivar
+	ClassPtr              types.FilePointer
+	IsaVMAddr             uint64
+	SuperclassVMAddr      uint64
 	MethodCacheBuckets    uint64
 	MethodCacheProperties uint64
 	DataVMAddr            uint64
 	IsSwiftLegacy         bool
 	IsSwiftStable         bool
-	ReadOnlyData          ClassRO64Type
+	ReadOnlyData          ClassRO64
 }
 
-func (c *ObjCClass) String() string {
+func (c *Class) String() string {
 	iMethods := "  // instance methods\n"
 	for _, meth := range c.InstanceMethods {
 		iMethods += fmt.Sprintf("  0x%011x -[%s %s]\n", meth.Pointer.Offset, c.Name, meth.Name)
@@ -305,16 +291,16 @@ func (c *ObjCClass) String() string {
 	)
 }
 
-type ObjcClassType struct {
-	IsaVmAddr              uint32
-	SuperclassVmAddr       uint32
+type ObjcClassT struct {
+	IsaVMAddr              uint32
+	SuperclassVMAddr       uint32
 	MethodCacheBuckets     uint32
 	MethodCacheProperties  uint32
-	DataVmAddrAndFastFlags uint32
+	DataVMAddrAndFastFlags uint32
 }
 
 type SwiftClassMetadata struct {
-	ObjcClassType
+	ObjcClassT
 	SwiftClassFlags uint32
 }
 
@@ -361,53 +347,53 @@ func (f ClassRoFlags) HasCxxStructors() bool {
 	return f&RO_HAS_CXX_STRUCTORS != 0
 }
 
-type ClassROType struct {
+type ClassRO struct {
 	Flags                ClassRoFlags
 	InstanceStart        uint32
 	InstanceSize         uint32
 	_                    uint32
-	IvarLayoutVmAddr     uint32
-	NameVmAddr           uint32
-	BaseMethodsVmAddr    uint32
-	BaseProtocolsVmAddr  uint32
-	IvarsVmAddr          uint32
-	WeakIvarLayoutVmAddr uint32
-	BasePropertiesVmAddr uint32
+	IvarLayoutVMAddr     uint32
+	NameVMAddr           uint32
+	BaseMethodsVMAddr    uint32
+	BaseProtocolsVMAddr  uint32
+	IvarsVMAddr          uint32
+	WeakIvarLayoutVMAddr uint32
+	BasePropertiesVMAddr uint32
 }
 
-type ObjcClass64Type struct {
-	IsaVmAddr              uint64
-	SuperclassVmAddr       uint64
+type ObjcClass64 struct {
+	IsaVMAddr              uint64
+	SuperclassVMAddr       uint64
 	MethodCacheBuckets     uint64
 	MethodCacheProperties  uint64
-	DataVmAddrAndFastFlags uint64
+	DataVMAddrAndFastFlags uint64
 }
 
 type SwiftClassMetadata64 struct {
-	ObjcClass64Type
+	ObjcClass64
 	SwiftClassFlags uint64
 }
 
-type ClassRO64Type struct {
+type ClassRO64 struct {
 	Flags         ClassRoFlags
 	InstanceStart uint32
 	InstanceSize  uint64
 	// _                    uint32
-	IvarLayoutVmAddr     uint64
-	NameVmAddr           uint64
-	BaseMethodsVmAddr    uint64
-	BaseProtocolsVmAddr  uint64
-	IvarsVmAddr          uint64
-	WeakIvarLayoutVmAddr uint64
-	BasePropertiesVmAddr uint64
+	IvarLayoutVMAddr     uint64
+	NameVMAddr           uint64
+	BaseMethodsVMAddr    uint64
+	BaseProtocolsVMAddr  uint64
+	IvarsVMAddr          uint64
+	WeakIvarLayoutVMAddr uint64
+	BasePropertiesVMAddr uint64
 }
 
-type ObjCIvarListType struct {
+type IvarList struct {
 	EntSize uint32
 	Count   uint32
 }
 
-type ObjCIvarType struct {
+type IvarT struct {
 	Offset      uint64 // uint32_t*  (uint64_t* on x86_64)
 	NameVMAddr  uint64 // const char*
 	TypesVMAddr uint64 // const char*
@@ -415,8 +401,8 @@ type ObjCIvarType struct {
 	Size        uint32
 }
 
-type ObjCIvar struct {
+type Ivar struct {
 	Name string
 	Type string
-	ObjCIvarType
+	IvarT
 }
