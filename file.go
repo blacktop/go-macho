@@ -1238,6 +1238,24 @@ func (f *File) GetCString(strVMAdr uint64) (string, error) {
 	return "", fmt.Errorf("string not found")
 }
 
+func (f *File) GetCStringAtOffset(strOffset int64) (string, error) {
+
+	if _, err := f.sr.Seek(strOffset, io.SeekStart); err != nil {
+		return "", fmt.Errorf("failed to Seek: %v", err)
+	}
+
+	s, err := bufio.NewReader(f.sr).ReadString('\x00')
+	if err != nil {
+		return "", fmt.Errorf("failed to ReadString: %v", err)
+	}
+
+	if len(s) > 0 {
+		return strings.Trim(s, "\x00"), nil
+	}
+
+	return "", fmt.Errorf("string not found")
+}
+
 // Segment returns the first Segment with the given name, or nil if no such segment exists.
 func (f *File) Segment(name string) *Segment {
 	for _, l := range f.Loads {
