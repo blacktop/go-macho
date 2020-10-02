@@ -5,6 +5,7 @@ package types
 import (
 	"encoding/binary"
 	"fmt"
+	"strings"
 )
 
 // A LoadCmd is a Mach-O load command.
@@ -98,6 +99,34 @@ const (
 	   segment are protected. */
 	ReadOnly SegFlag = 0x10 /* This segment is made read-only after fixups */
 )
+
+func (s SegFlag) List() []string {
+	var flags []string
+	if s&HighVM != 0 {
+		flags = append(flags, "HighVM")
+	}
+	if s&FvmLib != 0 {
+		flags = append(flags, "FixedVMLib")
+	}
+	if s&NoReLoc != 0 {
+		flags = append(flags, "NoReLoc")
+	}
+	if s&ProtectedVersion1 != 0 {
+		flags = append(flags, "ProtectedV1")
+	}
+	if s&ReadOnly != 0 {
+		flags = append(flags, "ReadOnly")
+	}
+	return flags
+}
+
+func (s SegFlag) String() string {
+	var fStr string
+	for _, attr := range s.List() {
+		fStr += fmt.Sprintf("%s|", attr)
+	}
+	return strings.TrimSuffix(fStr, "|")
+}
 
 // A Segment32 is a 32-bit Mach-O segment load command.
 type Segment32 struct {

@@ -192,16 +192,16 @@ func (f SectionFlag) List() []string {
 		flags = append(flags, "Zerofill")
 	}
 	if f.IsCstringLiterals() {
-		flags = append(flags, "Cstring Literals")
+		flags = append(flags, "CstringLiterals")
 	}
 	if f.Is4ByteLiterals() {
-		flags = append(flags, "4Byte Literals")
+		flags = append(flags, "4ByteLiterals")
 	}
 	if f.Is8ByteLiterals() {
-		flags = append(flags, "8Byte Literals")
+		flags = append(flags, "8ByteLiterals")
 	}
 	if f.IsLiteralPointers() {
-		flags = append(flags, "Literal Pointers")
+		flags = append(flags, "LiteralPointers")
 	}
 	if f.IsNonLazySymbolPointers() {
 		flags = append(flags, "NonLazySymbolPointers")
@@ -228,10 +228,10 @@ func (f SectionFlag) List() []string {
 		flags = append(flags, "Interposing")
 	}
 	if f.Is16ByteLiterals() {
-		flags = append(flags, "16Byte Literals")
+		flags = append(flags, "16ByteLiterals")
 	}
 	if f.IsDtraceDof() {
-		flags = append(flags, "Dtrace DOF")
+		flags = append(flags, "DtraceDOF")
 	}
 	if f.IsLazyDylibSymbolPointers() {
 		flags = append(flags, "LazyDylibSymbolPointers")

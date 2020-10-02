@@ -14,6 +14,19 @@ type Info struct {
 	ProtocolDefCount uint64
 }
 
+func (i Info) String() string {
+	return fmt.Sprintf(
+		"ObjC Info\n"+
+			"=========\n"+
+			"ClassDefs    = %d\n"+
+			"ProtocolDefs = %d\n"+
+			"SelRefs      = %d\n",
+		i.ClassDefCount,
+		i.ProtocolDefCount,
+		i.SelRefCount,
+	)
+}
+
 type ImageInfoFlag uint32
 
 const (
@@ -90,14 +103,14 @@ func (ml MethodList) IsUniqued() bool {
 func (ml MethodList) FixedUp() bool {
 	return MLFlags(ml.EntSizeAndFlags&METHOD_LIST_FLAGS_MASK)&METHOD_LIST_FIXED_UP == 1
 }
-func (ml MethodList) IsSmal() bool {
+func (ml MethodList) IsSmall() bool {
 	return ml.EntSizeAndFlags&METHOD_LIST_SMALL == METHOD_LIST_SMALL
 }
 func (ml MethodList) EntSize() uint32 {
 	return ml.EntSizeAndFlags & ^METHOD_LIST_FLAGS_MASK
 }
 func (ml MethodList) String() string {
-	return fmt.Sprintf("entrysize=0x%08x, fixed_up=%t, uniqued=%t, small=%t", ml.EntSize(), ml.FixedUp(), ml.IsUniqued(), ml.IsSmal())
+	return fmt.Sprintf("entrysize=0x%08x, fixed_up=%t, uniqued=%t, small=%t", ml.EntSize(), ml.FixedUp(), ml.IsUniqued(), ml.IsSmall())
 }
 
 type MethodT struct {
@@ -270,21 +283,25 @@ type Class struct {
 }
 
 func (c *Class) String() string {
+
 	iMethods := "  // instance methods\n"
 	for _, meth := range c.InstanceMethods {
-		iMethods += fmt.Sprintf("  0x%011x -[%s %s]\n", meth.Pointer.Offset, c.Name, meth.Name)
+		iMethods += fmt.Sprintf("  0x%011x -[%s %s]\n", meth.Pointer.VMAdder, c.Name, meth.Name)
 	}
 	if len(c.InstanceMethods) == 0 {
 		iMethods = ""
 	}
-	subClass := "<ROOT>"
+	var subClass string
+	if c.ReadOnlyData.Flags.IsRoot() {
+		subClass = "<ROOT>"
+	}
 	if c.SuperClass != nil {
 		subClass = c.SuperClass.Name
 	}
 	return fmt.Sprintf(
 		"0x%011x %s : %s\n"+
 			"%s",
-		c.ClassPtr.Offset,
+		c.ClassPtr.VMAdder,
 		c.Name,
 		subClass,
 		iMethods,

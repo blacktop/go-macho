@@ -60,23 +60,30 @@ func (t *FileTOC) String() string {
 	return fTocStr
 }
 
+func pad(length int) string {
+	if length > 0 {
+		return strings.Repeat(" ", length)
+	}
+	return " "
+}
+
 // LoadsString returns a string representation of all the MachO's load commands
 func (t *FileTOC) LoadsString() string {
 	var loadsStr string
 	for i, l := range t.Loads {
 		if s, ok := l.(*Segment); ok {
-			loadsStr += fmt.Sprintf("%02d: %s offset=0x%08x-0x%08x, addr=0x%09x-0x%09x\t%s\n", i, s.Command(), s.Offset, s.Offset+s.Filesz, s.Addr, s.Addr+s.Memsz, s.Name)
+			loadsStr += fmt.Sprintf("%02d: %s offset=0x%08x-0x%08x, addr=0x%09x-0x%09x %s/%s   %s%s%s\n", i, s.Command(), s.Offset, s.Offset+s.Filesz, s.Addr, s.Addr+s.Memsz, s.Prot, s.Maxprot, s.Name, pad(20-len(s.Name)), s.Flag)
 			for j := uint32(0); j < s.Nsect; j++ {
 				c := t.Sections[j+s.Firstsect]
 				secFlags := ""
 				if !c.Flags.IsRegular() {
 					secFlags = fmt.Sprintf("(%s)", c.Flags)
 				}
-				loadsStr += fmt.Sprintf("\toffset=0x%08x-0x%08x, addr=0x%09x-0x%09x\t\t%s.%s\t%s\t%s\n", c.Offset, uint64(c.Offset)+c.Size, c.Addr, c.Addr+c.Size, s.Name, c.Name, secFlags, c.Flags.AttributesString())
+				loadsStr += fmt.Sprintf("\toffset=0x%08x-0x%08x, addr=0x%09x-0x%09x\t\t%s.%s%s%s %s\n", c.Offset, uint64(c.Offset)+c.Size, c.Addr, c.Addr+c.Size, s.Name, c.Name, pad(32-(len(s.Name)+len(c.Name)+1)), c.Flags.AttributesString(), secFlags)
 			}
 		} else {
 			if l != nil {
-				loadsStr += fmt.Sprintf("%02d: %s%s%v\n", i, l.Command(), strings.Repeat(" ", 28-len(l.Command().String())), l)
+				loadsStr += fmt.Sprintf("%02d: %s%s%v\n", i, l.Command(), pad(28-len(l.Command().String())), l)
 			}
 		}
 	}
@@ -1200,6 +1207,29 @@ func (f *File) GetVMAddress(offset uint64) (uint64, error) {
 
 func (f *File) GetBaseAddress() uint64 {
 	return f.preferredLoadAddress()
+}
+
+func (f *File) convertToVMAddr(value uint64) uint64 {
+	if f.HasFixups() {
+		if !fixupchains.DcpArm64eIsBind(value) {
+			if fixupchains.DcpArm64eIsAuth(value) {
+				dcp := fixupchains.DyldChainedPtrArm64eAuthRebase{Pointer: value}
+				return dcp.Target() + f.preferredLoadAddress()
+			}
+			dcp := fixupchains.DyldChainedPtrArm64eRebase{Pointer: value}
+			return dcp.UnpackTarget()
+		}
+		// } else {
+		// 	if fixupchains.DcpArm64eIsAuth(value) {
+		// 		dcp := fixupchains.DyldChainedPtrArm64eAuthBind{Pointer: value}
+		// 		fmt.Println(dcp)
+		// 		return value
+		// 	}
+		// 	dcp := fixupchains.DyldChainedPtrArm64eBind{Pointer: value}
+		// 	fmt.Println(dcp)
+		// }
+	}
+	return value
 }
 
 func (f *File) GetCString(strVMAdr uint64) (string, error) {
