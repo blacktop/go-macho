@@ -1268,6 +1268,7 @@ func (f *File) GetCString(strVMAdr uint64) (string, error) {
 	return "", fmt.Errorf("string not found")
 }
 
+// GetCStringAtOffset returns a c-string at a given offset into the MachO
 func (f *File) GetCStringAtOffset(strOffset int64) (string, error) {
 
 	if _, err := f.sr.Seek(strOffset, io.SeekStart); err != nil {
@@ -1276,7 +1277,7 @@ func (f *File) GetCStringAtOffset(strOffset int64) (string, error) {
 
 	s, err := bufio.NewReader(f.sr).ReadString('\x00')
 	if err != nil {
-		return "", fmt.Errorf("failed to ReadString: %v", err)
+		return "", fmt.Errorf("failed to ReadString as offset 0x%x, %v", strOffset, err)
 	}
 
 	if len(s) > 0 {
