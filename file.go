@@ -1205,13 +1205,14 @@ func (f *File) GetVMAddress(offset uint64) (uint64, error) {
 	return 0, fmt.Errorf("offset 0x%x not within any segments file offset range", offset)
 }
 
+// GetBaseAddress returns the MachO's preferred load address
 func (f *File) GetBaseAddress() uint64 {
 	return f.preferredLoadAddress()
 }
 
 func (f *File) convertToVMAddr(value uint64) uint64 {
 	if f.HasFixups() {
-		if !fixupchains.DcpArm64eIsBind(value) {
+		if fixupchains.DcpArm64eIsRebase(value) {
 			if fixupchains.DcpArm64eIsAuth(value) {
 				dcp := fixupchains.DyldChainedPtrArm64eAuthRebase{Pointer: value}
 				return dcp.Target() + f.preferredLoadAddress()
@@ -1219,19 +1220,11 @@ func (f *File) convertToVMAddr(value uint64) uint64 {
 			dcp := fixupchains.DyldChainedPtrArm64eRebase{Pointer: value}
 			return dcp.UnpackTarget()
 		}
-		// } else {
-		// 	if fixupchains.DcpArm64eIsAuth(value) {
-		// 		dcp := fixupchains.DyldChainedPtrArm64eAuthBind{Pointer: value}
-		// 		fmt.Println(dcp)
-		// 		return value
-		// 	}
-		// 	dcp := fixupchains.DyldChainedPtrArm64eBind{Pointer: value}
-		// 	fmt.Println(dcp)
-		// }
 	}
 	return value
 }
 
+// GetCString returns a c-string at a given virtual address in the MachO
 func (f *File) GetCString(strVMAdr uint64) (string, error) {
 
 	strOffset, err := f.GetOffset(strVMAdr)

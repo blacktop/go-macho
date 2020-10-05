@@ -99,10 +99,19 @@ type AssociatedTypeDescriptor struct {
 // This section contains an array of builtin type descriptors.
 // A builtin type descriptor describes the basic layout information about any builtin types referenced from other sections.
 
+type BuiltinTypeFlag uint32
+
+func (f BuiltinTypeFlag) IsBitwiseTakable() bool {
+	return (f>>16)&1 != 0
+}
+func (f BuiltinTypeFlag) Alignment() uint16 {
+	return uint16(f & 0xffff)
+}
+
 type BuiltinTypeDescriptor struct {
 	TypeName            int32
 	Size                uint32
-	AlignmentAndFlags   uint32
+	AlignmentAndFlags   BuiltinTypeFlag
 	Stride              uint32
 	NumExtraInhabitants uint32
 }

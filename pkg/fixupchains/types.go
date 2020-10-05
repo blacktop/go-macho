@@ -109,6 +109,9 @@ const (
 func DcpArm64eIsBind(ptr uint64) bool {
 	return types.ExtractBits(ptr, 62, 1) != 0
 }
+func DcpArm64eIsRebase(ptr uint64) bool {
+	return types.ExtractBits(ptr, 62, 1) == 0
+}
 func DcpArm64eIsAuth(ptr uint64) bool {
 	return types.ExtractBits(ptr, 63, 1) != 0
 }
