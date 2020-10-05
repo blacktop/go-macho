@@ -74,28 +74,6 @@ const (
 	BUILTIN_TYPE_NAME_WORD = "Builtin.Word"
 )
 
-// ProtocolDescriptor in __TEXT.__swift5_protos
-// This section contains an array of 32-bit signed integers.
-// Each integer is a relative offset that points to a protocol descriptor in the __TEXT.__const section.
-type ProtocolDescriptor struct {
-	Flags                      uint32
-	Parent                     int32
-	Name                       int32
-	NumRequirementsInSignature uint32
-	NumRequirements            uint32
-	AssociatedTypeNames        int32
-}
-
-// ProtocolConformanceDescriptor in __TEXT.__swift5_proto
-// This section contains an array of 32-bit signed integers.
-// Each integer is a relative offset that points to a protocol conformance descriptor in the __TEXT.__const section.
-type ProtocolConformanceDescriptor struct {
-	ProtocolDescriptor    int32
-	NominalTypeDescriptor int32
-	ProtocolWitnessTable  int32
-	ConformanceFlags      uint32
-}
-
 // __TEXT.__swift5_assocty
 // This section contains an array of associated type descriptors.
 // An associated type descriptor contains a collection of associated type records for a conformance.
@@ -152,4 +130,40 @@ type CaptureDescriptor struct {
 	CaptureDescriptorHeader
 	CaptureTypeRecords    []CaptureTypeRecord
 	MetadataSourceRecords []MetadataSourceRecord
+}
+
+// __TEXT.__swift5_replac
+// This section contains dynamic replacement information.
+// This is essentially the Swift equivalent of Objective-C method swizzling.
+
+type Replacement struct {
+	ReplacedFunctionKey int32
+	NewFunction         int32
+	Replacement         int32
+	Flags               uint32
+}
+
+type ReplacementScope struct {
+	Flags           uint32
+	NumReplacements uint32
+}
+
+type AutomaticReplacements struct {
+	Flags           uint32
+	NumReplacements uint32 // hard coded to 1
+	Replacements    int32
+}
+
+// __TEXT.__swift5_replac2
+// This section contains dynamica replacement information for opaque types.
+
+type Replacement2 struct {
+	Original    int32
+	Replacement int32
+}
+
+type AutomaticReplacementsSome struct {
+	Flags           uint32
+	NumReplacements uint32
+	Replacements    []Replacement
 }

@@ -105,11 +105,11 @@ func (f ExportFlag) StubAndResolver() bool {
 func (f ExportFlag) String() string {
 	var fStr string
 	if f.Regular() {
-		fStr += "Regular "
+		fStr += "Regular"
 		if f.StubAndResolver() {
-			fStr += "(Has Resolver Function)"
+			fStr += " (Has Resolver Function)"
 		} else if f.WeakDefinition() {
-			fStr += "(Weak Definition)"
+			fStr += " (Weak Definition)"
 		}
 	} else if f.ThreadLocal() {
 		fStr += "Thread Local"

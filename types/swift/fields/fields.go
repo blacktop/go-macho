@@ -48,6 +48,16 @@ type Field struct {
 	Descriptor      FieldDescriptor
 }
 
+func (f Field) IsEnum() bool {
+	return f.Descriptor.Kind == Enum || f.Descriptor.Kind == MultiPayloadEnum
+}
+func (f Field) IsClass() bool {
+	return f.Descriptor.Kind == Class || f.Descriptor.Kind == ObjCClass
+}
+func (f Field) IsProtocol() bool {
+	return f.Descriptor.Kind == Protocol || f.Descriptor.Kind == ClassProtocol || f.Descriptor.Kind == ObjCProtocol
+}
+
 type Header struct {
 	MangledTypeName int32
 	Superclass      int32

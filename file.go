@@ -991,10 +991,10 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.LoadBytes = LoadBytes(cmddat)
 			l.Offset = led.Offset
 			l.Size = led.Size
-			// l.Data = make([]byte, led.Size)
-			// if _, err := r.ReadAt(l.Data, int64(led.Offset)); err != nil {
-			// 	return nil, err
-			// }
+			l.Data = make([]byte, led.Size)
+			if _, err := r.ReadAt(l.Data, int64(led.Offset)); err != nil {
+				return nil, err
+			}
 			f.Loads[i] = l
 		case types.LC_DYLD_CHAINED_FIXUPS:
 			var led types.DyldChainedFixupsCmd
@@ -1187,13 +1187,13 @@ func (f *File) readLeUint64(offset int64) (uint64, error) {
 	return binary.LittleEndian.Uint64(u64), nil
 }
 
-func (f *File) GetOffset(address uint64) (uint64, error) {
+func (f *File) GetOffset(address uint64) (int64, error) {
 	for _, seg := range f.Segments() {
 		if seg.Addr <= address && address < seg.Addr+seg.Memsz {
-			return (address - seg.Addr) + seg.Offset, nil
+			return int64((address - seg.Addr) + seg.Offset), nil
 		}
 	}
-	return 0, fmt.Errorf("address not within any segments adress range")
+	return 0, fmt.Errorf("address 0x%x not within any segments adress range", address)
 }
 
 func (f *File) GetVMAddress(offset uint64) (uint64, error) {
@@ -1202,7 +1202,7 @@ func (f *File) GetVMAddress(offset uint64) (uint64, error) {
 			return (offset - seg.Offset) + seg.Addr, nil
 		}
 	}
-	return 0, fmt.Errorf("offset not within any segments file offset range")
+	return 0, fmt.Errorf("offset 0x%x not within any segments file offset range", offset)
 }
 
 func (f *File) GetBaseAddress() uint64 {
@@ -1234,45 +1234,19 @@ func (f *File) convertToVMAddr(value uint64) uint64 {
 
 func (f *File) GetCString(strVMAdr uint64) (string, error) {
 
-	// for _, sec := range f.Sections {
-	// 	if sec.Flags.IsCstringLiterals() {
-	// 		data, err := sec.Data()
-	// 		if err != nil {
-	// 			return "", err
-	// 		}
-
-	// 		if strVMAdr > sec.Addr {
-	// 			strOffset := strVMAdr - sec.Addr
-	// 			if strOffset > sec.Size {
-	// 				return "", fmt.Errorf("offset out of bounds of the cstring section")
-	// 			}
 	strOffset, err := f.GetOffset(strVMAdr)
 	if err != nil {
 		return "", err
 	}
-	// csr := bytes.NewBuffer(data[strOffset:])
-	f.sr.Seek(int64(strOffset), io.SeekStart)
-	s, err := bufio.NewReader(f.sr).ReadString('\x00')
-	// s, err := csr.ReadString('\x00')
-	if err != nil {
-		log.Fatal(err.Error())
-	}
 
-	if len(s) > 0 {
-		return strings.Trim(s, "\x00"), nil
-	}
-	// 		}
-	// 	}
-	// }
-
-	return "", fmt.Errorf("string not found")
+	return f.GetCStringAtOffset(strOffset)
 }
 
 // GetCStringAtOffset returns a c-string at a given offset into the MachO
 func (f *File) GetCStringAtOffset(strOffset int64) (string, error) {
 
 	if _, err := f.sr.Seek(strOffset, io.SeekStart); err != nil {
-		return "", fmt.Errorf("failed to Seek: %v", err)
+		return "", fmt.Errorf("failed to Seek to offset 0x%x: %v", strOffset, err)
 	}
 
 	s, err := bufio.NewReader(f.sr).ReadString('\x00')
@@ -1284,7 +1258,7 @@ func (f *File) GetCStringAtOffset(strOffset int64) (string, error) {
 		return strings.Trim(s, "\x00"), nil
 	}
 
-	return "", fmt.Errorf("string not found")
+	return "", fmt.Errorf("string not found at offset 0x%x", strOffset)
 }
 
 // Segment returns the first Segment with the given name, or nil if no such segment exists.
@@ -1552,16 +1526,17 @@ func (f *File) ImportedSymbols() ([]Symbol, error) {
 // referred to by the binary f that are expected to be
 // satisfied by other libraries at dynamic load time.
 func (f *File) ImportedSymbolNames() ([]string, error) {
-	if f.Dysymtab == nil || f.Symtab == nil {
-		return nil, &FormatError{0, "missing symbol table", nil}
+	var all []string
+
+	syms, err := f.ImportedSymbols()
+	if err != nil {
+		return nil, err
 	}
 
-	st := f.Symtab
-	dt := f.Dysymtab
-	var all []string
-	for _, s := range st.Syms[dt.Iundefsym : dt.Iundefsym+dt.Nundefsym] {
+	for _, s := range syms {
 		all = append(all, s.Name)
 	}
+
 	return all, nil
 }
 

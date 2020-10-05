@@ -200,5 +200,5 @@ func ExtractBits(x uint64, start, nbits int32) uint64 {
 
 type FilePointer struct {
 	VMAdder uint64
-	Offset  uint64
+	Offset  int64
 }
