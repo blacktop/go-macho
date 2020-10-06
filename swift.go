@@ -114,11 +114,8 @@ func (f *File) GetSwiftTypes() (*[]stypes.TypeDescriptor, error) {
 			return nil, fmt.Errorf("failed to read __swift5_types: %v", err)
 		}
 
-		r := bytes.NewReader(dat)
-
 		relOffsets := make([]int32, len(dat)/sizeOfInt32)
-
-		if err := binary.Read(r, f.ByteOrder, &relOffsets); err != nil {
+		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &relOffsets); err != nil {
 			return nil, fmt.Errorf("failed to read relative offsets: %v", err)
 		}
 
@@ -145,7 +142,7 @@ func (f *File) GetSwiftTypes() (*[]stypes.TypeDescriptor, error) {
 				}
 				fmt.Printf("%#v\n", sD)
 			}
-			parent, err := f.GetCStringAtOffset(offset + 4 + int64(tDesc.Parent))
+			parent, err := f.GetCStringAtOffset(offset + int64(tDesc.Parent))
 			if err != nil {
 				return nil, fmt.Errorf("failed to read cstring: %v", err)
 			}
@@ -156,27 +153,83 @@ func (f *File) GetSwiftTypes() (*[]stypes.TypeDescriptor, error) {
 				return nil, fmt.Errorf("failed to read cstring: %v", err)
 			}
 			fmt.Println(name)
-
-			f.sr.Seek(offset+16+int64(tDesc.FieldDescriptor), io.SeekStart)
-
-			var fDesc fieldmd.Header
-			if err := binary.Read(f.sr, f.ByteOrder, &fDesc); err != nil {
-				return nil, fmt.Errorf("failed to read swift.Header: %v", err)
+			if tDesc.FieldDescriptor != 0 {
+				field, err := f.readField(offset + 16 + int64(tDesc.FieldDescriptor))
+				if err != nil {
+					return nil, fmt.Errorf("failed to read swift field: %v", err)
+				}
+				fmt.Println(field)
 			}
-			fmt.Println(fDesc)
-
-			name, err = f.GetCStringAtOffset(offset + 16 + int64(tDesc.FieldDescriptor) + int64(fDesc.MangledTypeName))
-			if err != nil {
-				return nil, fmt.Errorf("failed to read cstring: %v", err)
-			}
-			fmt.Println(name)
-
 			classes = append(classes, tDesc)
 		}
 
 		return &classes, nil
 	}
 	return nil, fmt.Errorf("file does not contain a __swift5_types section")
+}
+
+func (f *File) readField(offset int64) (*fieldmd.Field, error) {
+	var field fieldmd.Field
+	var err error
+
+	currOffset, err := f.sr.Seek(offset, io.SeekStart)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := binary.Read(f.sr, f.ByteOrder, &field.Descriptor.Header); err != nil {
+		return nil, fmt.Errorf("failed to read swift.Header: %v", err)
+	}
+
+	field.Kind = field.Descriptor.Kind.String()
+
+	field.MangledTypeName, _, err = f.GetMangledTypeAtOffset(currOffset + int64(field.Descriptor.Header.MangledTypeName))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read fieldmd.MangledTypeName: %v", err)
+	}
+
+	if field.Descriptor.Header.Superclass == 0 {
+		field.SuperClass = swift.MANGLING_MODULE_OBJC
+	} else {
+		field.SuperClass, err = f.GetCStringAtOffset(currOffset + sizeOfInt32 + int64(field.Descriptor.Header.Superclass))
+		if err != nil {
+			return nil, fmt.Errorf("failed to read cstring: %v", err)
+		}
+	}
+
+	currOffset, err = f.sr.Seek(offset+int64(binary.Size(fieldmd.Header{})), io.SeekStart)
+	if err != nil {
+		return nil, err
+	}
+
+	field.Descriptor.FieldRecords = make([]fieldmd.RecordT, field.Descriptor.Header.NumFields)
+	if err := binary.Read(f.sr, f.ByteOrder, &field.Descriptor.FieldRecords); err != nil {
+		return nil, fmt.Errorf("failed to read []fieldmd.RecordT: %v", err)
+	}
+
+	for idx, record := range field.Descriptor.FieldRecords {
+		rec := fieldmd.Record{
+			Flags: record.Flags.String(),
+		}
+
+		currOffset += int64(idx * int(field.Descriptor.FieldRecordSize))
+
+		if record.MangledTypeName != 0 {
+			rec.MangledTypeName, _, err = f.GetMangledTypeAtOffset(currOffset + 4 + int64(record.MangledTypeName))
+			if err != nil {
+				return nil, fmt.Errorf("failed to read fieldmd.Record.MangledTypeName; %v", err)
+			}
+		}
+
+		rec.Name, err = f.GetCStringAtOffset(currOffset + 8 + int64(record.FieldName))
+		if err != nil {
+			return nil, fmt.Errorf("failed to read cstring: %v", err)
+		}
+
+		field.Records = append(field.Records, rec)
+	}
+
+	return &field, nil
 }
 
 // GetSwiftFields parses all the fields in the __TEXT.__swift5_fieldmd section
@@ -201,6 +254,7 @@ func (f *File) GetSwiftFields() (*[]fieldmd.Field, error) {
 
 			var fDesc fieldmd.FieldDescriptor
 			err = binary.Read(r, f.ByteOrder, &fDesc.Header)
+			currOffset += int64(binary.Size(fieldmd.Header{}))
 
 			if err == io.EOF {
 				break
@@ -215,7 +269,7 @@ func (f *File) GetSwiftFields() (*[]fieldmd.Field, error) {
 			}
 
 			if fDesc.Header.Superclass == 0 {
-				superClass = "<ROOT>"
+				superClass = swift.MANGLING_MODULE_OBJC
 			} else {
 				superClass, err = f.GetCStringAtOffset(currOffset + sizeOfInt32 + int64(fDesc.Header.Superclass))
 				if err != nil {
@@ -229,8 +283,6 @@ func (f *File) GetSwiftFields() (*[]fieldmd.Field, error) {
 				return nil, fmt.Errorf("failed to read []fieldmd.RecordT: %v", err)
 			}
 
-			currOffset += int64(binary.Size(fieldmd.Header{}))
-
 			var records []fieldmd.Record
 			for idx, record := range fDesc.FieldRecords {
 				var name string
@@ -243,7 +295,6 @@ func (f *File) GetSwiftFields() (*[]fieldmd.Field, error) {
 						return nil, fmt.Errorf("failed to read record.MangledTypeName; %v", err)
 					}
 
-					typeName = "$s" + typeName
 					fmt.Printf("type: %s %v\n", typeName, []byte(typeName))
 
 					f.sr.ReadAt(peek, currOffset+4+int64(record.MangledTypeName)-16)
@@ -324,8 +375,8 @@ func (f *File) GetSwiftAssociatedTypes() (*[]swift.AssociatedTypeDescriptor, err
 }
 
 // GetSwiftBuiltinTypes parses all the built-in types in the __TEXT.__swift5_builtin section
-func (f *File) GetSwiftBuiltinTypes() (*[]swift.BuiltinTypeDescriptor, error) {
-	var builtInTypes []swift.BuiltinTypeDescriptor
+func (f *File) GetSwiftBuiltinTypes() (*[]swift.BuiltinType, error) {
+	var builtins []swift.BuiltinType
 
 	if sec := f.Section("__TEXT", "__swift5_builtin"); sec != nil {
 		dat, err := sec.Data()
@@ -333,7 +384,7 @@ func (f *File) GetSwiftBuiltinTypes() (*[]swift.BuiltinTypeDescriptor, error) {
 			return nil, fmt.Errorf("failed to read __swift5_builtin: %v", err)
 		}
 
-		builtInTypes = make([]swift.BuiltinTypeDescriptor, int(sec.Size)/binary.Size(swift.BuiltinTypeDescriptor{}))
+		builtInTypes := make([]swift.BuiltinTypeDescriptor, int(sec.Size)/binary.Size(swift.BuiltinTypeDescriptor{}))
 
 		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &builtInTypes); err != nil {
 			return nil, fmt.Errorf("failed to read []swift.BuiltinTypeDescriptor: %v", err)
@@ -345,10 +396,18 @@ func (f *File) GetSwiftBuiltinTypes() (*[]swift.BuiltinTypeDescriptor, error) {
 			if err != nil {
 				return nil, fmt.Errorf("failed to read record.MangledTypeName; %v", err)
 			}
-			fmt.Println("name:", name)
+
+			builtins = append(builtins, swift.BuiltinType{
+				Name:                name,
+				Size:                bType.Size,
+				Alignment:           bType.AlignmentAndFlags.Alignment(),
+				BitwiseTakable:      bType.AlignmentAndFlags.IsBitwiseTakable(),
+				Stride:              bType.Stride,
+				NumExtraInhabitants: bType.NumExtraInhabitants,
+			})
 		}
 
-		return &builtInTypes, nil
+		return &builtins, nil
 	}
 	return nil, fmt.Errorf("file does not contain a __swift5_builtin section")
 }

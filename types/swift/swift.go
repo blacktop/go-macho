@@ -108,6 +108,16 @@ func (f BuiltinTypeFlag) Alignment() uint16 {
 	return uint16(f & 0xffff)
 }
 
+// BuiltinType builtin swift type
+type BuiltinType struct {
+	Name                string
+	Size                uint32
+	Alignment           uint16
+	BitwiseTakable      bool
+	Stride              uint32
+	NumExtraInhabitants uint32
+}
+
 type BuiltinTypeDescriptor struct {
 	TypeName            int32
 	Size                uint32

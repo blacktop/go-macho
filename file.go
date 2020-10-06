@@ -857,6 +857,9 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 				if err == io.EOF {
 					break
 				}
+				if offset == 0 {
+					break
+				}
 				if err != nil {
 					return nil, err
 				}
