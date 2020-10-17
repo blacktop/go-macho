@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"strings"
@@ -183,7 +182,7 @@ func (f *File) readField(offset int64) (*fieldmd.Field, error) {
 
 	field.Kind = field.Descriptor.Kind.String()
 
-	field.MangledTypeName, _, err = f.GetMangledTypeAtOffset(currOffset + int64(field.Descriptor.Header.MangledTypeName))
+	field.TypeName, _, err = f.GetMangledTypeAtOffset(currOffset + int64(field.Descriptor.Header.MangledTypeName))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read fieldmd.MangledTypeName: %v", err)
 	}
@@ -245,17 +244,10 @@ func (f *File) GetSwiftFields() (*[]fieldmd.Field, error) {
 		r := bytes.NewReader(dat)
 
 		for {
-			var err error
-			var superClass string
+			fileOffset, _ := r.Seek(0, io.SeekCurrent)
+			field := fieldmd.Field{Offset: fileOffset + int64(sec.Offset)}
 
-			peek := make([]byte, 60)
-			currOffset, _ := r.Seek(0, io.SeekCurrent)
-			currOffset += int64(sec.Offset)
-
-			var fDesc fieldmd.FieldDescriptor
-			err = binary.Read(r, f.ByteOrder, &fDesc.Header)
-			currOffset += int64(binary.Size(fieldmd.Header{}))
-
+			err = binary.Read(r, f.ByteOrder, &field.Descriptor.Header)
 			if err == io.EOF {
 				break
 			}
@@ -263,69 +255,23 @@ func (f *File) GetSwiftFields() (*[]fieldmd.Field, error) {
 				return nil, fmt.Errorf("failed to read swift.Header: %v", err)
 			}
 
-			typeName, _, err := f.GetMangledTypeAtOffset(currOffset + int64(fDesc.Header.MangledTypeName))
-			if err != nil {
-				return nil, fmt.Errorf("failed to read MangledTypeName: %v", err)
-			}
+			field.Kind = field.Descriptor.Header.Kind.String()
 
-			if fDesc.Header.Superclass == 0 {
-				superClass = swift.MANGLING_MODULE_OBJC
-			} else {
-				superClass, err = f.GetCStringAtOffset(currOffset + sizeOfInt32 + int64(fDesc.Header.Superclass))
-				if err != nil {
-					return nil, fmt.Errorf("failed to read cstring: %v", err)
-				}
-				fmt.Printf("superClass: %s %v\n", superClass, []byte(superClass))
-			}
-
-			fDesc.FieldRecords = make([]fieldmd.RecordT, fDesc.Header.NumFields)
-			if err := binary.Read(r, f.ByteOrder, &fDesc.FieldRecords); err != nil {
+			field.Descriptor.FieldRecords = make([]fieldmd.RecordT, field.Descriptor.Header.NumFields)
+			if err := binary.Read(r, f.ByteOrder, &field.Descriptor.FieldRecords); err != nil {
 				return nil, fmt.Errorf("failed to read []fieldmd.RecordT: %v", err)
 			}
 
-			var records []fieldmd.Record
-			for idx, record := range fDesc.FieldRecords {
-				var name string
+			fields = append(fields, field)
+		}
 
-				currOffset += int64(idx * int(fDesc.FieldRecordSize))
-
-				if record.MangledTypeName != 0 {
-					typeName, _, err = f.GetMangledTypeAtOffset(currOffset + 4 + int64(record.MangledTypeName))
-					if err != nil {
-						return nil, fmt.Errorf("failed to read record.MangledTypeName; %v", err)
-					}
-
-					fmt.Printf("type: %s %v\n", typeName, []byte(typeName))
-
-					f.sr.ReadAt(peek, currOffset+4+int64(record.MangledTypeName)-16)
-					fmt.Printf("%s\n", hex.Dump(peek))
-				}
-
-				name, err = f.GetCStringAtOffset(currOffset + 8 + int64(record.FieldName))
-				if err != nil {
-					return nil, fmt.Errorf("failed to read cstring: %v", err)
-				}
-
-				fmt.Println("name:", name)
-				f.sr.ReadAt(peek, currOffset+8+int64(record.FieldName)-16)
-				fmt.Printf("%s\n", hex.Dump(peek))
-
-				records = append(records, fieldmd.Record{
-					Name: name,
-					// Type:            typeBytes,
-					MangledTypeName: typeName,
-					Flags:           record.Flags.String(),
-				})
+		// parse fields
+		for idx, fd := range fields {
+			typeName, _, err := f.GetMangledTypeAtOffset(fd.Offset + int64(fd.Descriptor.MangledTypeName))
+			if err != nil {
+				return nil, fmt.Errorf("failed to read MangledTypeName: %v", err)
 			}
-
-			fields = append(fields, fieldmd.Field{
-				// Type:            typeBytes,
-				MangledTypeName: typeName,
-				SuperClass:      superClass,
-				Kind:            fDesc.Kind.String(),
-				Records:         records,
-				Descriptor:      fDesc,
-			})
+			fields[idx].TypeName = typeName
 		}
 
 		return &fields, nil
@@ -464,42 +410,51 @@ func (f *File) GetSwiftClosures() (*[]swift.CaptureDescriptor, error) {
 
 // GetMangledTypeAtOffset reads a mangled type at a given offset in the MachO
 func (f *File) GetMangledTypeAtOffset(offset int64) (string, *stypes.TypeDescriptor, error) {
+
 	if _, err := f.sr.Seek(offset, io.SeekStart); err != nil {
 		return "", nil, fmt.Errorf("failed to Seek: %v", err)
 	}
 
-	r := bufio.NewReader(f.sr)
-
-	peekByte, err := r.Peek(1)
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to Peek at offset 0x%x, %v", offset, err)
+	var refType byte
+	if err := binary.Read(f.sr, f.ByteOrder, &refType); err != nil {
+		return "", nil, fmt.Errorf("failed to read possible symbolic reference type at offset 0x%x, %v", offset, err)
 	}
 
-	if peekByte[0] >= byte(0x01) && peekByte[0] <= byte(0x17) {
-		refType, err := r.ReadByte()
-		if err != nil {
-			return "", nil, fmt.Errorf("failed to ReadByte at offset 0x%x, %v", offset, err)
-		}
+	if refType >= byte(0x01) && refType <= byte(0x17) {
 
 		var t32 int32
-		if err := binary.Read(r, f.ByteOrder, &t32); err != nil {
+		if err := binary.Read(f.sr, f.ByteOrder, &t32); err != nil {
 			return "", nil, fmt.Errorf("failed to read 32bit symbolic ref: %v", err)
 		}
 
 		switch refType {
 		case 1:
-			f.sr.Seek(offset+int64(t32)+1, io.SeekStart)
+			typeDescOffset := offset + int64(t32) + 1
+			f.sr.Seek(typeDescOffset, io.SeekStart)
 			var tDesc stypes.TypeDescriptor
 			if err := binary.Read(f.sr, f.ByteOrder, &tDesc); err != nil {
 				return "", nil, fmt.Errorf("failed to read stypes.TypeDescriptor: %v", err)
 			}
-
-			name, err := f.GetCStringAtOffset(offset + int64(t32) + 1 + 8 + int64(tDesc.Name))
+			parentDescOffset := typeDescOffset + sizeOfInt32 + int64(tDesc.Parent)
+			f.sr.Seek(parentDescOffset, io.SeekStart)
+			var parentDesc stypes.TypeDescriptor
+			if err := binary.Read(f.sr, f.ByteOrder, &parentDesc); err != nil {
+				return "", nil, fmt.Errorf("failed to read stypes.TypeDescriptor: %v", err)
+			}
+			fmt.Println("parent:", parentDesc)
+			parent, err := f.GetCStringAtOffset(parentDescOffset + 2*sizeOfInt32 + int64(parentDesc.Name))
 			if err != nil {
 				return "", nil, fmt.Errorf("failed to read cstring: %v", err)
 			}
-			fmt.Println("name:", name, tDesc.Flags)
-			return name, &tDesc, nil
+			if parentDesc.Parent != 0 {
+				fmt.Printf("0x%x\n", parentDescOffset+sizeOfInt32+int64(parentDesc.Parent))
+			}
+			name, err := f.GetCStringAtOffset(typeDescOffset + 2*sizeOfInt32 + int64(tDesc.Name))
+			if err != nil {
+				return "", nil, fmt.Errorf("failed to read cstring: %v", err)
+			}
+			fmt.Println("name:", parent, name, tDesc.Flags)
+			return parent + "." + name, &tDesc, nil
 		case 2:
 			f.sr.Seek(offset+int64(t32)+1, io.SeekStart)
 			var context uint64
@@ -537,17 +492,17 @@ func (f *File) GetMangledTypeAtOffset(offset int64) (string, *stypes.TypeDescrip
 			return "", nil, fmt.Errorf("unsupported symbolic REF: %X, 0x%x", refType, offset+int64(t32))
 		}
 
-	} else if peekByte[0] >= byte(0x18) && peekByte[0] <= byte(0x1F) { // TODO: finish support for these types
-		refType, err := r.ReadByte()
-		if err != nil {
-			return "", nil, fmt.Errorf("failed to ReadByte at offset 0x%x, %v", offset, err)
-		}
+	} else if refType >= byte(0x18) && refType <= byte(0x1F) { // TODO: finish support for these types
 		int64Bytes := make([]byte, 8)
-		if _, err := r.Read(int64Bytes); err != nil {
-			fmt.Printf("REF: %X, 0x%x\n", refType, offset+int64(binary.LittleEndian.Uint64(int64Bytes)))
+		if _, err := f.sr.Read(int64Bytes); err != nil {
+			return "", nil, fmt.Errorf("unsupported symbolic REF: %X, 0x%x", refType, offset+int64(binary.LittleEndian.Uint64(int64Bytes)))
 		}
 	} else { // regular string mangled type
-		s, err := bufio.NewReader(r).ReadString('\x00')
+		// revert the peek byte read
+		if _, err := f.sr.Seek(-1, io.SeekCurrent); err != nil {
+			return "", nil, fmt.Errorf("failed to Seek: %v", err)
+		}
+		s, err := bufio.NewReader(f.sr).ReadString('\x00')
 		if err != nil {
 			return "", nil, fmt.Errorf("failed to ReadBytes at offset 0x%x, %v", offset, err)
 		}

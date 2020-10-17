@@ -1598,7 +1598,7 @@ func (f *File) FindAddressSymbols(addr uint64) ([]Symbol, error) {
 			syms = append(syms, sym)
 		}
 	}
-	if len(syms) > 1 {
+	if len(syms) > 0 {
 		return syms, nil
 	}
 	return nil, fmt.Errorf("symbol(s) not found in macho symtab for addr 0x%016x", addr)

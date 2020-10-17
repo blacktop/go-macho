@@ -40,12 +40,13 @@ const (
 )
 
 type Field struct {
-	Type            []byte
-	MangledTypeName string
-	SuperClass      string
-	Kind            string
-	Records         []Record
-	Descriptor      FieldDescriptor
+	TypeName    string
+	MangledName string
+	SuperClass  string
+	Kind        string
+	Records     []Record
+	Offset      int64
+	Descriptor  FieldDescriptor
 }
 
 func (f Field) IsEnum() bool {
