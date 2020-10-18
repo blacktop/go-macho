@@ -2,6 +2,7 @@ package objc
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/blacktop/go-macho/types"
 )
@@ -47,6 +48,68 @@ const (
 	SwiftStableVersionMaskShift = 16
 	SwiftStableVersionMask      = 0xffff << SwiftStableVersionMaskShift
 )
+
+func (f ImageInfoFlag) IsReplacement() bool {
+	return f&IsReplacement != 0
+}
+func (f ImageInfoFlag) SupportsGC() bool {
+	return f&SupportsGC != 0
+}
+func (f ImageInfoFlag) RequiresGC() bool {
+	return f&RequiresGC != 0
+}
+func (f ImageInfoFlag) OptimizedByDyld() bool {
+	return f&OptimizedByDyld != 0
+}
+func (f ImageInfoFlag) CorrectedSynthesize() bool {
+	return f&CorrectedSynthesize != 0
+}
+func (f ImageInfoFlag) IsSimulated() bool {
+	return f&IsSimulated != 0
+}
+func (f ImageInfoFlag) HasCategoryClassProperties() bool {
+	return f&HasCategoryClassProperties != 0
+}
+func (f ImageInfoFlag) OptimizedByDyldClosure() bool {
+	return f&OptimizedByDyldClosure != 0
+}
+
+func (f ImageInfoFlag) List() []string {
+	var flags []string
+	if f&IsReplacement != 0 {
+		flags = append(flags, "IsReplacement")
+	}
+	if f&SupportsGC != 0 {
+		flags = append(flags, "SupportsGC")
+	}
+	if f&RequiresGC != 0 {
+		flags = append(flags, "RequiresGC")
+	}
+	if f&OptimizedByDyld != 0 {
+		flags = append(flags, "OptimizedByDyld")
+	}
+	if f&CorrectedSynthesize != 0 {
+		flags = append(flags, "CorrectedSynthesize")
+	}
+	if f&IsSimulated != 0 {
+		flags = append(flags, "IsSimulated")
+	}
+	if f&HasCategoryClassProperties != 0 {
+		flags = append(flags, "HasCategoryClassProperties")
+	}
+	if f&OptimizedByDyldClosure != 0 {
+		flags = append(flags, "OptimizedByDyldClosure")
+	}
+	return flags
+}
+
+func (f ImageInfoFlag) String() string {
+	var fStr string
+	for _, attr := range f.List() {
+		fStr += fmt.Sprintf("%s, ", attr)
+	}
+	return strings.TrimSuffix(fStr, ", ")
+}
 
 func (f ImageInfoFlag) SwiftVersion() string {
 	// TODO: I noticed there is some flags higher than swift version (Console has 84019008, which is a version of 0x502)
@@ -252,6 +315,21 @@ func (p *Protocol) String() string {
 		iMethods,
 		optMethods,
 	)
+}
+
+// CFString object in a 64-bit MachO file
+type CFString struct {
+	Name    string
+	Address uint64
+	*CFString64T
+}
+
+// CFString64T object in a 64-bit MachO file
+type CFString64T struct {
+	IsaVMAddr uint64 // class64_t * (64-bit pointer)
+	Info      uint64 // flag bits
+	Data      uint64 // char * (64-bit pointer)
+	Length    uint64 // number of non-NULL characters in above
 }
 
 const (

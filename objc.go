@@ -326,6 +326,53 @@ func (f *File) GetObjCCategories() ([]objc.Category, error) {
 	return nil, fmt.Errorf("file does not contain a __objc_catlist section")
 }
 
+// GetCFStrings parses all the cfstrings in tne MachO
+func (f *File) GetCFStrings() ([]objc.CFString, error) {
+
+	var cfstrings []objc.CFString
+
+	for _, s := range f.Segments() {
+		if strings.HasPrefix(s.Name, "__DATA") {
+			if sec := f.Section(s.Name, "__cfstring"); sec != nil {
+				dat, err := sec.Data()
+				if err != nil {
+					return nil, fmt.Errorf("failed to read __cfstring: %v", err)
+				}
+
+				cfstrings = make([]objc.CFString, int(sec.Size)/binary.Size(objc.CFString64T{}))
+				cfStrTypes := make([]objc.CFString64T, int(sec.Size)/binary.Size(objc.CFString64T{}))
+				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &cfStrTypes); err != nil {
+					return nil, fmt.Errorf("failed to read cfstring64_t structs: %v", err)
+				}
+
+				for idx, cfstr := range cfStrTypes {
+					cfstrings[idx].CFString64T = &cfstr
+					if cfstr.Data == 0 {
+						return nil, fmt.Errorf("unhandled cstring parse case where data is 0")
+						// uint64_t n_value;
+						// const char *symbol_name = get_symbol_64(offset + offsetof(struct cfstring64_t, characters), S, info, n_value);
+						// if (symbol_name == nullptr)
+						//   return nullptr;
+						// cfs_characters = n_value;
+					}
+					cfstrings[idx].Name, err = f.GetCString(f.convertToVMAddr(cfstr.Data))
+					if err != nil {
+						return nil, fmt.Errorf("failed to read cstring: %v", err)
+					}
+					cfstrings[idx].Address = sec.Addr + uint64(idx*binary.Size(objc.CFString64T{}))
+					if err != nil {
+						return nil, fmt.Errorf("failed to calulate cfstring vmaddr: %v", err)
+					}
+				}
+
+				return cfstrings, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("file does not contain a __objc_catlist section")
+}
+
 func (f *File) GetObjCProtocols() ([]objc.Protocol, error) {
 	var protoPtr objc.ProtocolT
 	var protocols []objc.Protocol
