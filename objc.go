@@ -370,7 +370,7 @@ func (f *File) GetCFStrings() ([]objc.CFString, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("file does not contain a __objc_catlist section")
+	return nil, fmt.Errorf("file does not contain a __DATA.__cfstring section")
 }
 
 func (f *File) GetObjCProtocols() ([]objc.Protocol, error) {
@@ -691,6 +691,17 @@ func (f *File) GetObjCIvars(vmAddr uint64) ([]objc.Ivar, error) {
 	}
 
 	for _, ivar := range ivs {
+		off, err := f.GetOffset(f.convertToVMAddr(uint64(ivar.Offset)))
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
+		}
+
+		f.sr.Seek(int64(off), io.SeekStart)
+
+		var o uint32
+		if err := binary.Read(f.sr, f.ByteOrder, &o); err != nil {
+			return nil, fmt.Errorf("failed to read ivar.offset: %v", err)
+		}
 		n, err := f.GetCString(f.convertToVMAddr(uint64(ivar.NameVMAddr)))
 		if err != nil {
 			return nil, fmt.Errorf("failed to read cstring: %v", err)
@@ -700,9 +711,10 @@ func (f *File) GetObjCIvars(vmAddr uint64) ([]objc.Ivar, error) {
 			return nil, fmt.Errorf("failed to read cstring: %v", err)
 		}
 		ivars = append(ivars, objc.Ivar{
-			Name:  n,
-			Type:  t,
-			IvarT: ivar,
+			Name:   n,
+			Type:   t,
+			Offset: o,
+			IvarT:  ivar,
 		})
 	}
 

@@ -369,6 +369,13 @@ func (c *Class) String() string {
 	if len(c.InstanceMethods) == 0 {
 		iMethods = ""
 	}
+	iVars := "  // instance variables\n"
+	for _, ivar := range c.Ivars {
+		iVars += fmt.Sprintf("  %s\n", &ivar)
+	}
+	if len(c.Ivars) == 0 {
+		iVars = ""
+	}
 	var subClass string
 	if c.ReadOnlyData.Flags.IsRoot() {
 		subClass = "<ROOT>"
@@ -378,12 +385,13 @@ func (c *Class) String() string {
 	}
 	return fmt.Sprintf(
 		"0x%011x %s : %s\n"+
+			"%s"+
 			"%s",
 		c.ClassPtr.VMAdder,
 		c.Name,
 		subClass,
-		iMethods,
-	)
+		iVars,
+		iMethods)
 }
 
 type ObjcClassT struct {
@@ -497,7 +505,13 @@ type IvarT struct {
 }
 
 type Ivar struct {
-	Name string
-	Type string
+	Name   string
+	Type   string
+	Offset uint32
 	IvarT
+}
+
+func (i *Ivar) String() string {
+	return fmt.Sprintf("+%#02x %s %s (%#x)", i.Offset, i.Type, i.Name, i.Size)
+	// return fmt.Sprintf("+%#02x %s %s (%#x)", i.Offset, getReturnType(i.Type), i.Name, i.Size)
 }
