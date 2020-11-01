@@ -1,76 +1,32 @@
 REPO=blacktop
 NAME=go-macho
-VERSION=$(shell cat VERSION)
-MESSAGE?="New release ${VERSION}"
-
-# TODO remove \|/templates/\|/api
-SOURCE_FILES?=$$(go list ./... | grep -v /vendor/)
-TEST_PATTERN?=.
-TEST_OPTIONS?=
+VERSION=$(shell gh release list -L 1 | cut -f1)
+NEXT_VERSION=$(shell $(PWD)/.hack/bump/version -p $(VERSION))
 
 GIT_COMMIT=$(git rev-parse HEAD)
 GIT_DIRTY=$(test -n "`git status --porcelain`" && echo "+CHANGES" || true)
 GIT_DESCRIBE=$(git describe --tags)
 
-
-setup: ## Install all the build and lint dependencies
-	@echo "===> Installing deps"
-	go get -u github.com/alecthomas/gometalinter
-	go get -u github.com/pierrre/gotestcover
-	go get -u golang.org/x/tools/cmd/cover
-	gometalinter --install
-
-test: ## Run all the tests
-	gotestcover $(TEST_OPTIONS) -covermode=atomic -coverprofile=coverage.txt $(SOURCE_FILES) -run $(TEST_PATTERN) -timeout=30s
-
-cover: test ## Run all the tests and opens the coverage report
-	go tool cover -html=coverage.txt
-
-fmt: ## gofmt and goimports all go files
-	find . -name '*.go' -not -wholename './vendor/*' | while read -r file; do gofmt -w -s "$$file"; goimports -w "$$file"; done
-
-lint: ## Run all the linters
-	gometalinter --vendor --disable-all \
-		--enable=deadcode \
-		--enable=ineffassign \
-		--enable=gosimple \
-		--enable=staticcheck \
-		--enable=gofmt \
-		--enable=goimports \
-		--enable=dupl \
-		--enable=misspell \
-		--enable=errcheck \
-		--enable=vet \
-		--enable=vetshadow \
-		--deadline=10m \
-		./...
-		markdownfmt -w README.md
-
 .PHONY: bump
 bump: ## Incriment version patch number
 	@echo " > Bumping VERSION"
-	@.hack/bump/version -p $(shell cat VERSION) > VERSION
-	@git commit -am "bumping version to $(shell cat VERSION)"
-	@git push
+	@chglog add --version ${NEXT_VERSION}
+
+.PHONY: changelog
+changelog: bump ## Create a new CHANGELOG.md
+	@echo " > Creating CHANGELOG.md"
+	@chglog format --template release > CHANGELOG.md
 
 .PHONY: release
-release: bump ## Create a new release from the VERSION
+release: changelog ## Create a new release from the VERSION
 	@echo " > Creating Release"
-	@.hack/make/release v$(shell cat VERSION)
+	@gh release create ${NEXT_VERSION} -F CHANGELOG.md
 
 .PHONY: destroy
 destroy: ## Remove release from the VERSION
 	@echo " > Deleting Release"
 	git tag -d v${VERSION}
 	git push origin :refs/tags/v${VERSION}
-
-.PHONY: ci
-ci: lint test ## Run all the tests and code checks
-
-.PHONY: build
-build: ## Build a beta version of malice
-	@echo "===> Building Binaries"
-	go build
 
 # Absolutely awesome: http://marmelab.com/blog/2016/02/29/auto-documented-makefile.html
 help:

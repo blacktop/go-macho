@@ -17,3 +17,5 @@
 .vscode
 .hack
 *.plist
+changelog.yml
+.chglog.yml
