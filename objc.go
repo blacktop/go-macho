@@ -876,9 +876,9 @@ func (f *File) GetObjCProperties(vmAddr uint64) ([]objc.Property, error) {
 	return objcProperties, nil
 }
 
-func (f *File) GetObjCSelectorReferences() (map[uint64]string, error) {
+func (f *File) GetObjCSelectorReferences() (map[uint64]*objc.Selector, error) {
 	var selPtrs []uint64
-	selRefs := make(map[uint64]string)
+	selRefs := make(map[uint64]*objc.Selector)
 
 	for _, s := range f.Segments() {
 		if strings.HasPrefix(s.Name, "__DATA") {
@@ -893,12 +893,15 @@ func (f *File) GetObjCSelectorReferences() (map[uint64]string, error) {
 					return nil, fmt.Errorf("failed to read selector pointers: %v", err)
 				}
 
-				for _, sel := range selPtrs {
+				for idx, sel := range selPtrs {
 					selName, err := f.GetCString(f.convertToVMAddr(sel))
 					if err != nil {
 						return nil, fmt.Errorf("failed to read cstring: %v", err)
 					}
-					selRefs[f.convertToVMAddr(sel)] = selName
+					selRefs[sec.Addr+uint64(idx*sizeOfInt64)] = &objc.Selector{
+						VMAddr: f.convertToVMAddr(sel),
+						Name:   selName,
+					}
 				}
 				return selRefs, nil
 			}

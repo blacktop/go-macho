@@ -601,3 +601,8 @@ func (i *Ivar) String() string {
 	return fmt.Sprintf("+%#02x %s %s (%#x)", i.Offset, i.Type, i.Name, i.Size)
 	// return fmt.Sprintf("+%#02x %s %s (%#x)", i.Offset, getReturnType(i.Type), i.Name, i.Size)
 }
+
+type Selector struct {
+	VMAddr uint64
+	Name   string
+}
