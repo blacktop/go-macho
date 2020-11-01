@@ -303,11 +303,7 @@ func (f HeaderFlag) List() []string {
 }
 
 func (f HeaderFlag) Flags() string {
-	var fStr string
-	for _, attr := range f.List() {
-		fStr += fmt.Sprintf("%s, ", attr)
-	}
-	return strings.TrimSuffix(fStr, ", ")
+	return strings.Join(f.List(), ", ")
 }
 
 func (h FileHeader) String() string {

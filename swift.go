@@ -16,6 +16,7 @@ import (
 )
 
 const sizeOfInt32 = 4
+const sizeOfInt64 = 8
 
 // GetSwiftProtocols parses all the protocols in the __TEXT.__swift5_protos section
 func (f *File) GetSwiftProtocols() (*[]protocols.Protocol, error) {

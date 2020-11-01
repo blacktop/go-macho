@@ -34,6 +34,7 @@ type File struct {
 	Symtab   *Symtab
 	Dysymtab *Dysymtab
 
+	dcf    *fixupchains.DyldChainedFixups
 	sr     *io.SectionReader
 	closer io.Closer
 }
@@ -1225,6 +1226,32 @@ func (f *File) convertToVMAddr(value uint64) uint64 {
 		}
 	}
 	return value
+}
+
+// GetBindName returns the import name for a given dyld chained pointer
+func (f *File) GetBindName(pointer uint64) (string, error) {
+	var err error
+
+	if f.HasFixups() {
+		if f.dcf == nil {
+			f.dcf, err = f.DyldChainedFixups()
+			if err != nil {
+				return "", fmt.Errorf("failed to parse dyld chained fixups: %v", err)
+			}
+		}
+		if len(f.dcf.Imports) > 0 {
+			if !fixupchains.DcpArm64eIsRebase(pointer) {
+				if fixupchains.DcpArm64eIsAuth(pointer) {
+					authBind := fixupchains.DyldChainedPtrArm64eAuthBind{Pointer: pointer}
+					return f.dcf.Imports[authBind.Ordinal()].Name, nil
+				}
+				bind := fixupchains.DyldChainedPtrArm64eBind{Pointer: pointer}
+				return f.dcf.Imports[bind.Ordinal()].Name, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("MachO does not contain dyld chained fixups")
 }
 
 // GetCString returns a c-string at a given virtual address in the MachO

@@ -104,11 +104,7 @@ func (f ImageInfoFlag) List() []string {
 }
 
 func (f ImageInfoFlag) String() string {
-	var fStr string
-	for _, attr := range f.List() {
-		fStr += fmt.Sprintf("%s, ", attr)
-	}
-	return strings.TrimSuffix(fStr, ", ")
+	return strings.Join(f.List(), ", ")
 }
 
 func (f ImageInfoFlag) SwiftVersion() string {
@@ -242,8 +238,40 @@ type CategoryT struct {
 }
 
 type Category struct {
-	Name string
+	Name            string
+	VMAddr          uint64
+	ClassMethods    []Method
+	InstanceMethods []Method
 	CategoryT
+}
+
+func (c *Category) String() string {
+	var cMethods string
+	var iMethods string
+
+	cat := fmt.Sprintf("0x%011x %s", c.VMAddr, c.Name)
+
+	if len(c.ClassMethods) > 0 {
+		cMethods = "  // class methods\n"
+		for _, meth := range c.ClassMethods {
+			cMethods += fmt.Sprintf("  0x%011x +[%s %s]\n", meth.Pointer.VMAdder, c.Name, meth.Name)
+		}
+		cMethods += fmt.Sprintf("\n")
+	}
+	if len(c.InstanceMethods) > 0 {
+		iMethods = "  // instance methods\n"
+		for _, meth := range c.InstanceMethods {
+			iMethods += fmt.Sprintf("  0x%011x -[%s %s]\n", meth.Pointer.VMAdder, c.Name, meth.Name)
+		}
+		iMethods += fmt.Sprintf("\n")
+	}
+
+	return fmt.Sprintf(
+		"%s\n"+
+			"%s%s",
+		cat,
+		cMethods,
+		iMethods)
 }
 
 const (
@@ -254,6 +282,11 @@ const (
 	// Bits 0..15 are reserved for Swift's use.
 	PROTOCOL_FIXED_UP_MASK = (PROTOCOL_FIXED_UP_1 | PROTOCOL_FIXED_UP_2)
 )
+
+type ProtocolList struct {
+	Count     uint64
+	Protocols []uint64
+}
 
 type ProtocolT struct {
 	IsaVMAddr                     uint64
@@ -273,7 +306,9 @@ type ProtocolT struct {
 }
 
 type Protocol struct {
-	Name                    string
+	Name string
+	// Isa                     string
+	Prots                   []Protocol
 	InstanceMethods         []Method
 	InstanceProperties      []Property
 	ClassMethods            []Method
@@ -286,32 +321,53 @@ type Protocol struct {
 
 func (p *Protocol) String() string {
 	var props string
-	for _, prop := range p.InstanceProperties {
-		props += fmt.Sprintf(" @property %s\n", prop.Name)
+	var cMethods string
+	var iMethods string
+	var optMethods string
+
+	protocol := fmt.Sprintf("@protocol %s ", p.Name)
+
+	if len(p.Prots) > 0 {
+		var subProts []string
+		for _, prot := range p.Prots {
+			subProts = append(subProts, prot.Name)
+		}
+		protocol += fmt.Sprintf("<%s>", strings.Join(subProts, ", "))
 	}
-	iMethods := "  // instance methods\n"
-	for _, meth := range p.InstanceMethods {
-		iMethods += fmt.Sprintf(" -[%s %s]\n", p.Name, meth.Name)
+	if len(p.InstanceProperties) > 0 {
+		for _, prop := range p.InstanceProperties {
+			props += fmt.Sprintf(" @property (%s) %s\n", prop.Attributes, prop.Name)
+		}
+		props += fmt.Sprintf("\n")
 	}
-	if len(p.InstanceMethods) == 0 {
-		iMethods = ""
+	if len(p.ClassMethods) > 0 {
+		cMethods = "  // class methods\n"
+		for _, meth := range p.ClassMethods {
+			cMethods += fmt.Sprintf(" +[%s %s]\n", p.Name, meth.Name)
+		}
+		cMethods += fmt.Sprintf("\n")
 	}
-	optMethods := "  // instance methods\n"
-	for _, meth := range p.OptionalInstanceMethods {
-		optMethods += fmt.Sprintf(" -[%s %s]\n", p.Name, meth.Name)
+	if len(p.InstanceMethods) > 0 {
+		iMethods = "  // instance methods\n"
+		for _, meth := range p.InstanceMethods {
+			iMethods += fmt.Sprintf(" -[%s %s]\n", p.Name, meth.Name)
+		}
+		iMethods += fmt.Sprintf("\n")
 	}
-	if len(p.InstanceMethods) == 0 {
-		optMethods = ""
+	if len(p.OptionalInstanceMethods) > 0 {
+		optMethods = "@optional\n  // instance methods\n"
+		for _, meth := range p.OptionalInstanceMethods {
+			optMethods += fmt.Sprintf(" -[%s %s]\n", p.Name, meth.Name)
+		}
+		optMethods += fmt.Sprintf("\n")
 	}
 	return fmt.Sprintf(
-		"@protocol %s\n"+
-			"%s"+
-			"\n%s"+
-			"\n@optional\n"+
-			"%s"+
+		"%s\n"+
+			"%s%s%s%s"+
 			"@end\n",
-		p.Name,
+		protocol,
 		props,
+		cMethods,
 		iMethods,
 		optMethods,
 	)
@@ -346,9 +402,13 @@ const (
 
 type Class struct {
 	Name                  string
-	SuperClass            *Class
+	SuperClass            string
+	Isa                   string
 	InstanceMethods       []Method
+	ClassMethods          []Method
 	Ivars                 []Ivar
+	Props                 []Property
+	Prots                 []Protocol
 	ClassPtr              types.FilePointer
 	IsaVMAddr             uint64
 	SuperclassVMAddr      uint64
@@ -361,36 +421,62 @@ type Class struct {
 }
 
 func (c *Class) String() string {
+	var iVars string
+	var props string
+	var cMethods string
+	var iMethods string
 
-	iMethods := "  // instance methods\n"
-	for _, meth := range c.InstanceMethods {
-		iMethods += fmt.Sprintf("  0x%011x -[%s %s]\n", meth.Pointer.VMAdder, c.Name, meth.Name)
-	}
-	if len(c.InstanceMethods) == 0 {
-		iMethods = ""
-	}
-	iVars := "  // instance variables\n"
-	for _, ivar := range c.Ivars {
-		iVars += fmt.Sprintf("  %s\n", &ivar)
-	}
-	if len(c.Ivars) == 0 {
-		iVars = ""
-	}
 	var subClass string
 	if c.ReadOnlyData.Flags.IsRoot() {
 		subClass = "<ROOT>"
+	} else if len(c.SuperClass) > 0 {
+		subClass = c.SuperClass
 	}
-	if c.SuperClass != nil {
-		subClass = c.SuperClass.Name
+
+	class := fmt.Sprintf("0x%011x %s : %s ", c.ClassPtr.VMAdder, c.Name, subClass)
+
+	if len(c.Prots) > 0 {
+		var subProts []string
+		for _, prot := range c.Prots {
+			subProts = append(subProts, prot.Name)
+		}
+		class += fmt.Sprintf("<%s>", strings.Join(subProts, ", "))
 	}
+	if len(c.Ivars) > 0 {
+		iVars = "  // instance variables\n"
+		for _, ivar := range c.Ivars {
+			iVars += fmt.Sprintf("  %s\n", &ivar)
+		}
+		iVars += fmt.Sprintf("\n")
+	}
+	if len(c.Props) > 0 {
+		for _, prop := range c.Props {
+			props += fmt.Sprintf(" @property (%s) %s\n", prop.Attributes, prop.Name)
+		}
+		props += fmt.Sprintf("\n")
+	}
+	if len(c.ClassMethods) > 0 {
+		cMethods = "  // class methods\n"
+		for _, meth := range c.ClassMethods {
+			cMethods += fmt.Sprintf("  0x%011x +[%s %s]\n", meth.Pointer.VMAdder, c.Name, meth.Name)
+		}
+		cMethods += fmt.Sprintf("\n")
+	}
+	if len(c.InstanceMethods) > 0 {
+		iMethods = "  // instance methods\n"
+		for _, meth := range c.InstanceMethods {
+			iMethods += fmt.Sprintf("  0x%011x -[%s %s]\n", meth.Pointer.VMAdder, c.Name, meth.Name)
+		}
+		iMethods += fmt.Sprintf("\n")
+	}
+
 	return fmt.Sprintf(
-		"0x%011x %s : %s\n"+
-			"%s"+
-			"%s",
-		c.ClassPtr.VMAdder,
-		c.Name,
-		subClass,
+		"%s\n"+
+			"%s%s%s%s",
+		class,
 		iVars,
+		props,
+		cMethods,
 		iMethods)
 }
 

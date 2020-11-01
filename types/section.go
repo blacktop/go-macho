@@ -1,7 +1,6 @@
 package types
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -258,11 +257,7 @@ func (f SectionFlag) List() []string {
 }
 
 func (f SectionFlag) String() string {
-	var fStr string
-	for _, attr := range f.List() {
-		fStr += fmt.Sprintf("%s, ", attr)
-	}
-	return strings.TrimSuffix(fStr, ", ")
+	return strings.Join(f.List(), ", ")
 }
 
 const (
@@ -365,11 +360,7 @@ func (f SectionFlag) AttributesList() []string {
 }
 
 func (f SectionFlag) AttributesString() string {
-	var aStr string
-	for _, attr := range f.AttributesList() {
-		aStr += fmt.Sprintf("%s|", attr)
-	}
-	return strings.TrimSuffix(aStr, "|")
+	return strings.Join(f.AttributesList(), "|")
 }
 
 // func (ss sections) Print() {
