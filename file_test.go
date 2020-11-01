@@ -457,20 +457,6 @@ func TestNewFile(t *testing.T) {
 		fmt.Println(cs.Requirements[0].Detail)
 	}
 
-	if got.DyldChainedFixups() != nil {
-		dcf := got.DyldChainedFixups()
-		for _, fixup := range dcf.Fixups {
-			fmt.Println(fixup)
-		}
-	}
-
-	// dwarf, err := got.DWARF()
-	// if err != nil {
-	// 	t.Errorf("DWARF() error = %v", err)
-	// 	return
-	// }
-	// fmt.Println(dwarf)
-
 	fmt.Println(got.FileTOC.String())
 
 	if got.UUID().ID != "test" {
