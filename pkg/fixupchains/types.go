@@ -18,15 +18,23 @@ type DyldChainedFixups struct {
 	bo      binary.ByteOrder
 }
 
+type Fixup interface {
+	Offset() uint64
+	String(baseAddr ...uint64) string
+}
+
 type Rebase interface {
 	Offset() uint64
 	Target() uint64
+	String(baseAddr ...uint64) string
 }
 
 type Bind interface {
+	Name() string
 	Offset() uint64
 	Ordinal() uint64
 	Addend() uint64
+	String(baseAddr ...uint64) string
 }
 
 type DCSymbolsFormat uint32
@@ -77,8 +85,29 @@ type DyldChainedStarts struct {
 	DyldChainedStartsInSegment
 	PageStarts  []DCPtrStart
 	ChainStarts []uint16
-	Rebases     []Rebase
-	Binds       []Bind
+	Fixups      []Fixup
+}
+
+// Rebases filters fixups to only rebases
+func (s *DyldChainedStarts) Rebases() []Rebase {
+	var rebases []Rebase
+	for _, fixup := range s.Fixups {
+		if r, ok := fixup.(Rebase); ok {
+			rebases = append(rebases, r)
+		}
+	}
+	return rebases
+}
+
+// Binds filters fixups to only binds
+func (s *DyldChainedStarts) Binds() []Bind {
+	var binds []Bind
+	for _, fixup := range s.Fixups {
+		if b, ok := fixup.(Bind); ok {
+			binds = append(binds, b)
+		}
+	}
+	return binds
 }
 
 // DyldChainedStartsInSegment object is embedded in dyld_chain_starts_in_image
@@ -172,7 +201,10 @@ func (d DyldChainedPtrArm64eRebase) Auth() uint64 {
 func (d DyldChainedPtrArm64eRebase) Kind() string {
 	return "rebase"
 }
-func (d DyldChainedPtrArm64eRebase) String() string {
+func (d DyldChainedPtrArm64eRebase) String(baseAddr ...uint64) string {
+	if len(baseAddr) > 0 {
+		d.Fixup += baseAddr[0]
+	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: 0x%011x, high8: 0x%02x)",
 		d.Fixup,
 		d.Pointer,
@@ -187,6 +219,7 @@ func (d DyldChainedPtrArm64eRebase) String() string {
 type DyldChainedPtrArm64eBind struct {
 	Fixup   uint64
 	Pointer uint64
+	Import  string
 }
 
 func (d DyldChainedPtrArm64eBind) Offset() uint64 {
@@ -220,7 +253,13 @@ func (d DyldChainedPtrArm64eBind) Auth() uint64 {
 func (d DyldChainedPtrArm64eBind) Kind() string {
 	return "bind"
 }
-func (d DyldChainedPtrArm64eBind) String() string {
+func (d DyldChainedPtrArm64eBind) Name() string {
+	return d.Import
+}
+func (d DyldChainedPtrArm64eBind) String(baseAddr ...uint64) string {
+	if len(baseAddr) > 0 {
+		d.Fixup += baseAddr[0]
+	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, ordinal: %03d, addend: %d)",
 		d.Fixup,
 		d.Pointer,
@@ -264,7 +303,10 @@ func (d DyldChainedPtrArm64eAuthRebase) Auth() uint64 {
 func (d DyldChainedPtrArm64eAuthRebase) Kind() string {
 	return "auth-rebase"
 }
-func (d DyldChainedPtrArm64eAuthRebase) String() string {
+func (d DyldChainedPtrArm64eAuthRebase) String(baseAddr ...uint64) string {
+	if len(baseAddr) > 0 {
+		d.Fixup += baseAddr[0]
+	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: 0x%011x, key: %s, addrDiv: %d, diversity: 0x%04x)",
 		d.Fixup,
 		d.Pointer,
@@ -281,6 +323,7 @@ func (d DyldChainedPtrArm64eAuthRebase) String() string {
 type DyldChainedPtrArm64eAuthBind struct {
 	Fixup   uint64
 	Pointer uint64
+	Import  string
 }
 
 func (d DyldChainedPtrArm64eAuthBind) Offset() uint64 {
@@ -316,7 +359,13 @@ func (d DyldChainedPtrArm64eAuthBind) Auth() uint64 {
 func (d DyldChainedPtrArm64eAuthBind) Kind() string {
 	return "auth-bind"
 }
-func (d DyldChainedPtrArm64eAuthBind) String() string {
+func (d DyldChainedPtrArm64eAuthBind) Name() string {
+	return d.Import
+}
+func (d DyldChainedPtrArm64eAuthBind) String(baseAddr ...uint64) string {
+	if len(baseAddr) > 0 {
+		d.Fixup += baseAddr[0]
+	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, ordinal: %03d, key: %s, addrDiv: %d, diversity: 0x%04x)",
 		d.Fixup,
 		d.Pointer,
@@ -359,7 +408,10 @@ func (d DyldChainedPtr64Rebase) Bind() uint64 {
 func (d DyldChainedPtr64Rebase) Kind() string {
 	return "ptr64-rebase"
 }
-func (d DyldChainedPtr64Rebase) String() string {
+func (d DyldChainedPtr64Rebase) String(baseAddr ...uint64) string {
+	if len(baseAddr) > 0 {
+		d.Fixup += baseAddr[0]
+	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: 0x%011x, high8: 0x%02x)",
 		d.Fixup,
 		d.Pointer,
@@ -400,7 +452,10 @@ func (d DyldChainedPtr64RebaseOffset) Bind() uint64 {
 func (d DyldChainedPtr64RebaseOffset) Kind() string {
 	return "rebase-offset"
 }
-func (d DyldChainedPtr64RebaseOffset) String() string {
+func (d DyldChainedPtr64RebaseOffset) String(baseAddr ...uint64) string {
+	if len(baseAddr) > 0 {
+		d.Fixup += baseAddr[0]
+	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: 0x%011x, high8: 0x%02x)",
 		d.Fixup,
 		d.Pointer,
@@ -415,6 +470,7 @@ func (d DyldChainedPtr64RebaseOffset) String() string {
 type DyldChainedPtrArm64eBind24 struct {
 	Fixup   uint64
 	Pointer uint64
+	Import  string
 }
 
 func (d DyldChainedPtrArm64eBind24) Offset() uint64 {
@@ -448,7 +504,13 @@ func (d DyldChainedPtrArm64eBind24) Auth() uint64 {
 func (d DyldChainedPtrArm64eBind24) Kind() string {
 	return "arm64e bind24"
 }
-func (d DyldChainedPtrArm64eBind24) String() string {
+func (d DyldChainedPtrArm64eBind24) Name() string {
+	return d.Import
+}
+func (d DyldChainedPtrArm64eBind24) String(baseAddr ...uint64) string {
+	if len(baseAddr) > 0 {
+		d.Fixup += baseAddr[0]
+	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, ordinal: %03d, addend: %d)", d.Fixup, d.Pointer, d.Kind(), d.Next(), d.Ordinal(), d.SignExtendedAddend())
 }
 
@@ -456,6 +518,7 @@ func (d DyldChainedPtrArm64eBind24) String() string {
 type DyldChainedPtrArm64eAuthBind24 struct {
 	Fixup   uint64
 	Pointer uint64
+	Import  string
 }
 
 func (d DyldChainedPtrArm64eAuthBind24) Offset() uint64 {
@@ -491,7 +554,13 @@ func (d DyldChainedPtrArm64eAuthBind24) Auth() uint64 {
 func (d DyldChainedPtrArm64eAuthBind24) Kind() string {
 	return "auth-bind24"
 }
-func (d DyldChainedPtrArm64eAuthBind24) String() string {
+func (d DyldChainedPtrArm64eAuthBind24) Name() string {
+	return d.Import
+}
+func (d DyldChainedPtrArm64eAuthBind24) String(baseAddr ...uint64) string {
+	if len(baseAddr) > 0 {
+		d.Fixup += baseAddr[0]
+	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, key: %s, addrDiv: %d, diversity: 0x%04x, ordinal: %03d)",
 		d.Fixup,
 		d.Pointer,
@@ -508,6 +577,7 @@ func (d DyldChainedPtrArm64eAuthBind24) String() string {
 type DyldChainedPtr64Bind struct {
 	Fixup   uint64
 	Pointer uint64
+	Import  string
 }
 
 func (d DyldChainedPtr64Bind) Offset() uint64 {
@@ -531,7 +601,13 @@ func (d DyldChainedPtr64Bind) Bind() uint64 {
 func (d DyldChainedPtr64Bind) Kind() string {
 	return "ptr64-bind"
 }
-func (d DyldChainedPtr64Bind) String() string {
+func (d DyldChainedPtr64Bind) Name() string {
+	return d.Import
+}
+func (d DyldChainedPtr64Bind) String(baseAddr ...uint64) string {
+	if len(baseAddr) > 0 {
+		d.Fixup += baseAddr[0]
+	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, ordinal: %06x, addend: %d)",
 		d.Fixup,
 		d.Pointer,
@@ -575,7 +651,10 @@ func (d DyldChainedPtr64KernelCacheRebase) IsAuth() uint64 {
 func (d DyldChainedPtr64KernelCacheRebase) Kind() string {
 	return "kcache-rebase"
 }
-func (d DyldChainedPtr64KernelCacheRebase) String() string {
+func (d DyldChainedPtr64KernelCacheRebase) String(baseAddr ...uint64) string {
+	if len(baseAddr) > 0 {
+		d.Fixup += baseAddr[0]
+	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, key: %s, addrDiv: %d, diversity: 0x%04x, target: 0x%08x, cacheLevel: %d)",
 		d.Fixup,
 		d.Pointer,
@@ -614,7 +693,10 @@ func (d DyldChainedPtr32Rebase) Bind() uint32 {
 func (d DyldChainedPtr32Rebase) Kind() string {
 	return "ptr32-rebase"
 }
-func (d DyldChainedPtr32Rebase) String() string {
+func (d DyldChainedPtr32Rebase) String(baseAddr ...uint64) string {
+	if len(baseAddr) > 0 {
+		d.Fixup += baseAddr[0]
+	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%08x %16s: (next:%02d target: 0x%07x)", d.Fixup, d.Pointer, d.Kind(), d.Next(), d.Target())
 }
 
@@ -622,6 +704,7 @@ func (d DyldChainedPtr32Rebase) String() string {
 type DyldChainedPtr32Bind struct {
 	Fixup   uint64
 	Pointer uint32
+	Import  string
 }
 
 func (d DyldChainedPtr32Bind) Offset() uint64 {
@@ -642,7 +725,13 @@ func (d DyldChainedPtr32Bind) Bind() uint32 {
 func (d DyldChainedPtr32Bind) Kind() string {
 	return "ptr32-bind"
 }
-func (d DyldChainedPtr32Bind) String() string {
+func (d DyldChainedPtr32Bind) Name() string {
+	return d.Import
+}
+func (d DyldChainedPtr32Bind) String(baseAddr ...uint64) string {
+	if len(baseAddr) > 0 {
+		d.Fixup += baseAddr[0]
+	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%08x %16s: (next:%02d ordinal:%05x addend:%d)", d.Fixup, d.Pointer, d.Kind(), d.Next(), d.Ordinal(), d.Addend())
 }
 
@@ -664,7 +753,10 @@ func (d DyldChainedPtr32CacheRebase) Next() uint32 {
 func (d DyldChainedPtr32CacheRebase) Kind() string {
 	return "cache-rebase"
 }
-func (d DyldChainedPtr32CacheRebase) String() string {
+func (d DyldChainedPtr32CacheRebase) String(baseAddr ...uint64) string {
+	if len(baseAddr) > 0 {
+		d.Fixup += baseAddr[0]
+	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%08x %16s: (next:%02d target: 0x%07x)", d.Fixup, d.Pointer, d.Kind(), d.Next(), d.Target())
 }
 
@@ -686,6 +778,9 @@ func (d DyldChainedPtr32FirmwareRebase) Next() uint32 {
 func (d DyldChainedPtr32FirmwareRebase) Kind() string {
 	return "firmware-rebase"
 }
-func (d DyldChainedPtr32FirmwareRebase) String() string {
+func (d DyldChainedPtr32FirmwareRebase) String(baseAddr ...uint64) string {
+	if len(baseAddr) > 0 {
+		d.Fixup += baseAddr[0]
+	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%08x %16s: (next:%02d target: 0x%07x)", d.Fixup, d.Pointer, d.Kind(), d.Next(), d.Target())
 }

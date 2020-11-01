@@ -27,6 +27,9 @@ func (dcf *DyldChainedFixups) Parse() (*DyldChainedFixups, error) {
 		}
 	}
 
+	// Parse Imports
+	dcf.parseImports()
+
 	for segIdx, start := range dcf.Starts {
 
 		if start.PageStarts == nil {
@@ -61,9 +64,6 @@ func (dcf *DyldChainedFixups) Parse() (*DyldChainedFixups, error) {
 			}
 		}
 	}
-
-	// Parse Imports
-	dcf.parseImports()
 
 	return dcf, nil
 }
@@ -127,12 +127,11 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 				return err
 			}
 			if Generic32IsBind(dcPtr) {
-				dcf.Starts[segIdx].Binds = append(dcf.Starts[segIdx].Binds, DyldChainedPtr32Bind{
-					Pointer: dcPtr,
-					Fixup:   fixupLocation,
-				})
+				bind := DyldChainedPtr32Bind{Pointer: dcPtr, Fixup: fixupLocation}
+				bind.Import = dcf.Imports[bind.Ordinal()].Name
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, bind)
 			} else {
-				dcf.Starts[segIdx].Rebases = append(dcf.Starts[segIdx].Rebases, DyldChainedPtr32Rebase{
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, DyldChainedPtr32Rebase{
 					Pointer: dcPtr,
 					Fixup:   fixupLocation,
 				})
@@ -145,7 +144,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr); err != nil {
 				return err
 			}
-			dcf.Starts[segIdx].Rebases = append(dcf.Starts[segIdx].Rebases, DyldChainedPtr32CacheRebase{
+			dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, DyldChainedPtr32CacheRebase{
 				Pointer: dcPtr,
 				Fixup:   fixupLocation,
 			})
@@ -157,7 +156,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr); err != nil {
 				return err
 			}
-			dcf.Starts[segIdx].Rebases = append(dcf.Starts[segIdx].Rebases, DyldChainedPtr32FirmwareRebase{
+			dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, DyldChainedPtr32FirmwareRebase{
 				Pointer: dcPtr,
 				Fixup:   fixupLocation,
 			})
@@ -170,12 +169,11 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 				return err
 			}
 			if Generic64IsBind(dcPtr64) {
-				dcf.Starts[segIdx].Binds = append(dcf.Starts[segIdx].Binds, DyldChainedPtr64Bind{
-					Pointer: dcPtr64,
-					Fixup:   fixupLocation,
-				})
+				bind := DyldChainedPtr64Bind{Pointer: dcPtr64, Fixup: fixupLocation}
+				bind.Import = dcf.Imports[bind.Ordinal()].Name
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, bind)
 			} else {
-				dcf.Starts[segIdx].Rebases = append(dcf.Starts[segIdx].Rebases, DyldChainedPtr64Rebase{
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, DyldChainedPtr64Rebase{
 					Pointer: dcPtr64,
 					Fixup:   fixupLocation,
 				})
@@ -188,7 +186,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr64); err != nil {
 				return err
 			}
-			dcf.Starts[segIdx].Rebases = append(dcf.Starts[segIdx].Rebases, DyldChainedPtr64RebaseOffset{
+			dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, DyldChainedPtr64RebaseOffset{
 				Pointer: dcPtr64,
 				Fixup:   fixupLocation,
 			})
@@ -200,7 +198,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr64); err != nil {
 				return err
 			}
-			dcf.Starts[segIdx].Rebases = append(dcf.Starts[segIdx].Rebases, DyldChainedPtr64KernelCacheRebase{
+			dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, DyldChainedPtr64KernelCacheRebase{
 				Pointer: dcPtr64,
 				Fixup:   fixupLocation,
 			})
@@ -212,7 +210,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr64); err != nil {
 				return err
 			}
-			dcf.Starts[segIdx].Rebases = append(dcf.Starts[segIdx].Rebases, DyldChainedPtr64KernelCacheRebase{
+			dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, DyldChainedPtr64KernelCacheRebase{
 				Pointer: dcPtr64,
 				Fixup:   fixupLocation,
 			})
@@ -225,25 +223,23 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 				return err
 			}
 			if !DcpArm64eIsBind(dcPtr64) && !DcpArm64eIsAuth(dcPtr64) {
-				dcf.Starts[segIdx].Rebases = append(dcf.Starts[segIdx].Rebases, DyldChainedPtrArm64eRebase{
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, DyldChainedPtrArm64eRebase{
 					Pointer: dcPtr64,
 					Fixup:   fixupLocation,
 				})
 			} else if DcpArm64eIsBind(dcPtr64) && !DcpArm64eIsAuth(dcPtr64) {
-				dcf.Starts[segIdx].Binds = append(dcf.Starts[segIdx].Binds, DyldChainedPtrArm64eBind{
-					Pointer: dcPtr64,
-					Fixup:   fixupLocation,
-				})
+				bind := DyldChainedPtrArm64eBind{Pointer: dcPtr64, Fixup: fixupLocation}
+				bind.Import = dcf.Imports[bind.Ordinal()].Name
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, bind)
 			} else if !DcpArm64eIsBind(dcPtr64) && DcpArm64eIsAuth(dcPtr64) {
-				dcf.Starts[segIdx].Rebases = append(dcf.Starts[segIdx].Rebases, DyldChainedPtrArm64eAuthRebase{
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, DyldChainedPtrArm64eAuthRebase{
 					Pointer: dcPtr64,
 					Fixup:   fixupLocation,
 				})
 			} else {
-				dcf.Starts[segIdx].Binds = append(dcf.Starts[segIdx].Binds, DyldChainedPtrArm64eAuthBind{
-					Pointer: dcPtr64,
-					Fixup:   fixupLocation,
-				})
+				bind := DyldChainedPtrArm64eAuthBind{Pointer: dcPtr64, Fixup: fixupLocation}
+				bind.Import = dcf.Imports[bind.Ordinal()].Name
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, bind)
 			}
 			if DcpArm64eNext(dcPtr64) == 0 {
 				chainEnd = true
@@ -254,25 +250,23 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 				return err
 			}
 			if !DcpArm64eIsBind(dcPtr64) && !DcpArm64eIsAuth(dcPtr64) {
-				dcf.Starts[segIdx].Rebases = append(dcf.Starts[segIdx].Rebases, DyldChainedPtrArm64eRebase{
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, DyldChainedPtrArm64eRebase{
 					Pointer: dcPtr64,
 					Fixup:   fixupLocation,
 				})
 			} else if DcpArm64eIsBind(dcPtr64) && !DcpArm64eIsAuth(dcPtr64) {
-				dcf.Starts[segIdx].Binds = append(dcf.Starts[segIdx].Binds, DyldChainedPtrArm64eBind{
-					Pointer: dcPtr64,
-					Fixup:   fixupLocation,
-				})
+				bind := DyldChainedPtrArm64eBind{Pointer: dcPtr64, Fixup: fixupLocation}
+				bind.Import = dcf.Imports[bind.Ordinal()].Name
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, bind)
 			} else if !DcpArm64eIsBind(dcPtr64) && DcpArm64eIsAuth(dcPtr64) {
-				dcf.Starts[segIdx].Rebases = append(dcf.Starts[segIdx].Rebases, DyldChainedPtrArm64eAuthRebase{
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, DyldChainedPtrArm64eAuthRebase{
 					Pointer: dcPtr64,
 					Fixup:   fixupLocation,
 				})
 			} else {
-				dcf.Starts[segIdx].Binds = append(dcf.Starts[segIdx].Binds, DyldChainedPtrArm64eAuthBind{
-					Pointer: dcPtr64,
-					Fixup:   fixupLocation,
-				})
+				bind := DyldChainedPtrArm64eAuthBind{Pointer: dcPtr64, Fixup: fixupLocation}
+				bind.Import = dcf.Imports[bind.Ordinal()].Name
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, bind)
 			}
 			if DcpArm64eNext(dcPtr64) == 0 {
 				chainEnd = true
@@ -285,25 +279,23 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 				return err
 			}
 			if !DcpArm64eIsBind(dcPtr64) && !DcpArm64eIsAuth(dcPtr64) {
-				dcf.Starts[segIdx].Rebases = append(dcf.Starts[segIdx].Rebases, DyldChainedPtrArm64eRebase{
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, DyldChainedPtrArm64eRebase{
 					Pointer: dcPtr64,
 					Fixup:   fixupLocation,
 				})
 			} else if DcpArm64eIsBind(dcPtr64) && !DcpArm64eIsAuth(dcPtr64) {
-				dcf.Starts[segIdx].Binds = append(dcf.Starts[segIdx].Binds, DyldChainedPtrArm64eBind{
-					Pointer: dcPtr64,
-					Fixup:   fixupLocation,
-				})
+				bind := DyldChainedPtrArm64eBind{Pointer: dcPtr64, Fixup: fixupLocation}
+				bind.Import = dcf.Imports[bind.Ordinal()].Name
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, bind)
 			} else if !DcpArm64eIsBind(dcPtr64) && DcpArm64eIsAuth(dcPtr64) {
-				dcf.Starts[segIdx].Rebases = append(dcf.Starts[segIdx].Rebases, DyldChainedPtrArm64eAuthRebase{
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, DyldChainedPtrArm64eAuthRebase{
 					Pointer: dcPtr64,
 					Fixup:   fixupLocation,
 				})
 			} else {
-				dcf.Starts[segIdx].Binds = append(dcf.Starts[segIdx].Binds, DyldChainedPtrArm64eAuthBind{
-					Pointer: dcPtr64,
-					Fixup:   fixupLocation,
-				})
+				bind := DyldChainedPtrArm64eAuthBind{Pointer: dcPtr64, Fixup: fixupLocation}
+				bind.Import = dcf.Imports[bind.Ordinal()].Name
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, bind)
 			}
 			if DcpArm64eNext(dcPtr64) == 0 {
 				chainEnd = true
@@ -314,15 +306,13 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 				return err
 			}
 			if DcpArm64eIsBind(dcPtr64) && DcpArm64eIsAuth(dcPtr64) {
-				dcf.Starts[segIdx].Binds = append(dcf.Starts[segIdx].Binds, DyldChainedPtrArm64eAuthBind24{
-					Pointer: dcPtr64,
-					Fixup:   fixupLocation,
-				})
+				bind := DyldChainedPtrArm64eAuthBind24{Pointer: dcPtr64, Fixup: fixupLocation}
+				bind.Import = dcf.Imports[bind.Ordinal()].Name
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, bind)
 			} else if DcpArm64eIsBind(dcPtr64) && !DcpArm64eIsAuth(dcPtr64) {
-				dcf.Starts[segIdx].Binds = append(dcf.Starts[segIdx].Binds, DyldChainedPtrArm64eBind24{
-					Pointer: dcPtr64,
-					Fixup:   fixupLocation,
-				})
+				bind := DyldChainedPtrArm64eBind24{Pointer: dcPtr64, Fixup: fixupLocation}
+				bind.Import = dcf.Imports[bind.Ordinal()].Name
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, bind)
 			} else {
 				return fmt.Errorf("unknown DYLD_CHAINED_PTR_ARM64E_USERLAND24 pointer typr 0x%04X", dcPtr64)
 			}
