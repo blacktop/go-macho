@@ -1097,7 +1097,6 @@ type DyldExportsTrie struct {
 	types.DyldExportsTrieCmd
 	Offset uint32
 	Size   uint32
-	Data   []byte
 }
 
 func (t *DyldExportsTrie) String() string {
@@ -1114,7 +1113,6 @@ type DyldChainedFixups struct {
 	types.DyldChainedFixupsCmd
 	Offset uint32
 	Size   uint32
-	Data   []byte
 }
 
 func (cf *DyldChainedFixups) String() string {
