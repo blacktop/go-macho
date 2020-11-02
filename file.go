@@ -838,36 +838,6 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 			l.Offset = led.Offset
 			l.Size = led.Size
 			l.LoadBytes = LoadBytes(cmddat)
-			ldat := make([]byte, led.Size)
-			if _, err := r.ReadAt(ldat, int64(led.Offset)); err != nil {
-				return nil, err
-			}
-			fsr := bytes.NewReader(ldat)
-			offset, err := trie.ReadUleb128(fsr)
-			if err != nil {
-				return nil, err
-			}
-			l.StartOffset = offset
-			lastVMA, err := f.GetVMAddress(l.StartOffset)
-			if err != nil {
-				return nil, err
-			}
-			l.VMAddrs = append(l.VMAddrs, lastVMA)
-			for {
-				offset, err = trie.ReadUleb128(fsr)
-				if err == io.EOF {
-					break
-				}
-				if offset == 0 {
-					break
-				}
-				if err != nil {
-					return nil, err
-				}
-				lastVMA += offset
-				l.VMAddrs = append(l.VMAddrs, lastVMA)
-				l.NextFuncOffsets = append(l.NextFuncOffsets, offset)
-			}
 			f.Loads[i] = l
 		case types.LC_DYLD_ENVIRONMENT:
 			var hdr types.DyldEnvironmentCmd
@@ -1380,13 +1350,60 @@ func (f *File) BuildVersion() *BuildVersion {
 }
 
 // FunctionStarts returns the function starts array, or nil if none exists.
-func (f *File) FunctionStarts() []uint64 {
+func (f *File) FunctionStarts() *FunctionStarts {
 	for _, l := range f.Loads {
 		if s, ok := l.(*FunctionStarts); ok {
-			return s.VMAddrs
+			return s
 		}
 	}
 	return nil
+}
+
+// FunctionStartAddrs returns the function starts array, or nil if none exists.
+func (f *File) FunctionStartAddrs(data ...byte) []uint64 {
+	var vaddrs []uint64
+
+	fs := f.FunctionStarts()
+	if fs == nil {
+		return nil
+	}
+
+	var fsr *bytes.Reader
+	if len(data) > 0 {
+		fsr = bytes.NewReader(data)
+	} else {
+		ldat := make([]byte, fs.Size)
+		if _, err := f.sr.ReadAt(ldat, int64(fs.Offset)); err != nil {
+			return nil
+		}
+		fsr = bytes.NewReader(ldat)
+	}
+
+	offset, err := trie.ReadUleb128(fsr)
+	if err != nil {
+		return nil
+	}
+
+	lastVMA := offset + f.GetBaseAddress()
+
+	vaddrs = append(vaddrs, lastVMA)
+
+	for {
+		offset, err = trie.ReadUleb128(fsr)
+		if err == io.EOF {
+			break
+		}
+		if offset == 0 {
+			break
+		}
+		if err != nil {
+			return nil
+		}
+		lastVMA += offset
+		vaddrs = append(vaddrs, lastVMA)
+	}
+
+	return vaddrs
 }
 
 // CodeSignature returns the code signature, or nil if none exists.
