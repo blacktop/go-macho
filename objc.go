@@ -270,30 +270,35 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 
 	superClass := &objc.Class{Name: "<ROOT>"}
 	if classPtr.SuperclassVMAddr > 0 {
-		superClass, err = f.GetObjCClass(f.convertToVMAddr(classPtr.SuperclassVMAddr))
-		if err != nil {
-			bindName, err := f.GetBindName(classPtr.SuperclassVMAddr)
-			if err == nil {
-				superClass = &objc.Class{Name: strings.TrimPrefix(bindName, "_OBJC_CLASS_$_")}
-			} else {
-				return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: 0x%x; %v", vmaddr, err)
+		if !info.Flags.IsRoot() {
+			superClass, err = f.GetObjCClass(f.convertToVMAddr(classPtr.SuperclassVMAddr))
+			if err != nil {
+				bindName, err := f.GetBindName(classPtr.SuperclassVMAddr)
+				if err == nil {
+					superClass = &objc.Class{Name: strings.TrimPrefix(bindName, "_OBJC_CLASS_$_")}
+				} else {
+					return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: 0x%x; %v", vmaddr, err)
+				}
 			}
 		}
 	}
+
+	isaClass := &objc.Class{}
 	var cMethods []objc.Method
-	isaClass := &objc.Class{Name: "<ROOT>"}
 	if classPtr.IsaVMAddr > 0 {
-		isaClass, err = f.GetObjCClass(f.convertToVMAddr(classPtr.IsaVMAddr))
-		if err != nil {
-			bindName, err := f.GetBindName(classPtr.IsaVMAddr)
-			if err == nil {
-				isaClass = &objc.Class{Name: strings.TrimPrefix(bindName, "_OBJC_CLASS_$_")}
+		if !info.Flags.IsMeta() {
+			isaClass, err = f.GetObjCClass(f.convertToVMAddr(classPtr.IsaVMAddr))
+			if err != nil {
+				bindName, err := f.GetBindName(classPtr.IsaVMAddr)
+				if err == nil {
+					isaClass = &objc.Class{Name: strings.TrimPrefix(bindName, "_OBJC_CLASS_$_")}
+				} else {
+					return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: 0x%x; %v", vmaddr, err)
+				}
 			} else {
-				return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: 0x%x; %v", vmaddr, err)
-			}
-		} else {
-			if isaClass.ReadOnlyData.Flags.IsMeta() {
-				cMethods = isaClass.InstanceMethods
+				if isaClass.ReadOnlyData.Flags.IsMeta() {
+					cMethods = isaClass.InstanceMethods
+				}
 			}
 		}
 	}
