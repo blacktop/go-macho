@@ -1341,6 +1341,29 @@ func (f *File) BuildVersion() *BuildVersion {
 	return nil
 }
 
+// FileSets returns an array of Fileset entries.
+func (f *File) FileSets() []*FilesetEntry {
+	var fsets []*FilesetEntry
+	for _, l := range f.Loads {
+		if fs, ok := l.(*FilesetEntry); ok {
+			fsets = append(fsets, fs)
+		}
+	}
+	return fsets
+}
+
+// GetFileSetFileByName returns the Fileset MachO for a given name.
+func (f *File) GetFileSetFileByName(name string) (*File, error) {
+	for _, l := range f.Loads {
+		if fs, ok := l.(*FilesetEntry); ok {
+			if strings.Contains(strings.ToLower(fs.EntryID), strings.ToLower(name)) {
+				return NewFile(io.NewSectionReader(f.sr, int64(fs.Offset), 1<<63-1))
+			}
+		}
+	}
+	return nil, fmt.Errorf("fileset does NOT contain %s", name)
+}
+
 // FunctionStarts returns the function starts array, or nil if none exists.
 func (f *File) FunctionStarts() *FunctionStarts {
 	for _, l := range f.Loads {
