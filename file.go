@@ -259,6 +259,14 @@ func loadInSlice(c types.LoadCmd, list []types.LoadCmd) bool {
 	return false
 }
 
+// FileConfig is a MachO file config object
+type FileConfig struct {
+	Offset     int64
+	LoadFilter []types.LoadCmd
+
+	SrcReader *io.SectionReader
+}
+
 // Open opens the named file using os.Open and prepares it for use as a Mach-O binary.
 func Open(name string) (*File, error) {
 	f, err := os.Open(name)
@@ -288,10 +296,19 @@ func (f *File) Close() error {
 
 // NewFile creates a new File for accessing a Mach-O binary in an underlying reader.
 // The Mach-O binary is expected to start at position 0 in the ReaderAt.
-func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
+func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
+	var loadsFilter []types.LoadCmd
+
 	f := new(File)
-	sr := io.NewSectionReader(r, 0, 1<<63-1)
-	f.sr = sr
+	f.sr = io.NewSectionReader(r, 0, 1<<63-1)
+
+	if config != nil {
+		if config[0].SrcReader != nil {
+			f.sr = config[0].SrcReader
+			f.sr.Seek(config[0].Offset, io.SeekStart)
+		}
+		loadsFilter = config[0].LoadFilter
+	}
 
 	// Read and decode Mach magic to determine byte order, size.
 	// Magic32 and Magic64 differ only in the bottom bit.
@@ -313,7 +330,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 	}
 
 	// Read entire file header.
-	if err := binary.Read(sr, f.ByteOrder, &f.FileHeader); err != nil {
+	if err := binary.Read(f.sr, f.ByteOrder, &f.FileHeader); err != nil {
 		return nil, fmt.Errorf("failed to header: %v", err)
 	}
 
@@ -344,7 +361,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 		var s *Segment
 
 		// skip unwanted load commands
-		if len(loads) > 0 && !loadInSlice(cmd, loads) {
+		if len(loadsFilter) > 0 && !loadInSlice(cmd, loadsFilter) {
 			continue
 		}
 
@@ -444,10 +461,10 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_SYMTAB: %v", err)
 			}
 			strtab := make([]byte, hdr.Strsize)
-			if _, err := r.ReadAt(strtab, int64(hdr.Stroff)); err != nil {
-				return f, nil
-				// return nil, err
+			if _, err := f.sr.ReadAt(strtab, int64(hdr.Stroff)); err != nil {
+				return nil, fmt.Errorf("failed to read data at Stroff=%#x; %v", int64(hdr.Stroff), err)
 			}
+
 			var symsz int
 			if f.Magic == types.Magic64 {
 				symsz = 16
@@ -455,9 +472,10 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 				symsz = 12
 			}
 			symdat := make([]byte, int(hdr.Nsyms)*symsz)
-			if _, err := r.ReadAt(symdat, int64(hdr.Symoff)); err != nil {
+			if _, err := f.sr.ReadAt(symdat, int64(hdr.Symoff)); err != nil {
 				return nil, fmt.Errorf("failed to read data at Symoff=%#x; %v", int64(hdr.Symoff), err)
 			}
+
 			st, err := f.parseSymtab(symdat, strtab, cmddat, &hdr, offset)
 			if err != nil {
 				return nil, fmt.Errorf("failed to read parseSymtab: %v", err)
@@ -498,7 +516,7 @@ func NewFile(r io.ReaderAt, loads ...types.LoadCmd) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_DYSYMTAB: %v", err)
 			}
 			dat := make([]byte, hdr.Nindirectsyms*4)
-			if _, err := r.ReadAt(dat, int64(hdr.Indirectsymoff)); err != nil {
+			if _, err := f.sr.ReadAt(dat, int64(hdr.Indirectsymoff)); err != nil {
 				return nil, fmt.Errorf("failed to read data at Indirectsymoff=%#x; %v", int64(hdr.Indirectsymoff), err)
 			}
 			x := make([]uint32, hdr.Nindirectsyms)
@@ -1153,6 +1171,12 @@ func (f *File) readLeUint64(offset int64) (uint64, error) {
 	return binary.LittleEndian.Uint64(u64), nil
 }
 
+// ReadAt reads data at offset within MachO
+func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
+	return f.sr.ReadAt(p, off)
+}
+
+// GetOffset returns the file offset for a given virtual address
 func (f *File) GetOffset(address uint64) (int64, error) {
 	for _, seg := range f.Segments() {
 		if seg.Addr <= address && address < seg.Addr+seg.Memsz {
@@ -1162,6 +1186,7 @@ func (f *File) GetOffset(address uint64) (int64, error) {
 	return 0, fmt.Errorf("address 0x%x not within any segments adress range", address)
 }
 
+// GetVMAddress returns the virtal address for a given file offset
 func (f *File) GetVMAddress(offset uint64) (uint64, error) {
 	for _, seg := range f.Segments() {
 		if seg.Offset <= offset && offset < seg.Offset+seg.Filesz {
@@ -1218,6 +1243,12 @@ func (f *File) GetBindName(pointer uint64) (string, error) {
 
 // GetCString returns a c-string at a given virtual address in the MachO
 func (f *File) GetCString(strVMAdr uint64) (string, error) {
+
+	if sec := f.FindSectionForVMAddr(strVMAdr); sec != nil {
+		if !sec.Flags.IsCstringLiterals() {
+			return "", fmt.Errorf("virtual address not in a cstring section")
+		}
+	}
 
 	strOffset, err := f.GetOffset(strVMAdr)
 	if err != nil {
@@ -1282,7 +1313,7 @@ func (f *File) Section(segment, section string) *Section {
 func (f *File) FindSectionForVMAddr(vmAddr uint64) *Section {
 	for _, sec := range f.Sections {
 		if sec.Size == 0 {
-			fmt.Printf("section %s.%s has zero size\n", sec.Seg, sec.Name)
+			return nil
 		}
 		if sec.Addr <= vmAddr && vmAddr < sec.Addr+sec.Size {
 			return sec
@@ -1357,7 +1388,10 @@ func (f *File) GetFileSetFileByName(name string) (*File, error) {
 	for _, l := range f.Loads {
 		if fs, ok := l.(*FilesetEntry); ok {
 			if strings.Contains(strings.ToLower(fs.EntryID), strings.ToLower(name)) {
-				return NewFile(io.NewSectionReader(f.sr, int64(fs.Offset), 1<<63-1))
+				return NewFile(io.NewSectionReader(f.sr, int64(fs.Offset), 1<<63-1), FileConfig{
+					Offset:    int64(fs.Offset),
+					SrcReader: f.sr,
+				})
 			}
 		}
 	}
