@@ -112,6 +112,9 @@ const (
 )
 
 // GETTERS
+func (f HeaderFlag) None() bool {
+	return f == 0
+}
 func (f HeaderFlag) NoUndefs() bool {
 	return (f & NoUndefs) != 0
 }
@@ -212,6 +215,9 @@ func (f *HeaderFlag) Set(flag HeaderFlag, set bool) {
 // List returns a string array of flag names
 func (f HeaderFlag) List() []string {
 	var flags []string
+	if f.None() {
+		flags = append(flags, None.String())
+	}
 	if f.NoUndefs() {
 		flags = append(flags, NoUndefs.String())
 	}

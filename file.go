@@ -73,18 +73,18 @@ func (t *FileTOC) LoadsString() string {
 	var loadsStr string
 	for i, l := range t.Loads {
 		if s, ok := l.(*Segment); ok {
-			loadsStr += fmt.Sprintf("%02d: %s offset=0x%08x-0x%08x, addr=0x%09x-0x%09x %s/%s   %s%s%s\n", i, s.Command(), s.Offset, s.Offset+s.Filesz, s.Addr, s.Addr+s.Memsz, s.Prot, s.Maxprot, s.Name, pad(20-len(s.Name)), s.Flag)
+			loadsStr += fmt.Sprintf("%03d: %s sz=0x%08x off=0x%08x-0x%08x addr=0x%09x-0x%09x %s/%s   %s%s%s\n", i, s.Command(), s.Filesz, s.Offset, s.Offset+s.Filesz, s.Addr, s.Addr+s.Memsz, s.Prot, s.Maxprot, s.Name, pad(20-len(s.Name)), s.Flag)
 			for j := uint32(0); j < s.Nsect; j++ {
 				c := t.Sections[j+s.Firstsect]
 				secFlags := ""
 				if !c.Flags.IsRegular() {
 					secFlags = fmt.Sprintf("(%s)", c.Flags)
 				}
-				loadsStr += fmt.Sprintf("\toffset=0x%08x-0x%08x, addr=0x%09x-0x%09x\t\t%s.%s%s%s %s\n", c.Offset, uint64(c.Offset)+c.Size, c.Addr, c.Addr+c.Size, s.Name, c.Name, pad(32-(len(s.Name)+len(c.Name)+1)), c.Flags.AttributesString(), secFlags)
+				loadsStr += fmt.Sprintf("\tsz=0x%08x off=0x%08x-0x%08x addr=0x%09x-0x%09x\t\t%s.%s%s%s %s\n", c.Size, c.Offset, uint64(c.Offset)+c.Size, c.Addr, c.Addr+c.Size, s.Name, c.Name, pad(32-(len(s.Name)+len(c.Name)+1)), c.Flags.AttributesString(), secFlags)
 			}
 		} else {
 			if l != nil {
-				loadsStr += fmt.Sprintf("%02d: %s%s%v\n", i, l.Command(), pad(28-len(l.Command().String())), l)
+				loadsStr += fmt.Sprintf("%03d: %s%s%v\n", i, l.Command(), pad(28-len(l.Command().String())), l)
 			}
 		}
 	}

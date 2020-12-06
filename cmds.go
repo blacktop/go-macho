@@ -471,14 +471,57 @@ type Dysymtab struct {
 }
 
 func (d *Dysymtab) String() string {
-	// TODO make this like jtool
-	// 1 local symbols at index     0
-	// 29 external symbols at index  1
-	// 709 undefined symbols at index 30
-	// No TOC
-	// No modtab
-	// 1149 Indirect symbols at offset 0x1695f0
-	return fmt.Sprintf("%d Indirect symbols at offset 0x%08X", d.Nindirectsyms, d.Indirectsymoff)
+	var tocStr, modStr, extSymStr, indirSymStr, extRelStr, locRelStr string
+	if d.Ntoc == 0 {
+		tocStr = "No"
+	} else {
+		tocStr = fmt.Sprintf("%d at 0x%08x", d.Ntoc, d.Tocoffset)
+	}
+	if d.Nmodtab == 0 {
+		modStr = "No"
+	} else {
+		modStr = fmt.Sprintf("%d at 0x%08x", d.Nmodtab, d.Modtaboff)
+	}
+	if d.Nextrefsyms == 0 {
+		extSymStr = "None"
+	} else {
+		extSymStr = fmt.Sprintf("%d at 0x%08x", d.Nextrefsyms, d.Extrefsymoff)
+	}
+	if d.Nindirectsyms == 0 {
+		indirSymStr = "None"
+	} else {
+		indirSymStr = fmt.Sprintf("%d at 0x%08x", d.Nindirectsyms, d.Indirectsymoff)
+	}
+	if d.Nextrel == 0 {
+		extRelStr = "None"
+	} else {
+		extRelStr = fmt.Sprintf("%d at 0x%08x", d.Nextrel, d.Extreloff)
+	}
+	if d.Nlocrel == 0 {
+		locRelStr = "None"
+	} else {
+		locRelStr = fmt.Sprintf("%d at 0x%08x", d.Nlocrel, d.Locreloff)
+	}
+	return fmt.Sprintf(
+		"\n"+
+			"\t             Local Syms: %d at %d\n"+
+			"\t          External Syms: %d at %d\n"+
+			"\t         Undefined Syms: %d at %d\n"+
+			"\t                    TOC: %s\n"+
+			"\t                 Modtab: %s\n"+
+			"\tExternal symtab Entries: %s\n"+
+			"\tIndirect symtab Entries: %s\n"+
+			"\t External Reloc Entries: %s\n"+
+			"\t    Local Reloc Entries: %s",
+		d.Nlocalsym, d.Ilocalsym,
+		d.Nextdefsym, d.Iextdefsym,
+		d.Nundefsym, d.Iundefsym,
+		tocStr,
+		modStr,
+		extSymStr,
+		indirSymStr,
+		extRelStr,
+		locRelStr)
 }
 
 /*******************************************************************************
@@ -656,7 +699,7 @@ type CodeSignature struct {
 func (c *CodeSignature) String() string {
 	// TODO: fix this once codesigs are done
 	// return fmt.Sprintf("offset=0x%08x-0x%08x, size=%d, ID:   %s", c.Offset, c.Offset+c.Size, c.Size, c.ID)
-	return fmt.Sprintf("offset=0x%08x-0x%08x, size=%5d", c.Offset, c.Offset+c.Size, c.Size)
+	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d", c.Offset, c.Offset+c.Size, c.Size)
 }
 
 /*******************************************************************************
@@ -679,7 +722,7 @@ func (s *SplitInfo) String() string {
 	} else {
 		version = fmt.Sprintf("kind=0x%x", s.Version)
 	}
-	return fmt.Sprintf("offset=0x%08x-0x%08x, size=%5d, %s", s.Offset, s.Offset+s.Size, s.Size, version)
+	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d, %s", s.Offset, s.Offset+s.Size, s.Size, version)
 }
 
 /*******************************************************************************
@@ -717,9 +760,9 @@ type EncryptionInfo struct {
 
 func (e *EncryptionInfo) String() string {
 	if e.CryptID == 0 {
-		return fmt.Sprintf("Offset: 0x%x, Size: 0x%x (not-encrypted yet)", e.Offset, e.Size)
+		return fmt.Sprintf("offset=0x%x size=0x%x (not-encrypted yet)", e.Offset, e.Size)
 	}
-	return fmt.Sprintf("Offset: 0x%x, Size: 0x%x, CryptID: 0x%x", e.Offset, e.Size, e.CryptID)
+	return fmt.Sprintf("offset=0x%x size=0x%x CryptID: 0x%x", e.Offset, e.Size, e.CryptID)
 }
 func (e *EncryptionInfo) Copy() *EncryptionInfo {
 	return &EncryptionInfo{EncryptionInfoCmd: e.EncryptionInfoCmd}
@@ -910,7 +953,8 @@ type FunctionStarts struct {
 }
 
 func (f *FunctionStarts) String() string {
-	return fmt.Sprintf("offset=0x%08x-0x%08x, size=%5d, count=%d", f.Offset, f.Offset+f.Size, f.Size, len(f.VMAddrs))
+	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d", f.Offset, f.Offset+f.Size, f.Size)
+	// return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d count=%d", f.Offset, f.Offset+f.Size, f.Size, len(f.VMAddrs))
 }
 
 /*******************************************************************************
@@ -970,7 +1014,7 @@ type DataInCode struct {
 }
 
 func (d *DataInCode) String() string {
-	return fmt.Sprintf("offset=0x%08x-0x%08x, size=%5d, entries=%d", d.Offset, d.Offset+d.Size, d.Size, len(d.Entries))
+	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d entries=%d", d.Offset, d.Offset+d.Size, d.Size, len(d.Entries))
 }
 
 /*******************************************************************************
@@ -1005,9 +1049,9 @@ type EncryptionInfo64 struct {
 
 func (e *EncryptionInfo64) String() string {
 	if e.CryptID == 0 {
-		return fmt.Sprintf("Offset: 0x%x, Size: 0x%x (not-encrypted yet)", e.Offset, e.Size)
+		return fmt.Sprintf("offset=0x%09x  size=0x%x (not-encrypted yet)", e.Offset, e.Size)
 	}
-	return fmt.Sprintf("Offset: 0x%x, Size: 0x%x, CryptID: 0x%x", e.Offset, e.Size, e.CryptID)
+	return fmt.Sprintf("offset=0x%09x  size=0x%x CryptID: 0x%x", e.Offset, e.Size, e.CryptID)
 }
 func (e *EncryptionInfo64) Copy() *EncryptionInfo64 {
 	return &EncryptionInfo64{EncryptionInfo64Cmd: e.EncryptionInfo64Cmd}
@@ -1080,11 +1124,16 @@ type BuildVersion struct {
 }
 
 func (b *BuildVersion) String() string {
-	return fmt.Sprintf("Platform: %s, SDK: %s, Tool: %s (%s)",
+	if b.NumTools > 0 {
+		return fmt.Sprintf("Platform: %s, SDK: %s, Tool: %s (%s)",
+			b.Platform,
+			b.Sdk,
+			b.Tool,
+			b.ToolVersion)
+	}
+	return fmt.Sprintf("Platform: %s, SDK: %s",
 		b.Platform,
-		b.Sdk,
-		b.Tool,
-		b.ToolVersion)
+		b.Sdk)
 }
 
 /*******************************************************************************
@@ -1100,7 +1149,7 @@ type DyldExportsTrie struct {
 }
 
 func (t *DyldExportsTrie) String() string {
-	return fmt.Sprintf("Offset: 0x%x, Size: 0x%x", t.Offset, t.Size)
+	return fmt.Sprintf("offset=0x%09x  size=0x%x", t.Offset, t.Size)
 }
 
 /*******************************************************************************
@@ -1116,7 +1165,7 @@ type DyldChainedFixups struct {
 }
 
 func (cf *DyldChainedFixups) String() string {
-	return fmt.Sprintf("Offset: 0x%x, Size: 0x%x", cf.Offset, cf.Size)
+	return fmt.Sprintf("offset=0x%09x  size=0x%x", cf.Offset, cf.Size)
 }
 
 /*******************************************************************************
@@ -1133,7 +1182,7 @@ type FilesetEntry struct {
 }
 
 func (f *FilesetEntry) String() string {
-	return fmt.Sprintf("Addr: 0x%016x, Offset: 0x%09x, EntryID: %s", f.Addr, f.Offset, f.EntryID)
+	return fmt.Sprintf("offset=0x%09x addr=0x%016x %s", f.Offset, f.Addr, f.EntryID)
 }
 
 /*******************************************************************************

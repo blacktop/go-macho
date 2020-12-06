@@ -89,6 +89,7 @@ func (sv SrcVersion) String() string {
 type Tool uint32
 
 const (
+	none  Tool = 0
 	clang Tool = 1 // TOOL_CLANG
 	swift Tool = 2 // TOOL_SWIFT
 	ld    Tool = 3 // TOOL_LD

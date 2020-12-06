@@ -109,7 +109,7 @@ var cpuSubtypeArmStrings = []IntName{
 var cpuSubtypeArm64Strings = []IntName{
 	{uint32(CPUSubtypeArm64All), "ARM64"},
 	{uint32(CPUSubtypeArm64V8), "ARM64 (ARMv8)"},
-	{uint32(CPUSubtypeArm64E), "ARM64e (ARMv8.3)"},
+	{uint32(CPUSubtypeArm64E), "ARM64e"},
 }
 
 func (st CPUSubtype) String(cpu CPU) string {

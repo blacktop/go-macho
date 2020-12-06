@@ -35,19 +35,19 @@ func _() {
 	// An "invalid array index" compiler error signifies that the constant values have changed.
 	// Re-run the stringer command to generate them again.
 	var x [1]struct{}
+	_ = x[none-0]
 	_ = x[clang-1]
 	_ = x[swift-2]
 	_ = x[ld-3]
 }
 
-const _Tool_name = "clangswiftld"
+const _Tool_name = "noneclangswiftld"
 
-var _Tool_index = [...]uint8{0, 5, 10, 12}
+var _Tool_index = [...]uint8{0, 4, 9, 14, 16}
 
 func (i Tool) String() string {
-	i -= 1
 	if i >= Tool(len(_Tool_index)-1) {
-		return "Tool(" + strconv.FormatInt(int64(i+1), 10) + ")"
+		return "Tool(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
 	return _Tool_name[_Tool_index[i]:_Tool_index[i+1]]
 }
