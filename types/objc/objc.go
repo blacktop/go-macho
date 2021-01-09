@@ -606,3 +606,45 @@ type Selector struct {
 	VMAddr uint64
 	Name   string
 }
+
+type ImpCache struct {
+	PreoptCacheT
+	Entries []PreoptCacheEntryT
+}
+type PreoptCacheEntryT struct {
+	SelOffset uint32
+	ImpOffset uint32
+}
+type PreoptCacheT struct {
+	FallbackClassOffset int32
+	Info                uint32
+	// uint32_t cache_shift :  5
+	// uint32_t cache_mask  : 11
+	// uint32_t occupied    : 14
+	// uint32_t has_inlines :  1
+	// uint32_t bit_one     :  1
+}
+
+func (p PreoptCacheT) CacheShift() uint32 {
+	return uint32(types.ExtractBits(uint64(p.Info), 0, 5))
+}
+func (p PreoptCacheT) CacheMask() uint32 {
+	return uint32(types.ExtractBits(uint64(p.Info), 5, 11))
+}
+func (p PreoptCacheT) Occupied() uint32 {
+	return uint32(types.ExtractBits(uint64(p.Info), 16, 14))
+}
+func (p PreoptCacheT) HasInlines() bool {
+	return types.ExtractBits(uint64(p.Info), 30, 1) != 0
+}
+func (p PreoptCacheT) BitOne() bool {
+	return types.ExtractBits(uint64(p.Info), 31, 1) != 0
+}
+func (p PreoptCacheT) String() string {
+	return fmt.Sprintf("cache_shift: %d, cache_mask: %d, occupied: %d, has_inlines: %t, bit_one: %t",
+		p.CacheShift(),
+		p.CacheMask(),
+		p.Occupied(),
+		p.HasInlines(),
+		p.BitOne())
+}
