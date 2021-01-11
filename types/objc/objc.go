@@ -433,7 +433,7 @@ func (c *Class) String() string {
 		subClass = c.SuperClass
 	}
 
-	class := fmt.Sprintf("0x%011x %s : %s ", c.ClassPtr.VMAdder, c.Name, subClass)
+	class := fmt.Sprintf("0x%011x %s : %s", c.ClassPtr.VMAdder, c.Name, subClass)
 
 	if len(c.Prots) > 0 {
 		var subProts []string
@@ -443,11 +443,11 @@ func (c *Class) String() string {
 		class += fmt.Sprintf("<%s>", strings.Join(subProts, ", "))
 	}
 	if len(c.Ivars) > 0 {
-		iVars = "  // instance variables\n"
+		iVars = " {\n  // instance variables\n"
 		for _, ivar := range c.Ivars {
 			iVars += fmt.Sprintf("  %s\n", &ivar)
 		}
-		iVars += fmt.Sprintf("\n")
+		iVars += fmt.Sprintf("}\n\n")
 	}
 	if len(c.Props) > 0 {
 		for _, prop := range c.Props {
@@ -471,8 +471,7 @@ func (c *Class) String() string {
 	}
 
 	return fmt.Sprintf(
-		"%s\n"+
-			"%s%s%s%s",
+		"%s%s%s%s%s",
 		class,
 		iVars,
 		props,
