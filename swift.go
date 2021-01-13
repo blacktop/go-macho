@@ -464,7 +464,7 @@ func (f *File) GetMangledTypeAtOffset(offset int64) (string, *stypes.TypeDescrip
 			}
 			// Check if context pointer is a dyld chain fixup REBASE
 			if fixupchains.DcpArm64eIsRebase(context) {
-				off, err := f.GetOffset(f.convertToVMAddr(context))
+				off, err := f.GetOffset(f.vma.Convert(context))
 				if err != nil {
 					return "", nil, fmt.Errorf("failed to GetOffset: %v", err)
 				}

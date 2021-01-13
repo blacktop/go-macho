@@ -34,6 +34,7 @@ type File struct {
 	Symtab   *Symtab
 	Dysymtab *Dysymtab
 
+	vma    *types.VMAddrConverter
 	dcf    *fixupchains.DyldChainedFixups
 	sr     *io.SectionReader
 	closer io.Closer
@@ -261,8 +262,9 @@ func loadInSlice(c types.LoadCmd, list []types.LoadCmd) bool {
 
 // FileConfig is a MachO file config object
 type FileConfig struct {
-	Offset     int64
-	LoadFilter []types.LoadCmd
+	Offset          int64
+	LoadFilter      []types.LoadCmd
+	VMAddrConverter types.VMAddrConverter
 
 	SrcReader *io.SectionReader
 }
@@ -300,14 +302,19 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 	var loadsFilter []types.LoadCmd
 
 	f := new(File)
-	f.sr = io.NewSectionReader(r, 0, 1<<63-1)
 
 	if config != nil {
 		if config[0].SrcReader != nil {
 			f.sr = config[0].SrcReader
 			f.sr.Seek(config[0].Offset, io.SeekStart)
 		}
+		f.vma = &config[0].VMAddrConverter
 		loadsFilter = config[0].LoadFilter
+	} else {
+		f.sr = io.NewSectionReader(r, 0, 1<<63-1)
+		f.vma = &types.VMAddrConverter{
+			Converter: f.convertToVMAddr,
+		}
 	}
 
 	// Read and decode Mach magic to determine byte order, size.
@@ -1014,8 +1021,8 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			f.Loads[i] = l
 		}
 		if s != nil {
-			s.sr = io.NewSectionReader(r, int64(s.Offset), int64(s.Filesz))
-			s.ReaderAt = s.sr
+			// s.sr = io.NewSectionReader(r, int64(s.Offset), int64(s.Filesz))
+			s.ReaderAt = f.sr
 		}
 	}
 	return f, nil
@@ -1070,8 +1077,8 @@ func (f *File) parseSymtab(symdat, strtab, cmddat []byte, hdr *types.SymtabCmd, 
 
 func (f *File) pushSection(sh *Section, r io.ReaderAt) error {
 	f.Sections = append(f.Sections, sh)
-	sh.sr = io.NewSectionReader(r, int64(sh.Offset), int64(sh.Size))
-	sh.ReaderAt = sh.sr
+	// sh.sr = io.NewSectionReader(r, int64(sh.Offset), int64(sh.Size))
+	sh.ReaderAt = f.sr
 
 	if sh.Nreloc > 0 {
 		reldat := make([]byte, int(sh.Nreloc)*8)

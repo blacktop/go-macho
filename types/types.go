@@ -203,3 +203,16 @@ type FilePointer struct {
 	VMAdder uint64
 	Offset  int64
 }
+
+type VMAddrConverter struct {
+	PreferredLoadAddress            uint64
+	Slide                           int64
+	ChainedPointerFormat            uint16
+	IsContentRebased                bool
+	SharedCacheChainedPointerFormat uint8
+	Converter                       func(uint64) uint64
+}
+
+func (v *VMAddrConverter) Convert(addr uint64) uint64 {
+	return v.Converter(addr)
+}

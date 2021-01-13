@@ -137,8 +137,8 @@ func (s *Segment) Put64(b []byte, o binary.ByteOrder) int {
 
 // Data reads and returns the contents of the segment.
 func (s *Segment) Data() ([]byte, error) {
-	dat := make([]byte, s.sr.Size())
-	n, err := s.sr.ReadAt(dat, 0)
+	dat := make([]byte, s.Filesz)
+	n, err := s.ReadAt(dat, int64(s.Offset))
 	if n == len(dat) {
 		err = nil
 	}
@@ -238,8 +238,8 @@ type Section struct {
 
 // Data reads and returns the contents of the Mach-O section.
 func (s *Section) Data() ([]byte, error) {
-	dat := make([]byte, s.sr.Size())
-	n, err := s.sr.ReadAt(dat, 0)
+	dat := make([]byte, s.Size)
+	n, err := s.ReadAt(dat, int64(s.Offset))
 	if n == len(dat) {
 		err = nil
 	}
