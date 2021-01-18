@@ -201,7 +201,7 @@ func ExtractBits(x uint64, start, nbits int32) uint64 {
 
 type FilePointer struct {
 	VMAdder uint64
-	Offset  int64
+	Offset  uint64
 }
 
 type VMAddrConverter struct {
@@ -211,8 +211,20 @@ type VMAddrConverter struct {
 	IsContentRebased                bool
 	SharedCacheChainedPointerFormat uint8
 	Converter                       func(uint64) uint64
+	VMAddr2Offet                    func(uint64) (uint64, error)
+	Offet2VMAddr                    func(uint64) (uint64, error)
 }
 
 func (v *VMAddrConverter) Convert(addr uint64) uint64 {
 	return v.Converter(addr)
+}
+
+// GetOffset returns the file offset for a given virtual address
+func (v *VMAddrConverter) GetOffset(address uint64) (uint64, error) {
+	return v.VMAddr2Offet(address)
+}
+
+// GetVMAddress returns the virtal address for a given file offset
+func (v *VMAddrConverter) GetVMAddress(offset uint64) (uint64, error) {
+	return v.Offet2VMAddr(offset)
 }

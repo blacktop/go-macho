@@ -663,7 +663,7 @@ func (f *File) GetObjCMethodList() ([]objc.Method, error) {
 					Types:       t,
 					Pointer: types.FilePointer{
 						VMAdder: impVMAddr,
-						Offset:  int64(method.ImpOffset),
+						Offset:  uint64(method.ImpOffset),
 					},
 				})
 			}
@@ -744,7 +744,7 @@ func (f *File) readSmallMethods(methodList objc.MethodList) ([]objc.Method, erro
 			Types:       t,
 			Pointer: types.FilePointer{
 				VMAdder: impVMAddr,
-				Offset:  int64(method.ImpOffset),
+				Offset:  uint64(method.ImpOffset),
 			},
 		})
 	}
