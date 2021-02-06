@@ -1253,15 +1253,15 @@ func (f *File) GetBindName(pointer uint64) (string, error) {
 // GetCString returns a c-string at a given virtual address in the MachO
 func (f *File) GetCString(strVMAdr uint64) (string, error) {
 
-	if sec := f.FindSectionForVMAddr(strVMAdr); sec != nil {
-		if !sec.Flags.IsCstringLiterals() {
-			return "", fmt.Errorf("virtual address not in a cstring section")
-		}
-	}
+	// if sec := f.FindSectionForVMAddr(strVMAdr); sec != nil {
+	// 	if !sec.Flags.IsCstringLiterals() {
+	// 		return "", fmt.Errorf("virtual address not in a cstring section")
+	// 	}
+	// }
 
-	strOffset, err := f.GetOffset(strVMAdr)
+	strOffset, err := f.vma.GetOffset(strVMAdr)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to get offset for cstring at virtual address: %#x; %w", strVMAdr, err)
 	}
 
 	return f.GetCStringAtOffset(int64(strOffset))
