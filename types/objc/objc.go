@@ -104,7 +104,12 @@ func (f ImageInfoFlag) List() []string {
 }
 
 func (f ImageInfoFlag) String() string {
-	return strings.Join(f.List(), ", ")
+	return fmt.Sprintf(
+		"Flags = %s\n"+
+			"Swift = %s\n",
+		strings.Join(f.List(), ", "),
+		f.SwiftVersion(),
+	)
 }
 
 func (f ImageInfoFlag) SwiftVersion() string {
