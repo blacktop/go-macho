@@ -748,14 +748,15 @@ func (f *File) readSmallMethods(methodList objc.MethodList) ([]objc.Method, erro
 		if err := binary.Read(f.sr, f.ByteOrder, &nameAddr); err != nil {
 			return nil, fmt.Errorf("failed to read nameAddr(small): %v", err)
 		}
-		n, err := f.GetCStringAtOffset(int64(method.NameOffset) + currOffset)
+
+		n, err := f.GetCStringAtOffset(int64(nameAddr))
 		if err != nil {
 			return nil, fmt.Errorf("failed to read cstring: %v", err)
 		}
 
 		typesVMAddr, err := f.vma.GetVMAddress(uint64(method.TypesOffset) + uint64(currOffset+4))
 		if err != nil {
-			return nil, fmt.Errorf("failed to convert offset 0x%x to vmaddr; %v", method.TypesOffset, err)
+			return nil, fmt.Errorf("failed to convert offset 0x%x to vmaddr; %v", int64(method.TypesOffset)+currOffset+4, err)
 		}
 		t, err := f.GetCString(typesVMAddr)
 		if err != nil {
@@ -764,7 +765,7 @@ func (f *File) readSmallMethods(methodList objc.MethodList) ([]objc.Method, erro
 
 		impVMAddr, err := f.vma.GetVMAddress(uint64(method.ImpOffset) + uint64(currOffset+8))
 		if err != nil {
-			return nil, fmt.Errorf("failed to convert offset 0x%x to vmaddr; %v", method.ImpOffset, err)
+			return nil, fmt.Errorf("failed to convert offset 0x%x to vmaddr; %v", int64(method.ImpOffset)+currOffset+8, err)
 		}
 
 		currOffset += int64(methodList.EntSize())
