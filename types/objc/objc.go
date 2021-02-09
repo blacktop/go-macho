@@ -113,7 +113,8 @@ func (f ImageInfoFlag) String() string {
 }
 
 func (f ImageInfoFlag) SwiftVersion() string {
-	// TODO: I noticed there is some flags higher than swift version (Console has 84019008, which is a version of 0x502)
+	// TODO: I noticed there is some flags higher than swift version
+	// (Console has 84019008, which is a version of 0x502)
 	swiftVersion := (f >> 8) & 0xff
 	if swiftVersion != 0 {
 		switch swiftVersion {
@@ -259,14 +260,18 @@ func (c *Category) String() string {
 	if len(c.ClassMethods) > 0 {
 		cMethods = "  // class methods\n"
 		for _, meth := range c.ClassMethods {
+			// rtype, args := decodeMethodTypes(meth.Types)
 			cMethods += fmt.Sprintf("  0x%011x +[%s %s]\n", meth.Pointer.VMAdder, c.Name, meth.Name)
+			// cMethods += fmt.Sprintf("  0x%011x +(%s)[%s %s] %s\n", meth.Pointer.VMAdder, rtype, c.Name, meth.Name, args)
 		}
 		cMethods += fmt.Sprintf("\n")
 	}
 	if len(c.InstanceMethods) > 0 {
 		iMethods = "  // instance methods\n"
 		for _, meth := range c.InstanceMethods {
+			// rtype, args := decodeMethodTypes(meth.Types)
 			iMethods += fmt.Sprintf("  0x%011x -[%s %s]\n", meth.Pointer.VMAdder, c.Name, meth.Name)
+			// iMethods += fmt.Sprintf("  0x%011x -(%s)[%s %s] %s\n", meth.Pointer.VMAdder, rtype, c.Name, meth.Name, args)
 		}
 		iMethods += fmt.Sprintf("\n")
 	}
@@ -341,28 +346,34 @@ func (p *Protocol) String() string {
 	}
 	if len(p.InstanceProperties) > 0 {
 		for _, prop := range p.InstanceProperties {
-			props += fmt.Sprintf(" @property (%s) %s\n", prop.Attributes, prop.Name)
+			props += fmt.Sprintf(" @property %s%s\n", getPropertyAttributeTypes(prop.Attributes), prop.Name)
 		}
 		props += fmt.Sprintf("\n")
 	}
 	if len(p.ClassMethods) > 0 {
 		cMethods = "  // class methods\n"
 		for _, meth := range p.ClassMethods {
+			// rtype, args := decodeMethodTypes(meth.Types)
 			cMethods += fmt.Sprintf(" +[%s %s]\n", p.Name, meth.Name)
+			// cMethods += fmt.Sprintf(" +(%s)[%s %s] %s\n", rtype, p.Name, meth.Name, args)
 		}
 		cMethods += fmt.Sprintf("\n")
 	}
 	if len(p.InstanceMethods) > 0 {
 		iMethods = "  // instance methods\n"
 		for _, meth := range p.InstanceMethods {
+			// rtype, args := decodeMethodTypes(meth.Types)
 			iMethods += fmt.Sprintf(" -[%s %s]\n", p.Name, meth.Name)
+			// iMethods += fmt.Sprintf(" -(%s)[%s %s] %s\n", rtype, p.Name, meth.Name, args)
 		}
 		iMethods += fmt.Sprintf("\n")
 	}
 	if len(p.OptionalInstanceMethods) > 0 {
 		optMethods = "@optional\n  // instance methods\n"
 		for _, meth := range p.OptionalInstanceMethods {
+			// rtype, args := decodeMethodTypes(meth.Types)
 			optMethods += fmt.Sprintf(" -[%s %s]\n", p.Name, meth.Name)
+			// optMethods += fmt.Sprintf(" -(%s)[%s %s] %s\n", rtype, p.Name, meth.Name, args)
 		}
 		optMethods += fmt.Sprintf("\n")
 	}
@@ -456,21 +467,25 @@ func (c *Class) String() string {
 	}
 	if len(c.Props) > 0 {
 		for _, prop := range c.Props {
-			props += fmt.Sprintf(" @property (%s) %s\n", prop.Attributes, prop.Name)
+			props += fmt.Sprintf(" @property %s%s\n", getPropertyAttributeTypes(prop.Attributes), prop.Name)
 		}
 		props += fmt.Sprintf("\n")
 	}
 	if len(c.ClassMethods) > 0 {
 		cMethods = "  // class methods\n"
 		for _, meth := range c.ClassMethods {
+			// rtype, args := decodeMethodTypes(meth.Types)
 			cMethods += fmt.Sprintf("  0x%011x +[%s %s]\n", meth.Pointer.VMAdder, c.Name, meth.Name)
+			// cMethods += fmt.Sprintf("  0x%011x +(%s)[%s %s] %s\n", meth.Pointer.VMAdder, rtype, c.Name, meth.Name, args)
 		}
 		cMethods += fmt.Sprintf("\n")
 	}
 	if len(c.InstanceMethods) > 0 {
 		iMethods = "  // instance methods\n"
 		for _, meth := range c.InstanceMethods {
+			// rtype, args := decodeMethodTypes(meth.Types)
 			iMethods += fmt.Sprintf("  0x%011x -[%s %s]\n", meth.Pointer.VMAdder, c.Name, meth.Name)
+			// iMethods += fmt.Sprintf("  0x%011x -(%s)[%s %s] %s\n", meth.Pointer.VMAdder, rtype, c.Name, meth.Name, args)
 		}
 		iMethods += fmt.Sprintf("\n")
 	}
@@ -602,8 +617,8 @@ type Ivar struct {
 }
 
 func (i *Ivar) String() string {
-	return fmt.Sprintf("+%#02x %s %s (%#x)", i.Offset, i.Type, i.Name, i.Size)
-	// return fmt.Sprintf("+%#02x %s %s (%#x)", i.Offset, getReturnType(i.Type), i.Name, i.Size)
+	// return fmt.Sprintf("+%#02x %s %s (%#x)", i.Offset, i.Type, i.Name, i.Size)
+	return fmt.Sprintf("+%#02x %s %s (%#x)", i.Offset, getIVarType(i.Type), i.Name, i.Size)
 }
 
 type Selector struct {
