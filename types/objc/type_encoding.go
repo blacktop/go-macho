@@ -34,10 +34,11 @@ var typeEncoding = map[string]string{
 	"z": "size_t",
 	"Z": "int32",
 	"w": "wchar_t",
-	"?": "unknown",
+	// "?": "unknown",
+	"?": "void",
 	"^": "*",
 	"*": "char *",
-	"%": "atom",
+	"%": "NXAtom",
 	// "[":  "",
 	// "]":  "",
 	// "(":  "",
@@ -45,16 +46,20 @@ var typeEncoding = map[string]string{
 	// "{":  "",
 	// "}":  "",
 	"!":  "vector",
-	"r":  "const",
-	"n":  "in",
-	"N":  "inout",
-	"o":  "out",
-	"O":  "by copy",
-	"R":  "by ref",
-	"V":  "one way",
 	"Vv": "void",
 	"^?": "IMP", // void *
-	"r*": "const char *",
+}
+var typeSpecifiers = map[string]string{
+	"A": "atomic",
+	"j": "_Complex",
+	"!": "vector",
+	"r": "const",
+	"n": "in",
+	"N": "inout",
+	"o": "out",
+	"O": "by copy",
+	"R": "by ref",
+	"V": "one way",
 }
 
 const (
@@ -78,6 +83,14 @@ type methodEncodedArg struct {
 	StackSize string // variable stack size
 }
 
+type varEncodedType struct {
+	Head     string // type specifiers
+	Variable string // variable name
+	DecType  string // decoded variable type
+	EncType  string // encoded variable type
+	Tail     string // type output tail
+}
+
 // decodeMethodTypes decodes the method types and returns a return type and the argument types
 func decodeMethodTypes(encodedTypes string) (string, string) {
 	var argTypes []string
@@ -88,7 +101,11 @@ func decodeMethodTypes(encodedTypes string) (string, string) {
 	for _, arg := range getArguments(encArgs) {
 		argTypes = append(argTypes, arg.DecType)
 	}
-
+	if len(argTypes) == 2 {
+		return getReturnType(encodedTypes), ""
+	} else if len(argTypes) > 2 {
+		return getReturnType(encodedTypes), fmt.Sprintf("(%s)", strings.Join(argTypes[2:], ", "))
+	}
 	return getReturnType(encodedTypes), fmt.Sprintf("(%s)", strings.Join(argTypes, ", "))
 }
 
@@ -101,7 +118,7 @@ func getPropertyAttributeTypes(attrs string) string {
 	for _, attr := range strings.Split(attrs, ",") {
 		if strings.HasPrefix(attr, propertyType) {
 			attr = strings.TrimPrefix(attr, propertyType)
-			if strings.HasPrefix(attr, "@") {
+			if strings.HasPrefix(attr, "@\"") {
 				typeStr = strings.Trim(attr, "@\"") + " *"
 			} else {
 				if val, ok := typeEncoding[attr]; ok {
@@ -151,45 +168,77 @@ func getPropertyAttributeTypes(attrs string) string {
 }
 
 func getIVarType(ivType string) string {
-	if strings.HasPrefix(ivType, "@") {
+	if strings.HasPrefix(ivType, "@\"") && len(ivType) > 1 {
 		return strings.Trim(ivType, "@\"") + " *"
 	}
-	return getType(ivType)
+	return decodeType(ivType) + " "
 }
 
-func getType(encType string) string {
-	if val, ok := typeEncoding[encType]; ok {
-		return val
-	}
+func decodeType(encType string) string {
+	var s string
 
-	var decType string
-	if len(encType) > 2 {
-		if strings.ContainsRune(encType[:2], '[') {
-			decType = encType[strings.IndexByte(encType, '[')+1 : strings.LastIndexByte(encType, ']')]
-		} else if strings.ContainsRune(encType, '{') {
-			decType = encType[strings.IndexByte(encType, '{')+1 : strings.LastIndexByte(encType, '}')]
-		} else if strings.ContainsRune(encType, '(') {
-			decType = encType[strings.IndexByte(encType, '(')+1 : strings.LastIndexByte(encType, ')')]
-		}
-	}
-
-	if len(decType) == 0 {
-		return encType
-	}
-
-	if strings.ContainsRune(decType, '=') {
-		decType = decType[:strings.Index(decType, "=")]
+	if typ, ok := typeEncoding[encType]; ok {
+		return typ
 	}
 
 	if strings.HasPrefix(encType, "^") {
-		return decType + " *"
+		return decodeType(encType[1:]) + " *"
 	}
 
-	if strings.HasPrefix(encType, "r^") {
-		return "const " + decType + " *"
+	if spec, ok := typeSpecifiers[encType[:1]]; ok {
+		return spec + " " + decodeType(encType[1:])
 	}
 
-	return decType
+	if strings.HasPrefix(encType, "@\"") && len(encType) > 1 {
+		return strings.Trim(encType, "@\"")
+	}
+
+	if len(encType) > 2 {
+		if strings.ContainsRune(encType[:2], '[') { // ARRAY
+			inner := decodeType(encType[strings.IndexByte(encType, '[')+1 : strings.LastIndexByte(encType, ']')])
+			s += decodeArray(inner)
+		} else if strings.ContainsRune(encType, '{') { // STRUCT
+			inner := encType[strings.IndexByte(encType, '{')+1 : strings.LastIndexByte(encType, '}')]
+			s += "struct "
+			if strings.HasPrefix(inner, "@\"") && len(inner) > 1 {
+				inner = strings.Trim(inner, "@\"")
+			}
+			if strings.ContainsRune(inner, '=') {
+				idx := strings.Index(inner, "=")
+				inner = inner[:idx]
+			}
+			s += inner
+			// s += decodeStructure(inner)
+		} else if strings.ContainsRune(encType, '(') { // UNION
+			inner := encType[strings.IndexByte(encType, '(')+1 : strings.LastIndexByte(encType, ')')]
+			s += decodeUnion(inner)
+		}
+	}
+
+	if len(s) == 0 {
+		return encType
+	}
+
+	return s
+}
+
+func decodeArray(arrayType string) string {
+	numIdx := strings.LastIndexAny(arrayType, "0123456789")
+	return fmt.Sprintf("[%s]%s", arrayType[:numIdx+1], decodeType(arrayType[numIdx+1:]))
+}
+
+func decodeStructure(structType string) string {
+	sOut := "struct "
+	sOut += decodeType(structType)
+	if strings.ContainsRune(sOut, '=') {
+		sOut = sOut[:strings.Index(sOut, "=")]
+	}
+	return sOut
+}
+
+// TODO - finish
+func decodeUnion(unionType string) string {
+	return unionType
 }
 
 func getReturnType(types string) string {
@@ -197,7 +246,7 @@ func getReturnType(types string) string {
 	args := skipFirstType(types)
 	encodedRet := strings.TrimSuffix(types, args)
 
-	return getType(encodedRet)
+	return decodeType(encodedRet)
 }
 
 func skipFirstType(types string) string {
@@ -279,7 +328,7 @@ func getArguments(encArgs string) []methodEncodedArg {
 
 	for _, t := range regexp.MustCompile(`.\d+`).FindAllString(encArgs, -1) {
 		args = append(args, methodEncodedArg{
-			DecType:   getType(string(t[0])),
+			DecType:   decodeType(string(t[0])),
 			EncType:   string(t[0]),
 			StackSize: t[1:],
 		})
