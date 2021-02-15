@@ -733,6 +733,8 @@ func (f *File) GetObjCMethods(vmAddr uint64) ([]objc.Method, error) {
 }
 
 func (f *File) readSmallMethods(methodList objc.MethodList) ([]objc.Method, error) {
+	var err error
+	var nameVMAddr uint64
 	var objcMethods []objc.Method
 
 	currOffset, _ := f.sr.Seek(0, io.SeekCurrent)
@@ -743,35 +745,41 @@ func (f *File) readSmallMethods(methodList objc.MethodList) ([]objc.Method, erro
 	}
 
 	for _, method := range methods {
-		var nameAddr uint32
-		f.sr.Seek(int64(method.NameOffset)+currOffset, io.SeekStart)
-		if err := binary.Read(f.sr, f.ByteOrder, &nameAddr); err != nil {
+		f.sr.Seek(currOffset+int64(method.NameOffset), io.SeekStart)
+		if err := binary.Read(f.sr, f.ByteOrder, &nameVMAddr); err != nil {
 			return nil, fmt.Errorf("failed to read nameAddr(small): %v", err)
 		}
 
-		n, err := f.GetCStringAtOffset(int64(nameAddr))
+		if f.Flags.DylibInCache() {
+			nameVMAddr, err = f.vma.GetVMAddress(uint64(currOffset + int64(method.NameOffset)))
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert offset %#x to vmaddr; %v", currOffset+int64(method.NameOffset), err)
+			}
+		}
+
+		n, err := f.GetCString(f.vma.Convert(nameVMAddr))
 		if err != nil {
 			return nil, fmt.Errorf("failed to read cstring: %v", err)
 		}
 
-		typesVMAddr, err := f.vma.GetVMAddress(uint64(method.TypesOffset) + uint64(currOffset+4))
+		typesVMAddr, err := f.vma.GetVMAddress(uint64(currOffset + 4 + int64(method.TypesOffset)))
 		if err != nil {
-			return nil, fmt.Errorf("failed to convert offset 0x%x to vmaddr; %v", int64(method.TypesOffset)+currOffset+4, err)
+			return nil, fmt.Errorf("failed to convert offset %#x to vmaddr; %v", currOffset+4+int64(method.TypesOffset), err)
 		}
 		t, err := f.GetCString(typesVMAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read cstring: %v", err)
 		}
 
-		impVMAddr, err := f.vma.GetVMAddress(uint64(method.ImpOffset) + uint64(currOffset+8))
+		impVMAddr, err := f.vma.GetVMAddress(uint64(currOffset + 8 + int64(method.ImpOffset)))
 		if err != nil {
-			return nil, fmt.Errorf("failed to convert offset 0x%x to vmaddr; %v", int64(method.ImpOffset)+currOffset+8, err)
+			return nil, fmt.Errorf("failed to convert offset %#x to vmaddr; %v", currOffset+8+int64(method.ImpOffset), err)
 		}
 
 		currOffset += int64(methodList.EntSize())
 
 		objcMethods = append(objcMethods, objc.Method{
-			NameVMAddr:  uint64(nameAddr),
+			NameVMAddr:  nameVMAddr,
 			TypesVMAddr: typesVMAddr,
 			ImpVMAddr:   impVMAddr,
 			Name:        n,
