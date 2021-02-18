@@ -380,7 +380,7 @@ func (s *Section) Open() io.ReadSeeker { return io.NewSectionReader(s.sr, 0, 1<<
  * LC_SYMTAB
  *******************************************************************************/
 
-// A Symtab represents a Mach-O symbol table command.
+// A Symtab represents a Mach-O LC_SYMTAB command.
 type Symtab struct {
 	LoadBytes
 	types.SymtabCmd
@@ -442,7 +442,7 @@ func (s Symbol) String(m *File) string {
  * LC_UNIXTHREAD
  *******************************************************************************/
 
-// A UnixThread represents a Mach-O unix thread command.
+// A UnixThread represents a Mach-O LC_UNIXTHREAD command.
 type UnixThread struct {
 	LoadBytes
 	types.UnixThreadCmd
@@ -463,7 +463,7 @@ func (u *UnixThread) String() string {
  * LC_DYSYMTAB
  *******************************************************************************/
 
-// A Dysymtab represents a Mach-O dynamic symbol table command.
+// A Dysymtab represents a Mach-O LC_DYSYMTAB command.
 type Dysymtab struct {
 	LoadBytes
 	types.DysymtabCmd
@@ -546,7 +546,7 @@ func (d *Dylib) String() string {
  * LC_ID_DYLIB
  *******************************************************************************/
 
-// A DylibID represents a Mach-O load dynamic library ident command.
+// A DylibID represents a Mach-O LC_ID_DYLIB command.
 type DylibID Dylib
 
 func (d *DylibID) String() string {
@@ -557,6 +557,7 @@ func (d *DylibID) String() string {
  * LC_LOAD_DYLINKER
  *******************************************************************************/
 
+// A LoadDylinker represents a Mach-O LC_LOAD_DYLINKER command.
 type LoadDylinker struct {
 	LoadBytes
 	types.DylinkerCmd
@@ -571,7 +572,7 @@ func (d *LoadDylinker) String() string {
  * LC_ID_DYLINKER
  *******************************************************************************/
 
-// DylinkerID dynamic linker identification
+// DylinkerID represents a Mach-O LC_ID_DYLINKER command.
 type DylinkerID struct {
 	LoadBytes
 	types.DylinkerIDCmd
@@ -583,12 +584,28 @@ func (d *DylinkerID) String() string {
 }
 
 // TODO: LC_PREBOUND_DYLIB 0x10	/* modules prebound for a dynamically linked shared library */
-// TODO: LC_ROUTINES	0x11	/* image routines */
+
+/*******************************************************************************
+ * LC_ROUTINES - image routines
+ *******************************************************************************/
+
+// A Routines is a Mach-O LC_ROUTINES command.
+type Routines struct {
+	LoadBytes
+	types.Routines64Cmd
+	InitAddress uint32
+	InitModule  uint32
+}
+
+func (r *Routines) String() string {
+	return fmt.Sprintf("Address: %#08x, Module: %d", r.InitAddress, r.InitModule)
+}
 
 /*******************************************************************************
  * LC_SUB_FRAMEWORK
  *******************************************************************************/
 
+// A SubFramework is a Mach-O LC_SUB_FRAMEWORK command.
 type SubFramework struct {
 	LoadBytes
 	types.SubFrameworkCmd
@@ -605,7 +622,7 @@ func (s *SubFramework) String() string {
  * LC_SUB_CLIENT
  *******************************************************************************/
 
-// A SubClient is a Mach-O dynamic sub client command.
+// A SubClient is a Mach-O LC_SUB_CLIENT command.
 type SubClient struct {
 	LoadBytes
 	types.SubClientCmd
@@ -624,7 +641,7 @@ func (d *SubClient) String() string {
  * LC_LOAD_WEAK_DYLIB
  *******************************************************************************/
 
-// A WeakDylib represents a Mach-O load weak dynamic library command.
+// A WeakDylib represents a Mach-O LC_LOAD_WEAK_DYLIB command.
 type WeakDylib Dylib
 
 func (d *WeakDylib) String() string {
@@ -635,6 +652,7 @@ func (d *WeakDylib) String() string {
  * LC_ROUTINES_64
  *******************************************************************************/
 
+// A Routines64 is a Mach-O LC_ROUTINES_64 command.
 type Routines64 struct {
 	LoadBytes
 	types.Routines64Cmd
@@ -642,11 +660,15 @@ type Routines64 struct {
 	InitModule  uint64
 }
 
+func (r *Routines64) String() string {
+	return fmt.Sprintf("Address: %#016x, Module: %d", r.InitAddress, r.InitModule)
+}
+
 /*******************************************************************************
  * LC_UUID
  *******************************************************************************/
 
-// UUID represents a Mach-O uuid command.
+// UUID represents a Mach-O LC_UUID command.
 type UUID struct {
 	LoadBytes
 	types.UUIDCmd
@@ -673,7 +695,7 @@ func (s *UUID) Put(b []byte, o binary.ByteOrder) int {
  * LC_RPATH
  *******************************************************************************/
 
-// A Rpath represents a Mach-O rpath command.
+// A Rpath represents a Mach-O LC_RPATH command.
 type Rpath struct {
 	LoadBytes
 	types.RpathCmd
@@ -688,6 +710,7 @@ func (r *Rpath) String() string {
  * LC_CODE_SIGNATURE
  *******************************************************************************/
 
+// A CodeSignature represents a Mach-O LC_CODE_SIGNATURE command.
 type CodeSignature struct {
 	LoadBytes
 	types.CodeSignatureCmd
@@ -706,6 +729,7 @@ func (c *CodeSignature) String() string {
  * LC_SEGMENT_SPLIT_INFO
  *******************************************************************************/
 
+// A SplitInfo represents a Mach-O LC_SEGMENT_SPLIT_INFO command.
 type SplitInfo struct {
 	LoadBytes
 	types.SegmentSplitInfoCmd
@@ -729,6 +753,7 @@ func (s *SplitInfo) String() string {
  * LC_REEXPORT_DYLIB
  *******************************************************************************/
 
+// A ReExportDylib represents a Mach-O LC_REEXPORT_DYLIB command.
 type ReExportDylib Dylib
 
 func (d *ReExportDylib) String() string {
@@ -739,6 +764,7 @@ func (d *ReExportDylib) String() string {
  * LC_LAZY_LOAD_DYLIB - delay load of dylib until first use
  *******************************************************************************/
 
+// A LazyLoadDylib represents a Mach-O LC_LAZY_LOAD_DYLIB command.
 type LazyLoadDylib Dylib
 
 func (d *LazyLoadDylib) String() string {
@@ -784,7 +810,7 @@ func (e *EncryptionInfo) Put(b []byte, o binary.ByteOrder) int {
  * LC_DYLD_INFO
  *******************************************************************************/
 
-// A DyldInfo represents a Mach-O id dyld info command.
+// A DyldInfo represents a Mach-O LC_DYLD_INFO command.
 type DyldInfo struct {
 	LoadBytes
 	types.DyldInfoCmd
@@ -976,6 +1002,7 @@ func (d *DyldEnvironment) String() string {
  * LC_MAIN
  *******************************************************************************/
 
+// EntryPoint represents a Mach-O LC_MAIN command.
 type EntryPoint struct {
 	LoadBytes
 	types.EntryPointCmd
@@ -1004,7 +1031,7 @@ func (e *EntryPoint) Put(b []byte, o binary.ByteOrder) int {
  * LC_DATA_IN_CODE
  *******************************************************************************/
 
-// A DataInCode represents a Mach-O data in code command.
+// A DataInCode represents a Mach-O LC_DATA_IN_CODE command.
 type DataInCode struct {
 	LoadBytes
 	types.DataInCodeCmd
@@ -1021,7 +1048,7 @@ func (d *DataInCode) String() string {
  * LC_SOURCE_VERSION
  *******************************************************************************/
 
-// A SourceVersion represents a Mach-O source version.
+// A SourceVersion represents a Mach-O LC_SOURCE_VERSION command.
 type SourceVersion struct {
 	LoadBytes
 	types.SourceVersionCmd

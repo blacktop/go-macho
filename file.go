@@ -602,7 +602,18 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		// TODO: case types.LcPreboundDylib:
-		// TODO: case types.LcRoutines:
+		case types.LC_ROUTINES:
+			var rt types.RoutinesCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &rt); err != nil {
+				return nil, fmt.Errorf("failed to read LC_ROUTINES: %v", err)
+			}
+			l := new(Routines)
+			l.LoadCmd = cmd
+			l.InitAddress = rt.InitAddress
+			l.InitModule = rt.InitModule
+			l.LoadBytes = LoadBytes(cmddat)
+			f.Loads[i] = l
 		case types.LC_SUB_FRAMEWORK:
 			var sf types.SubFrameworkCmd
 			b := bytes.NewReader(cmddat)
