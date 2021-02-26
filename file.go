@@ -1318,12 +1318,41 @@ func (f *File) Segments() []*Segment {
 	return segs
 }
 
+// GetSectionsForSegment returns all the segment's sections or nil if it doesn't have any
+func (f *File) GetSectionsForSegment(name string) []*Section {
+	var secs []*Section
+	if seg := f.Segment(name); seg != nil {
+		if seg.Nsect > 0 {
+			for i := uint32(0); i < seg.Nsect; i++ {
+				if int(i+seg.Firstsect) < len(f.Sections) {
+					secs = append(secs, f.Sections[i+seg.Firstsect])
+				}
+			}
+			return secs
+		}
+	}
+	return nil
+}
+
 // Section returns the section with the given name in the given segment,
 // or nil if no such section exists.
 func (f *File) Section(segment, section string) *Section {
 	for _, sec := range f.Sections {
 		if sec.Seg == segment && sec.Name == section {
 			return sec
+		}
+	}
+	return nil
+}
+
+// FindSegmentForVMAddr returns the segment containing a given virtual memory ddress.
+func (f *File) FindSegmentForVMAddr(vmAddr uint64) *Segment {
+	for _, seg := range f.Segments() {
+		if seg.Filesz == 0 {
+			return nil
+		}
+		if seg.Addr <= vmAddr && vmAddr < seg.Addr+seg.Memsz {
+			return seg
 		}
 	}
 	return nil
@@ -1428,9 +1457,9 @@ func (f *File) FunctionStarts() *FunctionStarts {
 	return nil
 }
 
-// FunctionStartAddrs returns the function starts array, or nil if none exists.
-func (f *File) FunctionStartAddrs(data ...byte) []uint64 {
-	var vaddrs []uint64
+// GetFunctions returns the function array, or nil if none exists.
+func (f *File) GetFunctions(data ...byte) []types.Function {
+	var funcs []types.Function
 
 	fs := f.FunctionStarts()
 	if fs == nil {
@@ -1453,9 +1482,7 @@ func (f *File) FunctionStartAddrs(data ...byte) []uint64 {
 		return nil
 	}
 
-	lastVMA := offset + f.GetBaseAddress()
-
-	vaddrs = append(vaddrs, lastVMA)
+	startVMA := offset + f.GetBaseAddress()
 
 	for {
 		offset, err = trie.ReadUleb128(fsr)
@@ -1468,11 +1495,34 @@ func (f *File) FunctionStartAddrs(data ...byte) []uint64 {
 		if err != nil {
 			return nil
 		}
-		lastVMA += offset
-		vaddrs = append(vaddrs, lastVMA)
+
+		funcs = append(funcs, types.Function{
+			StartAddr: startVMA,
+			EndAddr:   startVMA + offset,
+		})
+
+		startVMA += offset
 	}
 
-	return vaddrs
+	// get last function
+	if s := f.FindSectionForVMAddr(startVMA); s != nil {
+		funcs = append(funcs, types.Function{
+			StartAddr: startVMA,
+			EndAddr:   s.Size,
+		})
+	}
+
+	return funcs
+}
+
+// GetFunctionForVMAddr returns the function containing a given virual address
+func (f *File) GetFunctionForVMAddr(addr uint64) (types.Function, error) {
+	for _, f := range f.GetFunctions() {
+		if addr >= f.StartAddr && addr < f.EndAddr {
+			return f, nil
+		}
+	}
+	return types.Function{}, fmt.Errorf("address %#016x not in any function", addr)
 }
 
 // CodeSignature returns the code signature, or nil if none exists.

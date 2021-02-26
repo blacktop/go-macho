@@ -116,6 +116,12 @@ const (
 	KindAbsJumpTable32 DiceKind = 0x0005
 )
 
+type Function struct {
+	Name      string
+	StartAddr uint64
+	EndAddr   uint64
+}
+
 /*******
 HELPERS
 ********/

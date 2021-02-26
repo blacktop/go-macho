@@ -6,12 +6,17 @@ import (
 	"strings"
 )
 
+// An Nlist is a Mach-O generic symbol table entry.
+type Nlist struct {
+	Name uint32
+	Type NType
+	Sect uint8
+	Desc NDescType
+}
+
 // An Nlist32 is a Mach-O 32-bit symbol table entry.
 type Nlist32 struct {
-	Name  uint32
-	Type  NType
-	Sect  uint8
-	Desc  NDescType
+	Nlist
 	Value uint32
 }
 
@@ -26,10 +31,7 @@ func (n *Nlist32) Put32(b []byte, o binary.ByteOrder) uint32 {
 
 // An Nlist64 is a Mach-O 64-bit symbol table entry.
 type Nlist64 struct {
-	Name  uint32
-	Type  NType
-	Sect  uint8
-	Desc  NDescType
+	Nlist
 	Value uint64
 }
 
