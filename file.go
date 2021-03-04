@@ -1348,10 +1348,7 @@ func (f *File) Section(segment, section string) *Section {
 // FindSegmentForVMAddr returns the segment containing a given virtual memory ddress.
 func (f *File) FindSegmentForVMAddr(vmAddr uint64) *Segment {
 	for _, seg := range f.Segments() {
-		if seg.Filesz == 0 {
-			return nil
-		}
-		if seg.Addr <= vmAddr && vmAddr < seg.Addr+seg.Memsz {
+		if seg.Addr <= vmAddr && vmAddr <= seg.Addr+seg.Memsz {
 			return seg
 		}
 	}
@@ -1361,10 +1358,7 @@ func (f *File) FindSegmentForVMAddr(vmAddr uint64) *Segment {
 // FindSectionForVMAddr returns the section containing a given virtual memory ddress.
 func (f *File) FindSectionForVMAddr(vmAddr uint64) *Section {
 	for _, sec := range f.Sections {
-		if sec.Size == 0 {
-			return nil
-		}
-		if sec.Addr <= vmAddr && vmAddr < sec.Addr+sec.Size {
+		if sec.Addr <= vmAddr && vmAddr <= sec.Addr+sec.Size {
 			return sec
 		}
 	}
