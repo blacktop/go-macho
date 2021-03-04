@@ -45,6 +45,7 @@ type FileTOC struct {
 	ByteOrder binary.ByteOrder
 	Loads     []Load
 	Sections  sections
+	functions []types.Function
 }
 
 func (t *FileTOC) String() string {
@@ -1453,6 +1454,11 @@ func (f *File) FunctionStarts() *FunctionStarts {
 
 // GetFunctions returns the function array, or nil if none exists.
 func (f *File) GetFunctions(data ...byte) []types.Function {
+
+	if len(f.functions) > 0 {
+		return f.functions
+	}
+
 	var funcs []types.Function
 
 	fs := f.FunctionStarts()
@@ -1505,6 +1511,9 @@ func (f *File) GetFunctions(data ...byte) []types.Function {
 			EndAddr:   s.Size,
 		})
 	}
+
+	// cache parsed functions
+	f.functions = funcs
 
 	return funcs
 }
