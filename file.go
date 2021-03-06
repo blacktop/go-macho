@@ -1508,7 +1508,7 @@ func (f *File) GetFunctions(data ...byte) []types.Function {
 	if s := f.FindSectionForVMAddr(startVMA); s != nil {
 		funcs = append(funcs, types.Function{
 			StartAddr: startVMA,
-			EndAddr:   s.Size,
+			EndAddr:   s.Addr + s.Size,
 		})
 	}
 
