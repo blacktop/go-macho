@@ -184,9 +184,9 @@ func parseCodeDirectory(r *bytes.Reader, offset uint32) (*types.CodeDirectory, e
 			Hash:  hash,
 		}
 		if !bytes.Equal(hash, make([]byte, cd.Header.HashSize)) {
-			sslot.Desc = fmt.Sprintf("Special Slot   %d %s:\t%x", slot, types.SlotType(slot), hash)
+			sslot.Desc = fmt.Sprintf("Special Slot   %d %-22v %x", slot, types.SlotType(slot).String()+":", hash)
 		} else {
-			sslot.Desc = fmt.Sprintf("Special Slot   %d %s:\tNot Bound", slot, types.SlotType(slot))
+			sslot.Desc = fmt.Sprintf("Special Slot   %d %-22v Not Bound", slot, types.SlotType(slot).String()+":")
 		}
 		cd.SpecialSlots = append(cd.SpecialSlots, sslot)
 	}
