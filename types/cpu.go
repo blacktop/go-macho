@@ -108,7 +108,7 @@ var cpuSubtypeArmStrings = []IntName{
 }
 var cpuSubtypeArm64Strings = []IntName{
 	{uint32(CPUSubtypeArm64All), "ARM64"},
-	{uint32(CPUSubtypeArm64V8), "ARM64 (ARMv8)"},
+	{uint32(CPUSubtypeArm64V8), "ARM64v8"},
 	{uint32(CPUSubtypeArm64E), "ARM64e"},
 }
 
@@ -121,18 +121,24 @@ func (st CPUSubtype) String(cpu CPU) string {
 	case CPUArm:
 		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeArmStrings, false)
 	case CPUArm64:
-		var feature string
+		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm64Strings, false)
+	}
+	return "UNKNOWN"
+}
+
+func (st CPUSubtype) Caps(cpu CPU) string {
+	switch cpu {
+	case CPUArm64:
 		caps := st & CpuSubtypeFeatureMask
 		if caps > 0 {
 			if caps&CpuSubtypePtrauthAbiUser == 0 {
-				feature = fmt.Sprintf(" caps: PAC%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
+				return fmt.Sprintf("caps: USR%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
 			} else {
-				feature = fmt.Sprintf(" caps: PAK%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
+				return fmt.Sprintf("caps: KER%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
 			}
 		}
-		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm64Strings, false) + feature
 	}
-	return "UNKNOWN"
+	return ""
 }
 
 func (st CPUSubtype) GoString(cpu CPU) string {

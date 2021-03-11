@@ -317,12 +317,12 @@ func (h FileHeader) String() string {
 	return fmt.Sprintf(
 		"Magic         = %s\n"+
 			"Type          = %s\n"+
-			"CPU           = %s, %s\n"+
+			"CPU           = %s, %s %s\n"+
 			"Commands      = %d (Size: %d)\n"+
 			"Flags         = %s\n",
 		h.Magic,
 		h.Type,
-		h.CPU, h.SubCPU.String(h.CPU),
+		h.CPU, h.SubCPU.String(h.CPU), h.SubCPU.Caps(h.CPU),
 		h.NCommands,
 		h.SizeCommands,
 		h.Flags.Flags(),
