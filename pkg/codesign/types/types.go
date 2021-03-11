@@ -10,6 +10,7 @@ type CodeSignature struct {
 	Requirements    []Requirement
 	CMSSignature    []byte
 	Entitlements    string
+	EntitlementsDER []byte
 }
 
 type magic uint32
@@ -90,11 +91,13 @@ type SlotType uint32
 
 const (
 	CSSLOT_CODEDIRECTORY                 SlotType = 0
-	CSSLOT_INFOSLOT                      SlotType = 1
-	CSSLOT_REQUIREMENTS                  SlotType = 2
-	CSSLOT_RESOURCEDIR                   SlotType = 3
-	CSSLOT_APPLICATION                   SlotType = 4
-	CSSLOT_ENTITLEMENTS                  SlotType = 5
+	CSSLOT_INFOSLOT                      SlotType = 1 // Info.plist
+	CSSLOT_REQUIREMENTS                  SlotType = 2 // internal requirements
+	CSSLOT_RESOURCEDIR                   SlotType = 3 // resource directory
+	CSSLOT_APPLICATION                   SlotType = 4 // Application specific slot/Top-level directory list
+	CSSLOT_ENTITLEMENTS                  SlotType = 5 // embedded entitlement configuration
+	CSSLOT_REP_SPECIFIC                  SlotType = 6 // for use by disk rep
+	CSSLOT_ENTITLEMENTS_DER              SlotType = 7 // DER representation of entitlements
 	CSSLOT_ALTERNATE_CODEDIRECTORIES     SlotType = 0x1000
 	CSSLOT_ALTERNATE_CODEDIRECTORY_MAX            = 5
 	CSSLOT_ALTERNATE_CODEDIRECTORY_LIMIT          = CSSLOT_ALTERNATE_CODEDIRECTORIES + CSSLOT_ALTERNATE_CODEDIRECTORY_MAX
@@ -109,7 +112,9 @@ var slotTypeStrings = []mtypes.IntName{
 	{uint32(CSSLOT_REQUIREMENTS), "Requirements Blob"},
 	{uint32(CSSLOT_RESOURCEDIR), "Resource Directory"},
 	{uint32(CSSLOT_APPLICATION), "Application Specific"},
-	{uint32(CSSLOT_ENTITLEMENTS), "Entitlements Blob"},
+	{uint32(CSSLOT_ENTITLEMENTS), "Entitlements Plist Blob"},
+	{uint32(CSSLOT_REP_SPECIFIC), "Disk Rep Specific"},
+	{uint32(CSSLOT_ENTITLEMENTS_DER), "Entitlements DER Blob"},
 	{uint32(CSSLOT_ALTERNATE_CODEDIRECTORIES), "Alternate CodeDirectories"},
 	{uint32(CSSLOT_ALTERNATE_CODEDIRECTORY_MAX), "Alternate CodeDirectory Max"},
 	{uint32(CSSLOT_ALTERNATE_CODEDIRECTORY_LIMIT), "Alternate CodeDirectory Limit"},

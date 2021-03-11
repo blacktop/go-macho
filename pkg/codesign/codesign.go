@@ -87,6 +87,18 @@ func ParseCodeSignature(cmddat []byte) (*types.CodeSignature, error) {
 			}
 			// NOTE: openssl pkcs7 -inform DER -in <cmsData> -print_certs -text -noout
 			cs.CMSSignature = cmsData
+		case types.CSSLOT_ENTITLEMENTS_DER:
+			entDerBlob := types.Blob{}
+			if err := binary.Read(r, binary.BigEndian, &entDerBlob); err != nil {
+				return nil, err
+			}
+			entDerData := make([]byte, int(entDerBlob.Length)-binary.Size(entDerBlob))
+			if err := binary.Read(r, binary.BigEndian, &entDerData); err != nil {
+				return nil, err
+			}
+			cs.EntitlementsDER = entDerData
+		case types.CSSLOT_REP_SPECIFIC:
+			fallthrough // TODO 🤷‍♂️
 		case types.CSSLOT_INFOSLOT:
 			fallthrough // TODO 🤷‍♂️
 		case types.CSSLOT_RESOURCEDIR:
