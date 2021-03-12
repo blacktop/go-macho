@@ -8,6 +8,7 @@ import (
 type CodeDirectory struct {
 	ID           string
 	TeamID       string
+	Scatter      Scatter
 	CDHash       string
 	SpecialSlots []SpecialSlot
 	CodeSlots    []CodeSlot
@@ -62,12 +63,14 @@ func (c hashType) GoString() string { return mtypes.StringName(uint32(c), csHash
 type cdVersion uint32
 
 const (
+	EARLIEST_VERSION     cdVersion = 0x20001
 	SUPPORTS_SCATTER     cdVersion = 0x20100
 	SUPPORTS_TEAMID      cdVersion = 0x20200
 	SUPPORTS_CODELIMIT64 cdVersion = 0x20300
 	SUPPORTS_EXECSEG     cdVersion = 0x20400
 	SUPPORTS_RUNTIME     cdVersion = 0x20500
 	SUPPORTS_LINKAGE     cdVersion = 0x20600
+	COMPATIBILITY_LIMIT  cdVersion = 0x2F000 // "version 3 with wiggle room"
 )
 
 var csVersionypeStrings = []mtypes.IntName{

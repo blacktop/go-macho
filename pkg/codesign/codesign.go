@@ -141,29 +141,40 @@ func parseCodeDirectory(r *bytes.Reader, offset uint32) (*types.CodeDirectory, e
 	}
 
 	// Parse version
+	if cd.Header.Version < types.EARLIEST_VERSION {
+		fmt.Printf("unsupported type or version of signature: %#x (too old)\n", cd.Header.Version)
+	} else if cd.Header.Version > types.COMPATIBILITY_LIMIT {
+		fmt.Printf("unsupported type or version of signature: %#x (too new)\n", cd.Header.Version)
+	}
 	switch cd.Header.Version {
 	case types.SUPPORTS_SCATTER:
 		if cd.Header.ScatterOffset > 0 {
 			r.Seek(int64(offset+cd.Header.ScatterOffset), io.SeekStart)
 			scatter := types.Scatter{}
 			if err := binary.Read(r, binary.BigEndian, &scatter); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to read SUPPORTS_SCATTER at: %d: %v", offset+cd.Header.ScatterOffset, err)
 			}
-			fmt.Printf("%#v\n", scatter)
+			cd.Scatter = scatter
 		}
 	case types.SUPPORTS_TEAMID:
-		r.Seek(int64(offset+cd.Header.TeamOffset), io.SeekStart)
-		teamID, err := bufio.NewReader(r).ReadString('\x00')
-		if err != nil {
-			return nil, fmt.Errorf("failed to read SUPPORTS_TEAMID at: %d: %v", offset+cd.Header.TeamOffset, err)
+		if cd.Header.TeamOffset > 0 {
+			r.Seek(int64(offset+cd.Header.TeamOffset), io.SeekStart)
+			teamID, err := bufio.NewReader(r).ReadString('\x00')
+			if err != nil {
+				return nil, fmt.Errorf("failed to read SUPPORTS_TEAMID at: %d: %v", offset+cd.Header.TeamOffset, err)
+			}
+			cd.TeamID = strings.Trim(teamID, "\x00")
 		}
-		cd.TeamID = strings.Trim(teamID, "\x00")
 	case types.SUPPORTS_CODELIMIT64:
 		// TODO 🤷‍♂️
 	case types.SUPPORTS_EXECSEG:
 		// TODO 🤷‍♂️
+	case types.SUPPORTS_RUNTIME:
+		// TODO 🤷‍♂️
+	case types.SUPPORTS_LINKAGE:
+		// TODO 🤷‍♂️
 	default:
-		fmt.Printf("Unknown code directory version 0x%x, please notify author\n", cd.Header.Version)
+		fmt.Printf("Unsupported code directory version %#x, please notify author\n", cd.Header.Version)
 	}
 	// Parse Indentity
 	r.Seek(int64(offset+cd.Header.IdentOffset), io.SeekStart)
