@@ -337,6 +337,7 @@ type ProtocolT struct {
 
 type Protocol struct {
 	Name string
+	Ptr  types.FilePointer
 	// Isa                     string
 	Prots                   []Protocol
 	InstanceMethods         []Method

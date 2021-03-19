@@ -104,7 +104,7 @@ func (f *File) GetObjCImageInfo() (*objc.ImageInfo, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("file does not contain a __objc_imageinfo section")
+	return nil, fmt.Errorf("macho does not contain a __objc_imageinfo section")
 }
 
 func (f *File) GetObjCClassInfo(vmAddr uint64) (*objc.ClassRO64, error) {
@@ -157,7 +157,7 @@ func (f *File) GetObjCMethodNames() (map[string]uint64, error) {
 		return meth2vmaddr, nil
 	}
 
-	return nil, fmt.Errorf("file does not contain a __TEXT.__objc_methname section")
+	return nil, fmt.Errorf("macho does not contain a __TEXT.__objc_methname section")
 }
 
 func (f *File) GetObjCClasses() ([]objc.Class, error) {
@@ -191,7 +191,7 @@ func (f *File) GetObjCClasses() ([]objc.Class, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("file does not contain a __objc_classlist section")
+	return nil, fmt.Errorf("macho does not contain a __objc_classlist section")
 }
 
 func (f *File) GetObjCPlusLoadClasses() ([]objc.Class, error) {
@@ -225,7 +225,7 @@ func (f *File) GetObjCPlusLoadClasses() ([]objc.Class, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("file does not contain a __objc_nlclslist section")
+	return nil, fmt.Errorf("macho does not contain a __objc_nlclslist section")
 }
 
 // GetObjCClass parses an ObjC class at a given virtual memory address
@@ -405,7 +405,7 @@ func (f *File) GetObjCCategories() ([]objc.Category, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("file does not contain a __objc_catlist section")
+	return nil, fmt.Errorf("macho does not contain a __objc_catlist section")
 }
 
 // GetCFStrings parses all the cfstrings in tne MachO
@@ -454,7 +454,7 @@ func (f *File) GetCFStrings() ([]objc.CFString, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("file does not contain a __DATA.__cfstring section")
+	return nil, fmt.Errorf("macho does not contain a __DATA.__cfstring section")
 }
 
 func (f *File) parseObjcProtocolList(vmaddr uint64) ([]objc.Protocol, error) {
@@ -502,7 +502,13 @@ func (f *File) getObjcProtocol(vmaddr uint64) (*objc.Protocol, error) {
 		return nil, fmt.Errorf("failed to read protocol_t: %v", err)
 	}
 
-	proto := objc.Protocol{ProtocolT: protoPtr}
+	proto := objc.Protocol{
+		Ptr: types.FilePointer{
+			VMAdder: vmaddr,
+			Offset:  off,
+		},
+		ProtocolT: protoPtr,
+	}
 
 	if protoPtr.NameVMAddr > 0 {
 		proto.Name, err = f.GetCString(f.vma.Convert(protoPtr.NameVMAddr))
@@ -522,7 +528,7 @@ func (f *File) getObjcProtocol(vmaddr uint64) (*objc.Protocol, error) {
 	// 	}
 	// }
 	if protoPtr.ProtocolsVMAddr > 0 {
-		proto.Prots, err = f.parseObjcProtocolList(protoPtr.ProtocolsVMAddr)
+		proto.Prots, err = f.parseObjcProtocolList(f.vma.Convert(protoPtr.ProtocolsVMAddr))
 		if err != nil {
 			return nil, fmt.Errorf("failed to read protocols vmaddr: %v", err)
 		}
@@ -627,7 +633,7 @@ func (f *File) GetObjCProtocols() ([]objc.Protocol, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("file does not contain a __objc_protolist section")
+	return nil, fmt.Errorf("macho does not contain a __objc_protolist section")
 }
 
 func (f *File) GetObjCMethodList() ([]objc.Method, error) {
@@ -708,7 +714,7 @@ func (f *File) GetObjCMethodList() ([]objc.Method, error) {
 
 		return objcMethods, nil
 	}
-	return nil, fmt.Errorf("file does not contain a __objc_methlist section")
+	return nil, fmt.Errorf("macho does not contain a __objc_methlist section")
 }
 
 func (f *File) GetObjCMethods(vmAddr uint64) ([]objc.Method, error) {
@@ -924,6 +930,119 @@ func (f *File) GetObjCProperties(vmAddr uint64) ([]objc.Property, error) {
 	return objcProperties, nil
 }
 
+func (f *File) GetObjCClassReferences() (map[uint64]*objc.Class, error) {
+	var classPtrs []uint64
+	clsRefs := make(map[uint64]*objc.Class)
+
+	for _, s := range f.Segments() {
+		if strings.HasPrefix(s.Name, "__DATA") {
+			if sec := f.Section(s.Name, "__objc_classrefs"); sec != nil {
+				if sec.Size == 0 {
+					return nil, fmt.Errorf("%s.%s section has size 0", sec.Seg, sec.Name)
+				}
+
+				dat, err := sec.Data()
+				if err != nil {
+					return nil, fmt.Errorf("failed to read __objc_classrefs: %v", err)
+				}
+
+				classPtrs = make([]uint64, sec.Size/8)
+				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &classPtrs); err != nil {
+					return nil, fmt.Errorf("failed to read class ref pointers: %v", err)
+				}
+
+				for idx, ptr := range classPtrs {
+					if cls, err := f.GetObjCClass(f.vma.Convert(ptr)); err != nil {
+						if bindName, err := f.GetBindName(ptr); err == nil {
+							clsRefs[sec.Addr+uint64(idx*sizeOfInt64)] = &objc.Class{Name: strings.TrimPrefix(bindName, "_OBJC_CLASS_$_")}
+						} else {
+							return nil, fmt.Errorf("failed to read objc_class_t at classref ptr: %#x; %v", ptr, err)
+						}
+					} else {
+						clsRefs[sec.Addr+uint64(idx*sizeOfInt64)] = cls
+					}
+				}
+				return clsRefs, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("macho does not contain a __objc_classrefs section")
+}
+
+func (f *File) GetObjCSuperReferences() (map[uint64]*objc.Class, error) {
+	var classPtrs []uint64
+	clsRefs := make(map[uint64]*objc.Class)
+
+	for _, s := range f.Segments() {
+		if strings.HasPrefix(s.Name, "__DATA") {
+			if sec := f.Section(s.Name, "__objc_superrefs"); sec != nil {
+				if sec.Size == 0 {
+					return nil, fmt.Errorf("%s.%s section has size 0", sec.Seg, sec.Name)
+				}
+
+				dat, err := sec.Data()
+				if err != nil {
+					return nil, fmt.Errorf("failed to read __objc_superrefs: %v", err)
+				}
+
+				classPtrs = make([]uint64, sec.Size/8)
+				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &classPtrs); err != nil {
+					return nil, fmt.Errorf("failed to read super ref pointers: %v", err)
+				}
+
+				for idx, ptr := range classPtrs {
+					if cls, err := f.GetObjCClass(f.vma.Convert(ptr)); err != nil {
+						if bindName, err := f.GetBindName(ptr); err == nil {
+							clsRefs[sec.Addr+uint64(idx*sizeOfInt64)] = &objc.Class{Name: strings.TrimPrefix(bindName, "_OBJC_CLASS_$_")}
+						} else {
+							return nil, fmt.Errorf("failed to read objc_class_t at superref ptr: %#x; %v", ptr, err)
+						}
+					} else {
+						clsRefs[sec.Addr+uint64(idx*sizeOfInt64)] = cls
+					}
+				}
+				return clsRefs, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("macho does not contain a __objc_superrefs section")
+}
+
+func (f *File) GetObjCProtoReferences() (map[uint64]*objc.Protocol, error) {
+	var protoPtrs []uint64
+	protRefs := make(map[uint64]*objc.Protocol)
+
+	for _, s := range f.Segments() {
+		if strings.HasPrefix(s.Name, "__DATA") {
+			if sec := f.Section(s.Name, "__objc_protorefs"); sec != nil {
+				if sec.Size == 0 {
+					return nil, fmt.Errorf("%s.%s section has size 0", sec.Seg, sec.Name)
+				}
+
+				dat, err := sec.Data()
+				if err != nil {
+					return nil, fmt.Errorf("failed to read __objc_protorefs: %v", err)
+				}
+
+				protoPtrs = make([]uint64, sec.Size/8)
+				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &protoPtrs); err != nil {
+					return nil, fmt.Errorf("failed to read super ref pointers: %v", err)
+				}
+
+				for idx, ptr := range protoPtrs {
+					proto, err := f.getObjcProtocol(f.vma.Convert(ptr))
+					if err != nil {
+						return nil, fmt.Errorf("failed to read objc_class_t at superref ptr: %#x; %v", ptr, err)
+					}
+					protRefs[sec.Addr+uint64(idx*sizeOfInt64)] = proto
+				}
+				return protRefs, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("macho does not contain a __objc_protorefs section")
+}
+
 func (f *File) GetObjCSelectorReferences() (map[uint64]*objc.Selector, error) {
 	var selPtrs []uint64
 	selRefs := make(map[uint64]*objc.Selector)
@@ -942,7 +1061,7 @@ func (f *File) GetObjCSelectorReferences() (map[uint64]*objc.Selector, error) {
 
 				selPtrs = make([]uint64, sec.Size/8)
 				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &selPtrs); err != nil {
-					return nil, fmt.Errorf("failed to read selector pointers: %v", err)
+					return nil, fmt.Errorf("failed to read selector ref pointers: %v", err)
 				}
 
 				for idx, sel := range selPtrs {
@@ -959,5 +1078,5 @@ func (f *File) GetObjCSelectorReferences() (map[uint64]*objc.Selector, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("file does not contain a __objc_selrefs section")
+	return nil, fmt.Errorf("macho does not contain a __objc_selrefs section")
 }
