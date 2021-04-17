@@ -1528,6 +1528,19 @@ func (f *File) GetFunctionForVMAddr(addr uint64) (types.Function, error) {
 	return types.Function{}, fmt.Errorf("address %#016x not in any function", addr)
 }
 
+func (f *File) GetFunctionData(fn types.Function) ([]byte, error) {
+	data := make([]byte, fn.EndAddr-fn.StartAddr)
+	offset, err := f.GetOffset(fn.StartAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get offset of function start at virtal address %#x: %v", fn.StartAddr, err)
+	}
+	_, err = f.ReadAt(data, int64(offset))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read data at offset %#x: %v", int64(offset), err)
+	}
+	return data, nil
+}
+
 // CodeSignature returns the code signature, or nil if none exists.
 func (f *File) CodeSignature() *CodeSignature {
 	for _, l := range f.Loads {

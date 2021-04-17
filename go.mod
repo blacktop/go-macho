@@ -1,3 +1,3 @@
 module github.com/blacktop/go-macho
 
-go 1.15
+go 1.16
