@@ -1,6 +1,7 @@
 package macho
 
 import (
+	"bytes"
 	"compress/zlib"
 	"encoding/binary"
 	"fmt"
@@ -131,6 +132,23 @@ func (s *Segment) Put64(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[8*4+4*8:], s.Nsect)
 	o.PutUint32(b[9*4+4*8:], uint32(s.Flag))
 	return 10*4 + 4*8
+}
+
+func (s *Segment) ToBytes(o binary.ByteOrder) ([]byte, error) {
+	buf := new(bytes.Buffer)
+
+	switch s.Command() {
+	case types.LC_SEGMENT:
+		return nil, fmt.Errorf("%s: not implimented yet", s.Command().String())
+	case types.LC_SEGMENT_64:
+		if err := binary.Write(buf, o, s.LoadCmd); err != nil {
+			return nil, fmt.Errorf("failed to write segment load command data to buffer: %v", err)
+		}
+	default:
+		return nil, fmt.Errorf("found unknown segment command: %s", s.Command().String())
+	}
+
+	return buf.Bytes(), nil
 }
 
 // Data reads and returns the contents of the segment.

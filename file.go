@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"os"
 	"strings"
@@ -283,6 +284,32 @@ func Open(name string) (*File, error) {
 	}
 	ff.closer = f
 	return ff, nil
+}
+
+// Export exports an in-memory MachO to a file
+func (f *File) Export(path string) error {
+	var buf bytes.Buffer
+
+	for _, seg := range f.Segments() {
+		dat, err := seg.Data()
+		if err != nil {
+			return fmt.Errorf("failed to read segment %s data: %v", seg.Name, err)
+		}
+		_, err = buf.Write(dat)
+		if err != nil {
+			return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
+		}
+		// TODO: align the data to page OR to 64bit ?
+	}
+
+	// TODO: fix up segment file offsets
+
+	err := ioutil.WriteFile(path, buf.Bytes(), 0755)
+	if err != nil {
+		return fmt.Errorf("failed to write exported MachO to file %s: %v", path, err)
+	}
+
+	return nil
 }
 
 // Close closes the File.
