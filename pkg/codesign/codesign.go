@@ -185,8 +185,8 @@ func parseCodeDirectory(r *bytes.Reader, offset uint32) (*types.CodeDirectory, e
 	cd.ID = id
 	// Parse Special Slots
 	r.Seek(int64(offset+cd.Header.HashOffset-(cd.Header.NSpecialSlots*uint32(cd.Header.HashSize))), io.SeekStart)
-	hash := make([]byte, cd.Header.HashSize)
 	for slot := cd.Header.NSpecialSlots; slot > 0; slot-- {
+		hash := make([]byte, cd.Header.HashSize)
 		if err := binary.Read(r, binary.BigEndian, &hash); err != nil {
 			return nil, err
 		}
@@ -204,6 +204,7 @@ func parseCodeDirectory(r *bytes.Reader, offset uint32) (*types.CodeDirectory, e
 	// Parse Slots
 	pageSize := uint32(math.Pow(2, float64(cd.Header.PageSize)))
 	for slot := uint32(0); slot < cd.Header.NCodeSlots; slot++ {
+		hash := make([]byte, cd.Header.HashSize)
 		if err := binary.Read(r, binary.BigEndian, &hash); err != nil {
 			return nil, err
 		}
