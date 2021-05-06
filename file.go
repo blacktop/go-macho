@@ -205,7 +205,8 @@ func (t *FileTOC) FileSize() uint64 {
 // writes the headers that come in-line with the segment Load commands,
 // but does not write the reference data for those sections.
 func (t *FileTOC) Put(buffer []byte) int {
-	next := t.FileHeader.Put(buffer, t.ByteOrder)
+	buf := new(bytes.Buffer)
+	next := t.FileHeader.Put(buf, t.ByteOrder)
 	for _, l := range t.Loads {
 		if s, ok := l.(*Segment); ok {
 			switch t.Magic {
@@ -433,6 +434,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 					return nil, fmt.Errorf("failed to read Section32: %v", err)
 				}
 				sh := new(Section)
+				sh.Type = 32
 				sh.Name = cstring(sh32.Name[0:])
 				sh.Seg = cstring(sh32.Seg[0:])
 				sh.Addr = uint64(sh32.Addr)
@@ -475,6 +477,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 					return nil, fmt.Errorf("failed to read Section64: %v", err)
 				}
 				sh := new(Section)
+				sh.Type = 64
 				sh.Name = cstring(sh64.Name[0:])
 				sh.Seg = cstring(sh64.Seg[0:])
 				sh.Addr = sh64.Addr

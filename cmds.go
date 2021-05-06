@@ -134,21 +134,48 @@ func (s *Segment) Put64(b []byte, o binary.ByteOrder) int {
 	return 10*4 + 4*8
 }
 
-func (s *Segment) ToBytes(o binary.ByteOrder) ([]byte, error) {
-	buf := new(bytes.Buffer)
+func (s *Segment) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	var name [16]byte
+	copy(name[:], s.Name)
 
 	switch s.Command() {
 	case types.LC_SEGMENT:
-		return nil, fmt.Errorf("%s: not implimented yet", s.Command().String())
+		if err := binary.Write(buf, o, types.Segment32{
+			LoadCmd: s.LoadCmd,        //              /* LC_SEGMENT */
+			Len:     s.Len,            // uint32       /* includes sizeof section_64 structs */
+			Name:    name,             // [16]byte     /* segment name */
+			Addr:    uint32(s.Addr),   // uint32       /* memory address of this segment */
+			Memsz:   uint32(s.Memsz),  // uint32       /* memory size of this segment */
+			Offset:  uint32(s.Offset), // uint32       /* file offset of this segment */
+			Filesz:  uint32(s.Filesz), // uint32       /* amount to map from the file */
+			Maxprot: s.Maxprot,        // VmProtection /* maximum VM protection */
+			Prot:    s.Prot,           // VmProtection /* initial VM protection */
+			Nsect:   s.Nsect,          // uint32       /* number of sections in segment */
+			Flag:    s.Flag,           // SegFlag      /* flags */
+		}); err != nil {
+			return fmt.Errorf("failed to write segment load command data to buffer: %v", err)
+		}
 	case types.LC_SEGMENT_64:
-		if err := binary.Write(buf, o, s.LoadCmd); err != nil {
-			return nil, fmt.Errorf("failed to write segment load command data to buffer: %v", err)
+		if err := binary.Write(buf, o, types.Segment64{
+			LoadCmd: s.LoadCmd, //              /* LC_SEGMENT_64 */
+			Len:     s.Len,     // uint32       /* includes sizeof section_64 structs */
+			Name:    name,      // [16]byte     /* segment name */
+			Addr:    s.Addr,    // uint64       /* memory address of this segment */
+			Memsz:   s.Memsz,   // uint64       /* memory size of this segment */
+			Offset:  s.Offset,  // uint64       /* file offset of this segment */
+			Filesz:  s.Filesz,  // uint64       /* amount to map from the file */
+			Maxprot: s.Maxprot, // VmProtection /* maximum VM protection */
+			Prot:    s.Prot,    // VmProtection /* initial VM protection */
+			Nsect:   s.Nsect,   // uint32       /* number of sections in segment */
+			Flag:    s.Flag,    // SegFlag      /* flags */
+		}); err != nil {
+			return fmt.Errorf("failed to write segment load command data to buffer: %v", err)
 		}
 	default:
-		return nil, fmt.Errorf("found unknown segment command: %s", s.Command().String())
+		return fmt.Errorf("found unknown segment command: %s", s.Command().String())
 	}
 
-	return buf.Bytes(), nil
+	return nil
 }
 
 // Data reads and returns the contents of the segment.
@@ -217,6 +244,7 @@ type SectionHeader struct {
 	Reserved1 uint32
 	Reserved2 uint32
 	Reserved3 uint32 // only present if original was 64-bit
+	Type      uint8
 }
 
 // A Reloc represents a Mach-O relocation.
@@ -293,6 +321,49 @@ func (s *Section) Put64(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[15*4+2*8:], s.Reserved3)
 	a := 16*4 + 2*8
 	return a + s.PutRelocs(b[a:], o)
+}
+
+func (s *Section) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	var name [16]byte
+	var seg [16]byte
+	copy(name[:], s.Name)
+	copy(seg[:], s.Seg)
+
+	if s.Type == 32 {
+		if err := binary.Write(buf, o, types.Segment32{
+			LoadCmd: s.LoadCmd,        //              /* LC_SEGMENT */
+			Len:     s.Len,            // uint32       /* includes sizeof section_64 structs */
+			Name:    name,             // [16]byte     /* segment name */
+			Addr:    uint32(s.Addr),   // uint32       /* memory address of this segment */
+			Memsz:   uint32(s.Memsz),  // uint32       /* memory size of this segment */
+			Offset:  uint32(s.Offset), // uint32       /* file offset of this segment */
+			Filesz:  uint32(s.Filesz), // uint32       /* amount to map from the file */
+			Maxprot: s.Maxprot,        // VmProtection /* maximum VM protection */
+			Prot:    s.Prot,           // VmProtection /* initial VM protection */
+			Nsect:   s.Nsect,          // uint32       /* number of sections in segment */
+			Flag:    s.Flag,           // SegFlag      /* flags */
+		}); err != nil {
+			return fmt.Errorf("failed to write segment load command data to buffer: %v", err)
+		}
+	} else { // 64
+		if err := binary.Write(buf, o, types.Segment64{
+			LoadCmd: s.LoadCmd, //              /* LC_SEGMENT_64 */
+			Len:     s.Len,     // uint32       /* includes sizeof section_64 structs */
+			Name:    name,      // [16]byte     /* segment name */
+			Addr:    s.Addr,    // uint64       /* memory address of this segment */
+			Memsz:   s.Memsz,   // uint64       /* memory size of this segment */
+			Offset:  s.Offset,  // uint64       /* file offset of this segment */
+			Filesz:  s.Filesz,  // uint64       /* amount to map from the file */
+			Maxprot: s.Maxprot, // VmProtection /* maximum VM protection */
+			Prot:    s.Prot,    // VmProtection /* initial VM protection */
+			Nsect:   s.Nsect,   // uint32       /* number of sections in segment */
+			Flag:    s.Flag,    // SegFlag      /* flags */
+		}); err != nil {
+			return fmt.Errorf("failed to write segment load command data to buffer: %v", err)
+		}
+	}
+
+	return nil
 }
 
 func (s *Section) PutRelocs(b []byte, o binary.ByteOrder) int {

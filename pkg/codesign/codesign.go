@@ -166,13 +166,13 @@ func parseCodeDirectory(r *bytes.Reader, offset uint32) (*types.CodeDirectory, e
 			cd.TeamID = strings.Trim(teamID, "\x00")
 		}
 	case types.SUPPORTS_CODELIMIT64:
-		// TODO 🤷‍♂️
+		fallthrough // TODO 🤷‍♂️
 	case types.SUPPORTS_EXECSEG:
-		// TODO 🤷‍♂️
+		fallthrough // TODO 🤷‍♂️
 	case types.SUPPORTS_RUNTIME:
-		// TODO 🤷‍♂️
+		fallthrough // TODO 🤷‍♂️
 	case types.SUPPORTS_LINKAGE:
-		// TODO 🤷‍♂️
+		fallthrough // TODO 🤷‍♂️
 	default:
 		fmt.Printf("Unsupported code directory version %#x, please notify author\n", cd.Header.Version)
 	}
