@@ -330,34 +330,35 @@ func (s *Section) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	copy(seg[:], s.Seg)
 
 	if s.Type == 32 {
-		if err := binary.Write(buf, o, types.Segment32{
-			LoadCmd: s.LoadCmd,        //              /* LC_SEGMENT */
-			Len:     s.Len,            // uint32       /* includes sizeof section_64 structs */
-			Name:    name,             // [16]byte     /* segment name */
-			Addr:    uint32(s.Addr),   // uint32       /* memory address of this segment */
-			Memsz:   uint32(s.Memsz),  // uint32       /* memory size of this segment */
-			Offset:  uint32(s.Offset), // uint32       /* file offset of this segment */
-			Filesz:  uint32(s.Filesz), // uint32       /* amount to map from the file */
-			Maxprot: s.Maxprot,        // VmProtection /* maximum VM protection */
-			Prot:    s.Prot,           // VmProtection /* initial VM protection */
-			Nsect:   s.Nsect,          // uint32       /* number of sections in segment */
-			Flag:    s.Flag,           // SegFlag      /* flags */
+		if err := binary.Write(buf, o, types.Section32{
+			Name:     name,           // [16]byte
+			Seg:      seg,            // [16]byte
+			Addr:     uint32(s.Addr), // uint32
+			Size:     uint32(s.Size), // uint32
+			Offset:   s.Offset,       // uint32
+			Align:    s.Align,        // uint32
+			Reloff:   s.Reloff,       // uint32
+			Nreloc:   s.Nreloc,       // uint32
+			Flags:    s.Flags,        // SectionFlag
+			Reserve1: s.Reserved1,    // uint32
+			Reserve2: s.Reserved2,    // uint32
 		}); err != nil {
 			return fmt.Errorf("failed to write segment load command data to buffer: %v", err)
 		}
 	} else { // 64
-		if err := binary.Write(buf, o, types.Segment64{
-			LoadCmd: s.LoadCmd, //              /* LC_SEGMENT_64 */
-			Len:     s.Len,     // uint32       /* includes sizeof section_64 structs */
-			Name:    name,      // [16]byte     /* segment name */
-			Addr:    s.Addr,    // uint64       /* memory address of this segment */
-			Memsz:   s.Memsz,   // uint64       /* memory size of this segment */
-			Offset:  s.Offset,  // uint64       /* file offset of this segment */
-			Filesz:  s.Filesz,  // uint64       /* amount to map from the file */
-			Maxprot: s.Maxprot, // VmProtection /* maximum VM protection */
-			Prot:    s.Prot,    // VmProtection /* initial VM protection */
-			Nsect:   s.Nsect,   // uint32       /* number of sections in segment */
-			Flag:    s.Flag,    // SegFlag      /* flags */
+		if err := binary.Write(buf, o, types.Section64{
+			Name:     name,        // [16]byte
+			Seg:      seg,         // [16]byte
+			Addr:     s.Addr,      // uint64
+			Size:     s.Size,      // uint64
+			Offset:   s.Offset,    // uint32
+			Align:    s.Align,     // uint32
+			Reloff:   s.Reloff,    // uint32
+			Nreloc:   s.Nreloc,    // uint32
+			Flags:    s.Flags,     // SectionFlag
+			Reserve1: s.Reserved1, // uint32
+			Reserve2: s.Reserved2, // uint32
+			Reserve3: s.Reserved3, // uint32
 		}); err != nil {
 			return fmt.Errorf("failed to write segment load command data to buffer: %v", err)
 		}
