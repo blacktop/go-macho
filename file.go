@@ -292,18 +292,21 @@ func (f *File) Export(path string) error {
 	var buf bytes.Buffer
 
 	for _, seg := range f.Segments() {
-		dat, err := seg.Data()
-		if err != nil {
+		// TODO: fix up segment file offsets
+		seg.Offset = uint64(buf.Len())
+		if err := seg.Write(&buf, f.ByteOrder); err != nil {
 			return fmt.Errorf("failed to read segment %s data: %v", seg.Name, err)
 		}
-		_, err = buf.Write(dat)
-		if err != nil {
-			return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
-		}
-		// TODO: align the data to page OR to 64bit ?
-	}
 
-	// TODO: fix up segment file offsets
+		// TODO: align the data to page OR to 64bit ?
+		align := uint32(types.RoundUp(uint64(buf.Len()), 8))
+		if align > 0 {
+			adata := make([]byte, align)
+			if _, err := buf.Write(adata); err != nil {
+				return fmt.Errorf("failed to add aligned at the end of segment %s data: %v", seg.Name, err)
+			}
+		}
+	}
 
 	err := ioutil.WriteFile(path, buf.Bytes(), 0755)
 	if err != nil {
