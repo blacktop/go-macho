@@ -3,6 +3,7 @@ package types
 //go:generate stringer -type=HeaderFileType,HeaderFlag -output header_string.go
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"strings"
@@ -33,6 +34,13 @@ func (h *FileHeader) Put(b []byte, o binary.ByteOrder) int {
 	}
 	o.PutUint32(b[28:], 0)
 	return 32
+}
+
+func (h *FileHeader) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, h); err != nil {
+		return fmt.Errorf("failed to write segment load command data to buffer: %v", err)
+	}
+	return nil
 }
 
 const (

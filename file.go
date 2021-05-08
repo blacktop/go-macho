@@ -205,8 +205,7 @@ func (t *FileTOC) FileSize() uint64 {
 // writes the headers that come in-line with the segment Load commands,
 // but does not write the reference data for those sections.
 func (t *FileTOC) Put(buffer []byte) int {
-	buf := new(bytes.Buffer)
-	next := t.FileHeader.Put(buf, t.ByteOrder)
+	next := t.FileHeader.Put(buffer, t.ByteOrder)
 	for _, l := range t.Loads {
 		if s, ok := l.(*Segment); ok {
 			switch t.Magic {
@@ -290,26 +289,229 @@ func Open(name string) (*File, error) {
 // Export exports an in-memory MachO to a file
 func (f *File) Export(path string) error {
 	var buf bytes.Buffer
+	var endOfLoadsOffset uint64
+
+	if err := f.FileHeader.Write(&buf, f.ByteOrder); err != nil {
+		return fmt.Errorf("failed to write file header to buffer: %v", err)
+	}
+
+	var (
+		oldSegOffset uint64
+		newSegOffset uint64
+	)
 
 	for _, seg := range f.Segments() {
 		// TODO: fix up segment file offsets
-		seg.Offset = uint64(buf.Len())
-		if err := seg.Write(&buf, f.ByteOrder); err != nil {
-			return fmt.Errorf("failed to read segment %s data: %v", seg.Name, err)
+		oldSegOffset = seg.Offset
+		seg.Offset = newSegOffset
+		newSegOffset += seg.Filesz
+		for i := uint32(0); i < seg.Nsect; i++ {
+			f.Sections[i+seg.Firstsect].Offset = f.Sections[i+seg.Firstsect].Offset - uint32(oldSegOffset)
+		}
+	}
+
+	for _, l := range f.Loads {
+		switch l.Command() {
+		case types.LC_UUID:
+			if err := u.Write(&buf, f.ByteOrder); err != nil {
+				return fmt.Errorf("failed to write LC_UUID to buffer: %v", err)
+			}
+		case types.LC_SYMTAB:
+
+		// TODO: case types.LC_SYMSEG:
+		// TODO: case types.LcThread:
+		case types.LC_UNIXTHREAD:
+
+		// TODO: case types.LcLoadfvmlib:
+		// TODO: case types.LcIdfvmlib:
+		// TODO: case types.LcIdent:
+		// TODO: case types.LcFvmfile:
+		// TODO: case types.LcPrepage:
+		case types.LC_DYSYMTAB:
+			var hdr types.DysymtabCmd
+
+		case types.LC_LOAD_DYLIB:
+
+		case types.LC_ID_DYLIB:
+
+		case types.LC_LOAD_DYLINKER:
+
+		case types.LC_ID_DYLINKER:
+
+		// TODO: case types.LcPreboundDylib:
+		case types.LC_ROUTINES:
+
+		case types.LC_SUB_FRAMEWORK:
+
+		// TODO: case types.LcSubUmbrella:
+		case types.LC_SUB_CLIENT:
+
+		// TODO: case types.LcSubLibrary:
+		// TODO: case types.LcTwolevelHints:
+		// TODO: case types.LcPrebindCksum:
+		case types.LC_LOAD_WEAK_DYLIB:
+
+		case types.LC_ROUTINES_64:
+
+		case types.LC_UUID:
+
+		case types.LC_RPATH:
+
+		case types.LC_CODE_SIGNATURE:
+
+		case types.LC_SEGMENT_SPLIT_INFO:
+
+		case types.LC_REEXPORT_DYLIB:
+
+		case types.LC_LAZY_LOAD_DYLIB:
+
+		case types.LC_ENCRYPTION_INFO:
+
+		case types.LC_DYLD_INFO:
+			fallthrough
+		case types.LC_DYLD_INFO_ONLY:
+
+		case types.LC_LOAD_UPWARD_DYLIB:
+
+		case types.LC_VERSION_MIN_MACOSX:
+
+		case types.LC_VERSION_MIN_IPHONEOS:
+
+		case types.LC_FUNCTION_STARTS:
+
+		case types.LC_DYLD_ENVIRONMENT:
+
+		case types.LC_MAIN:
+
+		case types.LC_DATA_IN_CODE:
+
+		case types.LC_SOURCE_VERSION:
+
+		// TODO: case types.LcDylibCodeSignDrs:
+		case types.LC_ENCRYPTION_INFO_64:
+
+		case types.LC_VERSION_MIN_TVOS:
+
+		case types.LC_VERSION_MIN_WATCHOS:
+
+		// TODO: case types.LcNote:
+		case types.LC_BUILD_VERSION:
+			var build types.BuildVersionCmd
+			var buildTool types.BuildToolVersion
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &build); err != nil {
+				return nil, fmt.Errorf("failed to read LC_BUILD_VERSION: %v", err)
+			}
+			l := new(BuildVersion)
+			l.LoadCmd = cmd
+			l.Platform = build.Platform.String()
+			l.Minos = build.Minos.String()
+			l.Sdk = build.Sdk.String()
+			l.NumTools = build.NumTools
+			// TODO: handle more than one tool case
+			if build.NumTools > 0 {
+				if err := binary.Read(b, bo, &buildTool); err != nil {
+					return nil, fmt.Errorf("failed to read LC_BUILD_VERSION buildTool: %v", err)
+				}
+				l.Tool = buildTool.Tool.String()
+				l.ToolVersion = buildTool.Version.String()
+			}
+			l.LoadBytes = LoadBytes(cmddat)
+			f.Loads[i] = l
+		case types.LC_DYLD_EXPORTS_TRIE:
+			var led types.LinkEditDataCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &led); err != nil {
+				return nil, fmt.Errorf("failed to read LC_DYLD_EXPORTS_TRIE: %v", err)
+			}
+			l := new(DyldExportsTrie)
+			l.LoadCmd = cmd
+			l.LoadBytes = LoadBytes(cmddat)
+			l.Offset = led.Offset
+			l.Size = led.Size
+			f.Loads[i] = l
+		case types.LC_DYLD_CHAINED_FIXUPS:
+			var led types.DyldChainedFixupsCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &led); err != nil {
+				return nil, fmt.Errorf("failed to read LC_DYLD_CHAINED_FIXUPS: %v", err)
+			}
+			l := new(DyldChainedFixups)
+			l.LoadCmd = cmd
+			l.Offset = led.Offset
+			l.Size = led.Size
+			l.LoadBytes = LoadBytes(cmddat)
+			f.Loads[i] = l
+		case types.LC_FILESET_ENTRY:
+			var hdr types.FilesetEntryCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &hdr); err != nil {
+				return nil, fmt.Errorf("failed to read LC_FILESET_ENTRY: %v", err)
+			}
+			l := new(FilesetEntry)
+			l.LoadCmd = cmd
+			if hdr.EntryID >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in load fileset entry command", hdr.EntryID}
+			}
+			l.EntryID = cstring(cmddat[hdr.EntryID:])
+			l.Offset = hdr.Offset
+			l.Addr = hdr.Addr
+			l.LoadBytes = LoadBytes(cmddat)
+			f.Loads[i] = l
+		default:
+			log.Printf("found NEW load command: %s, please let the author know :)", cmd)
 		}
 
-		// TODO: align the data to page OR to 64bit ?
-		align := uint32(types.RoundUp(uint64(buf.Len()), 8))
-		if align > 0 {
-			adata := make([]byte, align)
-			if _, err := buf.Write(adata); err != nil {
-				return fmt.Errorf("failed to add aligned at the end of segment %s data: %v", seg.Name, err)
+		if s, ok := l.(*Symtab); ok {
+			s.Stroff = 0
+		} else if d, ok := l.(*Dysymtab); ok {
+			d.Extrefsymoff = 1
+		} else if u, ok := l.(*UUID); ok {
+
+		} else if b, ok := l.(*BuildVersion); ok {
+			if err := b.Write(&buf, f.ByteOrder); err != nil {
+				return fmt.Errorf("failed to write LC_BUILD_VERSION to buffer: %v", err)
+			}
+		} else if s, ok := l.(*SourceVersion); ok {
+			if err := s.Write(&buf, f.ByteOrder); err != nil {
+				return fmt.Errorf("failed to write LC_SOURCE_VERSION to buffer: %v", err)
+			}
+		} else if u, ok := l.(*UnixThread); ok {
+			if err := u.Write(&buf, f.ByteOrder); err != nil {
+				return fmt.Errorf("failed to write LC_UNIXTHREAD to buffer: %v", err)
+			}
+		} else if f, ok := l.(*FunctionStarts); ok {
+			if err := f.Write(&buf, f.ByteOrder); err != nil {
+				return fmt.Errorf("failed to write LC_FUNCTION_STARTS to buffer: %v", err)
 			}
 		}
 	}
 
-	err := ioutil.WriteFile(path, buf.Bytes(), 0755)
-	if err != nil {
+	endOfLoadsOffset = uint64(buf.Len())
+
+	// write out segment data to buffer
+	for _, seg := range f.Segments() {
+		dat, err := seg.Data()
+		if err != nil {
+			return fmt.Errorf("failed to read segment %s data: %v", seg.Name, err)
+		}
+		if seg.Name == "__TEXT" {
+			dat = dat[endOfLoadsOffset:]
+		}
+		if _, err := buf.Write(dat); err != nil {
+			return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
+		}
+		// TODO: align the data to page OR to 64bit ?
+		// align := uint32(types.RoundUp(uint64(buf.Len()), 8)) - uint32(buf.Len())
+		// if align > 0 {
+		// 	adata := make([]byte, align)
+		// 	if _, err := buf.Write(adata); err != nil {
+		// 		return fmt.Errorf("failed to add aligned at the end of segment %s data: %v", seg.Name, err)
+		// 	}
+		// }
+	}
+
+	if err := ioutil.WriteFile(path, buf.Bytes(), 0755); err != nil {
 		return fmt.Errorf("failed to write exported MachO to file %s: %v", path, err)
 	}
 
