@@ -289,7 +289,6 @@ func Open(name string) (*File, error) {
 // Export exports an in-memory MachO to a file
 func (f *File) Export(path string) error {
 	var buf bytes.Buffer
-	var endOfLoadsOffset uint64
 
 	if err := f.FileHeader.Write(&buf, f.ByteOrder); err != nil {
 		return fmt.Errorf("failed to write file header to buffer: %v", err)
@@ -312,182 +311,86 @@ func (f *File) Export(path string) error {
 
 	for _, l := range f.Loads {
 		switch l.Command() {
-		case types.LC_UUID:
-			if err := u.Write(&buf, f.ByteOrder); err != nil {
-				return fmt.Errorf("failed to write LC_UUID to buffer: %v", err)
+		case types.LC_SEGMENT:
+			if err := l.(*Segment).Write(&buf, f.ByteOrder); err != nil {
+				return err
+			}
+		case types.LC_SEGMENT_64:
+			if err := l.(*Segment).Write(&buf, f.ByteOrder); err != nil {
+				return err
 			}
 		case types.LC_SYMTAB:
-
-		// TODO: case types.LC_SYMSEG:
-		// TODO: case types.LcThread:
-		case types.LC_UNIXTHREAD:
-
-		// TODO: case types.LcLoadfvmlib:
-		// TODO: case types.LcIdfvmlib:
-		// TODO: case types.LcIdent:
-		// TODO: case types.LcFvmfile:
-		// TODO: case types.LcPrepage:
+			if err := l.(*Symtab).Write(&buf, f.ByteOrder); err != nil {
+				return err
+			}
 		case types.LC_DYSYMTAB:
-			var hdr types.DysymtabCmd
-
-		case types.LC_LOAD_DYLIB:
-
-		case types.LC_ID_DYLIB:
-
-		case types.LC_LOAD_DYLINKER:
-
-		case types.LC_ID_DYLINKER:
-
-		// TODO: case types.LcPreboundDylib:
-		case types.LC_ROUTINES:
-
-		case types.LC_SUB_FRAMEWORK:
-
-		// TODO: case types.LcSubUmbrella:
-		case types.LC_SUB_CLIENT:
-
-		// TODO: case types.LcSubLibrary:
-		// TODO: case types.LcTwolevelHints:
-		// TODO: case types.LcPrebindCksum:
-		case types.LC_LOAD_WEAK_DYLIB:
-
-		case types.LC_ROUTINES_64:
-
-		case types.LC_UUID:
-
-		case types.LC_RPATH:
-
+			if err := l.(*Dysymtab).Write(&buf, f.ByteOrder); err != nil {
+				return err
+			}
 		case types.LC_CODE_SIGNATURE:
-
+			if err := l.(*CodeSignature).Write(&buf, f.ByteOrder); err != nil {
+				return err
+			}
 		case types.LC_SEGMENT_SPLIT_INFO:
-
-		case types.LC_REEXPORT_DYLIB:
-
-		case types.LC_LAZY_LOAD_DYLIB:
-
+			if err := l.(*SplitInfo).Write(&buf, f.ByteOrder); err != nil {
+				return err
+			}
 		case types.LC_ENCRYPTION_INFO:
-
+			if err := l.(*EncryptionInfo).Write(&buf, f.ByteOrder); err != nil {
+				return err
+			}
 		case types.LC_DYLD_INFO:
-			fallthrough
+			if err := l.(*DyldInfo).Write(&buf, f.ByteOrder); err != nil {
+				return err
+			}
 		case types.LC_DYLD_INFO_ONLY:
-
-		case types.LC_LOAD_UPWARD_DYLIB:
-
-		case types.LC_VERSION_MIN_MACOSX:
-
-		case types.LC_VERSION_MIN_IPHONEOS:
-
+			if err := l.(*DyldInfoOnly).Write(&buf, f.ByteOrder); err != nil {
+				return err
+			}
 		case types.LC_FUNCTION_STARTS:
-
-		case types.LC_DYLD_ENVIRONMENT:
-
+			if err := l.(*FunctionStarts).Write(&buf, f.ByteOrder); err != nil {
+				return err
+			}
 		case types.LC_MAIN:
-
+			if err := l.(*EntryPoint).Write(&buf, f.ByteOrder); err != nil {
+				return err
+			}
 		case types.LC_DATA_IN_CODE:
-
-		case types.LC_SOURCE_VERSION:
-
-		// TODO: case types.LcDylibCodeSignDrs:
+			if err := l.(*DataInCode).Write(&buf, f.ByteOrder); err != nil {
+				return err
+			}
+		case types.LC_DYLIB_CODE_SIGN_DRS:
+			if err := l.(*DylibCodeSignDrs).Write(&buf, f.ByteOrder); err != nil {
+				return err
+			}
 		case types.LC_ENCRYPTION_INFO_64:
-
-		case types.LC_VERSION_MIN_TVOS:
-
-		case types.LC_VERSION_MIN_WATCHOS:
-
-		// TODO: case types.LcNote:
-		case types.LC_BUILD_VERSION:
-			var build types.BuildVersionCmd
-			var buildTool types.BuildToolVersion
-			b := bytes.NewReader(cmddat)
-			if err := binary.Read(b, bo, &build); err != nil {
-				return nil, fmt.Errorf("failed to read LC_BUILD_VERSION: %v", err)
+			if err := l.(*EncryptionInfo64).Write(&buf, f.ByteOrder); err != nil {
+				return err
 			}
-			l := new(BuildVersion)
-			l.LoadCmd = cmd
-			l.Platform = build.Platform.String()
-			l.Minos = build.Minos.String()
-			l.Sdk = build.Sdk.String()
-			l.NumTools = build.NumTools
-			// TODO: handle more than one tool case
-			if build.NumTools > 0 {
-				if err := binary.Read(b, bo, &buildTool); err != nil {
-					return nil, fmt.Errorf("failed to read LC_BUILD_VERSION buildTool: %v", err)
-				}
-				l.Tool = buildTool.Tool.String()
-				l.ToolVersion = buildTool.Version.String()
+		case types.LC_LINKER_OPTIMIZATION_HINT:
+			if err := l.(*LinkerOptimizationHint).Write(&buf, f.ByteOrder); err != nil {
+				return err
 			}
-			l.LoadBytes = LoadBytes(cmddat)
-			f.Loads[i] = l
 		case types.LC_DYLD_EXPORTS_TRIE:
-			var led types.LinkEditDataCmd
-			b := bytes.NewReader(cmddat)
-			if err := binary.Read(b, bo, &led); err != nil {
-				return nil, fmt.Errorf("failed to read LC_DYLD_EXPORTS_TRIE: %v", err)
+			if err := l.(*DyldExportsTrie).Write(&buf, f.ByteOrder); err != nil {
+				return err
 			}
-			l := new(DyldExportsTrie)
-			l.LoadCmd = cmd
-			l.LoadBytes = LoadBytes(cmddat)
-			l.Offset = led.Offset
-			l.Size = led.Size
-			f.Loads[i] = l
 		case types.LC_DYLD_CHAINED_FIXUPS:
-			var led types.DyldChainedFixupsCmd
-			b := bytes.NewReader(cmddat)
-			if err := binary.Read(b, bo, &led); err != nil {
-				return nil, fmt.Errorf("failed to read LC_DYLD_CHAINED_FIXUPS: %v", err)
+			if err := l.(*DyldChainedFixups).Write(&buf, f.ByteOrder); err != nil {
+				return err
 			}
-			l := new(DyldChainedFixups)
-			l.LoadCmd = cmd
-			l.Offset = led.Offset
-			l.Size = led.Size
-			l.LoadBytes = LoadBytes(cmddat)
-			f.Loads[i] = l
 		case types.LC_FILESET_ENTRY:
-			var hdr types.FilesetEntryCmd
-			b := bytes.NewReader(cmddat)
-			if err := binary.Read(b, bo, &hdr); err != nil {
-				return nil, fmt.Errorf("failed to read LC_FILESET_ENTRY: %v", err)
+			if err := l.(*FilesetEntry).Write(&buf, f.ByteOrder); err != nil {
+				return err
 			}
-			l := new(FilesetEntry)
-			l.LoadCmd = cmd
-			if hdr.EntryID >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid name in load fileset entry command", hdr.EntryID}
-			}
-			l.EntryID = cstring(cmddat[hdr.EntryID:])
-			l.Offset = hdr.Offset
-			l.Addr = hdr.Addr
-			l.LoadBytes = LoadBytes(cmddat)
-			f.Loads[i] = l
 		default:
-			log.Printf("found NEW load command: %s, please let the author know :)", cmd)
-		}
-
-		if s, ok := l.(*Symtab); ok {
-			s.Stroff = 0
-		} else if d, ok := l.(*Dysymtab); ok {
-			d.Extrefsymoff = 1
-		} else if u, ok := l.(*UUID); ok {
-
-		} else if b, ok := l.(*BuildVersion); ok {
-			if err := b.Write(&buf, f.ByteOrder); err != nil {
-				return fmt.Errorf("failed to write LC_BUILD_VERSION to buffer: %v", err)
-			}
-		} else if s, ok := l.(*SourceVersion); ok {
-			if err := s.Write(&buf, f.ByteOrder); err != nil {
-				return fmt.Errorf("failed to write LC_SOURCE_VERSION to buffer: %v", err)
-			}
-		} else if u, ok := l.(*UnixThread); ok {
-			if err := u.Write(&buf, f.ByteOrder); err != nil {
-				return fmt.Errorf("failed to write LC_UNIXTHREAD to buffer: %v", err)
-			}
-		} else if f, ok := l.(*FunctionStarts); ok {
-			if err := f.Write(&buf, f.ByteOrder); err != nil {
-				return fmt.Errorf("failed to write LC_FUNCTION_STARTS to buffer: %v", err)
+			if _, err := buf.Write(l.Raw()); err != nil {
+				return fmt.Errorf("failed to write %s to buffer: %v", l.Command().String(), err)
 			}
 		}
 	}
 
-	endOfLoadsOffset = uint64(buf.Len())
+	endOfLoadsOffset := uint64(buf.Len())
 
 	// write out segment data to buffer
 	for _, seg := range f.Segments() {
@@ -1164,7 +1067,18 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Version = sv.Version.String()
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
-		// TODO: case types.LcDylibCodeSignDrs:
+		case types.LC_DYLIB_CODE_SIGN_DRS:
+			var led types.LinkEditDataCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &led); err != nil {
+				return nil, fmt.Errorf("failed to read LC_DYLIB_CODE_SIGN_DRS: %v", err)
+			}
+			l := new(DylibCodeSignDrs)
+			l.LoadCmd = cmd
+			l.Offset = led.Offset
+			l.Size = led.Size
+			l.LoadBytes = LoadBytes(cmddat)
+			f.Loads[i] = l
 		case types.LC_ENCRYPTION_INFO_64:
 			var ei types.EncryptionInfo64Cmd
 			b := bytes.NewReader(cmddat)
@@ -1179,7 +1093,18 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		// TODO: case types.LcLinkerOption:
-		// TODO: case types.LcLinkerOptimizationHint:
+		case types.LC_LINKER_OPTIMIZATION_HINT:
+			var led types.LinkEditDataCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &led); err != nil {
+				return nil, fmt.Errorf("failed to read LC_LINKER_OPTIMIZATION_HINT: %v", err)
+			}
+			l := new(LinkerOptimizationHint)
+			l.LoadCmd = cmd
+			l.Offset = led.Offset
+			l.Size = led.Size
+			l.LoadBytes = LoadBytes(cmddat)
+			f.Loads[i] = l
 		case types.LC_VERSION_MIN_TVOS:
 			var verMin types.VersionMinMacOSCmd
 			b := bytes.NewReader(cmddat)
@@ -1388,12 +1313,7 @@ func cstring(b []byte) string {
 	return string(b[0:i])
 }
 
-func (f *File) is64bit() bool {
-	if f.FileHeader.Magic == types.Magic64 {
-		return true
-	}
-	return false
-}
+func (f *File) is64bit() bool { return f.FileHeader.Magic == types.Magic64 }
 
 func (f *File) pointerSize() uint64 {
 	if f.is64bit() {
@@ -1948,9 +1868,7 @@ func (f *File) ImportedSymbols() ([]Symbol, error) {
 	st := f.Symtab
 	dt := f.Dysymtab
 	var all []Symbol
-	for _, s := range st.Syms[dt.Iundefsym : dt.Iundefsym+dt.Nundefsym] {
-		all = append(all, s)
-	}
+	all = append(all, st.Syms[dt.Iundefsym:dt.Iundefsym+dt.Nundefsym]...)
 	return all, nil
 }
 

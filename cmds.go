@@ -20,6 +20,7 @@ type Load interface {
 	Command() types.LoadCmd
 	LoadSize(*FileTOC) uint32 // Need the TOC for alignment, sigh.
 	Put([]byte, binary.ByteOrder) int
+	Write(buf *bytes.Buffer, o binary.ByteOrder) error
 }
 
 // LoadCmdBytes is a command-tagged sequence of bytes.
@@ -59,6 +60,10 @@ func (b LoadBytes) String() string {
 func (b LoadBytes) Raw() []byte                { return b }
 func (b LoadBytes) Copy() LoadBytes            { return LoadBytes(append([]byte{}, b...)) }
 func (b LoadBytes) LoadSize(t *FileTOC) uint32 { return uint32(len(b)) }
+func (b LoadBytes) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	_, err := buf.Write(b)
+	return err
+}
 
 /*******************************************************************************
  * SEGMENT
@@ -153,7 +158,7 @@ func (s *Segment) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 			Nsect:   s.Nsect,          // uint32       /* number of sections in segment */
 			Flag:    s.Flag,           // SegFlag      /* flags */
 		}); err != nil {
-			return fmt.Errorf("failed to write segment load command data to buffer: %v", err)
+			return fmt.Errorf("failed to write LC_SEGMENT to buffer: %v", err)
 		}
 	case types.LC_SEGMENT_64:
 		if err := binary.Write(buf, o, types.Segment64{
@@ -169,7 +174,7 @@ func (s *Segment) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 			Nsect:   s.Nsect,   // uint32       /* number of sections in segment */
 			Flag:    s.Flag,    // SegFlag      /* flags */
 		}); err != nil {
-			return fmt.Errorf("failed to write segment load command data to buffer: %v", err)
+			return fmt.Errorf("failed to write LC_SEGMENT to buffer: %v", err)
 		}
 	default:
 		return fmt.Errorf("found unknown segment command: %s", s.Command().String())
@@ -343,7 +348,7 @@ func (s *Section) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 			Reserve1: s.Reserved1,    // uint32
 			Reserve2: s.Reserved2,    // uint32
 		}); err != nil {
-			return fmt.Errorf("failed to write segment load command data to buffer: %v", err)
+			return fmt.Errorf("failed to write 32bit Section %s data to buffer: %v", s.Name, err)
 		}
 	} else { // 64
 		if err := binary.Write(buf, o, types.Section64{
@@ -360,7 +365,7 @@ func (s *Section) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 			Reserve2: s.Reserved2, // uint32
 			Reserve3: s.Reserved3, // uint32
 		}); err != nil {
-			return fmt.Errorf("failed to write segment load command data to buffer: %v", err)
+			return fmt.Errorf("failed to write 64bit Section %s data to buffer: %v", s.Name, err)
 		}
 	}
 
@@ -496,6 +501,19 @@ func (s *Symtab) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[5*4:], s.Strsize)
 	return 6 * 4
 }
+func (s *Symtab) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, types.SymtabCmd{
+		LoadCmd: s.LoadCmd,
+		Len:     s.Len,
+		Symoff:  s.Symoff,
+		Nsyms:   s.Nsyms,
+		Stroff:  s.Stroff,
+		Strsize: s.Strsize,
+	}); err != nil {
+		return fmt.Errorf("failed to write LC_SYMTAB to buffer: %v", err)
+	}
+	return nil
+}
 
 // A Symbol is a Mach-O 32-bit or 64-bit symbol table entry.
 type Symbol struct {
@@ -556,6 +574,34 @@ type Dysymtab struct {
 	LoadBytes
 	types.DysymtabCmd
 	IndirectSyms []uint32 // indices into Symtab.Syms
+}
+
+func (d *Dysymtab) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, types.DysymtabCmd{
+		LoadCmd:        d.LoadCmd,
+		Len:            d.Len,
+		Ilocalsym:      d.Ilocalsym,
+		Nlocalsym:      d.Nlocalsym,
+		Iextdefsym:     d.Iextdefsym,
+		Nextdefsym:     d.Nextdefsym,
+		Iundefsym:      d.Iundefsym,
+		Nundefsym:      d.Nundefsym,
+		Tocoffset:      d.Tocoffset,
+		Ntoc:           d.Ntoc,
+		Modtaboff:      d.Modtaboff,
+		Nmodtab:        d.Nmodtab,
+		Extrefsymoff:   d.Extrefsymoff,
+		Nextrefsyms:    d.Nextrefsyms,
+		Indirectsymoff: d.Indirectsymoff,
+		Nindirectsyms:  d.Nindirectsyms,
+		Extreloff:      d.Extreloff,
+		Nextrel:        d.Nextrel,
+		Locreloff:      d.Locreloff,
+		Nlocrel:        d.Nlocrel,
+	}); err != nil {
+		return fmt.Errorf("failed to write LC_DYSYMTAB to buffer: %v", err)
+	}
+	return nil
 }
 
 func (d *Dysymtab) String() string {
@@ -700,9 +746,7 @@ type SubFramework struct {
 	Framework string
 }
 
-func (s *SubFramework) String() string {
-	return fmt.Sprintf("%s", s.Framework)
-}
+func (s *SubFramework) String() string { return s.Framework }
 
 // TODO: LC_SUB_UMBRELLA 0x13	/* sub umbrella */
 
@@ -807,6 +851,18 @@ type CodeSignature struct {
 	ctypes.CodeSignature
 }
 
+func (c *CodeSignature) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, types.CodeSignatureCmd{
+		LoadCmd: c.LoadCmd,
+		Len:     c.Len,
+		Offset:  c.Offset,
+		Size:    c.Size,
+	}); err != nil {
+		return fmt.Errorf("failed to write LC_CODE_SIGNATURE to buffer: %v", err)
+	}
+	return nil
+}
+
 func (c *CodeSignature) String() string {
 	// TODO: fix this once codesigs are done
 	// return fmt.Sprintf("offset=0x%08x-0x%08x, size=%d, ID:   %s", c.Offset, c.Offset+c.Size, c.Size, c.ID)
@@ -825,6 +881,18 @@ type SplitInfo struct {
 	Size    uint32
 	Version uint8
 	Offsets []uint64
+}
+
+func (s *SplitInfo) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, types.SegmentSplitInfoCmd{
+		LoadCmd: s.LoadCmd,
+		Len:     s.Len,
+		Offset:  s.Offset,
+		Size:    s.Size,
+	}); err != nil {
+		return fmt.Errorf("failed to write LC_SEGMENT_SPLIT_INFO to buffer: %v", err)
+	}
+	return nil
 }
 
 func (s *SplitInfo) String() string {
@@ -870,6 +938,19 @@ type EncryptionInfo struct {
 	Offset  uint32                 // file offset of encrypted range
 	Size    uint32                 // file size of encrypted range
 	CryptID types.EncryptionSystem // which enryption system, 0 means not-encrypted yet
+}
+
+func (l *EncryptionInfo) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, types.EncryptionInfoCmd{
+		LoadCmd: l.LoadCmd,
+		Len:     l.Len,
+		Offset:  l.Offset,
+		Size:    l.Size,
+		CryptID: l.CryptID,
+	}); err != nil {
+		return fmt.Errorf("failed to write LC_ENCRYPTION_INFO to buffer: %v", err)
+	}
+	return nil
 }
 
 func (e *EncryptionInfo) String() string {
@@ -950,9 +1031,28 @@ func (d *DyldInfo) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[11*4:], d.ExportSize)
 	return int(d.Len)
 }
+func (l *DyldInfo) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, types.DyldInfoCmd{
+		LoadCmd:      l.LoadCmd,
+		Len:          l.Len,
+		RebaseOff:    l.RebaseOff,
+		RebaseSize:   l.RebaseSize,
+		BindOff:      l.BindOff,
+		BindSize:     l.BindSize,
+		WeakBindOff:  l.WeakBindOff,
+		WeakBindSize: l.WeakBindSize,
+		LazyBindOff:  l.LazyBindOff,
+		LazyBindSize: l.LazyBindSize,
+		ExportOff:    l.ExportOff,
+		ExportSize:   l.ExportSize,
+	}); err != nil {
+		return fmt.Errorf("failed to write LC_DYLD_INFO to buffer: %v", err)
+	}
+	return nil
+}
 
 /*******************************************************************************
- * LC_DYLD_INFO
+ * LC_DYLD_INFO_ONLY
  *******************************************************************************/
 
 // DyldInfoOnly is compressed dyld information only
@@ -1006,6 +1106,25 @@ func (d *DyldInfoOnly) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[10*4:], d.ExportOff)
 	o.PutUint32(b[11*4:], d.ExportSize)
 	return int(d.Len)
+}
+func (l *DyldInfoOnly) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, types.DyldInfoOnlyCmd{
+		LoadCmd:      l.LoadCmd,
+		Len:          l.Len,
+		RebaseOff:    l.RebaseOff,
+		RebaseSize:   l.RebaseSize,
+		BindOff:      l.BindOff,
+		BindSize:     l.BindSize,
+		WeakBindOff:  l.WeakBindOff,
+		WeakBindSize: l.WeakBindSize,
+		LazyBindOff:  l.LazyBindOff,
+		LazyBindSize: l.LazyBindSize,
+		ExportOff:    l.ExportOff,
+		ExportSize:   l.ExportSize,
+	}); err != nil {
+		return fmt.Errorf("failed to write LC_DYLD_INFO_ONLY to buffer: %v", err)
+	}
+	return nil
 }
 
 /*******************************************************************************
@@ -1066,6 +1185,18 @@ type FunctionStarts struct {
 	VMAddrs         []uint64
 }
 
+func (l *FunctionStarts) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, types.FunctionStartsCmd{
+		LoadCmd: l.LoadCmd,
+		Len:     l.Len,
+		Offset:  l.Offset,
+		Size:    l.Size,
+	}); err != nil {
+		return fmt.Errorf("failed to write LC_FUNCTION_STARTS to buffer: %v", err)
+	}
+	return nil
+}
+
 func (f *FunctionStarts) String() string {
 	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d", f.Offset, f.Offset+f.Size, f.Size)
 	// return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d count=%d", f.Offset, f.Offset+f.Size, f.Size, len(f.VMAddrs))
@@ -1114,6 +1245,17 @@ func (e *EntryPoint) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint64(b[3*8:], e.StackSize)
 	return int(e.Len)
 }
+func (e *EntryPoint) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, types.EntryPointCmd{
+		LoadCmd:   e.LoadCmd,
+		Len:       e.Len,
+		Offset:    e.Offset,
+		StackSize: e.StackSize,
+	}); err != nil {
+		return fmt.Errorf("failed to write LC_MAIN to buffer: %v", err)
+	}
+	return nil
+}
 
 /*******************************************************************************
  * LC_DATA_IN_CODE
@@ -1128,6 +1270,18 @@ type DataInCode struct {
 	Entries []types.DataInCodeEntry
 }
 
+func (l *DataInCode) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, types.DataInCodeCmd{
+		LoadCmd: l.LoadCmd,
+		Len:     l.Len,
+		Offset:  l.Offset,
+		Size:    l.Size,
+	}); err != nil {
+		return fmt.Errorf("failed to write LC_DATA_IN_CODE to buffer: %v", err)
+	}
+	return nil
+}
+
 func (d *DataInCode) String() string {
 	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d entries=%d", d.Offset, d.Offset+d.Size, d.Size, len(d.Entries))
 }
@@ -1139,7 +1293,7 @@ func (d *DataInCode) String() string {
 // A SourceVersion represents a Mach-O LC_SOURCE_VERSION command.
 type SourceVersion struct {
 	LoadBytes
-	types.SourceVersionCmd
+	types.DylibCodeSignDrsCmd
 	Version string
 }
 
@@ -1147,7 +1301,32 @@ func (s *SourceVersion) String() string {
 	return s.Version
 }
 
-// TODO: LC_DYLIB_CODE_SIGN_DRS 0x2B /* Code signing DRs copied from linked dylibs */
+/*******************************************************************************
+ * LC_DYLIB_CODE_SIGN_DRS Code signing DRs copied from linked dylibs
+ *******************************************************************************/
+
+type DylibCodeSignDrs struct {
+	LoadBytes
+	types.DylibCodeSignDrsCmd
+	Offset uint32
+	Size   uint32
+}
+
+func (d *DylibCodeSignDrs) String() string {
+	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d", d.Offset, d.Offset+d.Size, d.Size)
+}
+
+func (l *DylibCodeSignDrs) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, types.DylibCodeSignDrsCmd{
+		LoadCmd: l.LoadCmd,
+		Len:     l.Len,
+		Offset:  l.Offset,
+		Size:    l.Size,
+	}); err != nil {
+		return fmt.Errorf("failed to write LC_DYLIB_CODE_SIGN_DRS to buffer: %v", err)
+	}
+	return nil
+}
 
 /*******************************************************************************
  * LC_ENCRYPTION_INFO_64
@@ -1184,9 +1363,48 @@ func (e *EncryptionInfo64) Put(b []byte, o binary.ByteOrder) int {
 
 	return int(e.Len)
 }
+func (e *EncryptionInfo64) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, types.EncryptionInfo64Cmd{
+		LoadCmd: e.LoadCmd,
+		Len:     e.Len,
+		Offset:  e.Offset,
+		Size:    e.Size,
+		CryptID: e.CryptID,
+		Pad:     e.Pad,
+	}); err != nil {
+		return fmt.Errorf("failed to write LC_ENCRYPTION_INFO_64 to buffer: %v", err)
+	}
+	return nil
+}
 
 // TODO: LC_LINKER_OPTION 0x2D /* linker options in MH_OBJECT files */
-// TODO: LC_LINKER_OPTIMIZATION_HINT 0x2E /* optimization hints in MH_OBJECT files */
+
+/*******************************************************************************
+ * LC_LINKER_OPTIMIZATION_HINT - linker options in MH_OBJECT files
+ *******************************************************************************/
+
+type LinkerOptimizationHint struct {
+	LoadBytes
+	types.LinkerOptimizationHintCmd
+	Offset uint32
+	Size   uint32
+}
+
+func (l *LinkerOptimizationHint) String() string {
+	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d", l.Offset, l.Offset+l.Size, l.Size)
+}
+
+func (l *LinkerOptimizationHint) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, types.LinkerOptimizationHintCmd{
+		LoadCmd: l.LoadCmd,
+		Len:     l.Len,
+		Offset:  l.Offset,
+		Size:    l.Size,
+	}); err != nil {
+		return fmt.Errorf("failed to write LC_LINKER_OPTIMIZATION_HINT to buffer: %v", err)
+	}
+	return nil
+}
 
 /*******************************************************************************
  * LC_VERSION_MIN_TVOS
@@ -1263,6 +1481,18 @@ type DyldExportsTrie struct {
 	Size   uint32
 }
 
+func (t *DyldExportsTrie) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, types.DyldExportsTrieCmd{
+		LoadCmd: t.LoadCmd,
+		Len:     t.Len,
+		Offset:  t.Offset,
+		Size:    t.Size,
+	}); err != nil {
+		return fmt.Errorf("failed to write LC_DYLD_EXPORTS_TRIE to buffer: %v", err)
+	}
+	return nil
+}
+
 func (t *DyldExportsTrie) String() string {
 	return fmt.Sprintf("offset=0x%09x  size=0x%x", t.Offset, t.Size)
 }
@@ -1277,6 +1507,18 @@ type DyldChainedFixups struct {
 	types.DyldChainedFixupsCmd
 	Offset uint32
 	Size   uint32
+}
+
+func (s *DyldChainedFixups) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, types.DyldChainedFixupsCmd{
+		LoadCmd: s.LoadCmd,
+		Len:     s.Len,
+		Offset:  s.Offset,
+		Size:    s.Size,
+	}); err != nil {
+		return fmt.Errorf("failed to write LC_DYLD_CHAINED_FIXUPS to buffer: %v", err)
+	}
+	return nil
 }
 
 func (cf *DyldChainedFixups) String() string {
@@ -1294,6 +1536,20 @@ type FilesetEntry struct {
 	Addr    uint64 // memory address of the entry
 	Offset  uint64 // file offset of the entry
 	EntryID string // contained entry id
+}
+
+func (l *FilesetEntry) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, types.FilesetEntryCmd{
+		LoadCmd:  l.LoadCmd,
+		Len:      l.Len,
+		Addr:     l.Addr,
+		Offset:   l.Offset,
+		EntryID:  32, // it is always 0x20
+		Reserved: l.Reserved,
+	}); err != nil {
+		return fmt.Errorf("failed to write LC_FILESET_ENTRY to buffer: %v", err)
+	}
+	return nil
 }
 
 func (f *FilesetEntry) String() string {
@@ -1315,4 +1571,16 @@ type LinkEditData struct {
 	types.LinkEditDataCmd
 	Offset uint32
 	Size   uint32
+}
+
+func (l *LinkEditData) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, types.LinkEditDataCmd{
+		LoadCmd: l.LoadCmd,
+		Len:     l.Len,
+		Offset:  l.Offset,
+		Size:    l.Size,
+	}); err != nil {
+		return fmt.Errorf("failed to write linkedit_data_command to buffer: %v", err)
+	}
+	return nil
 }
