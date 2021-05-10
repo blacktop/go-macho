@@ -286,100 +286,319 @@ func Open(name string) (*File, error) {
 	return ff, nil
 }
 
-// Export exports an in-memory MachO to a file
+type segInfo struct {
+	Start uint64
+	End   uint64
+	// Size  uint64
+}
+type segMapInfo struct {
+	Name string
+	Old  segInfo
+	New  segInfo
+}
+
+type exportSegMap []segMapInfo
+
+func (m exportSegMap) Remap(offset uint64) (uint64, error) {
+
+	for _, segInfo := range m {
+		if segInfo.Old.Start <= offset && offset <= segInfo.Old.End {
+			return segInfo.New.Start + (offset - segInfo.Old.Start), nil
+		}
+	}
+
+	return 0, fmt.Errorf("failed to remapp offset %#x", offset)
+}
+
+// Export exports an in-memory or cached dylib|kext MachO to a file
 func (f *File) Export(path string) error {
 	var buf bytes.Buffer
+	var segMap exportSegMap
 
 	if err := f.FileHeader.Write(&buf, f.ByteOrder); err != nil {
 		return fmt.Errorf("failed to write file header to buffer: %v", err)
 	}
-
-	var (
-		oldSegOffset uint64
-		newSegOffset uint64
-	)
-
+	buf.Write([]byte{0, 0, 0, 0})
+	// create segment offset map
+	var newSegOffset uint64
 	for _, seg := range f.Segments() {
-		// TODO: fix up segment file offsets
-		oldSegOffset = seg.Offset
-		seg.Offset = newSegOffset
+		segMap = append(segMap, segMapInfo{
+			Name: seg.Name,
+			Old: segInfo{
+				Start: seg.Offset,
+				End:   seg.Offset + seg.Filesz,
+			},
+			New: segInfo{
+				Start: newSegOffset,
+				End:   newSegOffset + seg.Filesz,
+			},
+		})
 		newSegOffset += seg.Filesz
-		for i := uint32(0); i < seg.Nsect; i++ {
-			f.Sections[i+seg.Firstsect].Offset = f.Sections[i+seg.Firstsect].Offset - uint32(oldSegOffset)
-		}
 	}
 
 	for _, l := range f.Loads {
 		switch l.Command() {
 		case types.LC_SEGMENT:
-			if err := l.(*Segment).Write(&buf, f.ByteOrder); err != nil {
+			fallthrough
+		case types.LC_SEGMENT_64:
+			seg := l.(*Segment)
+
+			off, err := segMap.Remap(seg.Offset)
+			if err != nil {
+				return fmt.Errorf("failed to remap offset in segment %s: %v", seg.Name, err)
+			}
+			seg.Offset = off
+
+			if err := seg.Write(&buf, f.ByteOrder); err != nil {
 				return err
 			}
-		case types.LC_SEGMENT_64:
-			if err := l.(*Segment).Write(&buf, f.ByteOrder); err != nil {
-				return err
+
+			for i := uint32(0); i < seg.Nsect; i++ {
+				if f.Sections[i+seg.Firstsect].Size > 0 && f.Sections[i+seg.Firstsect].Offset != 0 {
+					off, err := segMap.Remap(uint64(f.Sections[i+seg.Firstsect].Offset))
+					if err != nil {
+						return fmt.Errorf("failed to remap offset in section %s.%s: %v", seg.Name, f.Sections[i+seg.Firstsect].Name, err)
+					}
+					f.Sections[i+seg.Firstsect].Offset = uint32(off)
+				}
+
+				// roff, err := segMap.Remap(uint64(f.Sections[i+seg.Firstsect].Reloff))
+				// if err != nil {
+				// 	return fmt.Errorf("failed to remap rel offset in section %s: %v", f.Sections[i+seg.Firstsect].Name, err)
+				// }
+				// f.Sections[i+seg.Firstsect].Reloff = uint32(roff)
+
+				if err := f.Sections[i+seg.Firstsect].Write(&buf, f.ByteOrder); err != nil {
+					return err
+				}
 			}
 		case types.LC_SYMTAB:
+			stroff, err := segMap.Remap(uint64(l.(*Symtab).Stroff))
+			if err != nil {
+				return fmt.Errorf("failed to remap string offset in %s: %v", types.LC_SYMTAB, err)
+			}
+			l.(*Symtab).Stroff = uint32(stroff)
+
+			symoff, err := segMap.Remap(uint64(l.(*Symtab).Symoff))
+			if err != nil {
+				return fmt.Errorf("failed to remap symbol offset in %s: %v", types.LC_SYMTAB, err)
+			}
+			l.(*Symtab).Symoff = uint32(symoff)
+
 			if err := l.(*Symtab).Write(&buf, f.ByteOrder); err != nil {
 				return err
 			}
 		case types.LC_DYSYMTAB:
+			// tocoffset, err := segMap.Remap(uint64(l.(*Dysymtab).Tocoffset))
+			// if err != nil {
+			// 	return fmt.Errorf("failed to remap Tocoffset in %s: %v", types.LC_DYSYMTAB, err)
+			// }
+			// l.(*Dysymtab).Tocoffset = uint32(tocoffset)
+			// modtaboff, err := segMap.Remap(uint64(l.(*Dysymtab).Modtaboff))
+			// if err != nil {
+			// 	return fmt.Errorf("failed to remap Modtaboff in %s: %v", types.LC_DYSYMTAB, err)
+			// }
+			// l.(*Dysymtab).Modtaboff = uint32(modtaboff)
+			// extrefsymoff, err := segMap.Remap(uint64(l.(*Dysymtab).Extrefsymoff))
+			// if err != nil {
+			// 	return fmt.Errorf("failed to remap Extrefsymoff %s: %v", types.LC_DYSYMTAB, err)
+			// }
+			// l.(*Dysymtab).Extrefsymoff = uint32(extrefsymoff)
+			indirectsymoff, err := segMap.Remap(uint64(l.(*Dysymtab).Indirectsymoff))
+			if err != nil {
+				return fmt.Errorf("failed to remap Indirectsymoff in %s: %v", types.LC_DYSYMTAB, err)
+			}
+			l.(*Dysymtab).Indirectsymoff = uint32(indirectsymoff)
+			// extreloff, err := segMap.Remap(uint64(l.(*Dysymtab).Extreloff))
+			// if err != nil {
+			// 	return fmt.Errorf("failed to remap Extreloff in %s: %v", types.LC_DYSYMTAB, err)
+			// }
+			// l.(*Dysymtab).Extreloff = uint32(extreloff)
+			// locreloff, err := segMap.Remap(uint64(l.(*Dysymtab).Locreloff))
+			// if err != nil {
+			// 	return fmt.Errorf("failed to remap Locreloff in %s: %v", types.LC_DYSYMTAB, err)
+			// }
+			// l.(*Dysymtab).Locreloff = uint32(locreloff)
+
 			if err := l.(*Dysymtab).Write(&buf, f.ByteOrder); err != nil {
 				return err
 			}
 		case types.LC_CODE_SIGNATURE:
+			off, err := segMap.Remap(uint64(l.(*CodeSignature).Offset))
+			if err != nil {
+				return fmt.Errorf("failed to remap offset in %s: %v", types.LC_CODE_SIGNATURE, err)
+			}
+			l.(*CodeSignature).Offset = uint32(off)
 			if err := l.(*CodeSignature).Write(&buf, f.ByteOrder); err != nil {
 				return err
 			}
 		case types.LC_SEGMENT_SPLIT_INFO:
+			off, err := segMap.Remap(uint64(l.(*SplitInfo).Offset))
+			if err != nil {
+				return fmt.Errorf("failed to remap offset in %s: %v", types.LC_SEGMENT_SPLIT_INFO, err)
+			}
+			l.(*SplitInfo).Offset = uint32(off)
+
 			if err := l.(*SplitInfo).Write(&buf, f.ByteOrder); err != nil {
 				return err
 			}
 		case types.LC_ENCRYPTION_INFO:
+			off, err := segMap.Remap(uint64(l.(*EncryptionInfo).Offset))
+			if err != nil {
+				return fmt.Errorf("failed to remap offset in %s: %v", types.LC_ENCRYPTION_INFO, err)
+			}
+			l.(*EncryptionInfo).Offset = uint32(off)
+
 			if err := l.(*EncryptionInfo).Write(&buf, f.ByteOrder); err != nil {
 				return err
 			}
 		case types.LC_DYLD_INFO:
+			rebaseOff, err := segMap.Remap(uint64(l.(*DyldInfo).RebaseOff))
+			if err != nil {
+				return fmt.Errorf("failed to remap RebaseOff in %s: %v", types.LC_DYLD_INFO, err)
+			}
+			l.(*DyldInfo).RebaseOff = uint32(rebaseOff)
+			bindOff, err := segMap.Remap(uint64(l.(*DyldInfo).BindOff))
+			if err != nil {
+				return fmt.Errorf("failed to remap BindOff in %s: %v", types.LC_DYLD_INFO, err)
+			}
+			l.(*DyldInfo).BindOff = uint32(bindOff)
+			weakBindOff, err := segMap.Remap(uint64(l.(*DyldInfo).WeakBindOff))
+			if err != nil {
+				return fmt.Errorf("failed to remap WeakBindOff in %s: %v", types.LC_DYLD_INFO, err)
+			}
+			l.(*DyldInfo).WeakBindOff = uint32(weakBindOff)
+			lazyBindOff, err := segMap.Remap(uint64(l.(*DyldInfo).LazyBindOff))
+			if err != nil {
+				return fmt.Errorf("failed to remap LazyBindOff in %s: %v", types.LC_DYLD_INFO, err)
+			}
+			l.(*DyldInfo).LazyBindOff = uint32(lazyBindOff)
+			exportOff, err := segMap.Remap(uint64(l.(*DyldInfo).ExportOff))
+			if err != nil {
+				return fmt.Errorf("failed to remap ExportOff in %s: %v", types.LC_DYLD_INFO, err)
+			}
+			l.(*DyldInfo).ExportOff = uint32(exportOff)
+
 			if err := l.(*DyldInfo).Write(&buf, f.ByteOrder); err != nil {
 				return err
 			}
 		case types.LC_DYLD_INFO_ONLY:
+			rebaseOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).RebaseOff))
+			if err != nil {
+				return fmt.Errorf("failed to remap RebaseOff in %s: %v", types.LC_DYLD_INFO, err)
+			}
+			l.(*DyldInfoOnly).RebaseOff = uint32(rebaseOff)
+			bindOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).BindOff))
+			if err != nil {
+				return fmt.Errorf("failed to remap BindOff in %s: %v", types.LC_DYLD_INFO, err)
+			}
+			l.(*DyldInfoOnly).BindOff = uint32(bindOff)
+			weakBindOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).WeakBindOff))
+			if err != nil {
+				return fmt.Errorf("failed to remap WeakBindOff in %s: %v", types.LC_DYLD_INFO, err)
+			}
+			l.(*DyldInfoOnly).WeakBindOff = uint32(weakBindOff)
+			lazyBindOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).LazyBindOff))
+			if err != nil {
+				return fmt.Errorf("failed to remap LazyBindOff in %s: %v", types.LC_DYLD_INFO, err)
+			}
+			l.(*DyldInfoOnly).LazyBindOff = uint32(lazyBindOff)
+			exportOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).ExportOff))
+			if err != nil {
+				return fmt.Errorf("failed to remap ExportOff in %s: %v", types.LC_DYLD_INFO, err)
+			}
+			l.(*DyldInfoOnly).ExportOff = uint32(exportOff)
 			if err := l.(*DyldInfoOnly).Write(&buf, f.ByteOrder); err != nil {
 				return err
 			}
 		case types.LC_FUNCTION_STARTS:
+			off, err := segMap.Remap(uint64(l.(*FunctionStarts).Offset))
+			if err != nil {
+				return fmt.Errorf("failed to remap offset in %s: %v", types.LC_FUNCTION_STARTS, err)
+			}
+			l.(*FunctionStarts).Offset = uint32(off)
+
 			if err := l.(*FunctionStarts).Write(&buf, f.ByteOrder); err != nil {
 				return err
 			}
 		case types.LC_MAIN:
+			// TODO:is this an offset or vmaddr ?
+			off, err := segMap.Remap(l.(*EntryPoint).EntryOffset)
+			if err != nil {
+				return fmt.Errorf("failed to remap offset in %s: %v", types.LC_MAIN, err)
+			}
+			l.(*EntryPoint).EntryOffset = off
+
 			if err := l.(*EntryPoint).Write(&buf, f.ByteOrder); err != nil {
 				return err
 			}
 		case types.LC_DATA_IN_CODE:
+			off, err := segMap.Remap(uint64(l.(*DataInCode).Offset))
+			if err != nil {
+				return fmt.Errorf("failed to remap offset in %s: %v", types.LC_DATA_IN_CODE, err)
+			}
+			l.(*DataInCode).Offset = uint32(off)
+
 			if err := l.(*DataInCode).Write(&buf, f.ByteOrder); err != nil {
 				return err
 			}
 		case types.LC_DYLIB_CODE_SIGN_DRS:
+			off, err := segMap.Remap(uint64(l.(*DylibCodeSignDrs).Offset))
+			if err != nil {
+				return fmt.Errorf("failed to remap offset in %s: %v", types.LC_DYLIB_CODE_SIGN_DRS, err)
+			}
+			l.(*DylibCodeSignDrs).Offset = uint32(off)
+
 			if err := l.(*DylibCodeSignDrs).Write(&buf, f.ByteOrder); err != nil {
 				return err
 			}
 		case types.LC_ENCRYPTION_INFO_64:
+			off, err := segMap.Remap(uint64(l.(*EncryptionInfo64).Offset))
+			if err != nil {
+				return fmt.Errorf("failed to remap offset in %s: %v", types.LC_ENCRYPTION_INFO_64, err)
+			}
+			l.(*EncryptionInfo64).Offset = uint32(off)
+
 			if err := l.(*EncryptionInfo64).Write(&buf, f.ByteOrder); err != nil {
 				return err
 			}
 		case types.LC_LINKER_OPTIMIZATION_HINT:
+			off, err := segMap.Remap(uint64(l.(*LinkerOptimizationHint).Offset))
+			if err != nil {
+				return fmt.Errorf("failed to remap offset in %s: %v", types.LC_LINKER_OPTIMIZATION_HINT, err)
+			}
+			l.(*LinkerOptimizationHint).Offset = uint32(off)
+
 			if err := l.(*LinkerOptimizationHint).Write(&buf, f.ByteOrder); err != nil {
 				return err
 			}
 		case types.LC_DYLD_EXPORTS_TRIE:
+			off, err := segMap.Remap(uint64(l.(*DyldExportsTrie).Offset))
+			if err != nil {
+				return fmt.Errorf("failed to remap offset in %s: %v", types.LC_DYLD_EXPORTS_TRIE, err)
+			}
+			l.(*DyldExportsTrie).Offset = uint32(off)
+
 			if err := l.(*DyldExportsTrie).Write(&buf, f.ByteOrder); err != nil {
 				return err
 			}
 		case types.LC_DYLD_CHAINED_FIXUPS:
+			off, err := segMap.Remap(uint64(l.(*DyldChainedFixups).Offset))
+			if err != nil {
+				return fmt.Errorf("failed to remap offset in %s: %v", types.LC_DYLD_CHAINED_FIXUPS, err)
+			}
+			l.(*DyldChainedFixups).Offset = uint32(off)
+
 			if err := l.(*DyldChainedFixups).Write(&buf, f.ByteOrder); err != nil {
 				return err
 			}
 		case types.LC_FILESET_ENTRY:
+			off, err := segMap.Remap(l.(*FilesetEntry).Offset)
+			if err != nil {
+				return fmt.Errorf("failed to remap offset in %s: %v", types.LC_FILESET_ENTRY, err)
+			}
+			l.(*FilesetEntry).Offset = off
+
 			if err := l.(*FilesetEntry).Write(&buf, f.ByteOrder); err != nil {
 				return err
 			}
@@ -393,19 +612,26 @@ func (f *File) Export(path string) error {
 	endOfLoadsOffset := uint64(buf.Len())
 
 	// write out segment data to buffer
-	for _, seg := range f.Segments() {
-		dat, err := seg.Data()
+	for idx, seg := range f.Segments() {
+		dat := make([]byte, seg.Filesz)
+
+		_, err := f.ReadAt(dat, int64(segMap[idx].Old.Start))
 		if err != nil {
 			return fmt.Errorf("failed to read segment %s data: %v", seg.Name, err)
 		}
+
 		if seg.Name == "__TEXT" {
-			dat = dat[endOfLoadsOffset:]
+			if _, err := buf.Write(dat[endOfLoadsOffset:]); err != nil {
+				return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
+			}
+			continue
 		}
+
 		if _, err := buf.Write(dat); err != nil {
 			return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
 		}
 		// TODO: align the data to page OR to 64bit ?
-		// align := uint32(types.RoundUp(uint64(buf.Len()), 8)) - uint32(buf.Len())
+		// align := uint32(types.RoundUp(uint64(buf.Len()), 4)) - uint32(buf.Len())
 		// if align > 0 {
 		// 	adata := make([]byte, align)
 		// 	if _, err := buf.Write(adata); err != nil {
