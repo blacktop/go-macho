@@ -318,7 +318,7 @@ func (f *File) Export(path string) error {
 	if err := f.FileHeader.Write(&buf, f.ByteOrder); err != nil {
 		return fmt.Errorf("failed to write file header to buffer: %v", err)
 	}
-	buf.Write([]byte{0, 0, 0, 0})
+
 	// create segment offset map
 	var newSegOffset uint64
 	for _, seg := range f.Segments() {
@@ -354,7 +354,7 @@ func (f *File) Export(path string) error {
 			}
 
 			for i := uint32(0); i < seg.Nsect; i++ {
-				if f.Sections[i+seg.Firstsect].Size > 0 && f.Sections[i+seg.Firstsect].Offset != 0 {
+				if f.Sections[i+seg.Firstsect].Offset != 0 {
 					off, err := segMap.Remap(uint64(f.Sections[i+seg.Firstsect].Offset))
 					if err != nil {
 						return fmt.Errorf("failed to remap offset in section %s.%s: %v", seg.Name, f.Sections[i+seg.Firstsect].Name, err)
@@ -508,6 +508,7 @@ func (f *File) Export(path string) error {
 				return fmt.Errorf("failed to remap ExportOff in %s: %v", types.LC_DYLD_INFO, err)
 			}
 			l.(*DyldInfoOnly).ExportOff = uint32(exportOff)
+
 			if err := l.(*DyldInfoOnly).Write(&buf, f.ByteOrder); err != nil {
 				return err
 			}
@@ -613,31 +614,33 @@ func (f *File) Export(path string) error {
 
 	// write out segment data to buffer
 	for idx, seg := range f.Segments() {
-		dat := make([]byte, seg.Filesz)
+		if seg.Filesz > 0 {
+			dat := make([]byte, seg.Filesz)
 
-		_, err := f.ReadAt(dat, int64(segMap[idx].Old.Start))
-		if err != nil {
-			return fmt.Errorf("failed to read segment %s data: %v", seg.Name, err)
-		}
+			_, err := f.ReadAt(dat, int64(segMap[idx].Old.Start))
+			if err != nil {
+				return fmt.Errorf("failed to read segment %s data: %v", seg.Name, err)
+			}
 
-		if seg.Name == "__TEXT" {
-			if _, err := buf.Write(dat[endOfLoadsOffset:]); err != nil {
+			if seg.Name == "__TEXT" {
+				if _, err := buf.Write(dat[endOfLoadsOffset:]); err != nil {
+					return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
+				}
+				continue
+			}
+
+			if _, err := buf.Write(dat); err != nil {
 				return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
 			}
-			continue
+			// TODO: align the data to page OR to 64bit ?
+			// align := uint32(types.RoundUp(uint64(buf.Len()), 4)) - uint32(buf.Len())
+			// if align > 0 {
+			// 	adata := make([]byte, align)
+			// 	if _, err := buf.Write(adata); err != nil {
+			// 		return fmt.Errorf("failed to add aligned at the end of segment %s data: %v", seg.Name, err)
+			// 	}
+			// }
 		}
-
-		if _, err := buf.Write(dat); err != nil {
-			return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
-		}
-		// TODO: align the data to page OR to 64bit ?
-		// align := uint32(types.RoundUp(uint64(buf.Len()), 4)) - uint32(buf.Len())
-		// if align > 0 {
-		// 	adata := make([]byte, align)
-		// 	if _, err := buf.Write(adata); err != nil {
-		// 		return fmt.Errorf("failed to add aligned at the end of segment %s data: %v", seg.Name, err)
-		// 	}
-		// }
 	}
 
 	if err := ioutil.WriteFile(path, buf.Bytes(), 0755); err != nil {
@@ -854,7 +857,9 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err != nil {
 				return nil, fmt.Errorf("failed to read parseSymtab: %v", err)
 			}
+			st.LoadBytes = cmddat
 			st.LoadCmd = cmd
+			st.Len = siz
 			f.Loads[i] = st
 			f.Symtab = st
 		// TODO: case types.LC_SYMSEG:
@@ -866,8 +871,9 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_UNIXTHREAD: %v", err)
 			}
 			l := new(UnixThread)
-			l.LoadBytes = LoadBytes(cmddat)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			// TODO: handle all flavors
 			if ut.Flavor == 6 {
 				regs := make([]uint64, ut.Count/2)
@@ -898,8 +904,9 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read Nindirectsyms: %v", err)
 			}
 			st := new(Dysymtab)
+			st.LoadBytes = cmddat
 			st.LoadCmd = cmd
-			st.LoadBytes = LoadBytes(cmddat)
+			st.Len = siz
 			st.DysymtabCmd = hdr
 			st.IndirectSyms = x
 			f.Loads[i] = st
@@ -911,7 +918,9 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_LOAD_DYLIB: %v", err)
 			}
 			l := new(Dylib)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			if hdr.Name >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid name in dynamic library command", hdr.Name}
 			}
@@ -919,7 +928,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Time = hdr.Time
 			l.CurrentVersion = hdr.CurrentVersion.String()
 			l.CompatVersion = hdr.CompatVersion.String()
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_ID_DYLIB:
 			var hdr types.DylibCmd
@@ -928,7 +936,9 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_ID_DYLIB: %v", err)
 			}
 			l := new(DylibID)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			if hdr.Name >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid name in dynamic library ident command", hdr.Name}
 			}
@@ -936,7 +946,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Time = hdr.Time
 			l.CurrentVersion = hdr.CurrentVersion.String()
 			l.CompatVersion = hdr.CompatVersion.String()
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_LOAD_DYLINKER:
 			var hdr types.DylinkerCmd
@@ -945,12 +954,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_LOAD_DYLINKER: %v", err)
 			}
 			l := new(LoadDylinker)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			if hdr.Name >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid name in load dylinker command", hdr.Name}
 			}
 			l.Name = cstring(cmddat[hdr.Name:])
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_ID_DYLINKER:
 			var hdr types.DylinkerIDCmd
@@ -959,12 +969,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_ID_DYLINKER: %v", err)
 			}
 			l := new(DylinkerID)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			if hdr.Name >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid name in load dylinker command", hdr.Name}
 			}
 			l.Name = cstring(cmddat[hdr.Name:])
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		// TODO: case types.LcPreboundDylib:
 		case types.LC_ROUTINES:
@@ -974,10 +985,11 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_ROUTINES: %v", err)
 			}
 			l := new(Routines)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			l.InitAddress = rt.InitAddress
 			l.InitModule = rt.InitModule
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_SUB_FRAMEWORK:
 			var sf types.SubFrameworkCmd
@@ -986,12 +998,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_SUB_FRAMEWORK: %v", err)
 			}
 			l := new(SubFramework)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			if sf.Framework >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid framework in subframework command", sf.Framework}
 			}
 			l.Framework = cstring(cmddat[sf.Framework:])
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		// TODO: case types.LcSubUmbrella:
 		case types.LC_SUB_CLIENT:
@@ -1001,12 +1014,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_SUB_CLIENT: %v", err)
 			}
 			l := new(SubClient)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			if sc.Client >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid path in sub client command", sc.Client}
 			}
 			l.Name = cstring(cmddat[sc.Client:])
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		// TODO: case types.LcSubLibrary:
 		// TODO: case types.LcTwolevelHints:
@@ -1018,7 +1032,9 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_LOAD_WEAK_DYLIB: %v", err)
 			}
 			l := new(WeakDylib)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			if hdr.Name >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid name in weak dynamic library command", hdr.Name}
 			}
@@ -1026,7 +1042,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Time = hdr.Time
 			l.CurrentVersion = hdr.CurrentVersion.String()
 			l.CompatVersion = hdr.CompatVersion.String()
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_ROUTINES_64:
 			var r64 types.Routines64Cmd
@@ -1035,10 +1050,11 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_ROUTINES_64: %v", err)
 			}
 			l := new(Routines64)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			l.InitAddress = r64.InitAddress
 			l.InitModule = r64.InitModule
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_UUID:
 			var u types.UUIDCmd
@@ -1047,9 +1063,10 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_UUID: %v", err)
 			}
 			l := new(UUID)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			l.ID = u.UUID.String()
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_RPATH:
 			var hdr types.RpathCmd
@@ -1058,12 +1075,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_RPATH: %v", err)
 			}
 			l := new(Rpath)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			if hdr.Path >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid path in rpath command", hdr.Path}
 			}
 			l.Path = cstring(cmddat[hdr.Path:])
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_CODE_SIGNATURE:
 			var hdr types.CodeSignatureCmd
@@ -1072,10 +1090,11 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_CODE_SIGNATURE: %v", err)
 			}
 			l := new(CodeSignature)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			l.Offset = hdr.Offset
 			l.Size = hdr.Size
-			l.LoadBytes = LoadBytes(cmddat)
 			csdat := make([]byte, hdr.Size)
 			if _, err := r.ReadAt(csdat, int64(hdr.Offset)); err != nil {
 				return nil, fmt.Errorf("failed to read CS data at offset=%#x; %v", int64(hdr.Offset), err)
@@ -1093,10 +1112,11 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO: %v", err)
 			}
 			l := new(SplitInfo)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			l.Offset = hdr.Offset
 			l.Size = hdr.Size
-			l.LoadBytes = LoadBytes(cmddat)
 			ldat := make([]byte, l.Size)
 			if _, err := r.ReadAt(ldat, int64(l.Offset)); err != nil {
 				return nil, fmt.Errorf("failed to read SplitInfo data at offset=%#x; %v", int64(hdr.Offset), err)
@@ -1128,7 +1148,9 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_REEXPORT_DYLIB: %v", err)
 			}
 			l := new(ReExportDylib)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			if hdr.Name >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid name in dynamic library command", hdr.Name}
 			}
@@ -1136,7 +1158,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Time = hdr.Time
 			l.CurrentVersion = hdr.CurrentVersion.String()
 			l.CompatVersion = hdr.CompatVersion.String()
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_LAZY_LOAD_DYLIB:
 			var hdr types.LazyLoadDylibCmd
@@ -1145,7 +1166,9 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_LAZY_LOAD_DYLIB: %v", err)
 			}
 			l := new(LazyLoadDylib)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			if hdr.Name >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid name in load upwardl dylib command", hdr.Name}
 			}
@@ -1153,7 +1176,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Time = hdr.Time
 			l.CurrentVersion = hdr.CurrentVersion.String()
 			l.CompatVersion = hdr.CompatVersion.String()
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_ENCRYPTION_INFO:
 			var ei types.EncryptionInfoCmd
@@ -1162,11 +1184,12 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_ENCRYPTION_INFO: %v", err)
 			}
 			l := new(EncryptionInfo)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			l.Offset = ei.Offset
 			l.Size = ei.Size
 			l.CryptID = ei.CryptID
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_DYLD_INFO:
 			fallthrough
@@ -1177,7 +1200,9 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_DYLD_INFO(_ONLY): %v", err)
 			}
 			l := new(DyldInfo)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			l.RebaseOff = info.RebaseOff
 			l.RebaseSize = info.RebaseSize
 			l.BindOff = info.BindOff
@@ -1196,7 +1221,9 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_LOAD_UPWARD_DYLIB: %v", err)
 			}
 			l := new(UpwardDylib)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			if hdr.Name >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid name in load upwardl dylib command", hdr.Name}
 			}
@@ -1204,7 +1231,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Time = hdr.Time
 			l.CurrentVersion = hdr.CurrentVersion.String()
 			l.CompatVersion = hdr.CompatVersion.String()
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_VERSION_MIN_MACOSX:
 			var verMin types.VersionMinMacOSCmd
@@ -1213,10 +1239,11 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_VERSION_MIN_MACOSX: %v", err)
 			}
 			l := new(VersionMinMacOSX)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			l.Version = verMin.Version.String()
 			l.Sdk = verMin.Sdk.String()
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_VERSION_MIN_IPHONEOS:
 			var verMin types.VersionMinIPhoneOSCmd
@@ -1225,10 +1252,11 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_VERSION_MIN_IPHONEOS: %v", err)
 			}
 			l := new(VersionMiniPhoneOS)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			l.Version = verMin.Version.String()
 			l.Sdk = verMin.Sdk.String()
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_FUNCTION_STARTS:
 			var led types.LinkEditDataCmd
@@ -1237,10 +1265,11 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_FUNCTION_STARTS: %v", err)
 			}
 			l := new(FunctionStarts)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			l.Offset = led.Offset
 			l.Size = led.Size
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_DYLD_ENVIRONMENT:
 			var hdr types.DyldEnvironmentCmd
@@ -1249,12 +1278,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_DYLD_ENVIRONMENT: %v", err)
 			}
 			l := new(DyldEnvironment)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			if hdr.Name >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid name in dyld environment command", hdr.Name}
 			}
 			l.Name = cstring(cmddat[hdr.Name:])
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_MAIN:
 			var hdr types.EntryPointCmd
@@ -1263,10 +1293,11 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_MAIN: %v", err)
 			}
 			l := new(EntryPoint)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			l.EntryOffset = hdr.Offset
 			l.StackSize = hdr.StackSize
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_DATA_IN_CODE:
 			var led types.LinkEditDataCmd
@@ -1275,12 +1306,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_DATA_IN_CODE: %v", err)
 			}
 			l := new(DataInCode)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			// TODO: finish parsing Dice entries
 			// var e DataInCodeEntry
 			l.Offset = led.Offset
 			l.Size = led.Size
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_SOURCE_VERSION:
 			var sv types.SourceVersionCmd
@@ -1289,9 +1321,10 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_SOURCE_VERSION: %v", err)
 			}
 			l := new(SourceVersion)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			l.Version = sv.Version.String()
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_DYLIB_CODE_SIGN_DRS:
 			var led types.LinkEditDataCmd
@@ -1300,10 +1333,11 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_DYLIB_CODE_SIGN_DRS: %v", err)
 			}
 			l := new(DylibCodeSignDrs)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			l.Offset = led.Offset
 			l.Size = led.Size
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_ENCRYPTION_INFO_64:
 			var ei types.EncryptionInfo64Cmd
@@ -1312,11 +1346,12 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_ENCRYPTION_INFO_64: %v", err)
 			}
 			l := new(EncryptionInfo64)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			l.Offset = ei.Offset
 			l.Size = ei.Size
 			l.CryptID = ei.CryptID
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		// TODO: case types.LcLinkerOption:
 		case types.LC_LINKER_OPTIMIZATION_HINT:
@@ -1326,10 +1361,11 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_LINKER_OPTIMIZATION_HINT: %v", err)
 			}
 			l := new(LinkerOptimizationHint)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			l.Offset = led.Offset
 			l.Size = led.Size
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_VERSION_MIN_TVOS:
 			var verMin types.VersionMinMacOSCmd
@@ -1338,10 +1374,11 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_VERSION_MIN_TVOS: %v", err)
 			}
 			l := new(VersionMinTvOS)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			l.Version = verMin.Version.String()
 			l.Sdk = verMin.Sdk.String()
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_VERSION_MIN_WATCHOS:
 			var verMin types.VersionMinWatchOSCmd
@@ -1350,10 +1387,11 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_VERSION_MIN_WATCHOS: %v", err)
 			}
 			l := new(VersionMinWatchOS)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			l.Version = verMin.Version.String()
 			l.Sdk = verMin.Sdk.String()
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		// TODO: case types.LcNote:
 		case types.LC_BUILD_VERSION:
@@ -1364,7 +1402,9 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_BUILD_VERSION: %v", err)
 			}
 			l := new(BuildVersion)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			l.Platform = build.Platform.String()
 			l.Minos = build.Minos.String()
 			l.Sdk = build.Sdk.String()
@@ -1377,7 +1417,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				l.Tool = buildTool.Tool.String()
 				l.ToolVersion = buildTool.Version.String()
 			}
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_DYLD_EXPORTS_TRIE:
 			var led types.LinkEditDataCmd
@@ -1386,8 +1425,9 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_DYLD_EXPORTS_TRIE: %v", err)
 			}
 			l := new(DyldExportsTrie)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
-			l.LoadBytes = LoadBytes(cmddat)
+			l.Len = siz
 			l.Offset = led.Offset
 			l.Size = led.Size
 			f.Loads[i] = l
@@ -1398,10 +1438,11 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_DYLD_CHAINED_FIXUPS: %v", err)
 			}
 			l := new(DyldChainedFixups)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			l.Offset = led.Offset
 			l.Size = led.Size
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		case types.LC_FILESET_ENTRY:
 			var hdr types.FilesetEntryCmd
@@ -1410,14 +1451,15 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_FILESET_ENTRY: %v", err)
 			}
 			l := new(FilesetEntry)
+			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
+			l.Len = siz
 			if hdr.EntryID >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid name in load fileset entry command", hdr.EntryID}
 			}
 			l.EntryID = cstring(cmddat[hdr.EntryID:])
 			l.Offset = hdr.Offset
 			l.Addr = hdr.Addr
-			l.LoadBytes = LoadBytes(cmddat)
 			f.Loads[i] = l
 		}
 		if s != nil {
