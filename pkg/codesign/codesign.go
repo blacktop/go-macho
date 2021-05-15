@@ -168,13 +168,12 @@ func parseCodeDirectory(r *bytes.Reader, offset uint32) (*types.CodeDirectory, e
 	case types.SUPPORTS_CODELIMIT64:
 		fallthrough // TODO 🤷‍♂️
 	case types.SUPPORTS_EXECSEG:
-		fallthrough // TODO 🤷‍♂️
 	case types.SUPPORTS_RUNTIME:
 		fallthrough // TODO 🤷‍♂️
 	case types.SUPPORTS_LINKAGE:
 		fallthrough // TODO 🤷‍♂️
 	default:
-		fmt.Printf("Unsupported code directory version %#x, please notify author\n", cd.Header.Version)
+		fmt.Printf("Unsupported code directory version %s, please notify author\n", cd.Header.Version)
 	}
 	// Parse Indentity
 	r.Seek(int64(offset+cd.Header.IdentOffset), io.SeekStart)
@@ -182,7 +181,7 @@ func parseCodeDirectory(r *bytes.Reader, offset uint32) (*types.CodeDirectory, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to read CodeDirectory ID at: %d: %v", offset+cd.Header.IdentOffset, err)
 	}
-	cd.ID = id
+	cd.ID = strings.Trim(id, "\x00")
 	// Parse Special Slots
 	r.Seek(int64(offset+cd.Header.HashOffset-(cd.Header.NSpecialSlots*uint32(cd.Header.HashSize))), io.SeekStart)
 	for slot := cd.Header.NSpecialSlots; slot > 0; slot-- {
