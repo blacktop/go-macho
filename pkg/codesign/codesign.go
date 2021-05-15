@@ -165,9 +165,9 @@ func parseCodeDirectory(r *bytes.Reader, offset uint32) (*types.CodeDirectory, e
 			}
 			cd.TeamID = strings.Trim(teamID, "\x00")
 		}
+	case types.SUPPORTS_EXECSEG:
 	case types.SUPPORTS_CODELIMIT64:
 		fallthrough // TODO 🤷‍♂️
-	case types.SUPPORTS_EXECSEG:
 	case types.SUPPORTS_RUNTIME:
 		fallthrough // TODO 🤷‍♂️
 	case types.SUPPORTS_LINKAGE:
