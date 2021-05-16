@@ -110,6 +110,37 @@ func (s *DyldChainedStarts) Binds() []Bind {
 	return binds
 }
 
+func stride(pointerFormat DCPtrKind) uint64 {
+	switch pointerFormat {
+	case DYLD_CHAINED_PTR_ARM64E:
+		fallthrough
+	case DYLD_CHAINED_PTR_ARM64E_USERLAND:
+		fallthrough
+	case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
+		return uint64(8)
+	case DYLD_CHAINED_PTR_ARM64E_KERNEL:
+		fallthrough
+	case DYLD_CHAINED_PTR_ARM64E_FIRMWARE:
+		fallthrough
+	case DYLD_CHAINED_PTR_32_FIRMWARE:
+		fallthrough
+	case DYLD_CHAINED_PTR_64:
+		fallthrough
+	case DYLD_CHAINED_PTR_64_OFFSET:
+		fallthrough
+	case DYLD_CHAINED_PTR_32:
+		fallthrough
+	case DYLD_CHAINED_PTR_32_CACHE:
+		fallthrough
+	case DYLD_CHAINED_PTR_64_KERNEL_CACHE:
+		return uint64(4)
+	case DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE:
+		return uint64(1)
+	default:
+		panic(fmt.Sprintf("unsupported pointer chain format: %d", pointerFormat))
+	}
+}
+
 // DyldChainedStartsInSegment object is embedded in dyld_chain_starts_in_image
 // and passed down to the kernel for page-in linking
 type DyldChainedStartsInSegment struct {
@@ -655,14 +686,24 @@ func (d DyldChainedPtr64KernelCacheRebase) String(baseAddr ...uint64) string {
 	if len(baseAddr) > 0 {
 		d.Fixup += baseAddr[0]
 	}
-	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, key: %s, addrDiv: %d, diversity: 0x%04x, target: 0x%08x, cacheLevel: %d)",
+	if d.IsAuth() == 1 {
+		return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, key: %s, addrDiv: %d, diversity: 0x%04x, target: 0x%08x, cacheLevel: %d)",
+			d.Fixup,
+			d.Pointer,
+			d.Kind(),
+			d.Next(),
+			KeyName(d.Key()),
+			d.AddrDiv(),
+			d.Diversity(),
+			d.Target(),
+			d.CacheLevel(),
+		)
+	}
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: 0x%08x, cacheLevel: %d)",
 		d.Fixup,
 		d.Pointer,
 		d.Kind(),
 		d.Next(),
-		KeyName(d.Key()),
-		d.AddrDiv(),
-		d.Diversity(),
 		d.Target(),
 		d.CacheLevel(),
 	)

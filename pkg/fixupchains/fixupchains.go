@@ -114,14 +114,16 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 	var next uint64
 
 	chainEnd := false
-
-	pageContentStart := dcf.Starts[segIdx].DyldChainedStartsInSegment.SegmentOffset + uint64(pageIndex*dcf.Starts[segIdx].DyldChainedStartsInSegment.PageSize)
+	segOffset := dcf.Starts[segIdx].DyldChainedStartsInSegment.SegmentOffset
+	pageContentStart := segOffset + uint64(pageIndex)*uint64(dcf.Starts[segIdx].DyldChainedStartsInSegment.PageSize)
 
 	for !chainEnd {
 		fixupLocation := pageContentStart + uint64(offsetInPage) + next
 		dcf.sr.Seek(int64(fixupLocation), io.SeekStart)
 
-		switch dcf.Starts[segIdx].DyldChainedStartsInSegment.PointerFormat {
+		pointerFormat := dcf.Starts[segIdx].DyldChainedStartsInSegment.PointerFormat
+
+		switch pointerFormat {
 		case DYLD_CHAINED_PTR_32:
 			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr); err != nil {
 				return err
@@ -139,7 +141,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 			if Generic32Next(dcPtr) == 0 {
 				chainEnd = true
 			}
-			next += Generic32Next(dcPtr) * 4
+			next += Generic32Next(dcPtr) * stride(pointerFormat)
 		case DYLD_CHAINED_PTR_32_CACHE:
 			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr); err != nil {
 				return err
@@ -151,7 +153,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 			if Generic32Next(dcPtr) == 0 {
 				chainEnd = true
 			}
-			next += Generic32Next(dcPtr) * 4
+			next += Generic32Next(dcPtr) * stride(pointerFormat)
 		case DYLD_CHAINED_PTR_32_FIRMWARE:
 			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr); err != nil {
 				return err
@@ -163,7 +165,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 			if Generic32Next(dcPtr) == 0 {
 				chainEnd = true
 			}
-			next += Generic32Next(dcPtr) * 4
+			next += Generic32Next(dcPtr) * stride(pointerFormat)
 		case DYLD_CHAINED_PTR_64: // target is vmaddr
 			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr64); err != nil {
 				return err
@@ -181,7 +183,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 			if Generic64Next(dcPtr64) == 0 {
 				chainEnd = true
 			}
-			next += Generic64Next(dcPtr64) * 4
+			next += Generic64Next(dcPtr64) * stride(pointerFormat)
 		case DYLD_CHAINED_PTR_64_OFFSET: // target is vm offset
 			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr64); err != nil {
 				return err
@@ -193,7 +195,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 			if Generic64Next(dcPtr64) == 0 {
 				chainEnd = true
 			}
-			next += Generic64Next(dcPtr64) * 4
+			next += Generic64Next(dcPtr64) * stride(pointerFormat)
 		case DYLD_CHAINED_PTR_64_KERNEL_CACHE:
 			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr64); err != nil {
 				return err
@@ -205,7 +207,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 			if Generic64Next(dcPtr64) == 0 {
 				chainEnd = true
 			}
-			next += Generic64Next(dcPtr64) * 4
+			next += Generic64Next(dcPtr64) * stride(pointerFormat)
 		case DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE: // stride 1, x86_64 kernel caches
 			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr64); err != nil {
 				return err
@@ -217,7 +219,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 			if Generic64Next(dcPtr64) == 0 {
 				chainEnd = true
 			}
-			next += Generic64Next(dcPtr64)
+			next += Generic64Next(dcPtr64) * stride(pointerFormat)
 		case DYLD_CHAINED_PTR_ARM64E_KERNEL: // stride 4, unauth target is vm offset
 			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr64); err != nil {
 				return err
@@ -244,7 +246,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 			if DcpArm64eNext(dcPtr64) == 0 {
 				chainEnd = true
 			}
-			next += DcpArm64eNext(dcPtr64) * 4
+			next += DcpArm64eNext(dcPtr64) * stride(pointerFormat)
 		case DYLD_CHAINED_PTR_ARM64E_FIRMWARE: // stride 4, unauth target is vmaddr
 			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr64); err != nil {
 				return err
@@ -271,7 +273,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 			if DcpArm64eNext(dcPtr64) == 0 {
 				chainEnd = true
 			}
-			next += DcpArm64eNext(dcPtr64) * 4
+			next += DcpArm64eNext(dcPtr64) * stride(pointerFormat)
 		case DYLD_CHAINED_PTR_ARM64E: // stride 8, unauth target is vmaddr
 			fallthrough
 		case DYLD_CHAINED_PTR_ARM64E_USERLAND: // stride 8, unauth target is vm offset
@@ -300,7 +302,7 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 			if DcpArm64eNext(dcPtr64) == 0 {
 				chainEnd = true
 			}
-			next += DcpArm64eNext(dcPtr64) * 8
+			next += DcpArm64eNext(dcPtr64) * stride(pointerFormat)
 		case DYLD_CHAINED_PTR_ARM64E_USERLAND24: // stride 8, unauth target is vm offset, 24-bit bind
 			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr64); err != nil {
 				return err
@@ -319,9 +321,9 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 			if DcpArm64eNext(dcPtr64) == 0 {
 				chainEnd = true
 			}
-			next += DcpArm64eNext(dcPtr64) * 8
+			next += DcpArm64eNext(dcPtr64) * stride(pointerFormat)
 		default:
-			return fmt.Errorf("unknown pointer format 0x%04X", dcf.Starts[segIdx].DyldChainedStartsInSegment.PointerFormat)
+			return fmt.Errorf("unknown pointer format %#04X", dcf.Starts[segIdx].DyldChainedStartsInSegment.PointerFormat)
 		}
 	}
 
