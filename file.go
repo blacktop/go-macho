@@ -654,13 +654,23 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 		}
 		defer newFile.Close()
 
+		fi, err := newFile.Stat()
+		if err != nil {
+			return fmt.Errorf("failed to stat file %s: %v", path, err)
+		}
+		fileSize := fi.Size()
+
 		for _, start := range dcf.Starts {
 			if start.PageStarts != nil {
 				for _, fixup := range start.Fixups {
 					off, err := segMap.Remap(fixup.Offset())
 					if err != nil {
-						continue
+						off = fixup.Offset()
 						// return fmt.Errorf("failed to remap fixup at offset %#x: %v", off, err)
+					}
+
+					if off == 0 || off > uint64(fileSize) {
+						continue
 					}
 
 					if _, err := newFile.Seek(int64(off), io.SeekStart); err != nil {
