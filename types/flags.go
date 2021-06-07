@@ -82,6 +82,7 @@ const (
 	EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION   ExportFlag = 0x04
 	EXPORT_SYMBOL_FLAGS_REEXPORT          ExportFlag = 0x08
 	EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER ExportFlag = 0x10
+	EXPORT_SYMBOL_FLAGS_STATIC_RESOLVER   ExportFlag = 0x20
 )
 
 func (f ExportFlag) Regular() bool {
@@ -102,12 +103,18 @@ func (f ExportFlag) ReExport() bool {
 func (f ExportFlag) StubAndResolver() bool {
 	return f == EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER
 }
+func (f ExportFlag) StaticResolver() bool {
+	return f == EXPORT_SYMBOL_FLAGS_STATIC_RESOLVER
+}
+
 func (f ExportFlag) String() string {
 	var fStr string
 	if f.Regular() {
 		fStr += "Regular"
 		if f.StubAndResolver() {
 			fStr += " (Has Resolver Function)"
+		} else if f.StaticResolver() {
+			fStr += " (Has Static Resolver)"
 		} else if f.WeakDefinition() {
 			fStr += " (Weak Definition)"
 		}
