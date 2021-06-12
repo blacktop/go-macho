@@ -47,7 +47,7 @@ type UUID [16]byte
 
 // IsNull returns true if UUID is 00000000-0000-0000-0000-000000000000
 func (u UUID) IsNull() bool {
-	return u != [16]byte{0}
+	return u == [16]byte{0}
 }
 
 func (u UUID) String() string {
