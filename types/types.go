@@ -45,6 +45,11 @@ func (v VmProtection) String() string {
 // UUID is a macho uuid object
 type UUID [16]byte
 
+// IsNull returns true if UUID is 00000000-0000-0000-0000-000000000000
+func (u UUID) IsNull() bool {
+	return u != [16]byte{0}
+}
+
 func (u UUID) String() string {
 	return fmt.Sprintf("%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X",
 		u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7], u[8], u[9], u[10], u[11], u[12], u[13], u[14], u[15])
