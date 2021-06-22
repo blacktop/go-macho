@@ -744,7 +744,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 	// Magic32 and Magic64 differ only in the bottom bit.
 	var ident [4]byte
 	if _, err := r.ReadAt(ident[0:], 0); err != nil {
-		return nil, fmt.Errorf("failed to magic: %v", err)
+		return nil, fmt.Errorf("failed to parse magic: %v", err)
 	}
 	be := binary.BigEndian.Uint32(ident[0:])
 	le := binary.LittleEndian.Uint32(ident[0:])
@@ -761,7 +761,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 
 	// Read entire file header.
 	if err := binary.Read(f.sr, f.ByteOrder, &f.FileHeader); err != nil {
-		return nil, fmt.Errorf("failed to header: %v", err)
+		return nil, fmt.Errorf("failed to parse header: %v", err)
 	}
 
 	// Then load commands.
@@ -771,7 +771,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 	}
 	dat := make([]byte, f.SizeCommands)
 	if _, err := r.ReadAt(dat, offset); err != nil {
-		return nil, fmt.Errorf("failed to command dat: %v", err)
+		return nil, fmt.Errorf("failed to parse command dat: %v", err)
 	}
 	f.Loads = make([]Load, f.NCommands)
 	bo := f.ByteOrder
@@ -892,6 +892,19 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, fmt.Errorf("failed to read LC_SYMTAB: %v", err)
 			}
+
+			// FIXME: do we really need this?
+			off, err := f.fixLinkEditOffset(uint64(hdr.Symoff))
+			if err != nil {
+				return nil, err
+			}
+			hdr.Symoff = uint32(off)
+			off, err = f.fixLinkEditOffset(uint64(hdr.Stroff))
+			if err != nil {
+				return nil, err
+			}
+			hdr.Stroff = uint32(off)
+
 			strtab := make([]byte, hdr.Strsize)
 			if _, err := f.sr.ReadAt(strtab, int64(hdr.Stroff)); err != nil {
 				return nil, fmt.Errorf("failed to read data at Stroff=%#x; %v", int64(hdr.Stroff), err)
@@ -1144,6 +1157,14 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, fmt.Errorf("failed to read LC_CODE_SIGNATURE: %v", err)
 			}
+
+			// FIXME: do we really need this?
+			off, err := f.fixLinkEditOffset(uint64(hdr.Offset))
+			if err != nil {
+				return nil, err
+			}
+			hdr.Offset = uint32(off)
+
 			l := new(CodeSignature)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
@@ -1166,6 +1187,14 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO: %v", err)
 			}
+
+			// FIXME: do we really need this?
+			off, err := f.fixLinkEditOffset(uint64(hdr.Offset))
+			if err != nil {
+				return nil, err
+			}
+			hdr.Offset = uint32(off)
+
 			l := new(SplitInfo)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
@@ -1238,6 +1267,14 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &ei); err != nil {
 				return nil, fmt.Errorf("failed to read LC_ENCRYPTION_INFO: %v", err)
 			}
+
+			// FIXME: do we really need this?
+			off, err := f.fixLinkEditOffset(uint64(ei.Offset))
+			if err != nil {
+				return nil, err
+			}
+			ei.Offset = uint32(off)
+
 			l := new(EncryptionInfo)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
@@ -1319,6 +1356,14 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &led); err != nil {
 				return nil, fmt.Errorf("failed to read LC_FUNCTION_STARTS: %v", err)
 			}
+
+			// FIXME: do we really need this?
+			off, err := f.fixLinkEditOffset(uint64(led.Offset))
+			if err != nil {
+				return nil, err
+			}
+			led.Offset = uint32(off)
+
 			l := new(FunctionStarts)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
@@ -1360,6 +1405,14 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &led); err != nil {
 				return nil, fmt.Errorf("failed to read LC_DATA_IN_CODE: %v", err)
 			}
+
+			// FIXME: do we really need this?
+			off, err := f.fixLinkEditOffset(uint64(led.Offset))
+			if err != nil {
+				return nil, err
+			}
+			led.Offset = uint32(off)
+
 			l := new(DataInCode)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
@@ -1387,6 +1440,14 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &led); err != nil {
 				return nil, fmt.Errorf("failed to read LC_DYLIB_CODE_SIGN_DRS: %v", err)
 			}
+
+			// FIXME: do we really need this?
+			off, err := f.fixLinkEditOffset(uint64(led.Offset))
+			if err != nil {
+				return nil, err
+			}
+			led.Offset = uint32(off)
+
 			l := new(DylibCodeSignDrs)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
@@ -1415,6 +1476,14 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &led); err != nil {
 				return nil, fmt.Errorf("failed to read LC_LINKER_OPTIMIZATION_HINT: %v", err)
 			}
+
+			// FIXME: do we really need this?
+			off, err := f.fixLinkEditOffset(uint64(led.Offset))
+			if err != nil {
+				return nil, err
+			}
+			led.Offset = uint32(off)
+
 			l := new(LinkerOptimizationHint)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
@@ -1479,6 +1548,14 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &led); err != nil {
 				return nil, fmt.Errorf("failed to read LC_DYLD_EXPORTS_TRIE: %v", err)
 			}
+
+			// FIXME: do we really need this?
+			off, err := f.fixLinkEditOffset(uint64(led.Offset))
+			if err != nil {
+				return nil, err
+			}
+			led.Offset = uint32(off)
+
 			l := new(DyldExportsTrie)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
@@ -1492,6 +1569,14 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &led); err != nil {
 				return nil, fmt.Errorf("failed to read LC_DYLD_CHAINED_FIXUPS: %v", err)
 			}
+
+			// FIXME: do we really need this?
+			off, err := f.fixLinkEditOffset(uint64(led.Offset))
+			if err != nil {
+				return nil, err
+			}
+			led.Offset = uint32(off)
+
 			l := new(DyldChainedFixups)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
@@ -1668,6 +1753,15 @@ func (f *File) readLeUint64(offset int64) (uint64, error) {
 		return 0, err
 	}
 	return binary.LittleEndian.Uint64(u64), nil
+}
+
+// fixLinkEditOffset corrects to "bad?" offsets of dylibs in iOS15+ dyld_shared_caches
+func (f *File) fixLinkEditOffset(offset uint64) (uint64, error) {
+	addr, err := f.GetVMAddress(offset)
+	if err != nil {
+		return 0, fmt.Errorf("failed to fix linkedit offset: %v", err)
+	}
+	return f.vma.VMAddr2Offet(addr)
 }
 
 // ReadAt reads data at offset within MachO
