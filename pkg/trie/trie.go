@@ -121,7 +121,7 @@ func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {
 
 		r.Seek(int64(tNode.Offset), io.SeekStart)
 
-		terminalSize, err := readUleb128(r)
+		terminalSize, err := ReadUleb128(r)
 		if err != nil {
 			return nil, err
 		}
@@ -156,7 +156,7 @@ func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {
 				}
 			}
 
-			symValueInt, err = readUleb128(r)
+			symValueInt, err = ReadUleb128(r)
 			if err != nil {
 				return nil, err
 			}
