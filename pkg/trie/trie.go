@@ -4,9 +4,43 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"path/filepath"
 
 	"github.com/blacktop/go-macho/types"
 )
+
+type TrieEntry struct {
+	Name         string
+	ReExport     string
+	Flags        types.ExportFlag
+	Other        uint64
+	Address      uint64
+	FoundInDylib string
+}
+
+type trieEntrys struct {
+	Entries           []TrieEntry
+	edgeStrings       [][]byte
+	cummulativeString []byte
+
+	r *bytes.Reader
+}
+
+type trieNode struct {
+	Offset   uint64
+	SymBytes []byte
+}
+
+func (e TrieEntry) String() string {
+	if e.Flags.ReExport() {
+		return fmt.Sprintf("%#016x: %s (%s)\tre-exported from %s", e.Address, e.Name, e.ReExport, filepath.Base(e.FoundInDylib))
+	} else if e.Flags.StubAndResolver() {
+		return fmt.Sprintf("%#016x %s\t(stub to %#8x)", e.Address, e.Name, e.Other)
+	} else if len(e.FoundInDylib) > 0 {
+		return fmt.Sprintf("%#016x: %s, %s", e.Address, e.Name, e.FoundInDylib)
+	}
+	return fmt.Sprintf("%#016x: %s", e.Address, e.Name)
+}
 
 func ReadUleb128(r *bytes.Reader) (uint64, error) {
 	var result uint64
@@ -66,51 +100,28 @@ func ReadUleb128FromBuffer(buf *bytes.Buffer) (uint64, int, error) {
 	return result, length, nil
 }
 
-type TrieEntry struct {
-	Name         string
-	Flags        types.ExportFlag
-	Other        uint64
-	Address      uint64
-	FoundInDylib string
-}
-
-type trieEntrys struct {
-	Entries           []TrieEntry
-	edgeStrings       [][]byte
-	cummulativeString []byte
-	r                 *bytes.Reader
-}
-
-type trieNode struct {
-	Offset   uint64
-	SymBytes []byte
-}
-
-func (e TrieEntry) String() string {
-	if len(e.FoundInDylib) > 0 {
-		return fmt.Sprintf("0x%8x: %s, %s", e.Address, e.Name, e.FoundInDylib)
-	}
-	return fmt.Sprintf("0x%8x: %s", e.Address, e.Name)
-}
-
 func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {
 
 	var tNode trieNode
 	var entries []TrieEntry
 
-	nodes := []trieNode{trieNode{
+	nodes := []trieNode{{
 		Offset:   0,
 		SymBytes: make([]byte, 0),
 	}}
 
 	r := bytes.NewReader(trieData)
 
+	tmp := make([]byte, 0, 0x20000)
+
 	for len(nodes) > 0 {
 		tNode, nodes = nodes[len(nodes)-1], nodes[:len(nodes)-1]
 
+		tmp = tmp[:len(tNode.SymBytes)]
+
 		r.Seek(int64(tNode.Offset), io.SeekStart)
 
-		terminalSize, err := ReadUleb128(r)
+		terminalSize, err := readUleb128(r)
 		if err != nil {
 			return nil, err
 		}
@@ -119,6 +130,7 @@ func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {
 			var symFlagInt, symValueInt, symOtherInt uint64
 			var reExportSymBytes []byte
 			var symName string
+			var reExportSymName string
 
 			symFlagInt, err := ReadUleb128(r)
 			if err != nil {
@@ -144,7 +156,7 @@ func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {
 				}
 			}
 
-			symValueInt, err = ReadUleb128(r)
+			symValueInt, err = readUleb128(r)
 			if err != nil {
 				return nil, err
 			}
@@ -154,8 +166,7 @@ func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {
 				if err != nil {
 					return nil, err
 				}
-				// TODO: handle stubs
-				// log.Debugf("StubAndResolver: %d", symOtherInt)
+				symOtherInt += loadAddress
 			}
 
 			if flags.Regular() || flags.ThreadLocal() {
@@ -163,20 +174,23 @@ func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {
 			}
 
 			if len(reExportSymBytes) > 0 {
-				symName = fmt.Sprintf("%s (%s)", string(tNode.SymBytes), string(reExportSymBytes))
+				symName = string(tNode.SymBytes)
+				reExportSymName = string(reExportSymBytes)
 			} else {
-				symName = fmt.Sprintf("%s", string(tNode.SymBytes))
+				symName = string(tNode.SymBytes)
 			}
 
 			entries = append(entries, TrieEntry{
-				Name:    symName,
-				Flags:   flags,
-				Other:   symOtherInt,
-				Address: symValueInt,
+				Name:     symName,
+				ReExport: reExportSymName,
+				Flags:    flags,
+				Other:    symOtherInt,
+				Address:  symValueInt,
 			})
 		}
 
 		r.Seek(int64(tNode.Offset+terminalSize+1), io.SeekStart)
+
 		childrenRemaining, err := r.ReadByte()
 		if err == io.EOF {
 			break
@@ -184,7 +198,6 @@ func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {
 
 		for i := 0; i < int(childrenRemaining); i++ {
 
-			tmp := make([]byte, len(tNode.SymBytes), 32000)
 			copy(tmp, tNode.SymBytes)
 
 			for {
@@ -206,7 +219,8 @@ func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {
 			// log.WithFields(log.Fields{
 			// 	"name":   string(tmp),
 			// 	"offset": childNodeOffset,
-			// }).Infof("Node")
+			// }).Debug("Node")
+
 			nodes = append(nodes, trieNode{
 				Offset:   childNodeOffset,
 				SymBytes: tmp,
