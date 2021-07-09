@@ -112,12 +112,8 @@ func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {
 
 	r := bytes.NewReader(trieData)
 
-	tmp := make([]byte, 0, 0x20000)
-
 	for len(nodes) > 0 {
 		tNode, nodes = nodes[len(nodes)-1], nodes[:len(nodes)-1]
-
-		tmp = tmp[:len(tNode.SymBytes)]
 
 		r.Seek(int64(tNode.Offset), io.SeekStart)
 
@@ -198,6 +194,7 @@ func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {
 
 		for i := 0; i < int(childrenRemaining); i++ {
 
+			tmp := make([]byte, len(tNode.SymBytes), 32768)
 			copy(tmp, tNode.SymBytes)
 
 			for {
