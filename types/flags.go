@@ -112,16 +112,18 @@ func (f ExportFlag) String() string {
 	if f.Regular() {
 		fStr += "Regular"
 		if f.StubAndResolver() {
-			fStr += " (Has Resolver Function)"
+			fStr += "|Has Resolver Function"
 		} else if f.StaticResolver() {
-			fStr += " (Has Static Resolver)"
+			fStr += "|Has Static Resolver"
 		} else if f.WeakDefinition() {
-			fStr += " (Weak Definition)"
+			fStr += "|Weak Definition"
 		}
 	} else if f.ThreadLocal() {
 		fStr += "Thread Local"
 	} else if f.Absolute() {
 		fStr += "Absolute"
+	} else if f.ReExport() {
+		fStr += "ReExport"
 	}
 	return strings.TrimSpace(fStr)
 }

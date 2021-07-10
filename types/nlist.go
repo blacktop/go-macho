@@ -165,6 +165,14 @@ func (d NDescType) IsPrivateUndefinedNonLazy() bool {
 func (d NDescType) IsPrivateUndefinedLazy() bool {
 	return (d & REFERENCE_TYPE) == REFERENCE_FLAG_PRIVATE_UNDEFINED_LAZY
 }
+
+const (
+	SELF_LIBRARY_ORDINAL   NDescType = 0x0
+	MAX_LIBRARY_ORDINAL    NDescType = 0xfd
+	DYNAMIC_LOOKUP_ORDINAL NDescType = 0xfe
+	EXECUTABLE_ORDINAL     NDescType = 0xff
+)
+
 func (d NDescType) GetLibraryOrdinal() NDescType {
 	return (d >> 8) & 0xff
 }
@@ -192,13 +200,6 @@ func (t NDescType) String() string {
 	// tStr += fmt.Sprintf("libord=%d", t.GetLibraryOrdinal())
 	return strings.TrimSuffix(tStr, "|")
 }
-
-const (
-	SELF_LIBRARY_ORDINAL   NDescType = 0x0
-	MAX_LIBRARY_ORDINAL    NDescType = 0xfd
-	DYNAMIC_LOOKUP_ORDINAL NDescType = 0xfe
-	EXECUTABLE_ORDINAL     NDescType = 0xff
-)
 
 // TODO: add these flags to the NDescType String output
 

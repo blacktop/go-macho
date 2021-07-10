@@ -33,7 +33,7 @@ type trieNode struct {
 
 func (e TrieEntry) String() string {
 	if e.Flags.ReExport() {
-		return fmt.Sprintf("%#016x: %s (%s)\tre-exported from %s", e.Address, e.Name, e.ReExport, filepath.Base(e.FoundInDylib))
+		return fmt.Sprintf("%#016x: %s (%s re-exported from %s)", e.Address, e.Name, e.ReExport, filepath.Base(e.FoundInDylib))
 	} else if e.Flags.StubAndResolver() {
 		return fmt.Sprintf("%#016x %s\t(stub to %#8x)", e.Address, e.Name, e.Other)
 	} else if len(e.FoundInDylib) > 0 {
@@ -140,6 +140,7 @@ func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {
 				if err != nil {
 					return nil, err
 				}
+
 				for {
 					s, err := r.ReadByte()
 					if err == io.EOF {
@@ -150,14 +151,8 @@ func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {
 					}
 					reExportSymBytes = append(reExportSymBytes, s)
 				}
-			}
 
-			symValueInt, err = ReadUleb128(r)
-			if err != nil {
-				return nil, err
-			}
-
-			if flags.StubAndResolver() {
+			} else if flags.StubAndResolver() {
 				symOtherInt, err = ReadUleb128(r)
 				if err != nil {
 					return nil, err
@@ -165,7 +160,12 @@ func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {
 				symOtherInt += loadAddress
 			}
 
-			if flags.Regular() || flags.ThreadLocal() {
+			symValueInt, err = ReadUleb128(r)
+			if err != nil {
+				return nil, err
+			}
+
+			if (flags.Regular() || flags.ThreadLocal()) && !flags.ReExport() {
 				symValueInt += loadAddress
 			}
 
