@@ -2137,13 +2137,16 @@ func (f *File) DyldExportsTrie() *DyldExportsTrie {
 func (f *File) DyldExports() ([]trie.TrieEntry, error) {
 
 	if dxt := f.DyldExportsTrie(); dxt != nil {
+		if dxt.Size == 0 {
+			return []trie.TrieEntry{}, nil
+		}
 		data := make([]byte, dxt.Size)
 		if _, err := f.sr.ReadAt(data, int64(dxt.Offset)); err != nil {
-			return nil, fmt.Errorf("failed to read DyldExportsTrie data at offset=%#x; %v", int64(dxt.Offset), err)
+			return nil, fmt.Errorf("failed to read %s data at offset=%#x; %v", types.LC_DYLD_EXPORTS_TRIE, int64(dxt.Offset), err)
 		}
 		exports, err := trie.ParseTrie(data, f.GetBaseAddress())
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse DyldExportsTrie: %v", err)
+			return nil, fmt.Errorf("failed to parse %s: %v", types.LC_DYLD_EXPORTS_TRIE, err)
 		}
 		return exports, nil
 	}
@@ -2320,6 +2323,9 @@ func (f *File) ImportedLibraries() []string {
 			all = append(all, lib.Name)
 		}
 		if lib, ok := l.(*ReExportDylib); ok {
+			all = append(all, lib.Name)
+		}
+		if lib, ok := l.(*UpwardDylib); ok {
 			all = append(all, lib.Name)
 		}
 	}
