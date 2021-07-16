@@ -194,6 +194,10 @@ func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {
 
 		for i := 0; i < int(childrenRemaining); i++ {
 
+			if len(tNode.SymBytes) > 32768 {
+				return nil, fmt.Errorf("possible malformed export trie: len(tNode.SymBytes)=%d > 32768", len(tNode.SymBytes))
+			}
+
 			tmp := make([]byte, len(tNode.SymBytes), 32768)
 			copy(tmp, tNode.SymBytes)
 
