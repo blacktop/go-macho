@@ -893,18 +893,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_SYMTAB: %v", err)
 			}
 
-			// FIXME: do we really need this?
-			off, err := f.fixLinkEditOffset(uint64(hdr.Symoff))
-			if err != nil {
-				return nil, err
-			}
-			hdr.Symoff = uint32(off)
-			off, err = f.fixLinkEditOffset(uint64(hdr.Stroff))
-			if err != nil {
-				return nil, err
-			}
-			hdr.Stroff = uint32(off)
-
 			strtab := make([]byte, hdr.Strsize)
 			if _, err := f.sr.ReadAt(strtab, int64(hdr.Stroff)); err != nil {
 				return nil, fmt.Errorf("failed to read data at Stroff=%#x; %v", int64(hdr.Stroff), err)
@@ -930,8 +918,36 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			st.Len = siz
 			f.Loads[i] = st
 			f.Symtab = st
-		// TODO: case types.LC_SYMSEG:
-		// TODO: case types.LcThread:
+		case types.LC_SYMSEG:
+			var led types.LinkEditDataCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &led); err != nil {
+				return nil, fmt.Errorf("failed to read LC_SYMSEG: %v", err)
+			}
+
+			l := new(SymSeg)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			l.Offset = led.Offset
+			l.Size = led.Size
+			f.Loads[i] = l
+		case types.LC_THREAD:
+			var t types.Thread
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &t); err != nil {
+				return nil, fmt.Errorf("failed to read LC_THREAD: %v", err)
+			}
+			l := new(Thread)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			l.Type = t.Type
+			l.Data = make([]uint32, t.Len-3*uint32(binary.Size(uint32(0)))/uint32(binary.Size(uint32(0))))
+			if err := binary.Read(b, bo, &l.Data); err != nil {
+				return nil, fmt.Errorf("failed to read Thread data: %v", err)
+			}
+			f.Loads[i] = l
 		case types.LC_UNIXTHREAD:
 			var ut types.UnixThreadCmd
 			b := bytes.NewReader(cmddat)
@@ -952,11 +968,76 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				l.EntryPoint = regs[len(regs)-2]
 			}
 			f.Loads[i] = l
-		// TODO: case types.LcLoadfvmlib:
-		// TODO: case types.LcIdfvmlib:
-		// TODO: case types.LcIdent:
-		// TODO: case types.LcFvmfile:
-		// TODO: case types.LcPrepage:
+		case types.LC_LOADFVMLIB:
+			var hdr types.LoadFvmLibCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &hdr); err != nil {
+				return nil, fmt.Errorf("failed to read LC_LOADFVMLIB: %v", err)
+			}
+			l := new(LoadFvmlib)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			if hdr.Name >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in LC_LOADFVMLIB command", hdr.Name}
+			}
+			l.MinorVersion = types.Version(hdr.MinorVersion)
+			l.HeaderAddr = hdr.HeaderAddr
+			f.Loads[i] = l
+		case types.LC_IDFVMLIB:
+			var hdr types.IDFvmLibCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &hdr); err != nil {
+				return nil, fmt.Errorf("failed to read LC_IDFVMLIB: %v", err)
+			}
+			l := new(IDFvmlib)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			if hdr.Name >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in LC_IDFVMLIB command", hdr.Name}
+			}
+			l.MinorVersion = types.Version(hdr.MinorVersion)
+			l.HeaderAddr = hdr.HeaderAddr
+			f.Loads[i] = l
+		case types.LC_IDENT:
+			var hdr types.IdentCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &hdr); err != nil {
+				return nil, fmt.Errorf("failed to read LC_IDENT: %v", err)
+			}
+			l := new(Ident)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			l.Length = hdr.Len
+			f.Loads[i] = l
+		case types.LC_FVMFILE:
+			var hdr types.FvmFileCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &hdr); err != nil {
+				return nil, fmt.Errorf("failed to read LC_FVMFILE: %v", err)
+			}
+			l := new(FvmFile)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			if hdr.Name >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in LC_FVMFILE command", hdr.Name}
+			}
+			l.HeaderAddr = hdr.HeaderAddr
+			f.Loads[i] = l
+		case types.LC_PREPAGE:
+			var hdr types.PrePageCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &hdr); err != nil {
+				return nil, fmt.Errorf("failed to read LC_PREPAGE: %v", err)
+			}
+			l := new(Prepage)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			f.Loads[i] = l
 		case types.LC_DYSYMTAB:
 			var hdr types.DysymtabCmd
 			b := bytes.NewReader(cmddat)
@@ -1045,7 +1126,26 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			}
 			l.Name = cstring(cmddat[hdr.Name:])
 			f.Loads[i] = l
-		// TODO: case types.LcPreboundDylib:
+		case types.LC_PREBOUND_DYLIB:
+			var hdr types.PreboundDylibCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &hdr); err != nil {
+				return nil, fmt.Errorf("failed to read LC_PREBOUND_DYLIB: %v", err)
+			}
+			l := new(PreboundDylib)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			if hdr.Name >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in LC_PREBOUND_DYLIB command", hdr.Name}
+			}
+			l.NumModules = hdr.NumModules
+			l.Name = cstring(cmddat[hdr.Name:])
+			if hdr.LinkedModules >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid linked modules in LC_PREBOUND_DYLIB command", hdr.Name}
+			}
+			l.LinkedModules = cstring(cmddat[hdr.LinkedModules:])
+			f.Loads[i] = l
 		case types.LC_ROUTINES:
 			var rt types.RoutinesCmd
 			b := bytes.NewReader(cmddat)
@@ -1070,11 +1170,25 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadCmd = cmd
 			l.Len = siz
 			if sf.Framework >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid framework in subframework command", sf.Framework}
+				return nil, &FormatError{offset, "invalid framework in sub-framework command", sf.Framework}
 			}
 			l.Framework = cstring(cmddat[sf.Framework:])
 			f.Loads[i] = l
-		// TODO: case types.LcSubUmbrella:
+		case types.LC_SUB_UMBRELLA:
+			var su types.SubUmbrellaCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &su); err != nil {
+				return nil, fmt.Errorf("failed to read LC_SUB_UMBRELLA: %v", err)
+			}
+			l := new(SubUmbrella)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			if su.Umbrella >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid framework in sub-umbrella command", su.Umbrella}
+			}
+			l.Umbrella = cstring(cmddat[su.Umbrella:])
+			f.Loads[i] = l
 		case types.LC_SUB_CLIENT:
 			var sc types.SubClientCmd
 			b := bytes.NewReader(cmddat)
@@ -1090,9 +1204,50 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			}
 			l.Name = cstring(cmddat[sc.Client:])
 			f.Loads[i] = l
-		// TODO: case types.LcSubLibrary:
-		// TODO: case types.LcTwolevelHints:
-		// TODO: case types.LcPrebindCksum:
+		case types.LC_SUB_LIBRARY:
+			var s types.SubLibraryCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &s); err != nil {
+				return nil, fmt.Errorf("failed to read LC_SUB_LIBRARY: %v", err)
+			}
+			l := new(SubLibrary)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			if s.Library >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid framework in sub-library command", s.Library}
+			}
+			l.Library = cstring(cmddat[s.Library:])
+			f.Loads[i] = l
+		case types.LC_TWOLEVEL_HINTS:
+			var t types.TwolevelHintsCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &t); err != nil {
+				return nil, fmt.Errorf("failed to read LC_TWOLEVEL_HINTS: %v", err)
+			}
+			l := new(TwolevelHints)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			l.Offset = t.Offset
+			l.Hints = make([]types.TwolevelHint, t.NumHints)
+			if err := binary.Read(b, bo, &l.Hints); err != nil {
+				return nil, fmt.Errorf("failed to read hints data: %v", err)
+			}
+			f.Loads[i] = l
+
+		case types.LC_PREBIND_CKSUM:
+			var p types.PrebindCksumCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &p); err != nil {
+				return nil, fmt.Errorf("failed to read LC_PREBIND_CKSUM: %v", err)
+			}
+			l := new(PrebindCksum)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			l.CheckSum = p.CheckSum
+			f.Loads[i] = l
 		case types.LC_LOAD_WEAK_DYLIB:
 			var hdr types.DylibCmd
 			b := bytes.NewReader(cmddat)
@@ -1158,13 +1313,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_CODE_SIGNATURE: %v", err)
 			}
 
-			// FIXME: do we really need this?
-			off, err := f.fixLinkEditOffset(uint64(hdr.Offset))
-			if err != nil {
-				return nil, err
-			}
-			hdr.Offset = uint32(off)
-
 			l := new(CodeSignature)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
@@ -1187,13 +1335,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO: %v", err)
 			}
-
-			// FIXME: do we really need this?
-			off, err := f.fixLinkEditOffset(uint64(hdr.Offset))
-			if err != nil {
-				return nil, err
-			}
-			hdr.Offset = uint32(off)
 
 			l := new(SplitInfo)
 			l.LoadBytes = cmddat
@@ -1267,13 +1408,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &ei); err != nil {
 				return nil, fmt.Errorf("failed to read LC_ENCRYPTION_INFO: %v", err)
 			}
-
-			// FIXME: do we really need this?
-			off, err := f.fixLinkEditOffset(uint64(ei.Offset))
-			if err != nil {
-				return nil, err
-			}
-			ei.Offset = uint32(off)
 
 			l := new(EncryptionInfo)
 			l.LoadBytes = cmddat
@@ -1357,13 +1491,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_FUNCTION_STARTS: %v", err)
 			}
 
-			// FIXME: do we really need this?
-			off, err := f.fixLinkEditOffset(uint64(led.Offset))
-			if err != nil {
-				return nil, err
-			}
-			led.Offset = uint32(off)
-
 			l := new(FunctionStarts)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
@@ -1406,13 +1533,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_DATA_IN_CODE: %v", err)
 			}
 
-			// FIXME: do we really need this?
-			off, err := f.fixLinkEditOffset(uint64(led.Offset))
-			if err != nil {
-				return nil, err
-			}
-			led.Offset = uint32(off)
-
 			l := new(DataInCode)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
@@ -1441,13 +1561,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_DYLIB_CODE_SIGN_DRS: %v", err)
 			}
 
-			// FIXME: do we really need this?
-			off, err := f.fixLinkEditOffset(uint64(led.Offset))
-			if err != nil {
-				return nil, err
-			}
-			led.Offset = uint32(off)
-
 			l := new(DylibCodeSignDrs)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
@@ -1469,20 +1582,30 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Size = ei.Size
 			l.CryptID = ei.CryptID
 			f.Loads[i] = l
-		// TODO: case types.LcLinkerOption:
+		case types.LC_LINKER_OPTION:
+			var lo types.LinkerOptionCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &lo); err != nil {
+				return nil, fmt.Errorf("failed to read LC_LINKER_OPTION: %v", err)
+			}
+			l := new(LinkerOption)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			for i := 0; i < int(lo.Count); i++ {
+				o, err := bufio.NewReader(b).ReadString('\x00')
+				if err != nil {
+					break // FIXME: should this error?
+				}
+				l.Options = append(l.Options, o)
+			}
+			f.Loads[i] = l
 		case types.LC_LINKER_OPTIMIZATION_HINT:
 			var led types.LinkEditDataCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &led); err != nil {
 				return nil, fmt.Errorf("failed to read LC_LINKER_OPTIMIZATION_HINT: %v", err)
 			}
-
-			// FIXME: do we really need this?
-			off, err := f.fixLinkEditOffset(uint64(led.Offset))
-			if err != nil {
-				return nil, err
-			}
-			led.Offset = uint32(off)
 
 			l := new(LinkerOptimizationHint)
 			l.LoadBytes = cmddat
@@ -1517,7 +1640,20 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Version = verMin.Version.String()
 			l.Sdk = verMin.Sdk.String()
 			f.Loads[i] = l
-		// TODO: case types.LcNote:
+		case types.LC_NOTE:
+			var n types.NoteCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &n); err != nil {
+				return nil, fmt.Errorf("failed to read LC_NOTE: %v", err)
+			}
+			l := new(Note)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			l.DataOwner = string(n.DataOwner[:])
+			l.Offset = n.Offset
+			l.Size = n.Size
+			f.Loads[i] = l
 		case types.LC_BUILD_VERSION:
 			var build types.BuildVersionCmd
 			var buildTool types.BuildToolVersion
@@ -1549,13 +1685,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_DYLD_EXPORTS_TRIE: %v", err)
 			}
 
-			// FIXME: do we really need this?
-			off, err := f.fixLinkEditOffset(uint64(led.Offset))
-			if err != nil {
-				return nil, err
-			}
-			led.Offset = uint32(off)
-
 			l := new(DyldExportsTrie)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
@@ -1569,13 +1698,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &led); err != nil {
 				return nil, fmt.Errorf("failed to read LC_DYLD_CHAINED_FIXUPS: %v", err)
 			}
-
-			// FIXME: do we really need this?
-			off, err := f.fixLinkEditOffset(uint64(led.Offset))
-			if err != nil {
-				return nil, err
-			}
-			led.Offset = uint32(off)
 
 			l := new(DyldChainedFixups)
 			l.LoadBytes = cmddat

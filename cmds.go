@@ -533,16 +533,36 @@ func (s Symbol) String(m *File) string {
 }
 
 /*******************************************************************************
- * LC_SYMSEG
+ * LC_SYMSEG - link-edit gdb symbol table info (obsolete)
  *******************************************************************************/
 
-// TODO: LC_SYMSEG	0x3	/* link-edit gdb symbol table info (obsolete) */
+// A SymSeg represents a Mach-O LC_SYMSEG command.
+type SymSeg struct {
+	LoadBytes
+	types.SymsegCommand
+	Offset uint32
+	Size   uint32
+}
+
+func (s *SymSeg) String() string {
+	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d", s.Offset, s.Offset+s.Size, s.Size)
+}
 
 /*******************************************************************************
  * LC_THREAD
  *******************************************************************************/
 
-// TODO: LC_THREAD	0x4	/* thread */
+// A Thread represents a Mach-O LC_THREAD command.
+type Thread struct {
+	LoadBytes
+	types.Thread
+	Type uint32
+	Data []uint32
+}
+
+func (t *Thread) String() string {
+	return fmt.Sprintf("Type: %d", t.Type)
+}
 
 /*******************************************************************************
  * LC_UNIXTHREAD
@@ -559,11 +579,80 @@ func (u *UnixThread) String() string {
 	return fmt.Sprintf("Entry Point: 0x%016x", u.EntryPoint)
 }
 
-// TODO: LC_LOADFVMLIB	0x6	/* load a specified fixed VM shared library */
-// TODO: LC_IDFVMLIB	0x7	/* fixed VM shared library identification */
-// TODO: LC_IDENT	    0x8	/* object identification info (obsolete) */
-// TODO: LC_FVMFILE	    0x9	/* fixed VM file inclusion (internal use) */
-// TODO: LC_PREPAGE     0xa /* prepage command (internal use) */
+/*******************************************************************************
+ * LC_LOADFVMLIB - load a specified fixed VM shared library
+ *******************************************************************************/
+
+// A LoadFvmlib represents a Mach-O LC_LOADFVMLIB command.
+type LoadFvmlib struct {
+	LoadBytes
+	types.LoadFvmLibCmd
+	Name          string
+	MinorVersion  types.Version
+	HeaderAddress uint32
+}
+
+func (l *LoadFvmlib) String() string {
+	return fmt.Sprintf("%s (%s), Header Addr: %#08x", l.Name, l.MinorVersion, l.HeaderAddr)
+}
+
+/*******************************************************************************
+ * LC_IDFVMLIB - fixed VM shared library identification
+ *******************************************************************************/
+
+// A IDFvmlib represents a Mach-O LC_IDFVMLIB command.
+type IDFvmlib struct {
+	LoadBytes
+	types.IDFvmLibCmd
+	Name          string
+	MinorVersion  types.Version
+	HeaderAddress uint32
+}
+
+func (l *IDFvmlib) String() string {
+	return fmt.Sprintf("%s (%s), Header Addr: %#08x", l.Name, l.MinorVersion, l.HeaderAddr)
+}
+
+/*******************************************************************************
+ * LC_IDENT - object identification info (obsolete)
+ *******************************************************************************/
+
+// A Ident represents a Mach-O LC_IDENT command.
+type Ident struct {
+	LoadBytes
+	types.IdentCmd
+	Length uint32
+}
+
+func (i *Ident) String() string {
+	return fmt.Sprintf("len=%d", i.Length)
+}
+
+/*******************************************************************************
+ * LC_FVMFILE - fixed VM file inclusion (internal use)
+ *******************************************************************************/
+
+// A FvmFile represents a Mach-O LC_FVMFILE command.
+type FvmFile struct {
+	LoadBytes
+	types.FvmFileCmd
+	Name          string
+	HeaderAddress uint32
+}
+
+func (l *FvmFile) String() string {
+	return fmt.Sprintf("%s, Header Addr: %#08x", l.Name, l.HeaderAddr)
+}
+
+/*******************************************************************************
+ * LC_PREPAGE - prepage command (internal use)
+ *******************************************************************************/
+
+// A Prepage represents a Mach-O LC_PREPAGE command.
+type Prepage struct {
+	LoadBytes
+	types.PrePageCmd
+}
 
 /*******************************************************************************
  * LC_DYSYMTAB
@@ -717,7 +806,22 @@ func (d *DylinkerID) String() string {
 	return d.Name
 }
 
-// TODO: LC_PREBOUND_DYLIB 0x10	/* modules prebound for a dynamically linked shared library */
+/*******************************************************************************
+ * LC_PREBOUND_DYLIB - modules prebound for a dynamically linked shared library
+ *******************************************************************************/
+
+// PreboundDylib represents a Mach-O LC_PREBOUND_DYLIB command.
+type PreboundDylib struct {
+	LoadBytes
+	types.PreboundDylibCmd
+	Name          string
+	NumModules    uint32
+	LinkedModules string
+}
+
+func (d *PreboundDylib) String() string {
+	return fmt.Sprintf("%s, NumModules=%d, LinkedModules=%s", d.Name, d.NumModules, d.LinkedModules)
+}
 
 /*******************************************************************************
  * LC_ROUTINES - image routines
@@ -748,7 +852,18 @@ type SubFramework struct {
 
 func (s *SubFramework) String() string { return s.Framework }
 
-// TODO: LC_SUB_UMBRELLA 0x13	/* sub umbrella */
+/*******************************************************************************
+ * LC_SUB_UMBRELLA - sub umbrella
+ *******************************************************************************/
+
+// A SubUmbrella is a Mach-O LC_SUB_UMBRELLA command.
+type SubUmbrella struct {
+	LoadBytes
+	types.SubFrameworkCmd
+	Umbrella string
+}
+
+func (s *SubUmbrella) String() string { return s.Umbrella }
 
 /*******************************************************************************
  * LC_SUB_CLIENT
@@ -765,9 +880,49 @@ func (d *SubClient) String() string {
 	return d.Name
 }
 
-// TODO: LC_SUB_LIBRARY  0x15	/* sub library */
-// TODO: LC_TWOLEVEL_HINTS 0x16	/* two-level namespace lookup hints */
-// TODO: LC_PREBIND_CKSUM  0x17	/* prebind checksum */
+/*******************************************************************************
+ * LC_SUB_LIBRARY - sub library
+ *******************************************************************************/
+
+// A SubLibrary is a Mach-O LC_SUB_LIBRARY command.
+type SubLibrary struct {
+	LoadBytes
+	types.SubFrameworkCmd
+	Library string
+}
+
+func (s *SubLibrary) String() string { return s.Library }
+
+/*******************************************************************************
+ * LC_TWOLEVEL_HINTS - two-level namespace lookup hints
+ *******************************************************************************/
+
+// A TwolevelHints  is a Mach-O LC_TWOLEVEL_HINTS command.
+type TwolevelHints struct {
+	LoadBytes
+	types.TwolevelHintsCmd
+	Offset uint32
+	Hints  []types.TwolevelHint
+}
+
+func (s *TwolevelHints) String() string {
+	return fmt.Sprintf("Offset: %#08x, Num of Hints: %d", s.Offset, len(s.Hints))
+}
+
+/*******************************************************************************
+ * LC_PREBIND_CKSUM - prebind checksum
+ *******************************************************************************/
+
+// A PrebindCksum  is a Mach-O LC_PREBIND_CKSUM command.
+type PrebindCksum struct {
+	LoadBytes
+	types.PrebindCksumCmd
+	CheckSum uint32
+}
+
+func (p *PrebindCksum) String() string {
+	return fmt.Sprintf("CheckSum: %#08x", p.CheckSum)
+}
 
 /*******************************************************************************
  * LC_LOAD_WEAK_DYLIB
@@ -1377,7 +1532,20 @@ func (e *EncryptionInfo64) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	return nil
 }
 
-// TODO: LC_LINKER_OPTION 0x2D /* linker options in MH_OBJECT files */
+/*******************************************************************************
+ * LC_LINKER_OPTION - linker options in MH_OBJECT files
+ *******************************************************************************/
+
+// A LinkerOption represents a Mach-O LC_LINKER_OPTION command.
+type LinkerOption struct {
+	LoadBytes
+	types.LinkerOptionCmd
+	Options []string
+}
+
+func (o *LinkerOption) String() string {
+	return fmt.Sprintf("Options=%s", strings.Join(o.Options, ","))
+}
 
 /*******************************************************************************
  * LC_LINKER_OPTIMIZATION_HINT - linker options in MH_OBJECT files
@@ -1438,7 +1606,22 @@ func (v *VersionMinWatchOS) String() string {
 	return fmt.Sprintf("Version=%s, SDK=%s", v.Version, v.Sdk)
 }
 
-// TODO: LC_NOTE 0x31 /* arbitrary data included within a Mach-O file */
+/*******************************************************************************
+ * LC_NOTE - arbitrary data included within a Mach-O file
+ *******************************************************************************/
+
+// A Note represents a Mach-O LC_NOTE command.
+type Note struct {
+	LoadBytes
+	types.NoteCmd
+	DataOwner string
+	Offset    uint64
+	Size      uint64
+}
+
+func (n *Note) String() string {
+	return fmt.Sprintf("DataOwner=%s, offset=0x%08x-0x%08x size=%5d", n.DataOwner, n.Offset, n.Offset+n.Size, n.Size)
+}
 
 /*******************************************************************************
  * LC_BUILD_VERSION

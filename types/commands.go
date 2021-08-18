@@ -211,7 +211,11 @@ type FvmFileCmd struct {
 }
 
 // A PrePageCmd is a Mach-O prepage command (internal use) command.
-type PrePageCmd interface{} // LC_PREPAGE
+type PrePageCmd struct {
+	LoadCmd // LC_PREPAGE
+	Len     uint32
+}
+
 // A DysymtabCmd is a Mach-O dynamic symbol table command.
 type DysymtabCmd struct {
 	LoadCmd        // LC_DYSYMTAB
@@ -315,6 +319,15 @@ type TwolevelHintsCmd struct {
 	Len      uint32
 	Offset   uint32
 	NumHints uint32
+}
+
+type TwolevelHint uint32
+
+func (t TwolevelHint) SubImageIndex() uint32 {
+	return uint32(t & 0xff)
+}
+func (t TwolevelHint) TableOfContentsIndex() uint32 {
+	return uint32(t >> 8)
 }
 
 // A PrebindCksumCmd is a Mach-O prebind checksum command.
