@@ -1425,6 +1425,10 @@ type DataInCode struct {
 	Entries []types.DataInCodeEntry
 }
 
+func (d *DataInCode) String() string {
+	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d entries=%d", d.Offset, d.Offset+d.Size, d.Size, len(d.Entries))
+}
+
 func (l *DataInCode) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, types.DataInCodeCmd{
 		LoadCmd: l.LoadCmd,
@@ -1435,10 +1439,6 @@ func (l *DataInCode) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 		return fmt.Errorf("failed to write LC_DATA_IN_CODE to buffer: %v", err)
 	}
 	return nil
-}
-
-func (d *DataInCode) String() string {
-	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d entries=%d", d.Offset, d.Offset+d.Size, d.Size, len(d.Entries))
 }
 
 /*******************************************************************************

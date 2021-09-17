@@ -316,7 +316,8 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 				bind.Import = dcf.Imports[bind.Ordinal()].Name
 				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, bind)
 			} else {
-				return fmt.Errorf("unknown DYLD_CHAINED_PTR_ARM64E_USERLAND24 pointer typr 0x%04X", dcPtr64)
+				fmt.Printf("unknown DYLD_CHAINED_PTR_ARM64E_USERLAND24 pointer typr 0x%04x\n", dcPtr64)
+				// return fmt.Errorf("unknown DYLD_CHAINED_PTR_ARM64E_USERLAND24 pointer typr 0x%04x", dcPtr64)
 			}
 			if DcpArm64eNext(dcPtr64) == 0 {
 				chainEnd = true

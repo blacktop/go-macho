@@ -35,9 +35,11 @@ type File struct {
 	Symtab   *Symtab
 	Dysymtab *Dysymtab
 
-	vma    *types.VMAddrConverter
-	dcf    *fixupchains.DyldChainedFixups
-	sr     *io.SectionReader
+	vma *types.VMAddrConverter
+	dcf *fixupchains.DyldChainedFixups
+	sr  *io.SectionReader
+	lr  *io.SectionReader // linkedit_data_command reader (supports iOS15+ dyld_shared_cache linkedit file offsets)
+
 	closer io.Closer
 }
 
@@ -264,11 +266,11 @@ func loadInSlice(c types.LoadCmd, list []types.LoadCmd) bool {
 
 // FileConfig is a MachO file config object
 type FileConfig struct {
-	Offset          int64
-	LoadFilter      []types.LoadCmd
-	VMAddrConverter types.VMAddrConverter
-
-	SrcReader *io.SectionReader
+	Offset             int64
+	LoadFilter         []types.LoadCmd
+	VMAddrConverter    types.VMAddrConverter
+	SectionReader      *io.SectionReader
+	LinkEditDataReader *io.SectionReader
 }
 
 // Open opens the named file using os.Open and prepares it for use as a Mach-O binary.
@@ -725,14 +727,19 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 	f := new(File)
 
 	if config != nil {
-		if config[0].SrcReader != nil {
-			f.sr = config[0].SrcReader
+		if config[0].SectionReader != nil {
+			f.sr = config[0].SectionReader
 			f.sr.Seek(config[0].Offset, io.SeekStart)
+			f.lr = f.sr
+		}
+		if config[0].LinkEditDataReader != nil {
+			f.lr = config[0].LinkEditDataReader
 		}
 		f.vma = &config[0].VMAddrConverter
 		loadsFilter = config[0].LoadFilter
 	} else {
 		f.sr = io.NewSectionReader(r, 0, 1<<63-1)
+		f.lr = f.sr
 		f.vma = &types.VMAddrConverter{
 			Converter:    f.convertToVMAddr,
 			VMAddr2Offet: f.GetOffset,
@@ -894,7 +901,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			}
 
 			strtab := make([]byte, hdr.Strsize)
-			if _, err := f.sr.ReadAt(strtab, int64(hdr.Stroff)); err != nil {
+			if _, err := f.lr.ReadAt(strtab, int64(hdr.Stroff)); err != nil {
 				return nil, fmt.Errorf("failed to read data at Stroff=%#x; %v", int64(hdr.Stroff), err)
 			}
 
@@ -905,7 +912,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				symsz = 12
 			}
 			symdat := make([]byte, int(hdr.Nsyms)*symsz)
-			if _, err := f.sr.ReadAt(symdat, int64(hdr.Symoff)); err != nil {
+			if _, err := f.lr.ReadAt(symdat, int64(hdr.Symoff)); err != nil {
 				return nil, fmt.Errorf("failed to read data at Symoff=%#x; %v", int64(hdr.Symoff), err)
 			}
 
@@ -919,7 +926,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			f.Loads[i] = st
 			f.Symtab = st
 		case types.LC_SYMSEG:
-			var led types.LinkEditDataCmd
+			var led types.SymsegCommand
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &led); err != nil {
 				return nil, fmt.Errorf("failed to read LC_SYMSEG: %v", err)
@@ -1045,7 +1052,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_DYSYMTAB: %v", err)
 			}
 			dat := make([]byte, hdr.Nindirectsyms*4)
-			if _, err := f.sr.ReadAt(dat, int64(hdr.Indirectsymoff)); err != nil {
+			if _, err := f.lr.ReadAt(dat, int64(hdr.Indirectsymoff)); err != nil {
 				return nil, fmt.Errorf("failed to read data at Indirectsymoff=%#x; %v", int64(hdr.Indirectsymoff), err)
 			}
 			x := make([]uint32, hdr.Nindirectsyms)
@@ -1320,7 +1327,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Offset = hdr.Offset
 			l.Size = hdr.Size
 			csdat := make([]byte, hdr.Size)
-			if _, err := r.ReadAt(csdat, int64(hdr.Offset)); err != nil {
+			if _, err := f.lr.ReadAt(csdat, int64(hdr.Offset)); err != nil {
 				return nil, fmt.Errorf("failed to read CS data at offset=%#x; %v", int64(hdr.Offset), err)
 			}
 			cs, err := codesign.ParseCodeSignature(csdat)
@@ -1343,7 +1350,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Offset = hdr.Offset
 			l.Size = hdr.Size
 			ldat := make([]byte, l.Size)
-			if _, err := r.ReadAt(ldat, int64(l.Offset)); err != nil {
+			if _, err := f.lr.ReadAt(ldat, int64(l.Offset)); err != nil {
 				return nil, fmt.Errorf("failed to read SplitInfo data at offset=%#x; %v", int64(hdr.Offset), err)
 			}
 			fsr := bytes.NewReader(ldat)
@@ -1781,8 +1788,8 @@ func (f *File) parseSymtab(symdat, strtab, cmddat []byte, hdr *types.SymtabCmd, 
 
 func (f *File) pushSection(sh *Section, r io.ReaderAt) error {
 	f.Sections = append(f.Sections, sh)
-	// sh.sr = io.NewSectionReader(r, int64(sh.Offset), int64(sh.Size))
-	sh.ReaderAt = f.sr
+	sh.sr = io.NewSectionReader(r, int64(sh.Offset), int64(sh.Size))
+	sh.ReaderAt = sh.sr
 
 	if sh.Nreloc > 0 {
 		reldat := make([]byte, int(sh.Nreloc)*8)
@@ -2127,8 +2134,9 @@ func (f *File) GetFileSetFileByName(name string) (*File, error) {
 		if fs, ok := l.(*FilesetEntry); ok {
 			if strings.Contains(strings.ToLower(fs.EntryID), strings.ToLower(name)) {
 				return NewFile(io.NewSectionReader(f.sr, int64(fs.Offset), 1<<63-1), FileConfig{
-					Offset:    int64(fs.Offset),
-					SrcReader: f.sr,
+					Offset:             int64(fs.Offset),
+					SectionReader:      f.sr,
+					LinkEditDataReader: f.lr,
 				})
 			}
 		}
@@ -2165,7 +2173,7 @@ func (f *File) GetFunctions(data ...byte) []types.Function {
 		fsr = bytes.NewReader(data)
 	} else {
 		ldat := make([]byte, fs.Size)
-		if _, err := f.sr.ReadAt(ldat, int64(fs.Offset)); err != nil {
+		if _, err := f.lr.ReadAt(ldat, int64(fs.Offset)); err != nil {
 			return nil
 		}
 		fsr = bytes.NewReader(ldat)
@@ -2263,7 +2271,7 @@ func (f *File) DyldExports() ([]trie.TrieEntry, error) {
 			return []trie.TrieEntry{}, nil
 		}
 		data := make([]byte, dxt.Size)
-		if _, err := f.sr.ReadAt(data, int64(dxt.Offset)); err != nil {
+		if _, err := f.lr.ReadAt(data, int64(dxt.Offset)); err != nil {
 			return nil, fmt.Errorf("failed to read %s data at offset=%#x; %v", types.LC_DYLD_EXPORTS_TRIE, int64(dxt.Offset), err)
 		}
 		exports, err := trie.ParseTrie(data, f.GetBaseAddress())
@@ -2291,10 +2299,10 @@ func (f *File) DyldChainedFixups() (*fixupchains.DyldChainedFixups, error) {
 	for _, l := range f.Loads {
 		if dcfLC, ok := l.(*DyldChainedFixups); ok {
 			data := make([]byte, dcfLC.Size)
-			if _, err := f.sr.ReadAt(data, int64(dcfLC.Offset)); err != nil {
+			if _, err := f.lr.ReadAt(data, int64(dcfLC.Offset)); err != nil {
 				return nil, fmt.Errorf("failed to read DyldChainedFixups data at offset=%#x; %v", int64(dcfLC.Offset), err)
 			}
-			dcf := fixupchains.NewChainedFixups(bytes.NewReader(data), f.sr, f.ByteOrder)
+			dcf := fixupchains.NewChainedFixups(bytes.NewReader(data), f.lr, f.ByteOrder)
 			if err := dcf.ParseStarts(); err != nil {
 				return nil, fmt.Errorf("failed to parse dyld chained fixup starts: %v", err)
 			}

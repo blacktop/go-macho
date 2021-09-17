@@ -682,7 +682,7 @@ func (f *File) GetObjCMethodList() ([]objc.Method, error) {
 				if err != nil {
 					return nil, fmt.Errorf("failed to convert offset 0x%x to vmaddr; %v", method.TypesOffset, err)
 				}
-				t, err := f.GetCString(typesVMAddr)
+				t, err := f.GetCString(f.vma.Convert(typesVMAddr))
 				if err != nil {
 					return nil, fmt.Errorf("failed to read cstring: %v", err)
 				}
@@ -738,10 +738,9 @@ func (f *File) GetObjCMethods(vmAddr uint64) ([]objc.Method, error) {
 	return f.readBigMethods(methodList)
 }
 
-func (f *File) readSmallMethods(methodList objc.MethodList) ([]objc.Method, error) {
-	var err error
+func (f *File) readSmallMethods(methodList objc.MethodList) (objcMethods []objc.Method, err error) {
+
 	var nameVMAddr uint64
-	var objcMethods []objc.Method
 
 	currOffset, _ := f.sr.Seek(0, io.SeekCurrent)
 
@@ -772,7 +771,7 @@ func (f *File) readSmallMethods(methodList objc.MethodList) ([]objc.Method, erro
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert offset %#x to vmaddr; %v", currOffset+4+int64(method.TypesOffset), err)
 		}
-		t, err := f.GetCString(typesVMAddr)
+		t, err := f.GetCString(f.vma.Convert(typesVMAddr))
 		if err != nil {
 			return nil, fmt.Errorf("failed to read cstring: %v", err)
 		}
