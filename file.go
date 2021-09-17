@@ -845,7 +845,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				sh.Flags = sh32.Flags
 				sh.Reserved1 = sh32.Reserve1
 				sh.Reserved2 = sh32.Reserve2
-				if err := f.pushSection(sh, r); err != nil {
+				if err := f.pushSection(sh, f.sr); err != nil {
 					return nil, fmt.Errorf("failed to pushSection32: %v", err)
 				}
 			}
@@ -889,7 +889,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				sh.Reserved1 = sh64.Reserve1
 				sh.Reserved2 = sh64.Reserve2
 				sh.Reserved3 = sh64.Reserve3
-				if err := f.pushSection(sh, r); err != nil {
+				if err := f.pushSection(sh, f.sr); err != nil {
 					return nil, fmt.Errorf("failed to pushSection64: %v", err)
 				}
 			}
@@ -1788,8 +1788,8 @@ func (f *File) parseSymtab(symdat, strtab, cmddat []byte, hdr *types.SymtabCmd, 
 
 func (f *File) pushSection(sh *Section, r io.ReaderAt) error {
 	f.Sections = append(f.Sections, sh)
-	sh.sr = io.NewSectionReader(r, int64(sh.Offset), int64(sh.Size))
-	sh.ReaderAt = sh.sr
+	// sh.sr = io.NewSectionReader(r, int64(sh.Offset), int64(sh.Size))
+	sh.ReaderAt = f.sr
 
 	if sh.Nreloc > 0 {
 		reldat := make([]byte, int(sh.Nreloc)*8)
@@ -2302,7 +2302,7 @@ func (f *File) DyldChainedFixups() (*fixupchains.DyldChainedFixups, error) {
 			if _, err := f.lr.ReadAt(data, int64(dcfLC.Offset)); err != nil {
 				return nil, fmt.Errorf("failed to read DyldChainedFixups data at offset=%#x; %v", int64(dcfLC.Offset), err)
 			}
-			dcf := fixupchains.NewChainedFixups(bytes.NewReader(data), f.lr, f.ByteOrder)
+			dcf := fixupchains.NewChainedFixups(bytes.NewReader(data), f.sr, f.ByteOrder)
 			if err := dcf.ParseStarts(); err != nil {
 				return nil, fmt.Errorf("failed to parse dyld chained fixup starts: %v", err)
 			}
