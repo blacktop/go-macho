@@ -40,6 +40,8 @@ type File struct {
 	sr  *io.SectionReader
 	lr  *io.SectionReader // linkedit_data_command reader (supports iOS15+ dyld_shared_cache linkedit file offsets)
 
+	relativeSelectorBase uint64 // objc_opt version 16
+
 	closer io.Closer
 }
 
@@ -266,11 +268,12 @@ func loadInSlice(c types.LoadCmd, list []types.LoadCmd) bool {
 
 // FileConfig is a MachO file config object
 type FileConfig struct {
-	Offset             int64
-	LoadFilter         []types.LoadCmd
-	VMAddrConverter    types.VMAddrConverter
-	SectionReader      *io.SectionReader
-	LinkEditDataReader *io.SectionReader
+	Offset               int64
+	LoadFilter           []types.LoadCmd
+	VMAddrConverter      types.VMAddrConverter
+	SectionReader        *io.SectionReader
+	LinkEditDataReader   *io.SectionReader
+	RelativeSelectorBase uint64
 }
 
 // Open opens the named file using os.Open and prepares it for use as a Mach-O binary.
@@ -737,6 +740,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 		}
 		f.vma = &config[0].VMAddrConverter
 		loadsFilter = config[0].LoadFilter
+		f.relativeSelectorBase = config[0].RelativeSelectorBase
 	} else {
 		f.sr = io.NewSectionReader(r, 0, 1<<63-1)
 		f.lr = f.sr

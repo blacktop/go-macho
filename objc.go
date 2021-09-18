@@ -760,6 +760,9 @@ func (f *File) readSmallMethods(methodList objc.MethodList) (objcMethods []objc.
 			if err != nil {
 				return nil, fmt.Errorf("failed to convert offset %#x to vmaddr; %v", currOffset+int64(method.NameOffset), err)
 			}
+			if f.relativeSelectorBase > 0 {
+				nameVMAddr = f.relativeSelectorBase + uint64(method.NameOffset)
+			}
 		}
 
 		n, err := f.GetCString(f.vma.Convert(nameVMAddr))
