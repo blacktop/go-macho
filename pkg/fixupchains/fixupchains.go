@@ -307,17 +307,24 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr64); err != nil {
 				return err
 			}
-			if DcpArm64eIsBind(dcPtr64) && DcpArm64eIsAuth(dcPtr64) {
+			if !DcpArm64eIsBind(dcPtr64) && !DcpArm64eIsAuth(dcPtr64) {
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, DyldChainedPtrArm64eRebase24{
+					Pointer: dcPtr64,
+					Fixup:   fixupLocation,
+				})
+			} else if DcpArm64eIsBind(dcPtr64) && DcpArm64eIsAuth(dcPtr64) {
 				bind := DyldChainedPtrArm64eAuthBind24{Pointer: dcPtr64, Fixup: fixupLocation}
 				bind.Import = dcf.Imports[bind.Ordinal()].Name
 				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, bind)
+			} else if !DcpArm64eIsBind(dcPtr64) && DcpArm64eIsAuth(dcPtr64) {
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, DyldChainedPtrArm64eAuthRebase24{
+					Pointer: dcPtr64,
+					Fixup:   fixupLocation,
+				})
 			} else if DcpArm64eIsBind(dcPtr64) && !DcpArm64eIsAuth(dcPtr64) {
 				bind := DyldChainedPtrArm64eBind24{Pointer: dcPtr64, Fixup: fixupLocation}
 				bind.Import = dcf.Imports[bind.Ordinal()].Name
 				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, bind)
-			} else {
-				fmt.Printf("unknown DYLD_CHAINED_PTR_ARM64E_USERLAND24 pointer typr 0x%04x\n", dcPtr64)
-				// return fmt.Errorf("unknown DYLD_CHAINED_PTR_ARM64E_USERLAND24 pointer typr 0x%04x", dcPtr64)
 			}
 			if DcpArm64eNext(dcPtr64) == 0 {
 				chainEnd = true
