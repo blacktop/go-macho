@@ -697,6 +697,21 @@ type Selector struct {
 	Name   string
 }
 
+type OptOffsets struct {
+	MethodNameStart     uint64
+	MethodNameEnd       uint64
+	InlinedMethodsStart uint64
+	InlinedMethodsEnd   uint64
+}
+
+type OptOffsets2 struct {
+	Version             uint64
+	MethodNameStart     uint64
+	MethodNameEnd       uint64
+	InlinedMethodsStart uint64
+	InlinedMethodsEnd   uint64
+}
+
 type ImpCache struct {
 	PreoptCacheT
 	Entries []PreoptCacheEntryT
@@ -729,6 +744,9 @@ func (p PreoptCacheT) HasInlines() bool {
 }
 func (p PreoptCacheT) BitOne() bool {
 	return types.ExtractBits(uint64(p.Info), 31, 1) != 0
+}
+func (p PreoptCacheT) Capacity() uint32 {
+	return p.CacheMask() + 1
 }
 func (p PreoptCacheT) String() string {
 	return fmt.Sprintf("cache_shift: %d, cache_mask: %d, occupied: %d, has_inlines: %t, bit_one: %t",
