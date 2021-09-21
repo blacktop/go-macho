@@ -1,6 +1,6 @@
 # go-macho [WIP] 🚧
 
-[![Go](https://github.com/blacktop/go-macho/workflows/Go/badge.svg?branch=master)](https://github.com/blacktop/go-macho/actions) [![PkgGoDev](https://pkg.go.dev/badge/blacktop/go-macho)](https://pkg.go.dev/blacktop/go-macho) [![License](http://img.shields.io/:license-mit-blue.svg)](http://doge.mit-license.org)
+[![Go](https://github.com/blacktop/go-macho/workflows/Go/badge.svg?branch=master)](https://github.com/blacktop/go-macho/actions) [![Go Reference](https://pkg.go.dev/badge/github.com/blacktop/go-macho.svg)](https://pkg.go.dev/github.com/blacktop/go-macho) [![License](http://img.shields.io/:license-mit-blue.svg)](http://doge.mit-license.org)
 
 > Package macho implements access to and creation of Mach-O object files.
 
