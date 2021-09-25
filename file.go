@@ -622,7 +622,8 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 		if seg.Filesz > 0 {
 			dat := make([]byte, seg.Filesz)
 
-			_, err := f.ReadAt(dat, int64(segMap[idx].Old.Start))
+			_, err := f.lr.ReadAt(dat, int64(segMap[idx].Old.Start))
+			// _, err := f.ReadAt(dat, int64(segMap[idx].Old.Start))
 			if err != nil {
 				return fmt.Errorf("failed to read segment %s data: %v", seg.Name, err)
 			}
@@ -1429,14 +1430,33 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.CryptID = ei.CryptID
 			f.Loads[i] = l
 		case types.LC_DYLD_INFO:
-			fallthrough
-		case types.LC_DYLD_INFO_ONLY:
 			var info types.DyldInfoCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &info); err != nil {
-				return nil, fmt.Errorf("failed to read LC_DYLD_INFO(_ONLY): %v", err)
+				return nil, fmt.Errorf("failed to read LC_DYLD_INFO: %v", err)
 			}
 			l := new(DyldInfo)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			l.RebaseOff = info.RebaseOff
+			l.RebaseSize = info.RebaseSize
+			l.BindOff = info.BindOff
+			l.BindSize = info.BindSize
+			l.WeakBindOff = info.WeakBindOff
+			l.WeakBindSize = info.WeakBindSize
+			l.LazyBindOff = info.LazyBindOff
+			l.LazyBindSize = info.LazyBindSize
+			l.ExportOff = info.ExportOff
+			l.ExportSize = info.ExportSize
+			f.Loads[i] = l
+		case types.LC_DYLD_INFO_ONLY:
+			var info types.DyldInfoOnlyCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &info); err != nil {
+				return nil, fmt.Errorf("failed to read LC_DYLD_INFO_ONLY: %v", err)
+			}
+			l := new(DyldInfoOnly)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
