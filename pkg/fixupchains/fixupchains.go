@@ -7,13 +7,15 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/blacktop/go-macho/types"
 )
 
 // NewChainedFixups creates a new DyldChainedFixups instance
-func NewChainedFixups(lcdat *bytes.Reader, sr *io.SectionReader, bo binary.ByteOrder) *DyldChainedFixups {
+func NewChainedFixups(lcdat *bytes.Reader, sr *types.MachoReader, bo binary.ByteOrder) *DyldChainedFixups {
 	return &DyldChainedFixups{
 		r:  lcdat,
-		sr: sr,
+		sr: *sr,
 		bo: bo,
 	}
 }

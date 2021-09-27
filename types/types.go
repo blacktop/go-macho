@@ -4,7 +4,9 @@ package types
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"io"
 	"strconv"
 )
 
@@ -238,4 +240,85 @@ func (v *VMAddrConverter) GetOffset(address uint64) (uint64, error) {
 // GetVMAddress returns the virtal address for a given file offset
 func (v *VMAddrConverter) GetVMAddress(offset uint64) (uint64, error) {
 	return v.Offet2VMAddr(offset)
+}
+
+// MachoReader is a custom io.SectionReader interface with virtual address support
+type MachoReader interface {
+	io.ReadSeeker
+	io.ReaderAt
+	SeekToAddr(addr uint64) error
+	ReadAtAddr(buf []byte, addr uint64) (int, error)
+}
+
+// NewCustomSectionReader returns a CustomSectionReader that reads from r
+// starting at offset off and stops with EOF after n bytes.
+func NewCustomSectionReader(r io.ReaderAt, off int64, n int64) *CustomSectionReader {
+	return &CustomSectionReader{r, off, off, off + n}
+}
+
+// CustomSectionReader implements Read, Seek, and ReadAt on a section
+// of an underlying ReaderAt.
+// It also stubs out the MachoReader required SeekToAddr and ReadAtAddr
+type CustomSectionReader struct {
+	r     io.ReaderAt
+	base  int64
+	off   int64
+	limit int64
+}
+
+func (s *CustomSectionReader) Read(p []byte) (n int, err error) {
+	if s.off >= s.limit {
+		return 0, io.EOF
+	}
+	if max := s.limit - s.off; int64(len(p)) > max {
+		p = p[0:max]
+	}
+	n, err = s.r.ReadAt(p, s.off)
+	s.off += int64(n)
+	return
+}
+
+func (s *CustomSectionReader) Seek(offset int64, whence int) (int64, error) {
+	switch whence {
+	default:
+		return 0, errors.New("Seek: invalid whence")
+	case io.SeekStart:
+		offset += s.base
+	case io.SeekCurrent:
+		offset += s.off
+	case io.SeekEnd:
+		offset += s.limit
+	}
+	if offset < s.base {
+		return 0, errors.New("Seek: invalid offset")
+	}
+	s.off = offset
+	return offset - s.base, nil
+}
+
+func (s *CustomSectionReader) ReadAt(p []byte, off int64) (n int, err error) {
+	if off < 0 || off >= s.limit-s.base {
+		return 0, io.EOF
+	}
+	off += s.base
+	if max := s.limit - off; int64(len(p)) > max {
+		p = p[0:max]
+		n, err = s.r.ReadAt(p, off)
+		if err == nil {
+			err = io.EOF
+		}
+		return n, err
+	}
+	return s.r.ReadAt(p, off)
+}
+
+// Size returns the size of the section in bytes.
+func (s *CustomSectionReader) Size() int64 { return s.limit - s.base }
+
+func (s *CustomSectionReader) SeekToAddr(addr uint64) error {
+	panic("not implemented") // TODO: Implement
+}
+
+func (s *CustomSectionReader) ReadAtAddr(buf []byte, addr uint64) (int, error) {
+	panic("not implemented") // TODO: Implement
 }

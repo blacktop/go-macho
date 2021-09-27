@@ -337,7 +337,7 @@ type ProtocolT struct {
 
 type Protocol struct {
 	Name string
-	Ptr  types.FilePointer
+	Ptr  uint64
 	// Isa                     string
 	Prots                   []Protocol
 	InstanceMethods         []Method
@@ -466,7 +466,7 @@ type Class struct {
 	Ivars                 []Ivar
 	Props                 []Property
 	Prots                 []Protocol
-	ClassPtr              types.FilePointer
+	ClassPtr              uint64
 	IsaVMAddr             uint64
 	SuperclassVMAddr      uint64
 	MethodCacheBuckets    uint64
@@ -490,7 +490,7 @@ func (c *Class) dump(verbose bool) string {
 		subClass = c.SuperClass
 	}
 
-	class := fmt.Sprintf("0x%011x %s : %s", c.ClassPtr.VMAdder, c.Name, subClass)
+	class := fmt.Sprintf("0x%011x %s : %s", c.ClassPtr, c.Name, subClass)
 
 	if len(c.Prots) > 0 {
 		var subProts []string

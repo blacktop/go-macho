@@ -87,7 +87,7 @@ type SegmentHeader struct {
 
 func (s *SegmentHeader) String() string {
 	return fmt.Sprintf(
-		"Seg %s, len=0x%x, addr=0x%x, memsz=0x%x, offset=0x%x, filesz=0x%x, maxprot=0x%x, prot=0x%x, nsect=%d, flag=0x%x, firstsect=%d",
+		"Seg %s, len=%#x, addr=%#x, memsz=%#x, offset=%#x, filesz=%#x, maxprot=%#x, prot=%#x, nsect=%d, flag=%#x, firstsect=%d",
 		s.Name, s.Len, s.Addr, s.Memsz, s.Offset, s.Filesz, s.Maxprot, s.Prot, s.Nsect, s.Flag, s.Firstsect)
 }
 
@@ -1055,7 +1055,7 @@ func (s *SplitInfo) String() string {
 	if s.Version == types.DYLD_CACHE_ADJ_V2_FORMAT {
 		version = "format=v2"
 	} else {
-		version = fmt.Sprintf("kind=0x%x", s.Version)
+		version = fmt.Sprintf("kind=%#x", s.Version)
 	}
 	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d, %s", s.Offset, s.Offset+s.Size, s.Size, version)
 }
@@ -1110,9 +1110,9 @@ func (l *EncryptionInfo) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 
 func (e *EncryptionInfo) String() string {
 	if e.CryptID == 0 {
-		return fmt.Sprintf("offset=0x%x size=0x%x (not-encrypted yet)", e.Offset, e.Size)
+		return fmt.Sprintf("offset=%#x size=%#x (not-encrypted yet)", e.Offset, e.Size)
 	}
-	return fmt.Sprintf("offset=0x%x size=0x%x CryptID: 0x%x", e.Offset, e.Size, e.CryptID)
+	return fmt.Sprintf("offset=%#x size=%#x CryptID: %#x", e.Offset, e.Size, e.CryptID)
 }
 func (e *EncryptionInfo) Copy() *EncryptionInfo {
 	return &EncryptionInfo{EncryptionInfoCmd: e.EncryptionInfoCmd}
@@ -1385,7 +1385,7 @@ type EntryPoint struct {
 }
 
 func (e *EntryPoint) String() string {
-	return fmt.Sprintf("Entry Point: 0x%016x, Stack Size: 0x%x", e.EntryOffset, e.StackSize)
+	return fmt.Sprintf("Entry Point: 0x%016x, Stack Size: %#x", e.EntryOffset, e.StackSize)
 }
 func (e *EntryPoint) Copy() *EntryPoint {
 	return &EntryPoint{EntryPointCmd: e.EntryPointCmd}
@@ -1498,9 +1498,9 @@ type EncryptionInfo64 struct {
 
 func (e *EncryptionInfo64) String() string {
 	if e.CryptID == 0 {
-		return fmt.Sprintf("offset=0x%09x  size=0x%x (not-encrypted yet)", e.Offset, e.Size)
+		return fmt.Sprintf("offset=0x%09x  size=%#x (not-encrypted yet)", e.Offset, e.Size)
 	}
-	return fmt.Sprintf("offset=0x%09x  size=0x%x CryptID: 0x%x", e.Offset, e.Size, e.CryptID)
+	return fmt.Sprintf("offset=0x%09x  size=%#x CryptID: %#x", e.Offset, e.Size, e.CryptID)
 }
 func (e *EncryptionInfo64) Copy() *EncryptionInfo64 {
 	return &EncryptionInfo64{EncryptionInfo64Cmd: e.EncryptionInfo64Cmd}
@@ -1677,7 +1677,7 @@ func (t *DyldExportsTrie) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 }
 
 func (t *DyldExportsTrie) String() string {
-	return fmt.Sprintf("offset=0x%09x  size=0x%x", t.Offset, t.Size)
+	return fmt.Sprintf("offset=0x%09x  size=%#x", t.Offset, t.Size)
 }
 
 /*******************************************************************************
@@ -1705,7 +1705,7 @@ func (s *DyldChainedFixups) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 }
 
 func (cf *DyldChainedFixups) String() string {
-	return fmt.Sprintf("offset=0x%09x  size=0x%x", cf.Offset, cf.Size)
+	return fmt.Sprintf("offset=0x%09x  size=%#x", cf.Offset, cf.Size)
 }
 
 /*******************************************************************************

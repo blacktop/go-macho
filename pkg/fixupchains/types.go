@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"io"
 
 	"github.com/blacktop/go-macho/types"
 )
@@ -14,7 +13,7 @@ type DyldChainedFixups struct {
 	Starts  []DyldChainedStarts
 	Imports []DcfImport
 	r       *bytes.Reader
-	sr      *io.SectionReader
+	sr      types.MachoReader
 	bo      binary.ByteOrder
 }
 

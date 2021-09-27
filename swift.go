@@ -418,7 +418,7 @@ func (f *File) GetMangledTypeAtOffset(offset int64) (string, *stypes.TypeDescrip
 
 	var refType byte
 	if err := binary.Read(f.sr, f.ByteOrder, &refType); err != nil {
-		return "", nil, fmt.Errorf("failed to read possible symbolic reference type at offset 0x%x, %v", offset, err)
+		return "", nil, fmt.Errorf("failed to read possible symbolic reference type at offset %#x, %v", offset, err)
 	}
 
 	if refType >= byte(0x01) && refType <= byte(0x17) {
@@ -448,7 +448,7 @@ func (f *File) GetMangledTypeAtOffset(offset int64) (string, *stypes.TypeDescrip
 				return "", nil, fmt.Errorf("failed to read cstring: %v", err)
 			}
 			if parentDesc.Parent != 0 {
-				fmt.Printf("0x%x\n", parentDescOffset+sizeOfInt32+int64(parentDesc.Parent))
+				fmt.Printf("%#x\n", parentDescOffset+sizeOfInt32+int64(parentDesc.Parent))
 			}
 			name, err := f.GetCStringAtOffset(typeDescOffset + 2*sizeOfInt32 + int64(tDesc.Name))
 			if err != nil {
@@ -490,13 +490,13 @@ func (f *File) GetMangledTypeAtOffset(offset int64) (string, *stypes.TypeDescrip
 			name := dcf.Imports[fixupchains.DyldChainedPtrArm64eBind{Pointer: context}.Ordinal()].Name
 			return name, nil, nil
 		default:
-			return "", nil, fmt.Errorf("unsupported symbolic REF: %X, 0x%x", refType, offset+int64(t32))
+			return "", nil, fmt.Errorf("unsupported symbolic REF: %X, %#x", refType, offset+int64(t32))
 		}
 
 	} else if refType >= byte(0x18) && refType <= byte(0x1F) { // TODO: finish support for these types
 		int64Bytes := make([]byte, 8)
 		if _, err := f.sr.Read(int64Bytes); err != nil {
-			return "", nil, fmt.Errorf("unsupported symbolic REF: %X, 0x%x", refType, offset+int64(binary.LittleEndian.Uint64(int64Bytes)))
+			return "", nil, fmt.Errorf("unsupported symbolic REF: %X, %#x", refType, offset+int64(binary.LittleEndian.Uint64(int64Bytes)))
 		}
 	} else { // regular string mangled type
 		// revert the peek byte read
@@ -505,11 +505,11 @@ func (f *File) GetMangledTypeAtOffset(offset int64) (string, *stypes.TypeDescrip
 		}
 		s, err := bufio.NewReader(f.sr).ReadString('\x00')
 		if err != nil {
-			return "", nil, fmt.Errorf("failed to ReadBytes at offset 0x%x, %v", offset, err)
+			return "", nil, fmt.Errorf("failed to ReadBytes at offset %#x, %v", offset, err)
 		}
 		s = strings.Trim(s, "\x00")
 		if len(s) == 0 { // TODO this shouldn't happen
-			return "", nil, fmt.Errorf("failed to get read a string at offset 0x%x, %v", offset, err)
+			return "", nil, fmt.Errorf("failed to get read a string at offset %#x, %v", offset, err)
 		}
 		return "_$s" + strings.Trim(s, "\x00"), nil, nil // TODO: fix this append to be correct for all cases
 	}

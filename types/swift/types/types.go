@@ -61,7 +61,7 @@ func (f TypeDescFlag) KindSpecificFlags() uint16 {
 	return uint16(f >> 16 & 0xFFFF)
 }
 func (f TypeDescFlag) String() string {
-	return fmt.Sprintf("kind: %s, generic: %t, unique: %t, version: %d, kind_flags: 0x%x",
+	return fmt.Sprintf("kind: %s, generic: %t, unique: %t, version: %d, kind_flags: %#x",
 		f.Kind(),
 		f.IsGeneric(),
 		f.IsUnique(),

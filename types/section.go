@@ -375,7 +375,7 @@ func (f SectionFlag) AttributesString() string {
 // 		// if !strings.EqualFold(sec.Seg, prevSeg) && len(prevSeg) > 0 {
 // 		// 	fmt.Fprintf(w, "\n")
 // 		// }
-// 		fmt.Fprintf(w, "Mem: 0x%x-0x%x \t %s.%s \t %s \t %s\n", sec.Addr, sec.Addr+sec.Size, sec.Seg, sec.Name, secFlags, sec.Flags.AttributesString())
+// 		fmt.Fprintf(w, "Mem: %#x-%#x \t %s.%s \t %s \t %s\n", sec.Addr, sec.Addr+sec.Size, sec.Seg, sec.Name, secFlags, sec.Flags.AttributesString())
 // 		// prevSeg = sec.Seg
 // 	}
 // 	w.Flush()
