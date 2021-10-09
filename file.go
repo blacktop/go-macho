@@ -458,62 +458,80 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 				return err
 			}
 		case types.LC_DYLD_INFO:
-			rebaseOff, err := segMap.Remap(uint64(l.(*DyldInfo).RebaseOff))
-			if err != nil {
-				return fmt.Errorf("failed to remap RebaseOff in %s: %v", types.LC_DYLD_INFO, err)
+			if l.(*DyldInfo).RebaseOff > 0 {
+				rebaseOff, err := segMap.Remap(uint64(l.(*DyldInfo).RebaseOff))
+				if err != nil {
+					return fmt.Errorf("failed to remap RebaseOff in %s: %v", types.LC_DYLD_INFO, err)
+				}
+				l.(*DyldInfoOnly).RebaseOff = uint32(rebaseOff)
 			}
-			l.(*DyldInfo).RebaseOff = uint32(rebaseOff)
-			bindOff, err := segMap.Remap(uint64(l.(*DyldInfo).BindOff))
-			if err != nil {
-				return fmt.Errorf("failed to remap BindOff in %s: %v", types.LC_DYLD_INFO, err)
+			if l.(*DyldInfoOnly).BindOff > 0 {
+				bindOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).BindOff))
+				if err != nil {
+					return fmt.Errorf("failed to remap BindOff in %s: %v", types.LC_DYLD_INFO, err)
+				}
+				l.(*DyldInfoOnly).BindOff = uint32(bindOff)
 			}
-			l.(*DyldInfo).BindOff = uint32(bindOff)
-			weakBindOff, err := segMap.Remap(uint64(l.(*DyldInfo).WeakBindOff))
-			if err != nil {
-				return fmt.Errorf("failed to remap WeakBindOff in %s: %v", types.LC_DYLD_INFO, err)
+			if l.(*DyldInfo).WeakBindOff > 0 {
+				weakBindOff, err := segMap.Remap(uint64(l.(*DyldInfo).WeakBindOff))
+				if err != nil {
+					return fmt.Errorf("failed to remap WeakBindOff in %s: %v", types.LC_DYLD_INFO, err)
+				}
+				l.(*DyldInfo).WeakBindOff = uint32(weakBindOff)
 			}
-			l.(*DyldInfo).WeakBindOff = uint32(weakBindOff)
-			lazyBindOff, err := segMap.Remap(uint64(l.(*DyldInfo).LazyBindOff))
-			if err != nil {
-				return fmt.Errorf("failed to remap LazyBindOff in %s: %v", types.LC_DYLD_INFO, err)
+			if l.(*DyldInfo).LazyBindOff > 0 {
+				lazyBindOff, err := segMap.Remap(uint64(l.(*DyldInfo).LazyBindOff))
+				if err != nil {
+					return fmt.Errorf("failed to remap LazyBindOff in %s: %v", types.LC_DYLD_INFO, err)
+				}
+				l.(*DyldInfo).LazyBindOff = uint32(lazyBindOff)
 			}
-			l.(*DyldInfo).LazyBindOff = uint32(lazyBindOff)
-			exportOff, err := segMap.Remap(uint64(l.(*DyldInfo).ExportOff))
-			if err != nil {
-				return fmt.Errorf("failed to remap ExportOff in %s: %v", types.LC_DYLD_INFO, err)
+			if l.(*DyldInfo).ExportOff > 0 {
+				exportOff, err := segMap.Remap(uint64(l.(*DyldInfo).ExportOff))
+				if err != nil {
+					return fmt.Errorf("failed to remap ExportOff in %s: %v", types.LC_DYLD_INFO, err)
+				}
+				l.(*DyldInfo).ExportOff = uint32(exportOff)
 			}
-			l.(*DyldInfo).ExportOff = uint32(exportOff)
-
 			if err := l.(*DyldInfo).Write(&buf, f.ByteOrder); err != nil {
 				return err
 			}
 		case types.LC_DYLD_INFO_ONLY:
-			rebaseOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).RebaseOff))
-			if err != nil {
-				return fmt.Errorf("failed to remap RebaseOff in %s: %v", types.LC_DYLD_INFO, err)
+			if l.(*DyldInfoOnly).RebaseOff > 0 {
+				rebaseOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).RebaseOff))
+				if err != nil {
+					return fmt.Errorf("failed to remap RebaseOff in %s: %v", types.LC_DYLD_INFO_ONLY, err)
+				}
+				l.(*DyldInfoOnly).RebaseOff = uint32(rebaseOff)
 			}
-			l.(*DyldInfoOnly).RebaseOff = uint32(rebaseOff)
-			bindOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).BindOff))
-			if err != nil {
-				return fmt.Errorf("failed to remap BindOff in %s: %v", types.LC_DYLD_INFO, err)
+			if l.(*DyldInfoOnly).BindOff > 0 {
+				bindOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).BindOff))
+				if err != nil {
+					return fmt.Errorf("failed to remap BindOff in %s: %v", types.LC_DYLD_INFO_ONLY, err)
+				}
+				l.(*DyldInfoOnly).BindOff = uint32(bindOff)
 			}
-			l.(*DyldInfoOnly).BindOff = uint32(bindOff)
-			weakBindOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).WeakBindOff))
-			if err != nil {
-				return fmt.Errorf("failed to remap WeakBindOff in %s: %v", types.LC_DYLD_INFO, err)
+			if l.(*DyldInfoOnly).WeakBindOff > 0 {
+				weakBindOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).WeakBindOff))
+				if err != nil {
+					return fmt.Errorf("failed to remap WeakBindOff in %s: %v", types.LC_DYLD_INFO_ONLY, err)
+				}
+				l.(*DyldInfoOnly).WeakBindOff = uint32(weakBindOff)
 			}
-			l.(*DyldInfoOnly).WeakBindOff = uint32(weakBindOff)
-			lazyBindOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).LazyBindOff))
-			if err != nil {
-				return fmt.Errorf("failed to remap LazyBindOff in %s: %v", types.LC_DYLD_INFO, err)
+			if l.(*DyldInfoOnly).LazyBindOff > 0 {
+				lazyBindOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).LazyBindOff))
+				if err != nil {
+					return fmt.Errorf("failed to remap LazyBindOff in %s: %v", types.LC_DYLD_INFO_ONLY, err)
+				}
+				l.(*DyldInfoOnly).LazyBindOff = uint32(lazyBindOff)
 			}
-			l.(*DyldInfoOnly).LazyBindOff = uint32(lazyBindOff)
-			exportOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).ExportOff))
-			if err != nil {
-				return fmt.Errorf("failed to remap ExportOff in %s: %v", types.LC_DYLD_INFO, err)
+			if l.(*DyldInfoOnly).ExportOff > 0 {
+				exportOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).ExportOff))
+				if err != nil {
+					return fmt.Errorf("failed to remap ExportOff in %s: %v", types.LC_DYLD_INFO_ONLY, err)
+				}
+				l.(*DyldInfoOnly).ExportOff = uint32(exportOff)
 			}
-			l.(*DyldInfoOnly).ExportOff = uint32(exportOff)
-
 			if err := l.(*DyldInfoOnly).Write(&buf, f.ByteOrder); err != nil {
 				return err
 			}
