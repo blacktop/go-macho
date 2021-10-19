@@ -139,6 +139,10 @@ func (s *Segment) Put64(b []byte, o binary.ByteOrder) int {
 	return 10*4 + 4*8
 }
 
+func (s *Segment) LessThan(o *Segment) bool {
+	return s.Addr < o.Addr
+}
+
 func (s *Segment) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	var name [16]byte
 	copy(name[:], s.Name)
@@ -231,6 +235,20 @@ func (s *Segment) LoadSize(t *FileTOC) uint32 {
 
 // Open returns a new ReadSeeker reading the segment.
 func (s *Segment) Open() io.ReadSeeker { return io.NewSectionReader(s.sr, 0, 1<<63-1) }
+
+type Segments []*Segment
+
+func (v Segments) Len() int {
+	return len(v)
+}
+
+func (v Segments) Less(i, j int) bool {
+	return v[i].LessThan(v[j])
+}
+
+func (v Segments) Swap(i, j int) {
+	v[i], v[j] = v[j], v[i]
+}
 
 /*******************************************************************************
  * SECTION

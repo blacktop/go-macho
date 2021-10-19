@@ -13,6 +13,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"sort"
 	"strings"
 	"unsafe"
 
@@ -302,7 +303,23 @@ type segMapInfo struct {
 	New  segInfo
 }
 
+func (i segMapInfo) LessThan(o segMapInfo) bool {
+	return i.Old.Start < o.Old.Start
+}
+
 type exportSegMap []segMapInfo
+
+func (m exportSegMap) Len() int {
+	return len(m)
+}
+
+func (m exportSegMap) Less(i, j int) bool {
+	return m[i].LessThan(m[j])
+}
+
+func (m exportSegMap) Swap(i, j int) {
+	m[i], m[j] = m[j], m[i]
+}
 
 func (m exportSegMap) Remap(offset uint64) (uint64, error) {
 
@@ -340,6 +357,8 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 		})
 		newSegOffset += seg.Filesz
 	}
+
+	sort.Sort(segMap)
 
 	for _, l := range f.Loads {
 		switch l.Command() {
@@ -1947,7 +1966,7 @@ func (f *File) GetOffset(address uint64) (uint64, error) {
 			return (address - seg.Addr) + seg.Offset, nil
 		}
 	}
-	return 0, fmt.Errorf("address %#x not within any segments adress range", address)
+	return 0, fmt.Errorf("address %#x not within any segment's adress range", address)
 }
 
 // GetVMAddress returns the virtal address for a given file offset
@@ -1957,7 +1976,7 @@ func (f *File) GetVMAddress(offset uint64) (uint64, error) {
 			return (offset - seg.Offset) + seg.Addr, nil
 		}
 	}
-	return 0, fmt.Errorf("offset %#x not within any segments file offset range", offset)
+	return 0, fmt.Errorf("offset %#x not within any segment's file offset range", offset)
 }
 
 // GetBaseAddress returns the MachO's preferred load address
@@ -2052,13 +2071,14 @@ func (f *File) Segment(name string) *Segment {
 }
 
 // Segments returns all Segments.
-func (f *File) Segments() []*Segment {
-	var segs []*Segment
+func (f *File) Segments() Segments {
+	var segs Segments
 	for _, l := range f.Loads {
 		if s, ok := l.(*Segment); ok {
 			segs = append(segs, s)
 		}
 	}
+	sort.Sort(segs)
 	return segs
 }
 
@@ -2276,7 +2296,7 @@ func (f *File) GetFunctionData(fn types.Function) ([]byte, error) {
 	data := make([]byte, fn.EndAddr-fn.StartAddr)
 	offset, err := f.GetOffset(fn.StartAddr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get offset of function start at virtal address %#x: %v", fn.StartAddr, err)
+		return nil, fmt.Errorf("failed to get offset of function start: %v", err)
 	}
 	_, err = f.ReadAt(data, int64(offset))
 	if err != nil {
