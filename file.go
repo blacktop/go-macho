@@ -1093,6 +1093,15 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, fmt.Errorf("failed to read LC_DYSYMTAB: %v", err)
 			}
+			if hdr.Iundefsym > uint32(len(f.Symtab.Syms)) {
+				return nil, &FormatError{offset, fmt.Sprintf(
+					"undefined symbols index in dynamic symbol table command is greater than symbol table length (%d > %d)",
+					hdr.Iundefsym, len(f.Symtab.Syms)), nil}
+			} else if hdr.Iundefsym+hdr.Nundefsym > uint32(len(f.Symtab.Syms)) {
+				return nil, &FormatError{offset, fmt.Sprintf(
+					"number of undefined symbols after index in dynamic symbol table command is greater than symbol table length (%d > %d)",
+					hdr.Iundefsym+hdr.Nundefsym, len(f.Symtab.Syms)), nil}
+			}
 			dat := make([]byte, hdr.Nindirectsyms*4)
 			if _, err := f.cr.ReadAt(dat, int64(hdr.Indirectsymoff)); err != nil {
 				return nil, fmt.Errorf("failed to read data at Indirectsymoff=%#x; %v", int64(hdr.Indirectsymoff), err)
