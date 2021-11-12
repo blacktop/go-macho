@@ -655,12 +655,12 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 	endOfLoadsOffset := uint64(buf.Len())
 
 	// write out segment data to buffer
-	for idx, seg := range f.Segments() {
+	// for idx, seg := range f.Segments() {
+	for _, seg := range f.Segments() {
 		if seg.Filesz > 0 {
 			dat := make([]byte, seg.Filesz)
 
-			_, err := f.cr.ReadAt(dat, int64(segMap[idx].Old.Start))
-			// _, err := f.ReadAt(dat, int64(segMap[idx].Old.Start))
+			_, err := f.cr.ReadAtAddr(dat, seg.Addr)
 			if err != nil {
 				return fmt.Errorf("failed to read segment %s data: %v", seg.Name, err)
 			}
