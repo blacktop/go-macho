@@ -1,7 +1,19 @@
 package types
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
+	"io"
+
 	mtypes "github.com/blacktop/go-macho/types"
+)
+
+const (
+	pageSizeBits      = 12
+	pageSize          = 1 << pageSizeBits
+	blobSize          = 2 * 4
+	superBlobSize     = 3 * 4
+	codeDirectorySize = 13*4 + 4 + 4*8
 )
 
 // CodeSignature highlevel object
@@ -24,6 +36,13 @@ type SuperBlob struct {
 	// followed by Blobs in no particular order as indicated by offsets in index
 }
 
+func (s *SuperBlob) put(out []byte) []byte {
+	out = put32be(out, uint32(s.Magic))
+	out = put32be(out, s.Length)
+	out = put32be(out, s.Count)
+	return out
+}
+
 // BlobIndex object
 type BlobIndex struct {
 	Type   SlotType // type of entry
@@ -34,6 +53,12 @@ type BlobIndex struct {
 type Blob struct {
 	Magic  magic  // magic number
 	Length uint32 // total length of blob
+}
+
+func (b *Blob) put(out []byte) []byte {
+	out = put32be(out, uint32(b.Magic))
+	out = put32be(out, b.Length)
+	return out
 }
 
 const (
@@ -128,4 +153,87 @@ func (c SlotType) String() string {
 }
 func (c SlotType) GoString() string {
 	return mtypes.StringName(uint32(c), slotTypeStrings, true)
+}
+
+func put32be(b []byte, x uint32) []byte { binary.BigEndian.PutUint32(b, x); return b[4:] }
+func put64be(b []byte, x uint64) []byte { binary.BigEndian.PutUint64(b, x); return b[8:] }
+func put8(b []byte, x uint8) []byte     { b[0] = x; return b[1:] }
+func puts(b, s []byte) []byte           { n := copy(b, s); return b[n:] }
+
+// Size computes the size of the code signature.
+// id is the identifier used for signing (a field in CodeDirectory blob, which
+// has no significance in ad-hoc signing).
+func size(codeSize int64, id string) int64 {
+	nhashes := (codeSize + pageSize - 1) / pageSize
+	idOff := int64(codeDirectorySize)
+	hashOff := idOff + int64(len(id)+1)
+	cdirSz := hashOff + nhashes*sha256.Size
+	return int64(superBlobSize+blobSize) + cdirSz
+}
+
+func Sign(out []byte, data io.Reader, id string, codeSize, textOff, textSize int64, isMain bool, flags uint32) {
+
+	nhashes := (codeSize + pageSize - 1) / pageSize
+	idOff := int64(codeDirectorySize)
+	hashOff := idOff + int64(len(id)+1)
+	sz := size(codeSize, id)
+
+	// emit blob headers
+	sb := SuperBlob{
+		Magic:  MAGIC_EMBEDDED_SIGNATURE,
+		Length: uint32(sz),
+		Count:  1,
+	}
+	blob := Blob{
+		Magic:  magic(CSSLOT_CODEDIRECTORY),
+		Length: superBlobSize + blobSize,
+	}
+	cdir := CodeDirectoryType{
+		Magic:        MAGIC_CODEDIRECTORY,
+		Length:       uint32(sz) - (superBlobSize + blobSize),
+		Version:      SUPPORTS_EXECSEG,
+		Flags:        cdFlag(flags),
+		HashOffset:   uint32(hashOff),
+		IdentOffset:  uint32(idOff),
+		NCodeSlots:   uint32(nhashes),
+		CodeLimit:    uint32(codeSize),
+		HashSize:     sha256.Size,
+		HashType:     HASHTYPE_SHA256,
+		PageSize:     uint8(pageSizeBits),
+		ExecSegBase:  uint64(textOff),
+		ExecSegLimit: uint64(textSize),
+	}
+	if isMain {
+		cdir.ExecSegFlags = EXECSEG_MAIN_BINARY
+	}
+
+	outp := out
+	outp = sb.put(outp)
+	outp = blob.put(outp)
+	outp = cdir.put(outp)
+
+	// emit the identifier
+	outp = puts(outp, []byte(id+"\000"))
+
+	// emit hashes
+	var buf [pageSize]byte
+	h := sha256.New()
+	p := 0
+	for p < int(codeSize) {
+		n, err := io.ReadFull(data, buf[:])
+		if err == io.EOF {
+			break
+		}
+		if err != nil && err != io.ErrUnexpectedEOF {
+			panic(err)
+		}
+		if p+n > int(codeSize) {
+			n = int(codeSize) - p
+		}
+		p += n
+		h.Reset()
+		h.Write(buf[:n])
+		b := h.Sum(nil)
+		outp = puts(outp, b[:])
+	}
 }

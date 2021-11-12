@@ -222,3 +222,15 @@ func parseCodeDirectory(r *bytes.Reader, offset uint32) (*types.CodeDirectory, e
 
 	return &cd, nil
 }
+
+// AdHocSign generates an ad-hoc code signature and writes it to out.
+// out must have length at least Size(codeSize, id).
+// data is the file content without the signature, of size codeSize.
+// textOff and textSize is the file offset and size of the text segment.
+// isMain is true if this is a main executable.
+// id is the identifier used for signing (a field in CodeDirectory blob, which
+// has no significance in ad-hoc signing).
+// Similar to: `codesign --force --deep -s - MyApp.app`
+func AdHocSign(out []byte, data io.Reader, id string, codeSize, textOff, textSize int64, isMain bool) {
+	types.Sign(out, data, id, codeSize, textOff, textSize, isMain, uint32(types.ADHOC))
+}

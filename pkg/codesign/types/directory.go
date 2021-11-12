@@ -114,6 +114,8 @@ const (
 
 	RUNTIME cdFlag = 0x00010000 /* Apply hardened runtime policies */
 
+	LINKER_SIGNED cdFlag = 0x20000 // type property
+
 	ALLOWED_MACHO cdFlag = (ADHOC | HARD | KILL | CHECK_EXPIRATION | RESTRICT | ENFORCEMENT | REQUIRE_LV | RUNTIME)
 
 	EXEC_SET_HARD        cdFlag = 0x00100000 /* set HARD on any exec'ed process */
@@ -134,7 +136,7 @@ const (
 	ENTITLEMENT_FLAGS cdFlag = (GET_TASK_ALLOW | INSTALLER | DATAVAULT_CONTROLLER | NVRAM_UNRESTRICTED)
 )
 
-var cdFlagStrings = []mtypes.IntName{
+var cdFlagStrings = []mtypes.IntName{ // TODO: what about flag combinations?
 	{uint32(NONE), "None"},
 	{uint32(VALID), "Valid"},
 	{uint32(ADHOC), "Adhoc"},
@@ -151,6 +153,7 @@ var cdFlagStrings = []mtypes.IntName{
 	{uint32(ENTITLEMENTS_VALIDATED), "EntitlementsValidated"},
 	{uint32(NVRAM_UNRESTRICTED), "NvramUnrestricted"},
 	{uint32(RUNTIME), "Runtime"},
+	{uint32(LINKER_SIGNED), "LinkerSigned"},
 	{uint32(ALLOWED_MACHO), "AllowedMacho"},
 	{uint32(EXEC_SET_HARD), "ExecSetHard"},
 	{uint32(EXEC_SET_KILL), "ExecSetKill"},
@@ -213,6 +216,31 @@ type CodeDirectoryType struct {
 	EndWithExecSeg [0]uint8
 
 	/* followed by dynamic content as located by offset fields above */
+}
+
+func (c *CodeDirectoryType) put(out []byte) []byte {
+	out = put32be(out, uint32(c.Magic))
+	out = put32be(out, c.Length)
+	out = put32be(out, uint32(c.Version))
+	out = put32be(out, uint32(c.Flags))
+	out = put32be(out, c.HashOffset)
+	out = put32be(out, c.IdentOffset)
+	out = put32be(out, c.NSpecialSlots)
+	out = put32be(out, c.NCodeSlots)
+	out = put32be(out, c.CodeLimit)
+	out = put8(out, c.HashSize)
+	out = put8(out, uint8(c.HashType))
+	out = put8(out, c.Platform)
+	out = put8(out, c.PageSize)
+	out = put32be(out, c.Spare2)
+	out = put32be(out, c.ScatterOffset)
+	out = put32be(out, c.TeamOffset)
+	out = put32be(out, c.Spare3)
+	out = put64be(out, c.CodeLimit64)
+	out = put64be(out, c.ExecSegBase)
+	out = put64be(out, c.ExecSegLimit)
+	out = put64be(out, uint64(c.ExecSegFlags))
+	return out
 }
 
 // Scatter object
