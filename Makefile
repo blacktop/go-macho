@@ -7,6 +7,12 @@ GIT_COMMIT=$(git rev-parse HEAD)
 GIT_DIRTY=$(test -n "`git status --porcelain`" && echo "+CHANGES" || true)
 GIT_DESCRIBE=$(git describe --tags)
 
+.PHONY: dev-deps
+dev-deps: ## Install the dev dependencies
+	@brew install gh 
+	@go get -d github.com/goreleaser/chglog/cmd/chglog
+	@go get -d github.com/caarlos0/svu@v1.4.1
+
 .PHONY: bump
 bump: ## Incriment version patch number
 	@echo " > Bumping VERSION"
