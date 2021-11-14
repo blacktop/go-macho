@@ -607,6 +607,7 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	f.Symtab.Stroff = uint32(linkedit.Offset + newStringPoolOffset)
 	f.Symtab.Strsize = uint32(newSymNames.Len())
 
+	// f.Dysymtab.Ilocalsym = uint32(len(locals)) + f. .Nextdefsym + f.Dysymtab.Nundefsym
 	f.Dysymtab.Nlocalsym = uint32(len(locals))
 	f.Dysymtab.Extreloff = 0
 	f.Dysymtab.Nextrel = 0
