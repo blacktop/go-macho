@@ -54,8 +54,9 @@ func (m exportSegMap) Remap(offset uint64) (uint64, error) {
 }
 
 // Export exports an in-memory or cached dylib|kext MachO to a file
-func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddress uint64, locals []Symbol) error {
+func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddress uint64, locals []Symbol) (err error) {
 	var buf bytes.Buffer
+	var lebuf *bytes.Buffer
 	var segMap exportSegMap
 
 	inCache := f.FileHeader.Flags.DylibInCache()
@@ -92,7 +93,10 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 	}
 
 	if inCache {
-		f.optimizeLinkedit(locals)
+		lebuf, err = f.optimizeLinkedit(locals)
+		if err != nil {
+			return fmt.Errorf("failed to optimize load commands: %v", err)
+		}
 	}
 
 	if err := f.writeLoadCommands(&buf); err != nil {
@@ -105,31 +109,37 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 	for _, seg := range f.Segments() {
 		if seg.Filesz > 0 {
 			dat := make([]byte, seg.Filesz)
-
 			_, err := f.cr.ReadAtAddr(dat, seg.Addr)
 			if err != nil {
 				return fmt.Errorf("failed to read segment %s data: %v", seg.Name, err)
 			}
 
-			if seg.Name == "__TEXT" {
+			switch seg.Name {
+			case "__TEXT":
 				if _, err := buf.Write(dat[endOfLoadsOffset:]); err != nil {
 					return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
 				}
-				continue
+			case "__LINKEDIT":
+				if inCache {
+					if _, err := buf.Write(lebuf.Bytes()); err != nil {
+						return fmt.Errorf("failed to write optimized segment %s to export buffer: %v", seg.Name, err)
+					}
+				} else {
+					if _, err := buf.Write(dat); err != nil {
+						return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
+					}
+				}
+			default:
+				if _, err := buf.Write(dat); err != nil {
+					return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
+				}
 			}
-
-			if _, err := buf.Write(dat); err != nil {
-				return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
-			}
-			// TODO: align the data to page OR to 64bit ?
-			// align := uint32(types.RoundUp(uint64(buf.Len()), 4)) - uint32(buf.Len())
-			// if align > 0 {
-			// 	adata := make([]byte, align)
-			// 	if _, err := buf.Write(adata); err != nil {
-			// 		return fmt.Errorf("failed to add aligned at the end of segment %s data: %v", seg.Name, err)
-			// 	}
-			// }
 		}
+	}
+
+	// Page align file
+	for (buf.Len() % 0x1000) != 0 {
+		buf.WriteByte(0)
 	}
 
 	if err := ioutil.WriteFile(path, buf.Bytes(), 0755); err != nil {
@@ -428,7 +438,7 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 	return nil
 }
 
-func (f *File) optimizeLinkedit(locals []Symbol) ([]byte, error) {
+func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	var lebuf bytes.Buffer
 	var newSymNames bytes.Buffer
 
@@ -475,25 +485,33 @@ func (f *File) optimizeLinkedit(locals []Symbol) ([]byte, error) {
 		return nil, fmt.Errorf("failed to write LC_DATA_IN_CODE padding: %v", err)
 	}
 
-	// TODO: LC_CODE_SIGNATURE ?
-	// TODO: LC_DYLIB_CODE_SIGN_DRS ?
-	// TODO: LC_LINKER_OPTIMIZATION_HINT ?
-	// TODO: LC_DYLD_CHAINED_FIXUPS ?
-
-	// get all re-exports from LC_DYLD_EXPORTS_TRIE
+	// fix LC_DYLD_EXPORTS_TRIE
 	exports, err := f.DyldExports()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get LC_DYLD_EXPORTS_TRIE exports: %v", err)
 	}
-	for _, exp := range exports {
-		// if !exp.Flags.Regular() || exp.Flags.ReExport() || reexportDeps == exp.Other {
-		if !exp.Flags.Regular() || exp.Flags.ReExport() {
-			fmt.Println(exp) // TODO: add to []Symbol
-		}
-		// If the symbol comes from a dylib that is re-exported, this is not an individual symbol re-export
-		// if ( _reexportDeps.count((int)entry.info.other) != 0 )
-		//     return true;
+	dexpTrie := f.DyldExportsTrie()
+	if dexpTrie == nil {
+		return nil, fmt.Errorf("failed to find LC_DYLD_EXPORTS_TRIE")
 	}
+	dat = make([]byte, dexpTrie.Size)
+	_, err = f.cr.ReadAt(dat, int64(dexpTrie.Offset))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read LC_DYLD_EXPORTS_TRIE data: %v", err)
+	}
+	dexpTrie.Offset = uint32(linkedit.Offset) + uint32(lebuf.Len())
+	if _, err := lebuf.Write(dat); err != nil {
+		return nil, fmt.Errorf("failed to write LC_DYLD_EXPORTS_TRIE data: %v", err)
+	}
+	pad = linkedit.Offset + uint64(lebuf.Len())%f.pointerSize()
+	if _, err := lebuf.Write(make([]byte, pad)); err != nil {
+		return nil, fmt.Errorf("failed to write LC_DYLD_EXPORTS_TRIE padding: %v", err)
+	}
+
+	// TODO: LC_CODE_SIGNATURE           ?
+	// TODO: LC_DYLIB_CODE_SIGN_DRS      ?
+	// TODO: LC_LINKER_OPTIMIZATION_HINT ?
+	// TODO: LC_DYLD_CHAINED_FIXUPS      ?
 
 	newSymTabOffset := uint64(lebuf.Len())
 
@@ -501,11 +519,14 @@ func (f *File) optimizeLinkedit(locals []Symbol) ([]byte, error) {
 	newSymNames.WriteString("\x00")
 	// local symbols are first in dylibs, if this cache has unmapped locals, insert them all first
 	for _, lsym := range locals {
-		if err := binary.Write(&lebuf, binary.LittleEndian, types.Nlist{
-			Name: uint32(newSymNames.Len()),
-			Type: lsym.Type,
-			Sect: lsym.Sect,
-			Desc: lsym.Desc,
+		if err := binary.Write(&lebuf, binary.LittleEndian, types.Nlist64{
+			Nlist: types.Nlist{
+				Name: uint32(newSymNames.Len()),
+				Type: lsym.Type,
+				Sect: lsym.Sect,
+				Desc: lsym.Desc,
+			},
+			Value: lsym.Value,
 		}); err != nil {
 			return nil, fmt.Errorf("failed to write local nlist entry to NEW linkedit data: %v", err)
 		}
@@ -515,16 +536,45 @@ func (f *File) optimizeLinkedit(locals []Symbol) ([]byte, error) {
 	}
 	// now start copying symbol table from start of externs instead of start of locals
 	for _, sym := range f.Symtab.Syms[f.Dysymtab.Nlocalsym:] {
-		if err := binary.Write(&lebuf, binary.LittleEndian, types.Nlist{
-			Name: uint32(newSymNames.Len()),
-			Type: sym.Type,
-			Sect: sym.Sect,
-			Desc: sym.Desc,
+		if err := binary.Write(&lebuf, binary.LittleEndian, types.Nlist64{
+			Nlist: types.Nlist{
+				Name: uint32(newSymNames.Len()),
+				Type: sym.Type,
+				Sect: sym.Sect,
+				Desc: sym.Desc,
+			},
+			Value: sym.Value,
 		}); err != nil {
 			return nil, fmt.Errorf("failed to write symtab nlist entry to NEW linkedit data: %v", err)
 		}
 		if _, err := newSymNames.WriteString(sym.Name + "\x00"); err != nil {
 			return nil, fmt.Errorf("failed to write symbol name string to NEW linkedit data: %v", err)
+		}
+	}
+	// get all re-exports from LC_DYLD_EXPORTS_TRIE
+	for _, exp := range exports {
+		// If the symbol comes from a dylib that is re-exported, this is not an individual symbol re-export
+		// if ( _reexportDeps.count((int)entry.info.other) != 0 )
+		//     return true;
+		// if !exp.Flags.Regular() || exp.Flags.ReExport() || reexportDeps == exp.Other {
+		if !exp.Flags.Regular() || exp.Flags.ReExport() {
+			if err := binary.Write(&lebuf, binary.LittleEndian, types.Nlist64{
+				Nlist: types.Nlist{
+					Name: uint32(newSymNames.Len()),
+					Type: (types.N_INDR | types.N_EXT),
+					Sect: 0,
+					Desc: 0,
+				},
+				Value: exp.Address,
+			}); err != nil {
+				return nil, fmt.Errorf("failed to write export nlist entry to NEW linkedit data: %v", err)
+			}
+			if _, err := newSymNames.WriteString(exp.Name + "\x00"); err != nil {
+				return nil, fmt.Errorf("failed to write export symbol name string to NEW linkedit data: %v", err)
+			}
+			if _, err := newSymNames.WriteString(exp.ReExport + "\x00"); err != nil {
+				return nil, fmt.Errorf("failed to write symbol reexport name string to NEW linkedit data: %v", err)
+			}
 		}
 	}
 
@@ -565,9 +615,9 @@ func (f *File) optimizeLinkedit(locals []Symbol) ([]byte, error) {
 	f.Dysymtab.Indirectsymoff = uint32(linkedit.Offset + newIndSymTabOffset)
 
 	linkedit.Filesz = uint64(f.Symtab.Stroff+f.Symtab.Strsize) - linkedit.Offset
-	linkedit.Memsz = (linkedit.Filesz + 4095) & ^uint64(4096) // TODO: make sure this is correct
+	linkedit.Memsz = uint64(linkedit.Filesz+4095) & ^uint64(4095)
 
-	return lebuf.Bytes(), nil
+	return &lebuf, nil
 }
 
 func (f *File) writeLoadCommands(buf *bytes.Buffer) error {
@@ -585,14 +635,74 @@ func (f *File) writeLoadCommands(buf *bytes.Buffer) error {
 					return err
 				}
 			}
+		case types.LC_SYMTAB:
+			if err := l.(*Symtab).Write(buf, f.ByteOrder); err != nil {
+				return err
+			}
+		case types.LC_DYSYMTAB:
+			if err := l.(*Dysymtab).Write(buf, f.ByteOrder); err != nil {
+				return err
+			}
+		case types.LC_CODE_SIGNATURE:
+			if err := l.(*CodeSignature).Write(buf, f.ByteOrder); err != nil {
+				return err
+			}
 		case types.LC_SEGMENT_SPLIT_INFO:
 			// <rdar://problem/23212513> dylibs iOS 9 dyld caches have bogus LC_SEGMENT_SPLIT_INFO
-			// if err := l.(*SplitInfo).Write(buf, f.ByteOrder); err != nil {
-			// 	return err
-			// }
+			if err := l.(*SplitInfo).Write(buf, f.ByteOrder); err != nil {
+				return err
+			}
+		case types.LC_ENCRYPTION_INFO:
+			if err := l.(*EncryptionInfo).Write(buf, f.ByteOrder); err != nil {
+				return err
+			}
+		case types.LC_DYLD_INFO:
+			if err := l.(*DyldInfo).Write(buf, f.ByteOrder); err != nil {
+				return err
+			}
+		case types.LC_DYLD_INFO_ONLY:
+			if err := l.(*DyldInfoOnly).Write(buf, f.ByteOrder); err != nil {
+				return err
+			}
+		case types.LC_FUNCTION_STARTS:
+			if err := l.(*FunctionStarts).Write(buf, f.ByteOrder); err != nil {
+				return err
+			}
+		case types.LC_MAIN:
+			if err := l.(*EntryPoint).Write(buf, f.ByteOrder); err != nil {
+				return err
+			}
+		case types.LC_DATA_IN_CODE:
+			if err := l.(*DataInCode).Write(buf, f.ByteOrder); err != nil {
+				return err
+			}
+		case types.LC_DYLIB_CODE_SIGN_DRS:
+			if err := l.(*DylibCodeSignDrs).Write(buf, f.ByteOrder); err != nil {
+				return err
+			}
+		case types.LC_ENCRYPTION_INFO_64:
+			if err := l.(*EncryptionInfo64).Write(buf, f.ByteOrder); err != nil {
+				return err
+			}
+		case types.LC_LINKER_OPTIMIZATION_HINT:
+			if err := l.(*LinkerOptimizationHint).Write(buf, f.ByteOrder); err != nil {
+				return err
+			}
+		case types.LC_DYLD_EXPORTS_TRIE:
+			if err := l.(*DyldExportsTrie).Write(buf, f.ByteOrder); err != nil {
+				return err
+			}
+		case types.LC_DYLD_CHAINED_FIXUPS:
+			if err := l.(*DyldChainedFixups).Write(buf, f.ByteOrder); err != nil {
+				return err
+			}
+		case types.LC_FILESET_ENTRY:
+			if err := l.(*FilesetEntry).Write(buf, f.ByteOrder); err != nil {
+				return err
+			}
 		default:
 			if _, err := buf.Write(l.Raw()); err != nil {
-				return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+				return fmt.Errorf("failed to write %s to buffer: %v", l.Command().String(), err)
 			}
 		}
 	}

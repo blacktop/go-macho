@@ -1758,6 +1758,16 @@ func (f *File) GetFileSetFileByName(name string) (*File, error) {
 	return nil, fmt.Errorf("fileset does NOT contain %s", name)
 }
 
+// DataInCode returns the LC_DATA_IN_CODE, or nil if none exists.
+func (f *File) DataInCode() *DataInCode {
+	for _, l := range f.Loads {
+		if s, ok := l.(*DataInCode); ok {
+			return s
+		}
+	}
+	return nil
+}
+
 // FunctionStarts returns the function starts array, or nil if none exists.
 func (f *File) FunctionStarts() *FunctionStarts {
 	for _, l := range f.Loads {
