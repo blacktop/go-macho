@@ -440,6 +440,7 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 }
 
 func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
+	var newSymCount uint32
 	var lebuf bytes.Buffer
 	var newSymNames bytes.Buffer
 	var exports []trie.TrieEntry
@@ -533,9 +534,10 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		if _, err := newSymNames.WriteString(lsym.Name + "\x00"); err != nil {
 			return nil, fmt.Errorf("failed to write local symbol name string to NEW linkedit data: %v", err)
 		}
+		newSymCount++
 	}
 	// now start copying symbol table from start of externs instead of start of locals
-	for _, sym := range f.Symtab.Syms[f.Dysymtab.Nlocalsym:] {
+	for _, sym := range f.Symtab.Syms[f.Dysymtab.Iextdefsym:] {
 		if err := binary.Write(&lebuf, binary.LittleEndian, types.Nlist64{
 			Nlist: types.Nlist{
 				Name: uint32(newSymNames.Len()),
@@ -550,6 +552,7 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		if _, err := newSymNames.WriteString(sym.Name + "\x00"); err != nil {
 			return nil, fmt.Errorf("failed to write symbol name string to NEW linkedit data: %v", err)
 		}
+		newSymCount++
 	}
 	// get all re-exports from LC_DYLD_EXPORTS_TRIE
 	for _, exp := range exports {
@@ -575,6 +578,7 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 			if _, err := newSymNames.WriteString(exp.ReExport + "\x00"); err != nil {
 				return nil, fmt.Errorf("failed to write symbol reexport name string to NEW linkedit data: %v", err)
 			}
+			newSymCount++
 		}
 	}
 
@@ -602,13 +606,15 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		return nil, fmt.Errorf("failed to write symbol name strings to NEW linkedit data: %v", err)
 	}
 
-	// f.Symtab.Nsyms = newSymCount
+	f.Symtab.Nsyms = newSymCount
 	f.Symtab.Symoff = uint32(linkedit.Offset + newSymTabOffset)
 	f.Symtab.Stroff = uint32(linkedit.Offset + newStringPoolOffset)
 	f.Symtab.Strsize = uint32(newSymNames.Len())
 
 	// f.Dysymtab.Ilocalsym = uint32(len(locals)) + f. .Nextdefsym + f.Dysymtab.Nundefsym
 	f.Dysymtab.Nlocalsym = uint32(len(locals))
+	f.Dysymtab.Iextdefsym = uint32(len(locals))
+	f.Dysymtab.Iundefsym = f.Dysymtab.Iextdefsym + f.Dysymtab.Nextdefsym
 	f.Dysymtab.Extreloff = 0
 	f.Dysymtab.Nextrel = 0
 	f.Dysymtab.Locreloff = 0
