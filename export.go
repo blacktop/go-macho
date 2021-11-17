@@ -10,6 +10,7 @@ import (
 	"sort"
 
 	"github.com/blacktop/go-macho/pkg/fixupchains"
+	"github.com/blacktop/go-macho/pkg/trie"
 	"github.com/blacktop/go-macho/types"
 )
 
@@ -441,6 +442,7 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	var lebuf bytes.Buffer
 	var newSymNames bytes.Buffer
+	var exports []trie.TrieEntry
 
 	linkedit := f.Segment("__LINKEDIT")
 	if linkedit == nil {
@@ -486,26 +488,24 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	}
 
 	// fix LC_DYLD_EXPORTS_TRIE
-	exports, err := f.DyldExports()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get LC_DYLD_EXPORTS_TRIE exports: %v", err)
-	}
-	dexpTrie := f.DyldExportsTrie()
-	if dexpTrie == nil {
-		return nil, fmt.Errorf("failed to find LC_DYLD_EXPORTS_TRIE")
-	}
-	dat = make([]byte, dexpTrie.Size)
-	_, err = f.cr.ReadAt(dat, int64(dexpTrie.Offset))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read LC_DYLD_EXPORTS_TRIE data: %v", err)
-	}
-	dexpTrie.Offset = uint32(linkedit.Offset) + uint32(lebuf.Len())
-	if _, err := lebuf.Write(dat); err != nil {
-		return nil, fmt.Errorf("failed to write LC_DYLD_EXPORTS_TRIE data: %v", err)
-	}
-	pad = linkedit.Offset + uint64(lebuf.Len())%f.pointerSize()
-	if _, err := lebuf.Write(make([]byte, pad)); err != nil {
-		return nil, fmt.Errorf("failed to write LC_DYLD_EXPORTS_TRIE padding: %v", err)
+	if dexpTrie := f.DyldExportsTrie(); dexpTrie != nil {
+		exports, err = f.DyldExports()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get LC_DYLD_EXPORTS_TRIE exports: %v", err)
+		}
+		dat = make([]byte, dexpTrie.Size)
+		_, err = f.cr.ReadAt(dat, int64(dexpTrie.Offset))
+		if err != nil {
+			return nil, fmt.Errorf("failed to read LC_DYLD_EXPORTS_TRIE data: %v", err)
+		}
+		dexpTrie.Offset = uint32(linkedit.Offset) + uint32(lebuf.Len())
+		if _, err := lebuf.Write(dat); err != nil {
+			return nil, fmt.Errorf("failed to write LC_DYLD_EXPORTS_TRIE data: %v", err)
+		}
+		pad = linkedit.Offset + uint64(lebuf.Len())%f.pointerSize()
+		if _, err := lebuf.Write(make([]byte, pad)); err != nil {
+			return nil, fmt.Errorf("failed to write LC_DYLD_EXPORTS_TRIE padding: %v", err)
+		}
 	}
 
 	// TODO: LC_CODE_SIGNATURE           ?
