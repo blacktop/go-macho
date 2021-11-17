@@ -1711,6 +1711,16 @@ func (f *File) DyldInfo() *DyldInfo {
 	return nil
 }
 
+// DyldInfoOnly returns the dyld info only load command, or nil if no dyld info only exists.
+func (f *File) DyldInfoOnly() *DyldInfoOnly {
+	for _, l := range f.Loads {
+		if s, ok := l.(*DyldInfoOnly); ok {
+			return s
+		}
+	}
+	return nil
+}
+
 // SourceVersion returns the source version load command, or nil if no source version exists.
 func (f *File) SourceVersion() *SourceVersion {
 	for _, l := range f.Loads {

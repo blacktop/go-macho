@@ -440,6 +440,7 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 }
 
 func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
+	var err error
 	var newSymCount uint32
 	var lebuf bytes.Buffer
 	var newSymNames bytes.Buffer
@@ -450,51 +451,159 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		return nil, fmt.Errorf("unable to find __LINKEDIT segment")
 	}
 
+	// fix LC_DYLD_INFO|LC_DYLD_INFO_ONLY
+	if dinfo := f.DyldInfo(); dinfo != nil {
+		if dinfo.RebaseSize > 0 {
+			dat := make([]byte, dinfo.RebaseSize)
+			_, err := f.cr.ReadAt(dat, int64(dinfo.RebaseOff))
+			if err != nil {
+				return nil, fmt.Errorf("failed to read %s rebase data: %v", dinfo.LoadCmd, err)
+			}
+			dinfo.RebaseOff = uint32(linkedit.Offset) + uint32(lebuf.Len())
+			if _, err := lebuf.Write(dat); err != nil {
+				return nil, fmt.Errorf("failed to write %s rebase data: %v", dinfo.LoadCmd, err)
+			}
+		}
+		if dinfo.BindSize > 0 {
+			dat := make([]byte, dinfo.BindSize)
+			_, err := f.cr.ReadAt(dat, int64(dinfo.BindOff))
+			if err != nil {
+				return nil, fmt.Errorf("failed to read %s bind data: %v", dinfo.LoadCmd, err)
+			}
+			dinfo.BindOff = uint32(linkedit.Offset) + uint32(lebuf.Len())
+			if _, err := lebuf.Write(dat); err != nil {
+				return nil, fmt.Errorf("failed to write %s bind data: %v", dinfo.LoadCmd, err)
+			}
+		}
+		if dinfo.WeakBindSize > 0 {
+			dat := make([]byte, dinfo.WeakBindSize)
+			_, err := f.cr.ReadAt(dat, int64(dinfo.WeakBindOff))
+			if err != nil {
+				return nil, fmt.Errorf("failed to read %s weak bind data: %v", dinfo.LoadCmd, err)
+			}
+			dinfo.WeakBindOff = uint32(linkedit.Offset) + uint32(lebuf.Len())
+			if _, err := lebuf.Write(dat); err != nil {
+				return nil, fmt.Errorf("failed to write %s weak bind data: %v", dinfo.LoadCmd, err)
+			}
+		}
+		if dinfo.LazyBindSize > 0 {
+			dat := make([]byte, dinfo.LazyBindSize)
+			_, err := f.cr.ReadAt(dat, int64(dinfo.LazyBindOff))
+			if err != nil {
+				return nil, fmt.Errorf("failed to read %s lazy bind data: %v", dinfo.LoadCmd, err)
+			}
+			dinfo.LazyBindOff = uint32(linkedit.Offset) + uint32(lebuf.Len())
+			if _, err := lebuf.Write(dat); err != nil {
+				return nil, fmt.Errorf("failed to write %s lazy bind data: %v", dinfo.LoadCmd, err)
+			}
+		}
+		if dinfo.ExportSize > 0 {
+			dat := make([]byte, dinfo.ExportSize)
+			_, err := f.cr.ReadAt(dat, int64(dinfo.ExportOff))
+			if err != nil {
+				return nil, fmt.Errorf("failed to read %s export data: %v", dinfo.LoadCmd, err)
+			}
+			dinfo.ExportOff = uint32(linkedit.Offset) + uint32(lebuf.Len())
+			if _, err := lebuf.Write(dat); err != nil {
+				return nil, fmt.Errorf("failed to write %s export data: %v", dinfo.LoadCmd, err)
+			}
+		}
+	} else if dionly := f.DyldInfoOnly(); dionly != nil {
+		if dionly.RebaseSize > 0 {
+			dat := make([]byte, dionly.RebaseSize)
+			_, err := f.cr.ReadAt(dat, int64(dionly.RebaseOff))
+			if err != nil {
+				return nil, fmt.Errorf("failed to read %s rebase data: %v", dionly.LoadCmd, err)
+			}
+			dionly.RebaseOff = uint32(linkedit.Offset) + uint32(lebuf.Len())
+			if _, err := lebuf.Write(dat); err != nil {
+				return nil, fmt.Errorf("failed to write %s rebase data: %v", dionly.LoadCmd, err)
+			}
+		}
+		if dionly.BindSize > 0 {
+			dat := make([]byte, dionly.BindSize)
+			_, err := f.cr.ReadAt(dat, int64(dionly.BindOff))
+			if err != nil {
+				return nil, fmt.Errorf("failed to read %s bind data: %v", dionly.LoadCmd, err)
+			}
+			dionly.BindOff = uint32(linkedit.Offset) + uint32(lebuf.Len())
+			if _, err := lebuf.Write(dat); err != nil {
+				return nil, fmt.Errorf("failed to write %s bind data: %v", dionly.LoadCmd, err)
+			}
+		}
+		if dionly.WeakBindSize > 0 {
+			dat := make([]byte, dionly.WeakBindSize)
+			_, err := f.cr.ReadAt(dat, int64(dionly.WeakBindOff))
+			if err != nil {
+				return nil, fmt.Errorf("failed to read %s weak bind data: %v", dionly.LoadCmd, err)
+			}
+			dionly.WeakBindOff = uint32(linkedit.Offset) + uint32(lebuf.Len())
+			if _, err := lebuf.Write(dat); err != nil {
+				return nil, fmt.Errorf("failed to write %s weak bind data: %v", dionly.LoadCmd, err)
+			}
+		}
+		if dionly.LazyBindSize > 0 {
+			dat := make([]byte, dionly.LazyBindSize)
+			_, err := f.cr.ReadAt(dat, int64(dionly.LazyBindOff))
+			if err != nil {
+				return nil, fmt.Errorf("failed to read %s lazy bind data: %v", dionly.LoadCmd, err)
+			}
+			dionly.LazyBindOff = uint32(linkedit.Offset) + uint32(lebuf.Len())
+			if _, err := lebuf.Write(dat); err != nil {
+				return nil, fmt.Errorf("failed to write %s lazy bind data: %v", dionly.LoadCmd, err)
+			}
+		}
+		if dionly.ExportSize > 0 {
+			dat := make([]byte, dionly.ExportSize)
+			_, err := f.cr.ReadAt(dat, int64(dionly.ExportOff))
+			if err != nil {
+				return nil, fmt.Errorf("failed to read %s export data: %v", dionly.LoadCmd, err)
+			}
+			dionly.ExportOff = uint32(linkedit.Offset) + uint32(lebuf.Len())
+			if _, err := lebuf.Write(dat); err != nil {
+				return nil, fmt.Errorf("failed to write %s export data: %v", dionly.LoadCmd, err)
+			}
+		}
+	}
 	// fix LC_FUNCTION_STARTS
-	fstarts := f.FunctionStarts()
-	if fstarts == nil {
-		return nil, fmt.Errorf("failed to find LC_FUNCTION_STARTS")
+	if fstarts := f.FunctionStarts(); fstarts != nil {
+		dat := make([]byte, fstarts.Size)
+		_, err := f.cr.ReadAt(dat, int64(fstarts.Offset))
+		if err != nil {
+			return nil, fmt.Errorf("failed to read LC_FUNCTION_STARTS data: %v", err)
+		}
+		fstarts.Offset = uint32(linkedit.Offset) + uint32(lebuf.Len())
+		if _, err := lebuf.Write(dat); err != nil {
+			return nil, fmt.Errorf("failed to write LC_FUNCTION_STARTS data: %v", err)
+		}
+		pad := linkedit.Offset + uint64(lebuf.Len())%f.pointerSize()
+		if _, err := lebuf.Write(make([]byte, pad)); err != nil {
+			return nil, fmt.Errorf("failed to write LC_FUNCTION_STARTS padding: %v", err)
+		}
 	}
-	dat := make([]byte, fstarts.Size)
-	_, err := f.cr.ReadAt(dat, int64(fstarts.Offset))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read LC_FUNCTION_STARTS data: %v", err)
-	}
-	fstarts.Offset = uint32(linkedit.Offset) + uint32(lebuf.Len())
-	if _, err := lebuf.Write(dat); err != nil {
-		return nil, fmt.Errorf("failed to write LC_FUNCTION_STARTS data: %v", err)
-	}
-	pad := linkedit.Offset + uint64(lebuf.Len())%f.pointerSize()
-	if _, err := lebuf.Write(make([]byte, pad)); err != nil {
-		return nil, fmt.Errorf("failed to write LC_FUNCTION_STARTS padding: %v", err)
-	}
-
 	// fix LC_DATA_IN_CODE
-	dataNCode := f.DataInCode()
-	if dataNCode == nil {
-		return nil, fmt.Errorf("failed to find LC_DATA_IN_CODE")
+	if dataNCode := f.DataInCode(); dataNCode != nil {
+		dat := make([]byte, dataNCode.Size)
+		_, err = f.cr.ReadAt(dat, int64(dataNCode.Offset))
+		if err != nil {
+			return nil, fmt.Errorf("failed to read LC_DATA_IN_CODE data: %v", err)
+		}
+		dataNCode.Offset = uint32(linkedit.Offset) + uint32(lebuf.Len())
+		if _, err := lebuf.Write(dat); err != nil {
+			return nil, fmt.Errorf("failed to write LC_DATA_IN_CODE data: %v", err)
+		}
+		pad := linkedit.Offset + uint64(lebuf.Len())%f.pointerSize()
+		if _, err := lebuf.Write(make([]byte, pad)); err != nil {
+			return nil, fmt.Errorf("failed to write LC_DATA_IN_CODE padding: %v", err)
+		}
 	}
-	dat = make([]byte, dataNCode.Size)
-	_, err = f.cr.ReadAt(dat, int64(dataNCode.Offset))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read LC_DATA_IN_CODE data: %v", err)
-	}
-	dataNCode.Offset = uint32(linkedit.Offset) + uint32(lebuf.Len())
-	if _, err := lebuf.Write(dat); err != nil {
-		return nil, fmt.Errorf("failed to write LC_DATA_IN_CODE data: %v", err)
-	}
-	pad = linkedit.Offset + uint64(lebuf.Len())%f.pointerSize()
-	if _, err := lebuf.Write(make([]byte, pad)); err != nil {
-		return nil, fmt.Errorf("failed to write LC_DATA_IN_CODE padding: %v", err)
-	}
-
 	// fix LC_DYLD_EXPORTS_TRIE
 	if dexpTrie := f.DyldExportsTrie(); dexpTrie != nil {
 		exports, err = f.DyldExports()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get LC_DYLD_EXPORTS_TRIE exports: %v", err)
 		}
-		dat = make([]byte, dexpTrie.Size)
+		dat := make([]byte, dexpTrie.Size)
 		_, err = f.cr.ReadAt(dat, int64(dexpTrie.Offset))
 		if err != nil {
 			return nil, fmt.Errorf("failed to read LC_DYLD_EXPORTS_TRIE data: %v", err)
@@ -503,7 +612,7 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		if _, err := lebuf.Write(dat); err != nil {
 			return nil, fmt.Errorf("failed to write LC_DYLD_EXPORTS_TRIE data: %v", err)
 		}
-		pad = linkedit.Offset + uint64(lebuf.Len())%f.pointerSize()
+		pad := linkedit.Offset + uint64(lebuf.Len())%f.pointerSize()
 		if _, err := lebuf.Write(make([]byte, pad)); err != nil {
 			return nil, fmt.Errorf("failed to write LC_DYLD_EXPORTS_TRIE padding: %v", err)
 		}
