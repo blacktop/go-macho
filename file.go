@@ -323,13 +323,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 		loadsFilter = config[0].LoadFilter
 		f.relativeSelectorBase = config[0].RelativeSelectorBase
 	} else {
-		f.sr = types.NewCustomSectionReader(r, 0, 1<<63-1)
-		f.cr = f.sr
 		f.vma = &types.VMAddrConverter{
 			Converter:    f.convertToVMAddr,
 			VMAddr2Offet: f.GetOffset,
 			Offet2VMAddr: f.GetVMAddress,
 		}
+		f.sr = types.NewCustomSectionReader(r, f.vma, 0, 1<<63-1)
+		f.cr = f.sr
 	}
 
 	// Read and decode Mach magic to determine byte order, size.

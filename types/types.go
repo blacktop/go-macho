@@ -252,8 +252,8 @@ type MachoReader interface {
 
 // NewCustomSectionReader returns a CustomSectionReader that reads from r
 // starting at offset off and stops with EOF after n bytes.
-func NewCustomSectionReader(r io.ReaderAt, off int64, n int64) *CustomSectionReader {
-	return &CustomSectionReader{r, off, off, off + n}
+func NewCustomSectionReader(r io.ReaderAt, vma *VMAddrConverter, off int64, n int64) *CustomSectionReader {
+	return &CustomSectionReader{r, vma, off, off, off + n}
 }
 
 // CustomSectionReader implements Read, Seek, and ReadAt on a section
@@ -261,6 +261,7 @@ func NewCustomSectionReader(r io.ReaderAt, off int64, n int64) *CustomSectionRea
 // It also stubs out the MachoReader required SeekToAddr and ReadAtAddr
 type CustomSectionReader struct {
 	r     io.ReaderAt
+	vma   *VMAddrConverter
 	base  int64
 	off   int64
 	limit int64
@@ -316,9 +317,18 @@ func (s *CustomSectionReader) ReadAt(p []byte, off int64) (n int, err error) {
 func (s *CustomSectionReader) Size() int64 { return s.limit - s.base }
 
 func (s *CustomSectionReader) SeekToAddr(addr uint64) error {
-	panic("not implemented") // TODO: Implement
+	off, err := s.vma.VMAddr2Offet(addr)
+	if err != nil {
+		return err
+	}
+	_, err = s.Seek(int64(off), io.SeekStart)
+	return err
 }
 
 func (s *CustomSectionReader) ReadAtAddr(buf []byte, addr uint64) (int, error) {
-	panic("not implemented") // TODO: Implement
+	off, err := s.vma.VMAddr2Offet(addr)
+	if err != nil {
+		return 0, err
+	}
+	return s.ReadAt(buf, int64(off))
 }
