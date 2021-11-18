@@ -109,14 +109,13 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 	// Write out segment data to buffer
 	for _, seg := range f.Segments() {
 		if seg.Filesz > 0 {
-			dat := make([]byte, seg.Filesz)
-			_, err := f.cr.ReadAtAddr(dat, seg.Addr)
-			if err != nil {
-				return fmt.Errorf("failed to read segment %s data: %v", seg.Name, err)
-			}
-
 			switch seg.Name {
 			case "__TEXT":
+				dat := make([]byte, seg.Filesz)
+				_, err := f.cr.ReadAtAddr(dat, seg.Addr)
+				if err != nil {
+					return fmt.Errorf("failed to read segment %s data: %v", seg.Name, err)
+				}
 				if _, err := buf.Write(dat[endOfLoadsOffset:]); err != nil {
 					return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
 				}
@@ -126,11 +125,21 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 						return fmt.Errorf("failed to write optimized segment %s to export buffer: %v", seg.Name, err)
 					}
 				} else {
+					dat := make([]byte, seg.Filesz)
+					_, err := f.cr.ReadAtAddr(dat, seg.Addr)
+					if err != nil {
+						return fmt.Errorf("failed to read segment %s data: %v", seg.Name, err)
+					}
 					if _, err := buf.Write(dat); err != nil {
 						return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
 					}
 				}
 			default:
+				dat := make([]byte, seg.Filesz)
+				_, err := f.cr.ReadAtAddr(dat, seg.Addr)
+				if err != nil {
+					return fmt.Errorf("failed to read segment %s data: %v", seg.Name, err)
+				}
 				if _, err := buf.Write(dat); err != nil {
 					return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
 				}
