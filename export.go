@@ -233,7 +233,8 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 				if f.Sections[i+seg.Firstsect].Offset != 0 {
 					off, err := segMap.Remap(uint64(f.Sections[i+seg.Firstsect].Offset))
 					if err != nil {
-						return fmt.Errorf("failed to remap offset in section %s.%s: %v", seg.Name, f.Sections[i+seg.Firstsect].Name, err)
+						// return fmt.Errorf("failed to remap offset in section %s.%s: %v", seg.Name, f.Sections[i+seg.Firstsect].Name, err)
+						continue // FIXME: this is so that libcorecrypto.dylib will work as it has normal offsets for some reason
 					}
 					f.Sections[i+seg.Firstsect].Offset = uint32(off)
 				}
