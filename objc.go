@@ -90,10 +90,6 @@ func (f *File) GetObjCImageInfo() (*objc.ImageInfo, error) {
 	for _, s := range f.Segments() {
 		if strings.HasPrefix(s.Name, "__DATA") {
 			if sec := f.Section(s.Name, "__objc_imageinfo"); sec != nil {
-				if sec.Size == 0 {
-					return nil, fmt.Errorf("%s.%s section has size 0", sec.Seg, sec.Name)
-				}
-
 				dat, err := sec.Data()
 				if err != nil {
 					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
@@ -134,10 +130,6 @@ func (f *File) GetObjCMethodNames() (map[string]uint64, error) {
 	meth2vmaddr := make(map[string]uint64)
 
 	if sec := f.Section("__TEXT", "__objc_methname"); sec != nil {
-		if sec.Size == 0 {
-			return nil, fmt.Errorf("%s.%s section has size 0", sec.Seg, sec.Name)
-		}
-
 		off, err := f.vma.GetOffset(sec.Addr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
@@ -173,10 +165,6 @@ func (f *File) GetObjCClasses() ([]objc.Class, error) {
 	for _, s := range f.Segments() {
 		if strings.HasPrefix(s.Name, "__DATA") {
 			if sec := f.Section(s.Name, "__objc_classlist"); sec != nil {
-				if sec.Size == 0 {
-					return nil, fmt.Errorf("%s.%s section has size 0", sec.Seg, sec.Name)
-				}
-
 				dat, err := sec.Data()
 				if err != nil {
 					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
@@ -207,10 +195,6 @@ func (f *File) GetObjCPlusLoadClasses() ([]objc.Class, error) {
 	for _, s := range f.Segments() {
 		if strings.HasPrefix(s.Name, "__DATA") {
 			if sec := f.Section(s.Name, "__objc_nlclslist"); sec != nil {
-				if sec.Size == 0 {
-					return nil, fmt.Errorf("%s.%s section has size 0", sec.Seg, sec.Name)
-				}
-
 				dat, err := sec.Data()
 				if err != nil {
 					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
@@ -360,10 +344,6 @@ func (f *File) GetObjCCategories() ([]objc.Category, error) {
 	for _, s := range f.Segments() {
 		if strings.HasPrefix(s.Name, "__DATA") {
 			if sec := f.Section(s.Name, "__objc_catlist"); sec != nil {
-				if sec.Size == 0 {
-					return nil, fmt.Errorf("%s.%s section has size 0", sec.Seg, sec.Name)
-				}
-
 				dat, err := sec.Data()
 				if err != nil {
 					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
@@ -427,10 +407,6 @@ func (f *File) GetCFStrings() ([]objc.CFString, error) {
 
 	for _, s := range f.Segments() {
 		if sec := f.Section(s.Name, "__cfstring"); sec != nil {
-			if sec.Size == 0 {
-				return nil, fmt.Errorf("%s.%s section has size 0", sec.Seg, sec.Name)
-			}
-
 			dat, err := sec.Data()
 			if err != nil {
 				return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
@@ -628,10 +604,6 @@ func (f *File) GetObjCProtocols() ([]objc.Protocol, error) {
 	for _, s := range f.Segments() {
 		if strings.HasPrefix(s.Name, "__DATA") {
 			if sec := f.Section(s.Name, "__objc_protolist"); sec != nil {
-				if sec.Size == 0 {
-					return nil, fmt.Errorf("%s.%s section has size 0", sec.Seg, sec.Name)
-				}
-
 				dat, err := sec.Data()
 				if err != nil {
 					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
@@ -661,10 +633,6 @@ func (f *File) GetObjCMethodList() ([]objc.Method, error) {
 	var objcMethods []objc.Method
 
 	if sec := f.Section("__TEXT", "__objc_methlist"); sec != nil {
-		if sec.Size == 0 {
-			return nil, fmt.Errorf("%s.%s section has size 0", sec.Seg, sec.Name)
-		}
-
 		mlr := io.NewSectionReader(f.cr, int64(sec.Offset), int64(sec.Size))
 
 		for {
@@ -961,10 +929,6 @@ func (f *File) GetObjCClassReferences() (map[uint64]*objc.Class, error) {
 	for _, s := range f.Segments() {
 		if strings.HasPrefix(s.Name, "__DATA") {
 			if sec := f.Section(s.Name, "__objc_classrefs"); sec != nil {
-				if sec.Size == 0 {
-					return nil, fmt.Errorf("%s.%s section has size 0", sec.Seg, sec.Name)
-				}
-
 				dat, err := sec.Data()
 				if err != nil {
 					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
@@ -1000,10 +964,6 @@ func (f *File) GetObjCSuperReferences() (map[uint64]*objc.Class, error) {
 	for _, s := range f.Segments() {
 		if strings.HasPrefix(s.Name, "__DATA") {
 			if sec := f.Section(s.Name, "__objc_superrefs"); sec != nil {
-				if sec.Size == 0 {
-					return nil, fmt.Errorf("%s.%s section has size 0", sec.Seg, sec.Name)
-				}
-
 				dat, err := sec.Data()
 				if err != nil {
 					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
@@ -1042,9 +1002,6 @@ func (f *File) GetObjCProtoReferences() (map[uint64]*objc.Protocol, error) {
 			for _, secName := range []string{"__objc_protorefs", "__objc_protolist"} {
 				if sec := f.Section(s.Name, secName); sec != nil {
 					found = true
-					if sec.Size == 0 {
-						return nil, fmt.Errorf("%s.%s section has size 0", sec.Seg, sec.Name)
-					}
 
 					dat, err := sec.Data()
 					if err != nil {
@@ -1080,10 +1037,6 @@ func (f *File) GetObjCSelectorReferences() (map[uint64]*objc.Selector, error) {
 	for _, s := range f.Segments() {
 		if strings.HasPrefix(s.Name, "__DATA") {
 			if sec := f.Section(s.Name, "__objc_selrefs"); sec != nil {
-				if sec.Size == 0 {
-					return nil, fmt.Errorf("%s.%s section has size 0", sec.Seg, sec.Name)
-				}
-
 				dat, err := sec.Data()
 				if err != nil {
 					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
