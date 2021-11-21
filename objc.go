@@ -60,25 +60,34 @@ func (f *File) HasObjCMessageReferences() bool {
 	return false
 }
 
-func (f *File) GetObjCInfo() objc.Info {
-	var oInfo objc.Info
+func (f *File) GetObjCToc() objc.Toc {
+	var oInfo objc.Toc
 
 	for _, sec := range f.FileTOC.Sections {
 		if strings.HasPrefix(sec.SectionHeader.Seg, "__DATA") {
-			if strings.EqualFold(sec.Name, "__objc_selrefs") {
-				oInfo.SelRefCount += sec.SectionHeader.Size / f.pointerSize()
-			} else if strings.EqualFold(sec.Name, "__objc_classlist") {
-				oInfo.ClassDefCount += sec.SectionHeader.Size / f.pointerSize()
-			} else if strings.EqualFold(sec.Name, "__objc_protolist") {
-				oInfo.ProtocolDefCount += sec.SectionHeader.Size / f.pointerSize()
+			switch sec.Name {
+			case "__objc_classlist":
+				oInfo.ClassList = sec.Size / f.pointerSize()
+			case "__objc_nlclslist":
+				oInfo.NlclsList = sec.Size / f.pointerSize()
+			case "__objc_catlist":
+				oInfo.CatList = sec.Size / f.pointerSize()
+			case "__objc_protolist":
+				oInfo.ProtoList = sec.Size / f.pointerSize()
+			case "__objc_classrefs":
+				oInfo.ClassRefs = sec.Size / f.pointerSize()
+			case "__objc_superrefs":
+				oInfo.SuperRefs = sec.Size / f.pointerSize()
+			case "__objc_selrefs":
+				oInfo.SelRefs = sec.Size / f.pointerSize()
 			}
 		} else if (f.CPU == types.CPU386) && strings.EqualFold(sec.Name, "__OBJC") {
 			if strings.EqualFold(sec.Name, "__message_refs") {
-				oInfo.SelRefCount += sec.SectionHeader.Size / 4
+				oInfo.SelRefs += sec.SectionHeader.Size / 4
 			} else if strings.EqualFold(sec.Name, "__class") {
-				oInfo.ClassDefCount += sec.SectionHeader.Size / 48
+				oInfo.ClassList += sec.SectionHeader.Size / 48
 			} else if strings.EqualFold(sec.Name, "__protocol") {
-				oInfo.ProtocolDefCount += sec.SectionHeader.Size / 20
+				oInfo.ProtoList += sec.SectionHeader.Size / 20
 			}
 		}
 	}
@@ -170,7 +179,7 @@ func (f *File) GetObjCClasses() ([]objc.Class, error) {
 					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 				}
 
-				ptrs := make([]uint64, sec.Size/8)
+				ptrs := make([]uint64, sec.Size/f.pointerSize())
 				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &ptrs); err != nil {
 					return nil, fmt.Errorf("failed to read %s pointers: %v", sec.Name, err)
 				}
@@ -200,7 +209,7 @@ func (f *File) GetObjCPlusLoadClasses() ([]objc.Class, error) {
 					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 				}
 
-				ptrs := make([]uint64, sec.Size/8)
+				ptrs := make([]uint64, sec.Size/f.pointerSize())
 				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &ptrs); err != nil {
 					return nil, fmt.Errorf("failed to read %s pointers: %v", sec.Name, err)
 				}
@@ -348,7 +357,7 @@ func (f *File) GetObjCCategories() ([]objc.Category, error) {
 				if err != nil {
 					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 				}
-				ptrs := make([]uint64, sec.Size/8)
+				ptrs := make([]uint64, sec.Size/f.pointerSize())
 				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &ptrs); err != nil {
 					return nil, fmt.Errorf("failed to read %s.%s pointers: %v", sec.Seg, sec.Name, err)
 				}
@@ -609,7 +618,7 @@ func (f *File) GetObjCProtocols() ([]objc.Protocol, error) {
 					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 				}
 
-				ptrs := make([]uint64, sec.Size/8)
+				ptrs := make([]uint64, sec.Size/f.pointerSize())
 				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &ptrs); err != nil {
 					return nil, fmt.Errorf("failed to read %s.%s pointers: %v", sec.Seg, sec.Name, err)
 				}
@@ -934,7 +943,7 @@ func (f *File) GetObjCClassReferences() (map[uint64]*objc.Class, error) {
 					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 				}
 
-				classPtrs = make([]uint64, sec.Size/8)
+				classPtrs = make([]uint64, sec.Size/f.pointerSize())
 				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &classPtrs); err != nil {
 					return nil, fmt.Errorf("failed to read %s.%s pointers: %v", sec.Seg, sec.Name, err)
 				}
@@ -969,7 +978,7 @@ func (f *File) GetObjCSuperReferences() (map[uint64]*objc.Class, error) {
 					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 				}
 
-				classPtrs = make([]uint64, sec.Size/8)
+				classPtrs = make([]uint64, sec.Size/f.pointerSize())
 				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &classPtrs); err != nil {
 					return nil, fmt.Errorf("failed to read %s.%s pointers: %v", sec.Seg, sec.Name, err)
 				}
@@ -1008,7 +1017,7 @@ func (f *File) GetObjCProtoReferences() (map[uint64]*objc.Protocol, error) {
 						return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 					}
 
-					protoPtrs = make([]uint64, sec.Size/8)
+					protoPtrs = make([]uint64, sec.Size/f.pointerSize())
 					if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &protoPtrs); err != nil {
 						return nil, fmt.Errorf("failed to read %s.%s pointers: %v", sec.Seg, sec.Name, err)
 					}
@@ -1042,7 +1051,7 @@ func (f *File) GetObjCSelectorReferences() (map[uint64]*objc.Selector, error) {
 					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 				}
 
-				selPtrs = make([]uint64, sec.Size/8)
+				selPtrs = make([]uint64, sec.Size/f.pointerSize())
 				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &selPtrs); err != nil {
 					return nil, fmt.Errorf("failed to read %s.%s pointers: %v", sec.Seg, sec.Name, err)
 				}

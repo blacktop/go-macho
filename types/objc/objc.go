@@ -9,22 +9,34 @@ import (
 
 const IsDyldPreoptimized = 1 << 7
 
-type Info struct {
-	SelRefCount      uint64
-	ClassDefCount    uint64
-	ProtocolDefCount uint64
+type Toc struct {
+	ClassList uint64
+	ClassRefs uint64
+	NlclsList uint64
+	SuperRefs uint64
+	CatList   uint64
+	ProtoList uint64
+	SelRefs   uint64
 }
 
-func (i Info) String() string {
+func (i Toc) String() string {
 	return fmt.Sprintf(
-		"ObjC Info\n"+
+		"ObjC TOC\n"+
 			"=========\n"+
-			"ClassDefs    = %d\n"+
-			"ProtocolDefs = %d\n"+
-			"SelRefs      = %d\n",
-		i.ClassDefCount,
-		i.ProtocolDefCount,
-		i.SelRefCount,
+			"\t__objc_classlist  = %d\n"+
+			"\t__objc_classrefs  = %d\n"+
+			"\t__objc_nlclslist  = %d\n"+
+			"\t__objc_superrefs  = %d\n"+
+			"\t__objc_catlist    = %d\n"+
+			"\t__objc_protolist  = %d\n"+
+			"\t__objc_selrefs    = %d\n",
+		i.ClassList,
+		i.ClassRefs,
+		i.NlclsList,
+		i.SuperRefs,
+		i.CatList,
+		i.ProtoList,
+		i.SelRefs,
 	)
 }
 
