@@ -23,13 +23,13 @@ func (i Toc) String() string {
 	return fmt.Sprintf(
 		"ObjC TOC\n"+
 			"--------\n"+
-			"\t__objc_classlist  = %d\n"+
-			"\t__objc_classrefs  = %d\n"+
-			"\t__objc_nlclslist  = %d\n"+
-			"\t__objc_superrefs  = %d\n"+
-			"\t__objc_catlist    = %d\n"+
-			"\t__objc_protolist  = %d\n"+
-			"\t__objc_selrefs    = %d\n",
+			"  __objc_classlist  = %d\n"+
+			"  __objc_classrefs  = %d\n"+
+			"  __objc_nlclslist  = %d\n"+
+			"  __objc_superrefs  = %d\n"+
+			"  __objc_catlist    = %d\n"+
+			"  __objc_protolist  = %d\n"+
+			"  __objc_selrefs    = %d\n",
 		i.ClassList,
 		i.ClassRefs,
 		i.NlclsList,
