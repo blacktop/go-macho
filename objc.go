@@ -1035,33 +1035,37 @@ func (f *File) GetObjCProtoReferences() (map[uint64]*objc.Protocol, error) {
 
 	for _, s := range f.Segments() {
 		if strings.HasPrefix(s.Name, "__DATA") {
-			if sec := f.Section(s.Name, "__objc_protorefs"); sec != nil {
-				if sec.Size == 0 {
-					return nil, fmt.Errorf("%s.%s section has size 0", sec.Seg, sec.Name)
-				}
-
-				dat, err := sec.Data()
-				if err != nil {
-					return nil, fmt.Errorf("failed to read __objc_protorefs: %v", err)
-				}
-
-				protoPtrs = make([]uint64, sec.Size/8)
-				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &protoPtrs); err != nil {
-					return nil, fmt.Errorf("failed to read super ref pointers: %v", err)
-				}
-
-				for idx, ptr := range protoPtrs {
-					proto, err := f.getObjcProtocol(f.vma.Convert(ptr))
-					if err != nil {
-						return nil, fmt.Errorf("failed to read objc_class_t at superref ptr: %#x; %v", ptr, err)
+			for _, secName := range []string{"__objc_protorefs", "__objc_protolist"} {
+				if sec := f.Section(s.Name, secName); sec != nil {
+					if sec.Size == 0 {
+						return nil, fmt.Errorf("%s.%s section has size 0", sec.Seg, sec.Name)
 					}
-					protRefs[sec.Addr+uint64(idx*sizeOfInt64)] = proto
+
+					dat, err := sec.Data()
+					if err != nil {
+						return nil, fmt.Errorf("failed to read %s: %v", secName, err)
+					}
+
+					protoPtrs = make([]uint64, sec.Size/8)
+					if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &protoPtrs); err != nil {
+						return nil, fmt.Errorf("failed to read super ref pointers: %v", err)
+					}
+
+					for idx, ptr := range protoPtrs {
+						proto, err := f.getObjcProtocol(f.vma.Convert(ptr))
+						if err != nil {
+							return nil, fmt.Errorf("failed to read objc_class_t at superref ptr: %#x; %v", ptr, err)
+						}
+						protRefs[sec.Addr+uint64(idx*sizeOfInt64)] = proto
+					}
 				}
-				return protRefs, nil
 			}
 		}
 	}
-	return nil, fmt.Errorf("macho does not contain a __objc_protorefs section")
+	if len(protRefs) == 0 {
+		return nil, fmt.Errorf("MachO does not contain a __objc_protorefs or __objc_protolist section")
+	}
+	return protRefs, nil
 }
 
 func (f *File) GetObjCSelectorReferences() (map[uint64]*objc.Selector, error) {
