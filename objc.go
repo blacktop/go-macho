@@ -3,6 +3,7 @@ package macho
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	"github.com/blacktop/go-macho/types"
 	"github.com/blacktop/go-macho/types/objc"
 )
+
+var ErrObjcSectionNotFound = errors.New("missing required ObjC section")
 
 // TODO refactor into a pkg
 func (f *File) HasObjC() bool {
@@ -93,18 +96,18 @@ func (f *File) GetObjCImageInfo() (*objc.ImageInfo, error) {
 
 				dat, err := sec.Data()
 				if err != nil {
-					return nil, fmt.Errorf("failed to read __objc_imageinfo: %v", err)
+					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 				}
 
 				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &imgInfo); err != nil {
-					return nil, fmt.Errorf("failed to read ObjCImageInfo: %v", err)
+					return nil, fmt.Errorf("failed to read %T: %v", imgInfo, err)
 				}
 
 				return &imgInfo, nil
 			}
 		}
 	}
-	return nil, fmt.Errorf("macho does not contain a __objc_imageinfo section")
+	return nil, fmt.Errorf("macho does not contain __objc_imageinfo section: %w", ErrObjcSectionNotFound)
 }
 
 func (f *File) GetObjCClassInfo(vmaddr uint64) (*objc.ClassRO64, error) {
@@ -121,7 +124,7 @@ func (f *File) GetObjCClassInfo(vmaddr uint64) (*objc.ClassRO64, error) {
 	}
 
 	if err := binary.Read(f.cr, f.ByteOrder, &classData); err != nil {
-		return nil, fmt.Errorf("failed to read class_ro_t: %v", err)
+		return nil, fmt.Errorf("failed to read %T: %v", classData, err)
 	}
 
 	return &classData, nil
@@ -161,7 +164,7 @@ func (f *File) GetObjCMethodNames() (map[string]uint64, error) {
 		return meth2vmaddr, nil
 	}
 
-	return nil, fmt.Errorf("macho does not contain a __TEXT.__objc_methname section")
+	return nil, fmt.Errorf("macho does not contain a __TEXT.__objc_methname section: %w", ErrObjcSectionNotFound)
 }
 
 func (f *File) GetObjCClasses() ([]objc.Class, error) {
@@ -176,12 +179,12 @@ func (f *File) GetObjCClasses() ([]objc.Class, error) {
 
 				dat, err := sec.Data()
 				if err != nil {
-					return nil, fmt.Errorf("failed to read __objc_classlist: %v", err)
+					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 				}
 
 				ptrs := make([]uint64, sec.Size/8)
 				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &ptrs); err != nil {
-					return nil, fmt.Errorf("failed to read objc_class_t pointers: %v", err)
+					return nil, fmt.Errorf("failed to read %s pointers: %v", sec.Name, err)
 				}
 
 				for _, ptr := range ptrs {
@@ -195,7 +198,7 @@ func (f *File) GetObjCClasses() ([]objc.Class, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("macho does not contain a __objc_classlist section")
+	return nil, fmt.Errorf("macho does not contain a __objc_classlist section: %w", ErrObjcSectionNotFound)
 }
 
 func (f *File) GetObjCPlusLoadClasses() ([]objc.Class, error) {
@@ -210,18 +213,18 @@ func (f *File) GetObjCPlusLoadClasses() ([]objc.Class, error) {
 
 				dat, err := sec.Data()
 				if err != nil {
-					return nil, fmt.Errorf("failed to read __objc_nlclslist: %v", err)
+					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 				}
 
 				ptrs := make([]uint64, sec.Size/8)
 				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &ptrs); err != nil {
-					return nil, fmt.Errorf("failed to read objc_class_t pointers: %v", err)
+					return nil, fmt.Errorf("failed to read %s pointers: %v", sec.Name, err)
 				}
 
 				for _, ptr := range ptrs {
 					class, err := f.GetObjCClass(f.vma.Convert(ptr))
 					if err != nil {
-						return nil, fmt.Errorf("failed to read objc_class_t at vmaddr: %#x; %v", ptr, err)
+						return nil, fmt.Errorf("failed to read objc_class_t at vmaddr: %#x (converted %#x); %v", ptr, f.vma.Convert(ptr), err)
 					}
 					classes = append(classes, *class)
 				}
@@ -229,7 +232,7 @@ func (f *File) GetObjCPlusLoadClasses() ([]objc.Class, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("macho does not contain a __objc_nlclslist section")
+	return nil, fmt.Errorf("macho does not contain a __objc_nlclslist section: %w", ErrObjcSectionNotFound)
 }
 
 // GetObjCClass parses an ObjC class at a given virtual memory address
@@ -247,7 +250,7 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 	}
 
 	if err := binary.Read(f.cr, f.ByteOrder, &classPtr); err != nil {
-		return nil, fmt.Errorf("failed to read swift_class_metadata_t: %v", err)
+		return nil, fmt.Errorf("failed to read %T: %v", classPtr, err)
 	}
 
 	info, err := f.GetObjCClassInfo(f.vma.Convert(classPtr.DataVMAddrAndFastFlags) & objc.FAST_DATA_MASK64)
@@ -363,11 +366,11 @@ func (f *File) GetObjCCategories() ([]objc.Category, error) {
 
 				dat, err := sec.Data()
 				if err != nil {
-					return nil, fmt.Errorf("failed to read __objc_catlist: %v", err)
+					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 				}
 				ptrs := make([]uint64, sec.Size/8)
 				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &ptrs); err != nil {
-					return nil, fmt.Errorf("failed to read objc_category_t pointers: %v", err)
+					return nil, fmt.Errorf("failed to read %s.%s pointers: %v", sec.Seg, sec.Name, err)
 				}
 
 				for _, ptr := range ptrs {
@@ -382,7 +385,7 @@ func (f *File) GetObjCCategories() ([]objc.Category, error) {
 					}
 
 					if err := binary.Read(f.cr, f.ByteOrder, &categoryPtr); err != nil {
-						return nil, fmt.Errorf("failed to read objc_category_t: %v", err)
+						return nil, fmt.Errorf("failed to read %T: %v", categoryPtr, err)
 					}
 
 					category := objc.Category{VMAddr: ptr, CategoryT: categoryPtr}
@@ -414,7 +417,7 @@ func (f *File) GetObjCCategories() ([]objc.Category, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("macho does not contain a __objc_catlist section")
+	return nil, fmt.Errorf("macho does not contain a __objc_catlist section: %w", ErrObjcSectionNotFound)
 }
 
 // GetCFStrings parses all the cfstrings in tne MachO
@@ -430,19 +433,19 @@ func (f *File) GetCFStrings() ([]objc.CFString, error) {
 
 			dat, err := sec.Data()
 			if err != nil {
-				return nil, fmt.Errorf("failed to read __cfstring: %v", err)
+				return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 			}
 
 			cfstrings = make([]objc.CFString, int(sec.Size)/binary.Size(objc.CFString64T{}))
 			cfStrTypes := make([]objc.CFString64T, int(sec.Size)/binary.Size(objc.CFString64T{}))
 			if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &cfStrTypes); err != nil {
-				return nil, fmt.Errorf("failed to read cfstring64_t structs: %v", err)
+				return nil, fmt.Errorf("failed to read %T structs: %v", cfStrTypes, err)
 			}
 
 			for idx, cfstr := range cfStrTypes {
 				cfstrings[idx].CFString64T = &cfstr
 				if cfstr.Data == 0 {
-					return nil, fmt.Errorf("unhandled cstring parse case where data is 0")
+					return nil, fmt.Errorf("unhandled cstring parse case where data is 0") // TODO: finish this
 					// uint64_t n_value;
 					// const char *symbol_name = get_symbol_64(offset + offsetof(struct cfstring64_t, characters), S, info, n_value);
 					// if (symbol_name == nullptr)
@@ -463,7 +466,7 @@ func (f *File) GetCFStrings() ([]objc.CFString, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("macho does not contain a __DATA.__cfstring section")
+	return nil, fmt.Errorf("macho does not contain a __cfstring section: %w", ErrObjcSectionNotFound)
 }
 
 func (f *File) parseObjcProtocolList(vmaddr uint64) ([]objc.Protocol, error) {
@@ -548,31 +551,31 @@ func (f *File) getObjcProtocol(vmaddr uint64) (proto *objc.Protocol, err error) 
 	if protoPtr.InstanceMethodsVMAddr > 0 {
 		proto.InstanceMethods, err = f.GetObjCMethods(f.vma.Convert(protoPtr.InstanceMethodsVMAddr))
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to read instance method vmaddr: %v", err)
 		}
 	}
 	if protoPtr.OptionalInstanceMethodsVMAddr > 0 {
 		proto.OptionalInstanceMethods, err = f.GetObjCMethods(f.vma.Convert(protoPtr.OptionalInstanceMethodsVMAddr))
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to read optional instance method vmaddr: %v", err)
 		}
 	}
 	if protoPtr.ClassMethodsVMAddr > 0 {
 		proto.ClassMethods, err = f.GetObjCMethods(f.vma.Convert(protoPtr.ClassMethodsVMAddr))
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to read class method vmaddr: %v", err)
 		}
 	}
 	if protoPtr.OptionalClassMethodsVMAddr > 0 {
 		proto.OptionalClassMethods, err = f.GetObjCMethods(f.vma.Convert(protoPtr.OptionalClassMethodsVMAddr))
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to read optional class method vmaddr: %v", err)
 		}
 	}
 	if protoPtr.InstancePropertiesVMAddr > 0 {
 		proto.InstanceProperties, err = f.GetObjCProperties(f.vma.Convert(protoPtr.InstancePropertiesVMAddr))
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to read instance property vmaddr: %v", err)
 		}
 	}
 	if protoPtr.ExtendedMethodTypesVMAddr > 0 {
@@ -594,7 +597,7 @@ func (f *File) getObjcProtocol(vmaddr uint64) (proto *objc.Protocol, err error) 
 
 		proto.ExtendedMethodTypes, err = f.GetCString(f.vma.Convert(extMPtr))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read cstring: %v", err)
+			return nil, fmt.Errorf("failed to read proto extended method types cstring: %v", err)
 		}
 	}
 	if protoPtr.DemangledNameVMAddr > 0 {
@@ -611,7 +614,7 @@ func (f *File) getObjcProtocol(vmaddr uint64) (proto *objc.Protocol, err error) 
 
 		proto.DemangledName, err = f.GetCStringAtOffset(int64(dnOff))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read cstring: %v", err)
+			return nil, fmt.Errorf("failed to read proto demangled name cstring: %v", err)
 		}
 	}
 
@@ -631,18 +634,18 @@ func (f *File) GetObjCProtocols() ([]objc.Protocol, error) {
 
 				dat, err := sec.Data()
 				if err != nil {
-					return nil, fmt.Errorf("failed to read __objc_protolist: %v", err)
+					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 				}
 
 				ptrs := make([]uint64, sec.Size/8)
 				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &ptrs); err != nil {
-					return nil, fmt.Errorf("failed to read protocol_t pointers: %v", err)
+					return nil, fmt.Errorf("failed to read %s.%s pointers: %v", sec.Seg, sec.Name, err)
 				}
 
 				for _, ptr := range ptrs {
 					proto, err := f.getObjcProtocol(f.vma.Convert(ptr))
 					if err != nil {
-						return nil, fmt.Errorf("failed to read protocol at pointer %#x: %v", ptr, err)
+						return nil, fmt.Errorf("failed to read protocol at pointer %#x (converted %#x); %v", ptr, f.vma.Convert(ptr), err)
 					}
 					protocols = append(protocols, *proto)
 				}
@@ -650,7 +653,7 @@ func (f *File) GetObjCProtocols() ([]objc.Protocol, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("macho does not contain a __objc_protolist section")
+	return nil, fmt.Errorf("macho does not contain a __objc_protolist section: %w", ErrObjcSectionNotFound)
 }
 
 func (f *File) GetObjCMethodList() ([]objc.Method, error) {
@@ -692,7 +695,7 @@ func (f *File) GetObjCMethodList() ([]objc.Method, error) {
 				}
 				n, err := f.GetCString(uint64(nameAddr))
 				if err != nil {
-					return nil, fmt.Errorf("failed to read cstring: %v", err)
+					return nil, fmt.Errorf("failed to read methond name cstring: %v", err)
 				}
 
 				typesVMAddr, err := f.vma.GetVMAddress(uint64(method.TypesOffset) + uint64(currOffset+4))
@@ -701,7 +704,7 @@ func (f *File) GetObjCMethodList() ([]objc.Method, error) {
 				}
 				t, err := f.GetCString(f.vma.Convert(typesVMAddr))
 				if err != nil {
-					return nil, fmt.Errorf("failed to read cstring: %v", err)
+					return nil, fmt.Errorf("failed to read method types cstring: %v", err)
 				}
 
 				impVMAddr, err := f.vma.GetVMAddress(uint64(method.ImpOffset) + uint64(currOffset+8))
@@ -727,7 +730,7 @@ func (f *File) GetObjCMethodList() ([]objc.Method, error) {
 
 		return objcMethods, nil
 	}
-	return nil, fmt.Errorf("macho does not contain a __objc_methlist section")
+	return nil, fmt.Errorf("macho does not contain a __objc_methlist section: %w", ErrObjcSectionNotFound)
 }
 
 func (f *File) GetObjCMethods(vmaddr uint64) ([]objc.Method, error) {
@@ -784,7 +787,7 @@ func (f *File) readSmallMethods(methodList objc.MethodList) (objcMethods []objc.
 
 		n, err := f.GetCString(f.vma.Convert(nameVMAddr))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read cstring: %v", err)
+			return nil, fmt.Errorf("failed to read method name cstring: %v", err)
 		}
 
 		typesVMAddr, err := f.vma.GetVMAddress(uint64(currOffset + 4 + int64(method.TypesOffset)))
@@ -793,7 +796,7 @@ func (f *File) readSmallMethods(methodList objc.MethodList) (objcMethods []objc.
 		}
 		t, err := f.GetCString(f.vma.Convert(typesVMAddr))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read cstring: %v", err)
+			return nil, fmt.Errorf("failed to read method types cstring: %v", err)
 		}
 
 		impVMAddr, err := f.vma.GetVMAddress(uint64(currOffset + 8 + int64(method.ImpOffset)))
@@ -826,11 +829,11 @@ func (f *File) readBigMethods(methodList objc.MethodList) ([]objc.Method, error)
 	for _, method := range methods {
 		n, err := f.GetCString(f.vma.Convert(uint64(method.NameVMAddr)))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read cstring: %v", err)
+			return nil, fmt.Errorf("failed to read method name cstring: %v", err)
 		}
 		t, err := f.GetCString(f.vma.Convert(uint64(method.TypesVMAddr)))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read cstring: %v", err)
+			return nil, fmt.Errorf("failed to read method types cstring: %v", err)
 		}
 		if method.ImpVMAddr > 0 {
 			_, err := f.vma.GetOffset(f.vma.Convert(method.ImpVMAddr))
@@ -891,11 +894,11 @@ func (f *File) GetObjCIvars(vmaddr uint64) ([]objc.Ivar, error) {
 		}
 		n, err := f.GetCString(f.vma.Convert(uint64(ivar.NameVMAddr)))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read cstring: %v", err)
+			return nil, fmt.Errorf("failed to read ivar name cstring: %v", err)
 		}
 		t, err := f.GetCString(f.vma.Convert(uint64(ivar.TypesVMAddr)))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read cstring: %v", err)
+			return nil, fmt.Errorf("failed to read ivar types cstring: %v", err)
 		}
 		ivars = append(ivars, objc.Ivar{
 			Name:   n,
@@ -935,11 +938,11 @@ func (f *File) GetObjCProperties(vmaddr uint64) ([]objc.Property, error) {
 	for _, prop := range properties {
 		name, err := f.GetCString(f.vma.Convert(prop.NameVMAddr))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read cstring: %v", err)
+			return nil, fmt.Errorf("failed to read prop name cstring: %v", err)
 		}
 		attrib, err := f.GetCString(f.vma.Convert(prop.AttributesVMAddr))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read cstring: %v", err)
+			return nil, fmt.Errorf("failed to read prop attributes cstring: %v", err)
 		}
 		objcProperties = append(objcProperties, objc.Property{
 			PropertyT:  prop,
@@ -964,12 +967,12 @@ func (f *File) GetObjCClassReferences() (map[uint64]*objc.Class, error) {
 
 				dat, err := sec.Data()
 				if err != nil {
-					return nil, fmt.Errorf("failed to read __objc_classrefs: %v", err)
+					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 				}
 
 				classPtrs = make([]uint64, sec.Size/8)
 				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &classPtrs); err != nil {
-					return nil, fmt.Errorf("failed to read class ref pointers: %v", err)
+					return nil, fmt.Errorf("failed to read %s.%s pointers: %v", sec.Seg, sec.Name, err)
 				}
 
 				for idx, ptr := range classPtrs {
@@ -987,7 +990,7 @@ func (f *File) GetObjCClassReferences() (map[uint64]*objc.Class, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("macho does not contain a __objc_classrefs section")
+	return nil, fmt.Errorf("macho does not contain a __objc_classrefs section: %w", ErrObjcSectionNotFound)
 }
 
 func (f *File) GetObjCSuperReferences() (map[uint64]*objc.Class, error) {
@@ -1003,12 +1006,12 @@ func (f *File) GetObjCSuperReferences() (map[uint64]*objc.Class, error) {
 
 				dat, err := sec.Data()
 				if err != nil {
-					return nil, fmt.Errorf("failed to read __objc_superrefs: %v", err)
+					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 				}
 
 				classPtrs = make([]uint64, sec.Size/8)
 				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &classPtrs); err != nil {
-					return nil, fmt.Errorf("failed to read super ref pointers: %v", err)
+					return nil, fmt.Errorf("failed to read %s.%s pointers: %v", sec.Seg, sec.Name, err)
 				}
 
 				for idx, ptr := range classPtrs {
@@ -1026,35 +1029,37 @@ func (f *File) GetObjCSuperReferences() (map[uint64]*objc.Class, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("macho does not contain a __objc_superrefs section")
+	return nil, fmt.Errorf("macho does not contain a __objc_superrefs section: %w", ErrObjcSectionNotFound)
 }
 
 func (f *File) GetObjCProtoReferences() (map[uint64]*objc.Protocol, error) {
 	var protoPtrs []uint64
 	protRefs := make(map[uint64]*objc.Protocol)
 
+	found := false
 	for _, s := range f.Segments() {
 		if strings.HasPrefix(s.Name, "__DATA") {
 			for _, secName := range []string{"__objc_protorefs", "__objc_protolist"} {
 				if sec := f.Section(s.Name, secName); sec != nil {
+					found = true
 					if sec.Size == 0 {
 						return nil, fmt.Errorf("%s.%s section has size 0", sec.Seg, sec.Name)
 					}
 
 					dat, err := sec.Data()
 					if err != nil {
-						return nil, fmt.Errorf("failed to read %s: %v", secName, err)
+						return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 					}
 
 					protoPtrs = make([]uint64, sec.Size/8)
 					if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &protoPtrs); err != nil {
-						return nil, fmt.Errorf("failed to read super ref pointers: %v", err)
+						return nil, fmt.Errorf("failed to read %s.%s pointers: %v", sec.Seg, sec.Name, err)
 					}
 
 					for idx, ptr := range protoPtrs {
 						proto, err := f.getObjcProtocol(f.vma.Convert(ptr))
 						if err != nil {
-							return nil, fmt.Errorf("failed to read objc_class_t at superref ptr: %#x; %v", ptr, err)
+							return nil, fmt.Errorf("failed to read objc_class_t at superref ptr: %#x (converted %#x); %v", ptr, f.vma.Convert(ptr), err)
 						}
 						protRefs[sec.Addr+uint64(idx*sizeOfInt64)] = proto
 					}
@@ -1062,8 +1067,8 @@ func (f *File) GetObjCProtoReferences() (map[uint64]*objc.Protocol, error) {
 			}
 		}
 	}
-	if len(protRefs) == 0 {
-		return nil, fmt.Errorf("MachO does not contain a __objc_protorefs or __objc_protolist section")
+	if !found {
+		return nil, fmt.Errorf("MachO does not contain a __objc_protorefs or __objc_protolist section: %w", ErrObjcSectionNotFound)
 	}
 	return protRefs, nil
 }
@@ -1081,18 +1086,18 @@ func (f *File) GetObjCSelectorReferences() (map[uint64]*objc.Selector, error) {
 
 				dat, err := sec.Data()
 				if err != nil {
-					return nil, fmt.Errorf("failed to read __objc_selrefs: %v", err)
+					return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 				}
 
 				selPtrs = make([]uint64, sec.Size/8)
 				if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &selPtrs); err != nil {
-					return nil, fmt.Errorf("failed to read selector ref pointers: %v", err)
+					return nil, fmt.Errorf("failed to read %s.%s pointers: %v", sec.Seg, sec.Name, err)
 				}
 
 				for idx, sel := range selPtrs {
 					selName, err := f.GetCString(f.vma.Convert(sel))
 					if err != nil {
-						return nil, fmt.Errorf("failed to read cstring: %v", err)
+						return nil, fmt.Errorf("failed to read selector name cstring: %v", err)
 					}
 					selRefs[sec.Addr+uint64(idx*sizeOfInt64)] = &objc.Selector{
 						VMAddr: f.vma.Convert(sel),
@@ -1103,5 +1108,5 @@ func (f *File) GetObjCSelectorReferences() (map[uint64]*objc.Selector, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("macho does not contain a __objc_selrefs section")
+	return nil, fmt.Errorf("macho does not contain a __objc_selrefs section: %w", ErrObjcSectionNotFound)
 }
