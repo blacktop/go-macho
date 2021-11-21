@@ -22,7 +22,7 @@ type Toc struct {
 func (i Toc) String() string {
 	return fmt.Sprintf(
 		"ObjC TOC\n"+
-			"=========\n"+
+			"--------\n"+
 			"\t__objc_classlist  = %d\n"+
 			"\t__objc_classrefs  = %d\n"+
 			"\t__objc_nlclslist  = %d\n"+
