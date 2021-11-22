@@ -90,6 +90,10 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 
 	sort.Sort(segMap)
 
+	if exp := f.DyldExportsTrie(); exp != nil { // TODO: why do we need this?
+		f.DyldExports()
+	}
+
 	if err := f.optimizeLoadCommands(segMap); err != nil {
 		return fmt.Errorf("failed to optimize load commands: %v", err)
 	}

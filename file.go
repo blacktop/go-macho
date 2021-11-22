@@ -37,6 +37,7 @@ type File struct {
 
 	vma *types.VMAddrConverter
 	dcf *fixupchains.DyldChainedFixups
+	exp []trie.TrieEntry
 	sr  types.MachoReader
 	cr  types.MachoReader
 
@@ -1899,7 +1900,10 @@ func (f *File) DyldExportsTrie() *DyldExportsTrie {
 
 // DyldExports returns the dyld export trie symbols
 func (f *File) DyldExports() ([]trie.TrieEntry, error) {
-
+	var err error
+	if f.exp != nil {
+		return f.exp, nil
+	}
 	if dxt := f.DyldExportsTrie(); dxt != nil {
 		if dxt.Size == 0 {
 			return []trie.TrieEntry{}, nil
@@ -1908,11 +1912,11 @@ func (f *File) DyldExports() ([]trie.TrieEntry, error) {
 		if _, err := f.cr.ReadAt(data, int64(dxt.Offset)); err != nil {
 			return nil, fmt.Errorf("failed to read %s data at offset=%#x; %v", types.LC_DYLD_EXPORTS_TRIE, int64(dxt.Offset), err)
 		}
-		exports, err := trie.ParseTrie(data, f.GetBaseAddress())
+		f.exp, err = trie.ParseTrie(data, f.GetBaseAddress())
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse %s: %v", types.LC_DYLD_EXPORTS_TRIE, err)
 		}
-		return exports, nil
+		return f.exp, nil
 	}
 
 	return nil, fmt.Errorf("macho does not contain LC_DYLD_EXPORTS_TRIE")
