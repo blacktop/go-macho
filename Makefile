@@ -1,7 +1,7 @@
 REPO=blacktop
 NAME=go-macho
 VERSION=$(shell svu current)
-NEXT_VERSION=$(shell svu patch)
+NEXT_VERSION:=$(shell svu patch)
 
 GIT_COMMIT=$(git rev-parse HEAD)
 GIT_DIRTY=$(test -n "`git status --porcelain`" && echo "+CHANGES" || true)
