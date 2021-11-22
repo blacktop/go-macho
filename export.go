@@ -55,6 +55,15 @@ func (m exportSegMap) Remap(offset uint64) (uint64, error) {
 	return 0, fmt.Errorf("failed to remapp offset %#x", offset)
 }
 
+func (m exportSegMap) RemapSeg(name string, offset uint64) (uint64, error) {
+	for _, segInfo := range m {
+		if segInfo.Name == name {
+			return segInfo.New.Start + (offset - segInfo.Old.Start), nil
+		}
+	}
+	return 0, fmt.Errorf("failed to remapp offset %#x", offset)
+}
+
 // Export exports an in-memory or cached dylib|kext MachO to a file
 func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddress uint64, locals []Symbol) (err error) {
 	var buf bytes.Buffer
@@ -89,10 +98,6 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 	}
 
 	sort.Sort(segMap)
-
-	if exp := f.DyldExportsTrie(); exp != nil { // TODO: why do we need this?
-		f.DyldExports()
-	}
 
 	if err := f.optimizeLoadCommands(segMap); err != nil {
 		return fmt.Errorf("failed to optimize load commands: %v", err)
@@ -234,7 +239,7 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 		case types.LC_SEGMENT_64:
 			seg := l.(*Segment)
 
-			off, err := segMap.Remap(seg.Offset)
+			off, err := segMap.RemapSeg(seg.Name, seg.Offset)
 			if err != nil {
 				return fmt.Errorf("failed to remap offset in segment %s: %v", seg.Name, err)
 			}
@@ -257,16 +262,16 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 				// f.Sections[i+seg.Firstsect].Reloff = uint32(roff)
 			}
 		case types.LC_SYMTAB:
-			symoff, err := segMap.Remap(uint64(l.(*Symtab).Symoff))
-			if err != nil {
-				return fmt.Errorf("failed to remap symbol offset in %s: %v", l.Command(), err)
-			}
-			stroff, err := segMap.Remap(uint64(l.(*Symtab).Stroff))
-			if err != nil {
-				return fmt.Errorf("failed to remap string offset in %s: %v", l.Command(), err)
-			}
-			l.(*Symtab).Symoff = uint32(symoff)
-			l.(*Symtab).Stroff = uint32(stroff)
+			// symoff, err := segMap.Remap(uint64(l.(*Symtab).Symoff))
+			// if err != nil {
+			// 	return fmt.Errorf("failed to remap symbol offset in %s: %v", l.Command(), err)
+			// }
+			// stroff, err := segMap.Remap(uint64(l.(*Symtab).Stroff))
+			// if err != nil {
+			// 	return fmt.Errorf("failed to remap string offset in %s: %v", l.Command(), err)
+			// }
+			// l.(*Symtab).Symoff = uint32(symoff)
+			// l.(*Symtab).Stroff = uint32(stroff)
 		case types.LC_DYSYMTAB:
 			// tocoffset, err := segMap.Remap(uint64(l.(*Dysymtab).Tocoffset))
 			// if err != nil {
@@ -283,11 +288,11 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 			// 	return fmt.Errorf("failed to remap Extrefsymoff %s: %v", l.Command(), err)
 			// }
 			// l.(*Dysymtab).Extrefsymoff = uint32(extrefsymoff)
-			indirectsymoff, err := segMap.Remap(uint64(l.(*Dysymtab).Indirectsymoff))
-			if err != nil {
-				return fmt.Errorf("failed to remap Indirectsymoff in %s: %v", l.Command(), err)
-			}
-			l.(*Dysymtab).Indirectsymoff = uint32(indirectsymoff)
+			// indirectsymoff, err := segMap.Remap(uint64(l.(*Dysymtab).Indirectsymoff))
+			// if err != nil {
+			// 	return fmt.Errorf("failed to remap Indirectsymoff in %s: %v", l.Command(), err)
+			// }
+			// l.(*Dysymtab).Indirectsymoff = uint32(indirectsymoff)
 			// extreloff, err := segMap.Remap(uint64(l.(*Dysymtab).Extreloff))
 			// if err != nil {
 			// 	return fmt.Errorf("failed to remap Extreloff in %s: %v", l.Command(), err)
@@ -299,11 +304,11 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 			// }
 			// l.(*Dysymtab).Locreloff = uint32(locreloff)
 		case types.LC_CODE_SIGNATURE:
-			off, err := segMap.Remap(uint64(l.(*CodeSignature).Offset))
-			if err != nil {
-				return fmt.Errorf("failed to remap offset in %s: %v", l.Command(), err)
-			}
-			l.(*CodeSignature).Offset = uint32(off)
+			// off, err := segMap.Remap(uint64(l.(*CodeSignature).Offset))
+			// if err != nil {
+			// 	return fmt.Errorf("failed to remap offset in %s: %v", l.Command(), err)
+			// }
+			// l.(*CodeSignature).Offset = uint32(off)
 		case types.LC_SEGMENT_SPLIT_INFO:
 			// <rdar://problem/23212513> dylibs iOS 9 dyld caches have bogus LC_SEGMENT_SPLIT_INFO
 			// off, err := segMap.Remap(uint64(l.(*SplitInfo).Offset))
@@ -390,11 +395,11 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 				l.(*DyldInfoOnly).ExportOff = uint32(exportOff)
 			}
 		case types.LC_FUNCTION_STARTS:
-			off, err := segMap.Remap(uint64(l.(*FunctionStarts).Offset))
-			if err != nil {
-				return fmt.Errorf("failed to remap offset in %s: %v", l.Command(), err)
-			}
-			l.(*FunctionStarts).Offset = uint32(off)
+			// off, err := segMap.Remap(uint64(l.(*FunctionStarts).Offset))
+			// if err != nil {
+			// 	return fmt.Errorf("failed to remap offset in %s: %v", l.Command(), err)
+			// }
+			// l.(*FunctionStarts).Offset = uint32(off)
 		case types.LC_MAIN:
 			// TODO:is this an offset or vmaddr ?
 			off, err := segMap.Remap(l.(*EntryPoint).EntryOffset)
@@ -403,11 +408,11 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 			}
 			l.(*EntryPoint).EntryOffset = off
 		case types.LC_DATA_IN_CODE:
-			off, err := segMap.Remap(uint64(l.(*DataInCode).Offset))
-			if err != nil {
-				return fmt.Errorf("failed to remap offset in %s: %v", l.Command(), err)
-			}
-			l.(*DataInCode).Offset = uint32(off)
+			// off, err := segMap.Remap(uint64(l.(*DataInCode).Offset))
+			// if err != nil {
+			// 	return fmt.Errorf("failed to remap offset in %s: %v", l.Command(), err)
+			// }
+			// l.(*DataInCode).Offset = uint32(off)
 		case types.LC_DYLIB_CODE_SIGN_DRS:
 			off, err := segMap.Remap(uint64(l.(*DylibCodeSignDrs).Offset))
 			if err != nil {
@@ -427,11 +432,11 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 			}
 			l.(*LinkerOptimizationHint).Offset = uint32(off)
 		case types.LC_DYLD_EXPORTS_TRIE:
-			off, err := segMap.Remap(uint64(l.(*DyldExportsTrie).Offset))
-			if err != nil {
-				return fmt.Errorf("failed to remap offset in %s: %v", l.Command(), err)
-			}
-			l.(*DyldExportsTrie).Offset = uint32(off)
+			// off, err := segMap.Remap(uint64(l.(*DyldExportsTrie).Offset))
+			// if err != nil {
+			// 	return fmt.Errorf("failed to remap offset in %s: %v", l.Command(), err)
+			// }
+			// l.(*DyldExportsTrie).Offset = uint32(off)
 		case types.LC_DYLD_CHAINED_FIXUPS:
 			off, err := segMap.Remap(uint64(l.(*DyldChainedFixups).Offset))
 			if err != nil {
