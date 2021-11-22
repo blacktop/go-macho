@@ -31,8 +31,8 @@ release: changelog ## Create a new release from the VERSION
 .PHONY: destroy
 destroy: ## Remove release from the VERSION
 	@echo " > Deleting Release"
-	git tag -d v${VERSION}
-	git push origin :refs/tags/v${VERSION}
+	git tag -d ${VERSION}
+	git push origin :refs/tags/${VERSION}
 
 # Absolutely awesome: http://marmelab.com/blog/2016/02/29/auto-documented-makefile.html
 help:
