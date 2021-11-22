@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/blacktop/go-macho/pkg/fixupchains"
@@ -100,6 +101,10 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 		}
 	}
 
+	if err := f.optimizeObjC(segMap); err != nil {
+		return fmt.Errorf("failed to optimize ObjC: %v", err)
+	}
+
 	if err := f.writeLoadCommands(&buf); err != nil {
 		return fmt.Errorf("failed to write load commands: %v", err)
 	}
@@ -151,6 +156,8 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 	for (buf.Len() % 0x1000) != 0 {
 		buf.WriteByte(0)
 	}
+
+	os.MkdirAll(filepath.Dir(path), os.ModePerm)
 
 	if err := ioutil.WriteFile(path, buf.Bytes(), 0755); err != nil {
 		return fmt.Errorf("failed to write exported MachO to file %s: %v", path, err)
@@ -447,6 +454,10 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 		}
 	}
 	return nil
+}
+
+func (f *File) optimizeObjC(segMap exportSegMap) error {
+	return nil // TODO: impliment this
 }
 
 func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
