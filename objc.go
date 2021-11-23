@@ -139,14 +139,9 @@ func (f *File) GetObjCMethodNames() (map[string]uint64, error) {
 	meth2vmaddr := make(map[string]uint64)
 
 	if sec := f.Section("__TEXT", "__objc_methname"); sec != nil {
-		off, err := f.vma.GetOffset(sec.Addr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
-		}
-
 		stringPool := make([]byte, sec.Size)
 
-		if _, err := f.cr.ReadAt(stringPool, int64(off)); err != nil {
+		if _, err := f.sr.ReadAt(stringPool, int64(sec.Offset)); err != nil {
 			return nil, err
 		}
 
@@ -457,15 +452,11 @@ func (f *File) GetCFStrings() ([]objc.CFString, error) {
 func (f *File) parseObjcProtocolList(vmaddr uint64) ([]objc.Protocol, error) {
 	var protocols []objc.Protocol
 
-	if f.Flags.DylibInCache() {
-		f.cr.SeekToAddr(vmaddr)
-	} else {
-		off, err := f.vma.GetOffset(f.vma.Convert(vmaddr))
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
-		}
-		f.cr.Seek(int64(off), io.SeekStart)
+	off, err := f.vma.GetOffset(f.vma.Convert(vmaddr))
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
 	}
+	f.cr.Seek(int64(off), io.SeekStart)
 
 	var protList objc.ProtocolList
 	if err := binary.Read(f.cr, f.ByteOrder, &protList.Count); err != nil {

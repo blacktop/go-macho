@@ -1403,7 +1403,7 @@ func (f *File) parseSymtab(symdat, strtab, cmddat []byte, hdr *types.SymtabCmd, 
 func (f *File) pushSection(sh *Section, r io.ReaderAt) error {
 	f.Sections = append(f.Sections, sh)
 	// sh.sr = io.NewSectionReader(r, int64(sh.Offset), int64(sh.Size))
-	sh.ReaderAt = f.cr
+	sh.ReaderAt = f.sr
 
 	if sh.Nreloc > 0 {
 		reldat := make([]byte, int(sh.Nreloc)*8)
