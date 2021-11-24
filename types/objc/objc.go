@@ -10,13 +10,14 @@ import (
 const IsDyldPreoptimized = 1 << 7
 
 type Toc struct {
-	ClassList uint64
-	ClassRefs uint64
-	NlclsList uint64
-	SuperRefs uint64
-	CatList   uint64
-	ProtoList uint64
-	SelRefs   uint64
+	ClassList        uint64
+	NonLazyClassList uint64
+	CatList          uint64
+	NonLazyCatList   uint64
+	ProtoList        uint64
+	ClassRefs        uint64
+	SuperRefs        uint64
+	SelRefs          uint64
 }
 
 func (i Toc) String() string {
@@ -24,18 +25,20 @@ func (i Toc) String() string {
 		"ObjC TOC\n"+
 			"--------\n"+
 			"  __objc_classlist  = %d\n"+
-			"  __objc_classrefs  = %d\n"+
 			"  __objc_nlclslist  = %d\n"+
-			"  __objc_superrefs  = %d\n"+
 			"  __objc_catlist    = %d\n"+
+			"  __objc_nlcatlist  = %d\n"+
 			"  __objc_protolist  = %d\n"+
+			"  __objc_classrefs  = %d\n"+
+			"  __objc_superrefs  = %d\n"+
 			"  __objc_selrefs    = %d\n",
 		i.ClassList,
-		i.ClassRefs,
-		i.NlclsList,
-		i.SuperRefs,
+		i.NonLazyClassList,
 		i.CatList,
+		i.NonLazyCatList,
 		i.ProtoList,
+		i.ClassRefs,
+		i.SuperRefs,
 		i.SelRefs,
 	)
 }
@@ -263,8 +266,11 @@ type CategoryT struct {
 type Category struct {
 	Name            string
 	VMAddr          uint64
+	Class           *Class
+	Protocol        *Protocol
 	ClassMethods    []Method
 	InstanceMethods []Method
+	Properties      []Property
 	CategoryT
 }
 
@@ -284,7 +290,7 @@ func (c *Category) dump(verbose bool) string {
 				cMethods += fmt.Sprintf("  0x%011x +[%s %s]\n", meth.ImpVMAddr, c.Name, meth.Name)
 			}
 		}
-		cMethods += fmt.Sprintf("\n")
+		cMethods += "\n"
 	}
 	if len(c.InstanceMethods) > 0 {
 		iMethods = "  // instance methods\n"
@@ -296,7 +302,7 @@ func (c *Category) dump(verbose bool) string {
 				iMethods += fmt.Sprintf("  0x%011x -[%s %s]\n", meth.ImpVMAddr, c.Name, meth.Name)
 			}
 		}
-		iMethods += fmt.Sprintf("\n")
+		iMethods += "\n"
 	}
 
 	return fmt.Sprintf(
@@ -347,9 +353,9 @@ type ProtocolT struct {
 }
 
 type Protocol struct {
-	Name string
-	Ptr  uint64
-	// Isa                     string
+	Name                    string
+	Ptr                     uint64
+	Isa                     *Class
 	Prots                   []Protocol
 	InstanceMethods         []Method
 	InstanceProperties      []Property
@@ -384,7 +390,7 @@ func (p *Protocol) dump(verbose bool) string {
 				props += fmt.Sprintf(" @property (%s) %s\n", prop.Attributes, prop.Name)
 			}
 		}
-		props += fmt.Sprintf("\n")
+		props += "\n"
 	}
 	if len(p.ClassMethods) > 0 {
 		cMethods = "  // class methods\n"
@@ -396,7 +402,7 @@ func (p *Protocol) dump(verbose bool) string {
 				cMethods += fmt.Sprintf(" +[%s %s]\n", p.Name, meth.Name)
 			}
 		}
-		cMethods += fmt.Sprintf("\n")
+		cMethods += "\n"
 	}
 	if len(p.InstanceMethods) > 0 {
 		iMethods = "  // instance methods\n"
@@ -408,7 +414,7 @@ func (p *Protocol) dump(verbose bool) string {
 				iMethods += fmt.Sprintf(" -[%s %s]\n", p.Name, meth.Name)
 			}
 		}
-		iMethods += fmt.Sprintf("\n")
+		iMethods += "\n"
 	}
 	if len(p.OptionalInstanceMethods) > 0 {
 		optMethods = "@optional\n  // instance methods\n"
@@ -420,7 +426,7 @@ func (p *Protocol) dump(verbose bool) string {
 				optMethods += fmt.Sprintf(" -[%s %s]\n", p.Name, meth.Name)
 			}
 		}
-		optMethods += fmt.Sprintf("\n")
+		optMethods += "\n"
 	}
 	return fmt.Sprintf(
 		"%s\n"+
@@ -445,6 +451,7 @@ func (p *Protocol) Verbose() string {
 type CFString struct {
 	Name    string
 	Address uint64
+	Class   *Class
 	*CFString64T
 }
 
@@ -519,7 +526,7 @@ func (c *Class) dump(verbose bool) string {
 				iVars += fmt.Sprintf("  %s\n", &ivar)
 			}
 		}
-		iVars += fmt.Sprintf("}\n\n")
+		iVars += "}\n\n"
 	}
 	if len(c.Props) > 0 {
 		for _, prop := range c.Props {
@@ -529,7 +536,7 @@ func (c *Class) dump(verbose bool) string {
 				props += fmt.Sprintf(" @property (%s) %s\n", prop.Attributes, prop.Name)
 			}
 		}
-		props += fmt.Sprintf("\n")
+		props += "\n"
 	}
 	if len(c.ClassMethods) > 0 {
 		cMethods = "  // class methods\n"
@@ -541,7 +548,7 @@ func (c *Class) dump(verbose bool) string {
 				cMethods += fmt.Sprintf("  0x%011x +[%s %s]\n", meth.ImpVMAddr, c.Name, meth.Name)
 			}
 		}
-		cMethods += fmt.Sprintf("\n")
+		cMethods += "\n"
 	}
 	if len(c.InstanceMethods) > 0 {
 		iMethods = "  // instance methods\n"
@@ -553,7 +560,7 @@ func (c *Class) dump(verbose bool) string {
 				iMethods += fmt.Sprintf("  0x%011x -[%s %s]\n", meth.ImpVMAddr, c.Name, meth.Name)
 			}
 		}
-		iMethods += fmt.Sprintf("\n")
+		iMethods += "\n"
 	}
 
 	return fmt.Sprintf(

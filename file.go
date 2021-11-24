@@ -20,6 +20,7 @@ import (
 	"github.com/blacktop/go-macho/pkg/fixupchains"
 	"github.com/blacktop/go-macho/pkg/trie"
 	"github.com/blacktop/go-macho/types"
+	"github.com/blacktop/go-macho/types/objc"
 )
 
 const (
@@ -35,11 +36,12 @@ type File struct {
 	Symtab   *Symtab
 	Dysymtab *Dysymtab
 
-	vma *types.VMAddrConverter
-	dcf *fixupchains.DyldChainedFixups
-	exp []trie.TrieEntry
-	sr  types.MachoReader
-	cr  types.MachoReader
+	vma  *types.VMAddrConverter
+	dcf  *fixupchains.DyldChainedFixups
+	exp  []trie.TrieEntry
+	objc map[uint64]*objc.Class
+	sr   types.MachoReader
+	cr   types.MachoReader
 
 	relativeSelectorBase uint64 // objc_opt version 16
 
@@ -310,6 +312,8 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 	var loadsFilter []types.LoadCmd
 
 	f := new(File)
+
+	f.objc = make(map[uint64]*objc.Class)
 
 	if config != nil {
 		if config[0].SectionReader != nil {
