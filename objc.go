@@ -348,7 +348,6 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 						bindName, err := f.GetBindName(classPtr.SuperclassVMAddr)
 						if err == nil {
 							superClass = &objc.Class{Name: strings.TrimPrefix(bindName, "_OBJC_CLASS_$_")}
-							f.objc[classPtr.SuperclassVMAddr] = superClass
 						} else {
 							return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", vmaddr, err)
 						}
@@ -450,7 +449,14 @@ func (f *File) GetObjCCategories() ([]objc.Category, error) {
 						} else {
 							category.Class, err = f.GetObjCClass(categoryPtr.ClsVMAddr)
 							if err != nil {
-								return nil, fmt.Errorf("failed to get class methods at vmaddr: %#x; %v", categoryPtr.ClassMethodsVMAddr, err)
+								if f.HasFixups() {
+									bindName, err := f.GetBindName(categoryPtr.ClsVMAddr)
+									if err == nil {
+										category.Class = &objc.Class{Name: strings.TrimPrefix(bindName, "_OBJC_CLASS_$_")}
+									} else {
+										return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", categoryPtr.ClsVMAddr, err)
+									}
+								}
 							}
 							f.objc[categoryPtr.ClsVMAddr] = category.Class
 						}
