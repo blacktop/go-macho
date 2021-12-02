@@ -136,6 +136,15 @@ func (f *File) GetObjCClassInfo(vmaddr uint64) (*objc.ClassRO64, error) {
 		return nil, fmt.Errorf("failed to read %T: %v", classData, err)
 	}
 
+	// slide pointers
+	classData.IvarLayoutVMAddr = f.vma.Convert(classData.IvarLayoutVMAddr)
+	classData.NameVMAddr = f.vma.Convert(classData.NameVMAddr)
+	classData.BaseMethodsVMAddr = f.vma.Convert(classData.BaseMethodsVMAddr)
+	classData.BaseProtocolsVMAddr = f.vma.Convert(classData.BaseProtocolsVMAddr)
+	classData.IvarsVMAddr = f.vma.Convert(classData.IvarsVMAddr)
+	classData.WeakIvarLayoutVMAddr = f.vma.Convert(classData.WeakIvarLayoutVMAddr)
+	classData.BasePropertiesVMAddr = f.vma.Convert(classData.BasePropertiesVMAddr)
+
 	return &classData, nil
 }
 
@@ -293,7 +302,6 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 		return nil, fmt.Errorf("failed to get class info at vmaddr: %#x; %v", classPtr.DataVMAddrAndFastFlags&objc.FAST_DATA_MASK64, err)
 	}
 
-	info.NameVMAddr = f.vma.Convert(info.NameVMAddr)
 	name, err := f.GetCString(info.NameVMAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read cstring: %v", err)
@@ -301,7 +309,6 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 
 	var methods []objc.Method
 	if info.BaseMethodsVMAddr > 0 {
-		info.BaseMethodsVMAddr = f.vma.Convert(info.BaseMethodsVMAddr)
 		methods, err = f.GetObjCMethods(info.BaseMethodsVMAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get methods at vmaddr: %#x; %v", info.BaseMethodsVMAddr, err)
@@ -310,7 +317,6 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 
 	var prots []objc.Protocol
 	if info.BaseProtocolsVMAddr > 0 {
-		info.BaseProtocolsVMAddr = f.vma.Convert(info.BaseProtocolsVMAddr)
 		prots, err = f.parseObjcProtocolList(info.BaseProtocolsVMAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read protocols vmaddr: %v", err)
@@ -319,7 +325,6 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 
 	var ivars []objc.Ivar
 	if info.IvarsVMAddr > 0 {
-		info.IvarsVMAddr = f.vma.Convert(info.IvarsVMAddr)
 		ivars, err = f.GetObjCIvars(info.IvarsVMAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get ivars at vmaddr: %#x; %v", info.IvarsVMAddr, err)
@@ -328,17 +333,21 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 
 	var props []objc.Property
 	if info.BasePropertiesVMAddr > 0 {
-		info.BasePropertiesVMAddr = f.vma.Convert(info.BasePropertiesVMAddr)
 		props, err = f.GetObjCProperties(info.BasePropertiesVMAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get props at vmaddr: %#x; %v", info.BasePropertiesVMAddr, err)
 		}
 	}
 
-	superClass := &objc.Class{Name: "<ROOT>"}
+	superClass := &objc.Class{}
 	if classPtr.SuperclassVMAddr > 0 {
 		classPtr.SuperclassVMAddr = f.vma.Convert(classPtr.SuperclassVMAddr)
-		if !info.Flags.IsRoot() {
+		if info.Flags.IsRoot() {
+			superClass = &objc.Class{Name: "<ROOT>"}
+			// } else if info.Flags.IsMeta() {
+			// 	superClass = &objc.Class{Name: "<META>"}
+			// } else if info.Flags > 0 {
+		} else {
 			if c, ok := f.objc[classPtr.SuperclassVMAddr]; ok {
 				superClass = c
 			} else {
@@ -565,9 +574,7 @@ func (f *File) parseObjcProtocolList(vmaddr uint64) ([]objc.Protocol, error) {
 	if err := binary.Read(f.cr, f.ByteOrder, &protList.Count); err != nil {
 		return nil, fmt.Errorf("failed to read protocol_list_t count: %v", err)
 	}
-	if protList.Count > 0x1000 {
-		return nil, fmt.Errorf("you fucked up")
-	}
+
 	protList.Protocols = make([]uint64, protList.Count)
 	if err := binary.Read(f.cr, f.ByteOrder, &protList.Protocols); err != nil {
 		return nil, fmt.Errorf("failed to read protocol_list_t prots: %v", err)
@@ -612,7 +619,6 @@ func (f *File) getObjcProtocol(vmaddr uint64) (proto *objc.Protocol, err error) 
 			proto.Isa = c
 		} else {
 			// FIXME: causes infinite loop
-
 			// proto.Isa, err = f.GetObjCClass(protoPtr.IsaVMAddr)
 			// if err != nil {
 			// 	return nil, fmt.Errorf("failed to get class at vmaddr: %#x; %v", protoPtr.IsaVMAddr, err)

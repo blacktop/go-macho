@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"unsafe"
 
@@ -2074,40 +2075,6 @@ func (f *File) GetBindInfo() ([]types.Bind, error) {
 	if dinfo := f.DyldInfo(); dinfo != nil {
 		if dinfo.BindSize > 0 {
 			dat := make([]byte, dinfo.BindSize)
-			if _, err := f.cr.ReadAt(dat, int64(dinfo.BindOff)); err != nil {
-				return nil, fmt.Errorf("failed to read bind info: %v", err)
-			}
-			bs, err := f.parseBinds(bytes.NewReader(dat))
-			if err != nil {
-				return nil, err
-			}
-			binds = append(binds, bs...)
-		}
-		if dinfo.WeakBindSize > 0 {
-			dat := make([]byte, dinfo.WeakBindSize)
-			if _, err := f.cr.ReadAt(dat, int64(dinfo.WeakBindOff)); err != nil {
-				return nil, fmt.Errorf("failed to read weak bind info: %v", err)
-			}
-			bs, err := f.parseBinds(bytes.NewReader(dat))
-			if err != nil {
-				return nil, err
-			}
-			binds = append(binds, bs...)
-		}
-		if dinfo.LazyBindSize > 0 {
-			dat := make([]byte, dinfo.LazyBindSize)
-			if _, err := f.cr.ReadAt(dat, int64(dinfo.LazyBindOff)); err != nil {
-				return nil, fmt.Errorf("failed to read lazy bind info: %v", err)
-			}
-			bs, err := f.parseBinds(bytes.NewReader(dat))
-			if err != nil {
-				return nil, err
-			}
-			binds = append(binds, bs...)
-		}
-	} else if dinfo := f.DyldInfoOnly(); dinfo != nil {
-		if dinfo.BindSize > 0 {
-			dat := make([]byte, dinfo.BindSize)
 			if _, err := f.sr.ReadAt(dat, int64(dinfo.BindOff)); err != nil {
 				return nil, fmt.Errorf("failed to read bind info: %v", err)
 			}
@@ -2119,7 +2086,41 @@ func (f *File) GetBindInfo() ([]types.Bind, error) {
 		}
 		if dinfo.WeakBindSize > 0 {
 			dat := make([]byte, dinfo.WeakBindSize)
-			if _, err := f.cr.ReadAt(dat, int64(dinfo.WeakBindOff)); err != nil {
+			if _, err := f.sr.ReadAt(dat, int64(dinfo.WeakBindOff)); err != nil {
+				return nil, fmt.Errorf("failed to read weak bind info: %v", err)
+			}
+			bs, err := f.parseBinds(bytes.NewReader(dat))
+			if err != nil {
+				return nil, err
+			}
+			binds = append(binds, bs...)
+		}
+		if dinfo.LazyBindSize > 0 {
+			dat := make([]byte, dinfo.LazyBindSize)
+			if _, err := f.sr.ReadAt(dat, int64(dinfo.LazyBindOff)); err != nil {
+				return nil, fmt.Errorf("failed to read lazy bind info: %v", err)
+			}
+			bs, err := f.parseBinds(bytes.NewReader(dat))
+			if err != nil {
+				return nil, err
+			}
+			binds = append(binds, bs...)
+		}
+	} else if dinfo := f.DyldInfoOnly(); dinfo != nil {
+		if dinfo.BindSize > 0 {
+			dat := make([]byte, dinfo.BindSize)
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.BindOff)); err != nil {
+				return nil, fmt.Errorf("failed to read bind info: %v", err)
+			}
+			bs, err := f.parseBinds(bytes.NewReader(dat))
+			if err != nil {
+				return nil, err
+			}
+			binds = append(binds, bs...)
+		}
+		if dinfo.WeakBindSize > 0 {
+			dat := make([]byte, dinfo.WeakBindSize)
+			if _, err := f.sr.ReadAt(dat, int64(dinfo.WeakBindOff)); err != nil {
 				return nil, fmt.Errorf("failed to read weak bind info: %v", err)
 			}
 			bs, err := f.parseBinds(bytes.NewReader(dat))
@@ -2150,7 +2151,7 @@ func (f *File) GetRebaseInfo() ([]types.Rebase, error) {
 	if dinfo := f.DyldInfo(); dinfo != nil {
 		if dinfo.RebaseSize > 0 {
 			dat := make([]byte, dinfo.RebaseSize)
-			if _, err := f.cr.ReadAt(dat, int64(dinfo.RebaseOff)); err != nil {
+			if _, err := f.sr.ReadAt(dat, int64(dinfo.RebaseOff)); err != nil {
 				return nil, fmt.Errorf("failed to read rebase info: %v", err)
 			}
 			return f.parseRebase(bytes.NewReader(dat))
@@ -2158,7 +2159,7 @@ func (f *File) GetRebaseInfo() ([]types.Rebase, error) {
 	} else if dinfo := f.DyldInfoOnly(); dinfo != nil {
 		if dinfo.RebaseSize > 0 {
 			dat := make([]byte, dinfo.RebaseSize)
-			if _, err := f.cr.ReadAt(dat, int64(dinfo.RebaseOff)); err != nil {
+			if _, err := f.sr.ReadAt(dat, int64(dinfo.RebaseOff)); err != nil {
 				return nil, fmt.Errorf("failed to read rebase info: %v", err)
 			}
 			return f.parseRebase(bytes.NewReader(dat))
@@ -2173,7 +2174,7 @@ func (f *File) GetExports() ([]trie.TrieEntry, error) {
 	if dinfo := f.DyldInfo(); dinfo != nil {
 		if dinfo.ExportSize > 0 {
 			dat := make([]byte, dinfo.ExportSize)
-			if _, err := f.cr.ReadAt(dat, int64(dinfo.ExportOff)); err != nil {
+			if _, err := f.sr.ReadAt(dat, int64(dinfo.ExportOff)); err != nil {
 				return nil, fmt.Errorf("failed to read bind info: %v", err)
 			}
 			return trie.ParseTrie(dat, f.GetBaseAddress())
@@ -2181,7 +2182,7 @@ func (f *File) GetExports() ([]trie.TrieEntry, error) {
 	} else if dinfo := f.DyldInfoOnly(); dinfo != nil {
 		if dinfo.ExportSize > 0 {
 			dat := make([]byte, dinfo.ExportSize)
-			if _, err := f.cr.ReadAt(dat, int64(dinfo.ExportOff)); err != nil {
+			if _, err := f.sr.ReadAt(dat, int64(dinfo.ExportOff)); err != nil {
 				return nil, fmt.Errorf("failed to read bind info: %v", err)
 			}
 			return trie.ParseTrie(dat, f.GetBaseAddress())
@@ -2431,7 +2432,7 @@ func (f *File) parseRebase(r *bytes.Reader) ([]types.Rebase, error) {
 				rebase.Offset += skip + f.pointerSize()
 			}
 		default:
-			return nil, fmt.Errorf("bad bind opcode %#02x", opcode)
+			return nil, fmt.Errorf("bad rebase opcode %#02x", opcode)
 		}
 	}
 
@@ -2498,12 +2499,10 @@ func (f *File) LibraryOrdinalName(libraryOrdinal int) string {
 	dylibs := f.ImportedLibraries()
 
 	if libraryOrdinal > 0 {
-		path := dylibs[libraryOrdinal-1]
 		if libraryOrdinal > len(dylibs) {
 			return "ordinal-too-large"
 		}
-		parts := strings.Split(path, "/")
-		return parts[len(parts)-1]
+		return filepath.Base(dylibs[libraryOrdinal-1])
 	}
 
 	switch libraryOrdinal {
