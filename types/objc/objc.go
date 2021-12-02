@@ -634,6 +634,9 @@ func (f ClassRoFlags) IsRoot() bool {
 func (f ClassRoFlags) HasCxxStructors() bool {
 	return f&RO_HAS_CXX_STRUCTORS != 0
 }
+func (f ClassRoFlags) HasFuture() bool {
+	return f&RO_FUTURE != 0
+}
 
 type ClassRO struct {
 	Flags                ClassRoFlags

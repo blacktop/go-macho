@@ -33,13 +33,13 @@ type trieNode struct {
 
 func (e TrieEntry) String() string {
 	if e.Flags.ReExport() {
-		return fmt.Sprintf("%#016x: %s (%s re-exported from %s)", e.Address, e.Name, e.ReExport, filepath.Base(e.FoundInDylib))
+		return fmt.Sprintf("%#09x:\t(%s re-exported from %s)\t%s", e.Address, e.ReExport, filepath.Base(e.FoundInDylib), e.Name)
 	} else if e.Flags.StubAndResolver() {
-		return fmt.Sprintf("%#016x %s\t(stub to %#8x)", e.Address, e.Name, e.Other)
+		return fmt.Sprintf("%#09x:\t(stub to %#8x)\t%s", e.Address, e.Other, e.Name)
 	} else if len(e.FoundInDylib) > 0 {
-		return fmt.Sprintf("%#016x: %s, %s", e.Address, e.Name, e.FoundInDylib)
+		return fmt.Sprintf("%#09x: %s\t%s", e.Address, e.Name, e.FoundInDylib)
 	}
-	return fmt.Sprintf("%#016x: %s", e.Address, e.Name)
+	return fmt.Sprintf("%#09x:\t(%s)\t%s", e.Address, e.Flags, e.Name)
 }
 
 func ReadUleb128(r *bytes.Reader) (uint64, error) {
