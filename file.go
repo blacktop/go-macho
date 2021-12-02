@@ -12,7 +12,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"sort"
 	"strings"
 	"unsafe"
 
@@ -1406,8 +1405,9 @@ func (f *File) parseSymtab(symdat, strtab, cmddat []byte, hdr *types.SymtabCmd, 
 
 func (f *File) pushSection(sh *Section, r io.ReaderAt) error {
 	f.Sections = append(f.Sections, sh)
-	// sh.sr = io.NewSectionReader(r, int64(sh.Offset), int64(sh.Size))
+	sh.sr = io.NewSectionReader(r, int64(sh.Offset), int64(sh.Size))
 	sh.ReaderAt = f.sr
+	// sh.ReaderAt = f.cr
 
 	if sh.Nreloc > 0 {
 		reldat := make([]byte, int(sh.Nreloc)*8)
@@ -1466,6 +1466,25 @@ func cstring(b []byte) string {
 		i = len(b)
 	}
 	return string(b[0:i])
+}
+
+func readString(r io.Reader) (string, error) {
+	var b byte
+	var str string
+
+	for {
+		err := binary.Read(r, binary.BigEndian, &b)
+
+		if err != nil {
+			return str, err
+		}
+
+		if b == '\x00' {
+			return str, nil
+		}
+
+		str += string(b)
+	}
 }
 
 func (f *File) is64bit() bool { return f.FileHeader.Magic == types.Magic64 }
@@ -1635,7 +1654,7 @@ func (f *File) Segments() Segments {
 			segs = append(segs, s)
 		}
 	}
-	sort.Sort(segs)
+	// sort.Sort(segs)
 	return segs
 }
 
@@ -2047,6 +2066,376 @@ func (f *File) DWARF() (*dwarf.Data, error) {
 	}
 
 	return d, nil
+}
+
+func (f *File) GetBindInfo() ([]types.Bind, error) {
+	var binds []types.Bind
+
+	if dinfo := f.DyldInfo(); dinfo != nil {
+		if dinfo.BindSize > 0 {
+			dat := make([]byte, dinfo.BindSize)
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.BindOff)); err != nil {
+				return nil, fmt.Errorf("failed to read bind info: %v", err)
+			}
+			bs, err := f.parseBinds(bytes.NewReader(dat))
+			if err != nil {
+				return nil, err
+			}
+			binds = append(binds, bs...)
+		}
+		if dinfo.WeakBindSize > 0 {
+			dat := make([]byte, dinfo.WeakBindSize)
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.WeakBindOff)); err != nil {
+				return nil, fmt.Errorf("failed to read weak bind info: %v", err)
+			}
+			bs, err := f.parseBinds(bytes.NewReader(dat))
+			if err != nil {
+				return nil, err
+			}
+			binds = append(binds, bs...)
+		}
+		if dinfo.LazyBindSize > 0 {
+			dat := make([]byte, dinfo.LazyBindSize)
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.LazyBindOff)); err != nil {
+				return nil, fmt.Errorf("failed to read lazy bind info: %v", err)
+			}
+			bs, err := f.parseBinds(bytes.NewReader(dat))
+			if err != nil {
+				return nil, err
+			}
+			binds = append(binds, bs...)
+		}
+	} else if dinfo := f.DyldInfoOnly(); dinfo != nil {
+		if dinfo.BindSize > 0 {
+			dat := make([]byte, dinfo.BindSize)
+			if _, err := f.sr.ReadAt(dat, int64(dinfo.BindOff)); err != nil {
+				return nil, fmt.Errorf("failed to read bind info: %v", err)
+			}
+			bs, err := f.parseBinds(bytes.NewReader(dat))
+			if err != nil {
+				return nil, err
+			}
+			binds = append(binds, bs...)
+		}
+		if dinfo.WeakBindSize > 0 {
+			dat := make([]byte, dinfo.WeakBindSize)
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.WeakBindOff)); err != nil {
+				return nil, fmt.Errorf("failed to read weak bind info: %v", err)
+			}
+			bs, err := f.parseBinds(bytes.NewReader(dat))
+			if err != nil {
+				return nil, err
+			}
+			binds = append(binds, bs...)
+		}
+		if dinfo.LazyBindSize > 0 {
+			dat := make([]byte, dinfo.LazyBindSize)
+			if _, err := f.sr.ReadAt(dat, int64(dinfo.LazyBindOff)); err != nil {
+				return nil, fmt.Errorf("failed to read lazy bind info: %v", err)
+			}
+			bs, err := f.parseBinds(bytes.NewReader(dat))
+			if err != nil {
+				return nil, err
+			}
+			binds = append(binds, bs...)
+		}
+	} else {
+		return nil, fmt.Errorf("LC_DYLD_INFO|LC_DYLD_INFO_ONLY not found")
+	}
+
+	return binds, nil
+}
+
+func (f *File) GetRebaseInfo() ([]types.Rebase, error) {
+	if dinfo := f.DyldInfo(); dinfo != nil {
+		if dinfo.RebaseSize > 0 {
+			dat := make([]byte, dinfo.RebaseSize)
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.RebaseOff)); err != nil {
+				return nil, fmt.Errorf("failed to read rebase info: %v", err)
+			}
+			return f.parseRebase(bytes.NewReader(dat))
+		}
+	} else if dinfo := f.DyldInfoOnly(); dinfo != nil {
+		if dinfo.RebaseSize > 0 {
+			dat := make([]byte, dinfo.RebaseSize)
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.RebaseOff)); err != nil {
+				return nil, fmt.Errorf("failed to read rebase info: %v", err)
+			}
+			return f.parseRebase(bytes.NewReader(dat))
+		}
+	} else {
+		return nil, fmt.Errorf("LC_DYLD_INFO|LC_DYLD_INFO_ONLY not found")
+	}
+	return nil, nil
+}
+
+func (f *File) GetExports() ([]trie.TrieEntry, error) {
+	if dinfo := f.DyldInfo(); dinfo != nil {
+		if dinfo.ExportSize > 0 {
+			dat := make([]byte, dinfo.ExportSize)
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.ExportOff)); err != nil {
+				return nil, fmt.Errorf("failed to read bind info: %v", err)
+			}
+			return trie.ParseTrie(dat, f.GetBaseAddress())
+		}
+	} else if dinfo := f.DyldInfoOnly(); dinfo != nil {
+		if dinfo.ExportSize > 0 {
+			dat := make([]byte, dinfo.ExportSize)
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.ExportOff)); err != nil {
+				return nil, fmt.Errorf("failed to read bind info: %v", err)
+			}
+			return trie.ParseTrie(dat, f.GetBaseAddress())
+		}
+	} else {
+		return nil, fmt.Errorf("LC_DYLD_INFO|LC_DYLD_INFO_ONLY not found")
+	}
+	return nil, nil
+}
+
+func (f *File) parseBinds(r *bytes.Reader) ([]types.Bind, error) {
+	var bind types.Bind
+	var binds []types.Bind
+
+	for {
+		ptr, err := r.ReadByte()
+
+		if err == io.EOF {
+			break
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		imm := ptr & types.BIND_IMMEDIATE_MASK
+		opcode := ptr & types.BIND_OPCODE_MASK
+
+		switch opcode {
+		case types.BIND_OPCODE_DONE:
+			bind = types.Bind{}
+		case types.BIND_OPCODE_SET_DYLIB_ORDINAL_IMM:
+			bind.Dylib = f.LibraryOrdinalName(int(imm))
+		case types.BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB:
+			i, err := trie.ReadUleb128(r)
+			if err != nil {
+				return nil, err
+			}
+			bind.Dylib = f.LibraryOrdinalName(int(i))
+		case types.BIND_OPCODE_SET_DYLIB_SPECIAL_IMM:
+			if imm == 0 {
+				bind.Dylib = f.LibraryOrdinalName(int(imm))
+			} else {
+				bind.Dylib = f.LibraryOrdinalName(int(types.BIND_OPCODE_MASK | imm))
+			}
+		case types.BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM:
+			s, err := readString(r)
+			if err != nil {
+				return nil, err
+			}
+			bind.Name = strings.Trim(s, "\x00")
+			bind.Flags = imm
+		case types.BIND_OPCODE_SET_TYPE_IMM:
+			bind.Type = imm
+		case types.BIND_OPCODE_SET_ADDEND_SLEB:
+			add, err := trie.ReadSleb128(r)
+			if err != nil {
+				return nil, err
+			}
+			bind.Addend = add
+		case types.BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
+			off, err := trie.ReadUleb128(r)
+			if err != nil {
+				return nil, err
+			}
+			bind.Offset += off
+			bind.Start = f.Segments()[imm].Addr
+			bind.Segment = f.Segments()[imm].Name
+		case types.BIND_OPCODE_ADD_ADDR_ULEB:
+			off, err := trie.ReadUleb128(r)
+			if err != nil {
+				return nil, err
+			}
+			bind.Offset += off
+		case types.BIND_OPCODE_DO_BIND:
+			sec := f.FindSectionForVMAddr(f.Segment(bind.Segment).Addr + bind.Offset)
+			if sec == nil {
+				return nil, err
+			}
+			bind.Section = sec.Name
+			binds = append(binds, bind)
+			bind.Offset += f.pointerSize()
+		case types.BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB:
+			sec := f.FindSectionForVMAddr(f.Segment(bind.Segment).Addr + bind.Offset)
+			if sec == nil {
+				return nil, err
+			}
+			bind.Section = sec.Name
+			binds = append(binds, bind)
+			off, err := trie.ReadUleb128(r)
+			if err != nil {
+				return nil, err
+			}
+			bind.Offset += off + f.pointerSize()
+		case types.BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED:
+			sec := f.FindSectionForVMAddr(f.Segment(bind.Segment).Addr + bind.Offset)
+			if sec == nil {
+				return nil, err
+			}
+			bind.Section = sec.Name
+			binds = append(binds, bind)
+			bind.Offset += uint64(imm)*f.pointerSize() + f.pointerSize()
+		case types.BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB:
+			count, err := trie.ReadUleb128(r)
+			if err != nil {
+				return nil, err
+			}
+			skip, err := trie.ReadUleb128(r)
+			if err != nil {
+				return nil, err
+			}
+			for i := uint64(0); i < count; i++ {
+				sec := f.FindSectionForVMAddr(f.Segment(bind.Segment).Addr + bind.Offset)
+				if sec == nil {
+					return nil, err
+				}
+				bind.Section = sec.Name
+				binds = append(binds, bind)
+				bind.Offset += skip + f.pointerSize()
+			}
+		case types.BIND_OPCODE_THREADED:
+			switch imm {
+			case types.BIND_SUBOPCODE_THREADED_SET_BIND_ORDINAL_TABLE_SIZE_ULEB:
+				_, err := trie.ReadUleb128(r)
+				if err != nil {
+					return nil, err
+				}
+			case types.BIND_SUBOPCODE_THREADED_APPLY:
+			default:
+				return nil, fmt.Errorf("bad threaded bind subopcode %#02x", imm)
+			}
+		default:
+			return nil, fmt.Errorf("bad bind opcode %#02x", opcode)
+		}
+	}
+
+	return binds, nil
+}
+
+func (f *File) parseRebase(r *bytes.Reader) ([]types.Rebase, error) {
+	var rebase types.Rebase
+	var rebases []types.Rebase
+
+	for {
+		ptr, err := r.ReadByte()
+
+		if err == io.EOF {
+			break
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		imm := ptr & types.BIND_IMMEDIATE_MASK
+		opcode := ptr & types.BIND_OPCODE_MASK
+
+		switch opcode {
+		case types.REBASE_OPCODE_DONE:
+			rebase = types.Rebase{}
+		case types.REBASE_OPCODE_SET_TYPE_IMM:
+			rebase.Type = imm
+		case types.REBASE_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
+			off, err := trie.ReadUleb128(r)
+			if err != nil {
+				return nil, err
+			}
+			rebase.Offset += off
+			rebase.Start = f.Segments()[imm].Addr
+			rebase.Segment = f.Segments()[imm].Name
+		case types.REBASE_OPCODE_ADD_ADDR_ULEB:
+			off, err := trie.ReadUleb128(r)
+			if err != nil {
+				return nil, err
+			}
+			rebase.Offset += off
+		case types.REBASE_OPCODE_ADD_ADDR_IMM_SCALED:
+			rebase.Offset += uint64(imm) * f.pointerSize()
+		case types.REBASE_OPCODE_DO_REBASE_IMM_TIMES:
+			for i := byte(0); i < imm; i++ {
+				f.sr.Seek(int64(f.Segment(rebase.Segment).Offset+rebase.Offset), io.SeekStart)
+				if err := binary.Read(f.sr, f.ByteOrder, &rebase.Value); err != nil {
+					return nil, fmt.Errorf("failed to read pointer: %v", err)
+				}
+				sec := f.FindSectionForVMAddr(f.Segment(rebase.Segment).Addr + rebase.Offset)
+				if sec == nil {
+					return nil, err
+				}
+				rebase.Section = sec.Name
+				rebases = append(rebases, rebase)
+				rebase.Offset += f.pointerSize()
+			}
+		case types.REBASE_OPCODE_DO_REBASE_ULEB_TIMES:
+			count, err := trie.ReadUleb128(r)
+			if err != nil {
+				return nil, err
+			}
+			for i := uint64(0); i < count; i++ {
+				f.sr.Seek(int64(f.Segment(rebase.Segment).Offset+rebase.Offset), io.SeekStart)
+				if err := binary.Read(f.sr, f.ByteOrder, &rebase.Value); err != nil {
+					return nil, fmt.Errorf("failed to read pointer: %v", err)
+				}
+				sec := f.FindSectionForVMAddr(f.Segment(rebase.Segment).Addr + rebase.Offset)
+				if sec == nil {
+					return nil, err
+				}
+				rebase.Section = sec.Name
+				rebases = append(rebases, rebase)
+				rebase.Offset += f.pointerSize()
+			}
+		case types.REBASE_OPCODE_DO_REBASE_ADD_ADDR_ULEB:
+			f.sr.Seek(int64(f.Segment(rebase.Segment).Offset+rebase.Offset), io.SeekStart)
+			if err := binary.Read(f.sr, f.ByteOrder, &rebase.Value); err != nil {
+				return nil, fmt.Errorf("failed to read pointer: %v", err)
+			}
+			off, err := trie.ReadUleb128(r)
+			if err != nil {
+				return nil, err
+			}
+			sec := f.FindSectionForVMAddr(f.Segment(rebase.Segment).Addr + rebase.Offset)
+			if sec == nil {
+				return nil, err
+			}
+			rebase.Section = sec.Name
+			rebases = append(rebases, rebase)
+			rebase.Offset += off + f.pointerSize()
+		case types.REBASE_OPCODE_DO_REBASE_ULEB_TIMES_SKIPPING_ULEB:
+			count, err := trie.ReadUleb128(r)
+			if err != nil {
+				return nil, err
+			}
+			skip, err := trie.ReadUleb128(r)
+			if err != nil {
+				return nil, err
+			}
+			for i := uint64(0); i < count; i++ {
+				f.sr.Seek(int64(f.Segment(rebase.Segment).Offset+rebase.Offset), io.SeekStart)
+				if err := binary.Read(f.sr, f.ByteOrder, &rebase.Value); err != nil {
+					return nil, fmt.Errorf("failed to read pointer: %v", err)
+				}
+				sec := f.FindSectionForVMAddr(f.Segment(rebase.Segment).Addr + rebase.Offset)
+				if sec == nil {
+					return nil, err
+				}
+				rebase.Section = sec.Name
+				rebases = append(rebases, rebase)
+				rebase.Offset += skip + f.pointerSize()
+			}
+		default:
+			return nil, fmt.Errorf("bad bind opcode %#02x", opcode)
+		}
+	}
+
+	return rebases, nil
 }
 
 // ImportedSymbols returns the names of all symbols

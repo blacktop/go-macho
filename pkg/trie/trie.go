@@ -33,9 +33,13 @@ type trieNode struct {
 
 func (e TrieEntry) String() string {
 	if e.Flags.ReExport() {
-		return fmt.Sprintf("%#09x:\t(%s re-exported from %s)\t%s", e.Address, e.ReExport, filepath.Base(e.FoundInDylib), e.Name)
+		if len(e.ReExport) == 0 {
+			return fmt.Sprintf("%#09x:\t(from %s)\t%s", e.Address, filepath.Base(e.FoundInDylib), e.Name)
+		} else {
+			return fmt.Sprintf("%#09x:\t(%s re-exported from %s)\t%s", e.Address, e.ReExport, filepath.Base(e.FoundInDylib), e.Name)
+		}
 	} else if e.Flags.StubAndResolver() {
-		return fmt.Sprintf("%#09x:\t(stub to %#8x)\t%s", e.Address, e.Other, e.Name)
+		return fmt.Sprintf("%#09x:\t(resolver=%#8x)\t%s", e.Address, e.Other, e.Name)
 	} else if len(e.FoundInDylib) > 0 {
 		return fmt.Sprintf("%#09x: %s\t%s", e.Address, e.Name, e.FoundInDylib)
 	}
@@ -63,6 +67,35 @@ func ReadUleb128(r *bytes.Reader) (uint64, error) {
 		}
 
 		shift += 7
+	}
+
+	return result, nil
+}
+
+func ReadSleb128(r *bytes.Reader) (int64, error) {
+	var result int64
+	var shift uint64
+
+	for {
+		b, err := r.ReadByte()
+		if err == io.EOF {
+			return 0, err
+		}
+		if err != nil {
+			return 0, fmt.Errorf("could not parse SLEB128 value: %v", err)
+		}
+
+		result |= int64((int64(b) & 0x7f) << shift)
+		shift += 7
+
+		// If high order bit is 1.
+		if (b & 0x80) == 0 {
+			break
+		}
+
+		if (shift < 64) && ((b & 0x40) > 0) {
+			result |= -(1 << shift)
+		}
 	}
 
 	return result, nil
@@ -98,6 +131,43 @@ func ReadUleb128FromBuffer(buf *bytes.Buffer) (uint64, int, error) {
 	}
 
 	return result, length, nil
+}
+
+// EncodeUleb128 encodes input to the Unsigned Little Endian Base 128 format
+func EncodeUleb128(out io.ByteWriter, x uint64) {
+	for {
+		b := byte(x & 0x7f)
+		x = x >> 7
+		if x != 0 {
+			b = b | 0x80
+		}
+		out.WriteByte(b)
+		if x == 0 {
+			break
+		}
+	}
+}
+
+// EncodeSleb128 encodes input to the Signed Little Endian Base 128 format
+func EncodeSleb128(out io.ByteWriter, x int64) {
+	for {
+		b := byte(x & 0x7f)
+		x >>= 7
+
+		signb := b & 0x40
+
+		last := false
+		if (x == 0 && signb == 0) || (x == -1 && signb != 0) {
+			last = true
+		} else {
+			b = b | 0x80
+		}
+		out.WriteByte(b)
+
+		if last {
+			break
+		}
+	}
 }
 
 func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {

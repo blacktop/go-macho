@@ -1,6 +1,9 @@
 package types
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 const (
 	/* The following are used to encode rebasing information */
@@ -19,11 +22,36 @@ const (
 	REBASE_OPCODE_DO_REBASE_ADD_ADDR_ULEB            = 0x70
 	REBASE_OPCODE_DO_REBASE_ULEB_TIMES_SKIPPING_ULEB = 0x80
 )
+
+type Rebase struct {
+	Name    string
+	Type    uint8
+	Segment string
+	Section string
+	Start   uint64
+	Offset  uint64
+	Value   uint64
+}
+
+func (r Rebase) String() string {
+	return fmt.Sprintf(
+		"%-7s %-16s\t%#x\t%s\t%s\t%#x",
+		r.Segment,
+		r.Section,
+		r.Start+r.Offset,
+		getBindType(r.Type),
+		r.Name,
+		r.Value,
+	)
+}
+
 const (
 	/* The following are used to encode binding information */
 	BIND_TYPE_POINTER                                        = 1
 	BIND_TYPE_TEXT_ABSOLUTE32                                = 2
 	BIND_TYPE_TEXT_PCREL32                                   = 3
+	BIND_TYPE_THREADED_BIND                                  = 100
+	BIND_TYPE_THREADED_REBASE                                = 102
 	BIND_SPECIAL_DYLIB_SELF                                  = 0
 	BIND_SPECIAL_DYLIB_MAIN_EXECUTABLE                       = -1
 	BIND_SPECIAL_DYLIB_FLAT_LOOKUP                           = -2
@@ -49,6 +77,61 @@ const (
 	BIND_SUBOPCODE_THREADED_SET_BIND_ORDINAL_TABLE_SIZE_ULEB = 0x00
 	BIND_SUBOPCODE_THREADED_APPLY                            = 0x01
 )
+
+type Bind struct {
+	Name    string
+	Type    uint8
+	Flags   uint8
+	Addend  int64
+	Segment string
+	Section string
+	Start   uint64
+	Offset  uint64
+	Dylib   string
+}
+
+func (b Bind) String() string {
+	return fmt.Sprintf(
+		"%-7s %-16s\t%#x\t%s\t%d\t%s\t%s%s",
+		b.Segment,
+		b.Section,
+		b.Start+b.Offset,
+		getBindType(b.Type),
+		b.Addend,
+		b.Dylib,
+		b.Name,
+		getBindFlag(b.Flags),
+	)
+}
+
+func getBindType(t uint8) string {
+	switch t {
+	case 0:
+		return ""
+	case BIND_TYPE_POINTER:
+		return "pointer"
+	case BIND_TYPE_TEXT_ABSOLUTE32:
+		return "text abs32"
+	case BIND_TYPE_TEXT_PCREL32:
+		return "text rel32"
+	case BIND_TYPE_THREADED_BIND:
+		return "BIND_TYPE_THREADED_BIND"
+	case BIND_TYPE_THREADED_REBASE:
+		return "BIND_TYPE_THREADED_REBASE"
+	}
+	return fmt.Sprintf(" bad bind type %#02x", t)
+}
+func getBindFlag(f uint8) string {
+	switch f {
+	case BIND_SYMBOL_FLAGS_WEAK_IMPORT:
+		return " (weak import)"
+	case BIND_SYMBOL_FLAGS_NON_WEAK_DEFINITION:
+		fallthrough
+	case 0:
+		return ""
+	}
+	return fmt.Sprintf("bad bind flag %#02x", f)
+}
 
 const (
 	DYLD_CACHE_ADJ_V2_FORMAT = 0x7F
@@ -110,20 +193,20 @@ func (f ExportFlag) StaticResolver() bool {
 func (f ExportFlag) String() string {
 	var fStr string
 	if f.Regular() {
-		fStr += "Regular"
+		fStr += "regular"
 		if f.StubAndResolver() {
-			fStr += "|Has Resolver Function"
+			fStr += "|has_resolver"
 		} else if f.StaticResolver() {
-			fStr += "|Has Static Resolver"
+			fStr += "|static_resolver"
 		} else if f.WeakDefinition() {
-			fStr += "|Weak Definition"
+			fStr += "|weak_def"
 		}
 	} else if f.ThreadLocal() {
-		fStr += "Thread Local"
+		fStr += "per-thread"
 	} else if f.Absolute() {
-		fStr += "Absolute"
+		fStr += "absolute"
 	} else if f.ReExport() {
-		fStr += "ReExport"
+		fStr += "[re-export]"
 	}
 	return strings.TrimSpace(fStr)
 }
