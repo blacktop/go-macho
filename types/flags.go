@@ -76,9 +76,30 @@ const (
 	BIND_SUBOPCODE_THREADED_APPLY                            = 0x01
 )
 
+type BindKind uint8
+
+const (
+	BIND_KIND BindKind = iota
+	WEAK_KIND
+	LAZY_KIND
+)
+
+func (k BindKind) String() string {
+	switch k {
+	case BIND_KIND:
+		return "BIND"
+	case WEAK_KIND:
+		return "WEAK"
+	case LAZY_KIND:
+		return "LAZY"
+	}
+	return ""
+}
+
 type Bind struct {
 	Name    string
 	Type    uint8
+	Kind    BindKind
 	Flags   uint8
 	Addend  int64
 	Segment string
@@ -86,19 +107,21 @@ type Bind struct {
 	Start   uint64
 	Offset  uint64
 	Dylib   string
+	Value   uint64
 }
 
 func (b Bind) String() string {
 	return fmt.Sprintf(
-		"%-7s %-16s  %#x  %-10s  %5d %-16s\t%s%s",
+		"%-7s %-16s  %#x  %-4s  %-10s  %5d %-25s\t%s%s",
 		b.Segment,
 		b.Section,
 		b.Start+b.Offset,
+		b.Kind,
 		getBindType(b.Type),
 		b.Addend,
 		b.Dylib,
 		b.Name,
-		getBindFlag(b.Flags),
+		getBindFlag(b.Flags, b.Kind),
 	)
 }
 
@@ -119,15 +142,19 @@ func getBindType(t uint8) string {
 	}
 	return fmt.Sprintf(" bad bind type %#02x", t)
 }
-func getBindFlag(f uint8) string {
-	switch f {
-	case BIND_SYMBOL_FLAGS_WEAK_IMPORT:
+func getBindFlag(f uint8, k BindKind) string {
+	if f&BIND_SYMBOL_FLAGS_WEAK_IMPORT != 0 {
 		return " (weak import)"
-	case BIND_SYMBOL_FLAGS_NON_WEAK_DEFINITION:
-		fallthrough
-	case 0:
+	} else if f&BIND_SYMBOL_FLAGS_NON_WEAK_DEFINITION != 0 {
+		if k == WEAK_KIND {
+			return " (strong)"
+		} else {
+			return ""
+		}
+	} else if f == 0 {
 		return ""
 	}
+
 	return fmt.Sprintf("bad bind flag %#02x", f)
 }
 

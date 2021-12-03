@@ -2078,7 +2078,7 @@ func (f *File) GetBindInfo() ([]types.Bind, error) {
 			if _, err := f.sr.ReadAt(dat, int64(dinfo.BindOff)); err != nil {
 				return nil, fmt.Errorf("failed to read bind info: %v", err)
 			}
-			bs, err := f.parseBinds(bytes.NewReader(dat))
+			bs, err := f.parseBinds(bytes.NewReader(dat), types.BIND_KIND)
 			if err != nil {
 				return nil, err
 			}
@@ -2089,7 +2089,7 @@ func (f *File) GetBindInfo() ([]types.Bind, error) {
 			if _, err := f.sr.ReadAt(dat, int64(dinfo.WeakBindOff)); err != nil {
 				return nil, fmt.Errorf("failed to read weak bind info: %v", err)
 			}
-			bs, err := f.parseBinds(bytes.NewReader(dat))
+			bs, err := f.parseBinds(bytes.NewReader(dat), types.WEAK_KIND)
 			if err != nil {
 				return nil, err
 			}
@@ -2100,7 +2100,7 @@ func (f *File) GetBindInfo() ([]types.Bind, error) {
 			if _, err := f.sr.ReadAt(dat, int64(dinfo.LazyBindOff)); err != nil {
 				return nil, fmt.Errorf("failed to read lazy bind info: %v", err)
 			}
-			bs, err := f.parseBinds(bytes.NewReader(dat))
+			bs, err := f.parseBinds(bytes.NewReader(dat), types.LAZY_KIND)
 			if err != nil {
 				return nil, err
 			}
@@ -2112,7 +2112,7 @@ func (f *File) GetBindInfo() ([]types.Bind, error) {
 			if _, err := f.cr.ReadAt(dat, int64(dinfo.BindOff)); err != nil {
 				return nil, fmt.Errorf("failed to read bind info: %v", err)
 			}
-			bs, err := f.parseBinds(bytes.NewReader(dat))
+			bs, err := f.parseBinds(bytes.NewReader(dat), types.BIND_KIND)
 			if err != nil {
 				return nil, err
 			}
@@ -2123,7 +2123,7 @@ func (f *File) GetBindInfo() ([]types.Bind, error) {
 			if _, err := f.sr.ReadAt(dat, int64(dinfo.WeakBindOff)); err != nil {
 				return nil, fmt.Errorf("failed to read weak bind info: %v", err)
 			}
-			bs, err := f.parseBinds(bytes.NewReader(dat))
+			bs, err := f.parseBinds(bytes.NewReader(dat), types.WEAK_KIND)
 			if err != nil {
 				return nil, err
 			}
@@ -2134,7 +2134,7 @@ func (f *File) GetBindInfo() ([]types.Bind, error) {
 			if _, err := f.sr.ReadAt(dat, int64(dinfo.LazyBindOff)); err != nil {
 				return nil, fmt.Errorf("failed to read lazy bind info: %v", err)
 			}
-			bs, err := f.parseBinds(bytes.NewReader(dat))
+			bs, err := f.parseBinds(bytes.NewReader(dat), types.LAZY_KIND)
 			if err != nil {
 				return nil, err
 			}
@@ -2193,9 +2193,14 @@ func (f *File) GetExports() ([]trie.TrieEntry, error) {
 	return nil, nil
 }
 
-func (f *File) parseBinds(r *bytes.Reader) ([]types.Bind, error) {
-	var bind types.Bind
+func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, error) {
 	var binds []types.Bind
+	var ordinalTable []types.Bind
+	var ordinalTableSize uint64
+	var segOffset uint64
+
+	useThreadedRebaseBind := false
+	bind := types.Bind{Kind: kind}
 
 	for {
 		ptr, err := r.ReadByte()
@@ -2213,7 +2218,10 @@ func (f *File) parseBinds(r *bytes.Reader) ([]types.Bind, error) {
 
 		switch opcode {
 		case types.BIND_OPCODE_DONE:
-			bind = types.Bind{}
+			if kind != types.LAZY_KIND {
+				return binds, nil
+			}
+			bind = types.Bind{Kind: kind}
 		case types.BIND_OPCODE_SET_DYLIB_ORDINAL_IMM:
 			bind.Dylib = f.LibraryOrdinalName(int(imm))
 		case types.BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB:
@@ -2244,47 +2252,47 @@ func (f *File) parseBinds(r *bytes.Reader) ([]types.Bind, error) {
 			}
 			bind.Addend = add
 		case types.BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
-			off, err := trie.ReadUleb128(r)
+			segOffset, err = trie.ReadUleb128(r)
 			if err != nil {
 				return nil, err
 			}
-			bind.Offset += off
 			bind.Start = f.Segments()[imm].Addr
 			bind.Segment = f.Segments()[imm].Name
 		case types.BIND_OPCODE_ADD_ADDR_ULEB:
-			off, err := trie.ReadUleb128(r)
+			out, err := trie.ReadUleb128(r)
 			if err != nil {
 				return nil, err
 			}
-			bind.Offset += off
+			segOffset += out
 		case types.BIND_OPCODE_DO_BIND:
-			sec := f.FindSectionForVMAddr(f.Segment(bind.Segment).Addr + bind.Offset)
-			if sec == nil {
-				return nil, err
+			if useThreadedRebaseBind {
+				ordinalTable = append(ordinalTable, bind)
+			} else {
+				if sec := f.FindSectionForVMAddr(f.Segment(bind.Segment).Addr + segOffset); sec != nil {
+					bind.Section = sec.Name
+				}
+				bind.Offset = segOffset
+				binds = append(binds, bind)
+				segOffset += f.pointerSize()
 			}
-			bind.Section = sec.Name
-			binds = append(binds, bind)
-			bind.Offset += f.pointerSize()
 		case types.BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB:
-			sec := f.FindSectionForVMAddr(f.Segment(bind.Segment).Addr + bind.Offset)
-			if sec == nil {
-				return nil, err
+			if sec := f.FindSectionForVMAddr(f.Segment(bind.Segment).Addr + segOffset); sec != nil {
+				bind.Section = sec.Name
 			}
-			bind.Section = sec.Name
+			bind.Offset = segOffset
 			binds = append(binds, bind)
 			off, err := trie.ReadUleb128(r)
 			if err != nil {
 				return nil, err
 			}
-			bind.Offset += off + f.pointerSize()
+			segOffset += off + f.pointerSize()
 		case types.BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED:
-			sec := f.FindSectionForVMAddr(f.Segment(bind.Segment).Addr + bind.Offset)
-			if sec == nil {
-				return nil, err
+			if sec := f.FindSectionForVMAddr(f.Segment(bind.Segment).Addr + segOffset); sec != nil {
+				bind.Section = sec.Name
 			}
-			bind.Section = sec.Name
+			bind.Offset = segOffset
 			binds = append(binds, bind)
-			bind.Offset += uint64(imm)*f.pointerSize() + f.pointerSize()
+			segOffset += uint64(imm)*f.pointerSize() + f.pointerSize()
 		case types.BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB:
 			count, err := trie.ReadUleb128(r)
 			if err != nil {
@@ -2295,22 +2303,66 @@ func (f *File) parseBinds(r *bytes.Reader) ([]types.Bind, error) {
 				return nil, err
 			}
 			for i := uint64(0); i < count; i++ {
-				sec := f.FindSectionForVMAddr(f.Segment(bind.Segment).Addr + bind.Offset)
-				if sec == nil {
-					return nil, err
+				if sec := f.FindSectionForVMAddr(f.Segment(bind.Segment).Addr + segOffset); sec != nil {
+					bind.Section = sec.Name
 				}
-				bind.Section = sec.Name
+				bind.Offset = segOffset
 				binds = append(binds, bind)
-				bind.Offset += skip + f.pointerSize()
+				segOffset += skip + f.pointerSize()
 			}
 		case types.BIND_OPCODE_THREADED:
 			switch imm {
 			case types.BIND_SUBOPCODE_THREADED_SET_BIND_ORDINAL_TABLE_SIZE_ULEB:
-				_, err := trie.ReadUleb128(r)
+				ordinalTableSize, err = trie.ReadUleb128(r)
 				if err != nil {
 					return nil, err
 				}
-			case types.BIND_SUBOPCODE_THREADED_APPLY:
+				useThreadedRebaseBind = true
+			case types.BIND_SUBOPCODE_THREADED_APPLY: // parse chain
+				delta := uint64(0)
+				for {
+					var ptr uint64
+					f.sr.Seek(int64(f.Segment(bind.Segment).Offset+segOffset), io.SeekStart)
+					if err := binary.Read(f.sr, f.ByteOrder, &ptr); err != nil {
+						return nil, fmt.Errorf("failed to read pointer: %v", err)
+					}
+					if (ptr & (1 << 62)) == 0 { // isRebase TODO: handle rebases
+						if (ptr & (1 << 63)) != 0 { // isAuthenticated
+							// uint16_t diversity = (uint16_t)(value >> 32);
+							// bool hasAddressDiversity = (value & (1ULL << 48)) != 0;
+							// uint8_t key = (uint8_t)((value >> 49) & 0x3);
+							// static const char* keyNames[] = {
+							// 	"IA", "IB", "DA", "DB"
+							// };
+							// printf("%-7s %-16s 0x%08llX %10s  %5lld %-16s %s%s with value 0x%016llX (JOP: diversity %d, address %s, %s)\n", segName, sectionName(segIndex, segStartAddr+segOffset), segStartAddr+segOffset, typeName, addend, fromDylib, symbolName, weak_import, value, diversity, hasAddressDiversity ? "true" : "false", keyNames[key]);
+						} else {
+							// // Regular pointer which needs to fit in 51-bits of value.
+							// // C++ RTTI uses the top bit, so we'll allow the whole top-byte
+							// // and the signed-extended bottom 43-bits to be fit in to 51-bits.
+							// uint64_t top8Bits = value & 0x0007F80000000000ULL;
+							// uint64_t bottom43Bits = value & 0x000007FFFFFFFFFFULL;
+							// uint64_t targetValue = ( top8Bits << 13 ) | (((intptr_t)(bottom43Bits << 21) >> 21) & 0x00FFFFFFFFFFFFFF);
+							// targetValue = targetValue + slide;
+							// *(uint64_t*)address = targetValue;
+						}
+					}
+					// the ordinal is bits [0..15]
+					ord := ptr & 0xFFFF
+					if ord > ordinalTableSize { // TODO: make sure this is right
+						return nil, fmt.Errorf("bind ordinal is out of range")
+					}
+					ordinalTable[ord].Value = ptr
+					ordinalTable[ord].Offset = segOffset
+					binds = append(binds, ordinalTable[ord])
+					// The delta is bits [51..61]
+					// And bit 62 is to tell us if we are a rebase (0) or bind (1)
+					ptr &= ^uint64(1 << 62)
+					delta = (ptr & 0x3FF8000000000000) >> 51
+					segOffset += delta * f.pointerSize()
+					if delta != 0 {
+						break
+					}
+				}
 			default:
 				return nil, fmt.Errorf("bad threaded bind subopcode %#02x", imm)
 			}
@@ -2342,7 +2394,7 @@ func (f *File) parseRebase(r *bytes.Reader) ([]types.Rebase, error) {
 
 		switch opcode {
 		case types.REBASE_OPCODE_DONE:
-			rebase = types.Rebase{}
+			return rebases, nil
 		case types.REBASE_OPCODE_SET_TYPE_IMM:
 			rebase.Type = imm
 		case types.REBASE_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
