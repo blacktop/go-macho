@@ -72,14 +72,6 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 
 	inCache := f.FileHeader.Flags.DylibInCache()
 
-	if inCache {
-		f.FileHeader.Flags &= 0x7FFFFFFF // remove in-cache bit
-	}
-
-	if err := f.FileHeader.Write(&buf, f.ByteOrder); err != nil {
-		return fmt.Errorf("failed to write file header to buffer: %v", err)
-	}
-
 	// create segment offset map
 	var newSegOffset uint64
 	for _, seg := range f.Segments() {
@@ -112,6 +104,14 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 
 	if err := f.optimizeObjC(segMap); err != nil {
 		return fmt.Errorf("failed to optimize ObjC: %v", err)
+	}
+
+	if inCache {
+		f.FileHeader.Flags &= 0x7FFFFFFF // remove in-cache bit
+	}
+
+	if err := f.FileHeader.Write(&buf, f.ByteOrder); err != nil {
+		return fmt.Errorf("failed to write file header to buffer: %v", err)
 	}
 
 	if err := f.writeLoadCommands(&buf); err != nil {
@@ -323,77 +323,77 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 			}
 			l.(*EncryptionInfo).Offset = uint32(off)
 		case types.LC_DYLD_INFO:
-			if l.(*DyldInfo).RebaseOff > 0 {
-				rebaseOff, err := segMap.Remap(uint64(l.(*DyldInfo).RebaseOff))
-				if err != nil {
-					return fmt.Errorf("failed to remap RebaseOff in %s: %v", l.Command(), err)
-				}
-				l.(*DyldInfoOnly).RebaseOff = uint32(rebaseOff)
-			}
-			if l.(*DyldInfoOnly).BindOff > 0 {
-				bindOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).BindOff))
-				if err != nil {
-					return fmt.Errorf("failed to remap BindOff in %s: %v", l.Command(), err)
-				}
-				l.(*DyldInfoOnly).BindOff = uint32(bindOff)
-			}
-			if l.(*DyldInfo).WeakBindOff > 0 {
-				weakBindOff, err := segMap.Remap(uint64(l.(*DyldInfo).WeakBindOff))
-				if err != nil {
-					return fmt.Errorf("failed to remap WeakBindOff in %s: %v", l.Command(), err)
-				}
-				l.(*DyldInfo).WeakBindOff = uint32(weakBindOff)
-			}
-			if l.(*DyldInfo).LazyBindOff > 0 {
-				lazyBindOff, err := segMap.Remap(uint64(l.(*DyldInfo).LazyBindOff))
-				if err != nil {
-					return fmt.Errorf("failed to remap LazyBindOff in %s: %v", l.Command(), err)
-				}
-				l.(*DyldInfo).LazyBindOff = uint32(lazyBindOff)
-			}
-			if l.(*DyldInfo).ExportOff > 0 {
-				exportOff, err := segMap.Remap(uint64(l.(*DyldInfo).ExportOff))
-				if err != nil {
-					return fmt.Errorf("failed to remap ExportOff in %s: %v", l.Command(), err)
-				}
-				l.(*DyldInfo).ExportOff = uint32(exportOff)
-			}
+			// if l.(*DyldInfo).RebaseOff > 0 {
+			// 	rebaseOff, err := segMap.Remap(uint64(l.(*DyldInfo).RebaseOff))
+			// 	if err != nil {
+			// 		return fmt.Errorf("failed to remap RebaseOff in %s: %v", l.Command(), err)
+			// 	}
+			// 	l.(*DyldInfoOnly).RebaseOff = uint32(rebaseOff)
+			// }
+			// if l.(*DyldInfoOnly).BindOff > 0 {
+			// 	bindOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).BindOff))
+			// 	if err != nil {
+			// 		return fmt.Errorf("failed to remap BindOff in %s: %v", l.Command(), err)
+			// 	}
+			// 	l.(*DyldInfoOnly).BindOff = uint32(bindOff)
+			// }
+			// if l.(*DyldInfo).WeakBindOff > 0 {
+			// 	weakBindOff, err := segMap.Remap(uint64(l.(*DyldInfo).WeakBindOff))
+			// 	if err != nil {
+			// 		return fmt.Errorf("failed to remap WeakBindOff in %s: %v", l.Command(), err)
+			// 	}
+			// 	l.(*DyldInfo).WeakBindOff = uint32(weakBindOff)
+			// }
+			// if l.(*DyldInfo).LazyBindOff > 0 {
+			// 	lazyBindOff, err := segMap.Remap(uint64(l.(*DyldInfo).LazyBindOff))
+			// 	if err != nil {
+			// 		return fmt.Errorf("failed to remap LazyBindOff in %s: %v", l.Command(), err)
+			// 	}
+			// 	l.(*DyldInfo).LazyBindOff = uint32(lazyBindOff)
+			// }
+			// if l.(*DyldInfo).ExportOff > 0 {
+			// 	exportOff, err := segMap.Remap(uint64(l.(*DyldInfo).ExportOff))
+			// 	if err != nil {
+			// 		return fmt.Errorf("failed to remap ExportOff in %s: %v", l.Command(), err)
+			// 	}
+			// 	l.(*DyldInfo).ExportOff = uint32(exportOff)
+			// }
 		case types.LC_DYLD_INFO_ONLY:
-			if l.(*DyldInfoOnly).RebaseOff > 0 {
-				rebaseOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).RebaseOff))
-				if err != nil {
-					return fmt.Errorf("failed to remap RebaseOff in %s: %v", l.Command(), err)
-				}
-				l.(*DyldInfoOnly).RebaseOff = uint32(rebaseOff)
-			}
-			if l.(*DyldInfoOnly).BindOff > 0 {
-				bindOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).BindOff))
-				if err != nil {
-					return fmt.Errorf("failed to remap BindOff in %s: %v", l.Command(), err)
-				}
-				l.(*DyldInfoOnly).BindOff = uint32(bindOff)
-			}
-			if l.(*DyldInfoOnly).WeakBindOff > 0 {
-				weakBindOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).WeakBindOff))
-				if err != nil {
-					return fmt.Errorf("failed to remap WeakBindOff in %s: %v", l.Command(), err)
-				}
-				l.(*DyldInfoOnly).WeakBindOff = uint32(weakBindOff)
-			}
-			if l.(*DyldInfoOnly).LazyBindOff > 0 {
-				lazyBindOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).LazyBindOff))
-				if err != nil {
-					return fmt.Errorf("failed to remap LazyBindOff in %s: %v", l.Command(), err)
-				}
-				l.(*DyldInfoOnly).LazyBindOff = uint32(lazyBindOff)
-			}
-			if l.(*DyldInfoOnly).ExportOff > 0 {
-				exportOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).ExportOff))
-				if err != nil {
-					return fmt.Errorf("failed to remap ExportOff in %s: %v", l.Command(), err)
-				}
-				l.(*DyldInfoOnly).ExportOff = uint32(exportOff)
-			}
+			// if l.(*DyldInfoOnly).RebaseOff > 0 {
+			// 	rebaseOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).RebaseOff))
+			// 	if err != nil {
+			// 		return fmt.Errorf("failed to remap RebaseOff in %s: %v", l.Command(), err)
+			// 	}
+			// 	l.(*DyldInfoOnly).RebaseOff = uint32(rebaseOff)
+			// }
+			// if l.(*DyldInfoOnly).BindOff > 0 {
+			// 	bindOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).BindOff))
+			// 	if err != nil {
+			// 		return fmt.Errorf("failed to remap BindOff in %s: %v", l.Command(), err)
+			// 	}
+			// 	l.(*DyldInfoOnly).BindOff = uint32(bindOff)
+			// }
+			// if l.(*DyldInfoOnly).WeakBindOff > 0 {
+			// 	weakBindOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).WeakBindOff))
+			// 	if err != nil {
+			// 		return fmt.Errorf("failed to remap WeakBindOff in %s: %v", l.Command(), err)
+			// 	}
+			// 	l.(*DyldInfoOnly).WeakBindOff = uint32(weakBindOff)
+			// }
+			// if l.(*DyldInfoOnly).LazyBindOff > 0 {
+			// 	lazyBindOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).LazyBindOff))
+			// 	if err != nil {
+			// 		return fmt.Errorf("failed to remap LazyBindOff in %s: %v", l.Command(), err)
+			// 	}
+			// 	l.(*DyldInfoOnly).LazyBindOff = uint32(lazyBindOff)
+			// }
+			// if l.(*DyldInfoOnly).ExportOff > 0 {
+			// 	exportOff, err := segMap.Remap(uint64(l.(*DyldInfoOnly).ExportOff))
+			// 	if err != nil {
+			// 		return fmt.Errorf("failed to remap ExportOff in %s: %v", l.Command(), err)
+			// 	}
+			// 	l.(*DyldInfoOnly).ExportOff = uint32(exportOff)
+			// }
 		case types.LC_FUNCTION_STARTS:
 			// off, err := segMap.Remap(uint64(l.(*FunctionStarts).Offset))
 			// if err != nil {
@@ -466,6 +466,23 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 }
 
 func (f *File) optimizeObjC(segMap exportSegMap) error {
+
+	// classes, err := f.GetObjCClasses()
+	// if err != nil {
+	// 	if errors.Is(err, ErrObjcSectionNotFound) {
+	// 		return nil
+	// 	}
+	// 	return err
+	// }
+
+	// for _, class := range classes {
+	// 	if _, err := f.GetOffset(class.ClassPtr); err != nil {
+	// 		fmt.Println(class)
+	// 	} else {
+	// 		fmt.Println("WRITE TO LINKEDIT")
+	// 	}
+	// }
+
 	return nil // TODO: impliment this
 }
 
