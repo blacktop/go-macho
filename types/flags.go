@@ -24,7 +24,6 @@ const (
 )
 
 type Rebase struct {
-	Name    string
 	Type    uint8
 	Segment string
 	Section string
@@ -35,12 +34,11 @@ type Rebase struct {
 
 func (r Rebase) String() string {
 	return fmt.Sprintf(
-		"%-7s %-16s\t%#x\t%s\t%s\t%#x",
+		"%-7s %-16s\t%#x  %s  %#x",
 		r.Segment,
 		r.Section,
 		r.Start+r.Offset,
 		getBindType(r.Type),
-		r.Name,
 		r.Value,
 	)
 }
@@ -92,7 +90,7 @@ type Bind struct {
 
 func (b Bind) String() string {
 	return fmt.Sprintf(
-		"%-7s %-16s\t%#x\t%s\t%d\t%s\t%s%s",
+		"%-7s %-16s  %#x  %-10s  %5d %-16s\t%s%s",
 		b.Segment,
 		b.Section,
 		b.Start+b.Offset,

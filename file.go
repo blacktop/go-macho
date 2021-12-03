@@ -2367,11 +2367,9 @@ func (f *File) parseRebase(r *bytes.Reader) ([]types.Rebase, error) {
 				if err := binary.Read(f.sr, f.ByteOrder, &rebase.Value); err != nil {
 					return nil, fmt.Errorf("failed to read pointer: %v", err)
 				}
-				sec := f.FindSectionForVMAddr(f.Segment(rebase.Segment).Addr + rebase.Offset)
-				if sec == nil {
-					return nil, err
+				if sec := f.FindSectionForVMAddr(f.Segment(rebase.Segment).Addr + rebase.Offset); sec != nil {
+					rebase.Section = sec.Name
 				}
-				rebase.Section = sec.Name
 				rebases = append(rebases, rebase)
 				rebase.Offset += f.pointerSize()
 			}
@@ -2385,11 +2383,9 @@ func (f *File) parseRebase(r *bytes.Reader) ([]types.Rebase, error) {
 				if err := binary.Read(f.sr, f.ByteOrder, &rebase.Value); err != nil {
 					return nil, fmt.Errorf("failed to read pointer: %v", err)
 				}
-				sec := f.FindSectionForVMAddr(f.Segment(rebase.Segment).Addr + rebase.Offset)
-				if sec == nil {
-					return nil, err
+				if sec := f.FindSectionForVMAddr(f.Segment(rebase.Segment).Addr + rebase.Offset); sec != nil {
+					rebase.Section = sec.Name
 				}
-				rebase.Section = sec.Name
 				rebases = append(rebases, rebase)
 				rebase.Offset += f.pointerSize()
 			}
@@ -2402,11 +2398,9 @@ func (f *File) parseRebase(r *bytes.Reader) ([]types.Rebase, error) {
 			if err != nil {
 				return nil, err
 			}
-			sec := f.FindSectionForVMAddr(f.Segment(rebase.Segment).Addr + rebase.Offset)
-			if sec == nil {
-				return nil, err
+			if sec := f.FindSectionForVMAddr(f.Segment(rebase.Segment).Addr + rebase.Offset); sec != nil {
+				rebase.Section = sec.Name
 			}
-			rebase.Section = sec.Name
 			rebases = append(rebases, rebase)
 			rebase.Offset += off + f.pointerSize()
 		case types.REBASE_OPCODE_DO_REBASE_ULEB_TIMES_SKIPPING_ULEB:
@@ -2423,11 +2417,9 @@ func (f *File) parseRebase(r *bytes.Reader) ([]types.Rebase, error) {
 				if err := binary.Read(f.sr, f.ByteOrder, &rebase.Value); err != nil {
 					return nil, fmt.Errorf("failed to read pointer: %v", err)
 				}
-				sec := f.FindSectionForVMAddr(f.Segment(rebase.Segment).Addr + rebase.Offset)
-				if sec == nil {
-					return nil, err
+				if sec := f.FindSectionForVMAddr(f.Segment(rebase.Segment).Addr + rebase.Offset); sec != nil {
+					rebase.Section = sec.Name
 				}
-				rebase.Section = sec.Name
 				rebases = append(rebases, rebase)
 				rebase.Offset += skip + f.pointerSize()
 			}
