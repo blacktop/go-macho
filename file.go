@@ -1637,6 +1637,22 @@ func (f *File) GetCStringAtOffset(strOffset int64) (string, error) {
 	return "", fmt.Errorf("string not found at offset %#x", strOffset)
 }
 
+// IsCString returns cstring at given virtual address if is in a CstringLiterals section
+func (f *File) IsCString(addr uint64) (string, bool) {
+	for _, sec := range f.Sections {
+		if sec.Flags.IsCstringLiterals() {
+			if sec.Addr <= addr && addr < sec.Addr+sec.Size {
+				str, err := f.GetCString(addr)
+				if err != nil {
+					return "", false
+				}
+				return str, true
+			}
+		}
+	}
+	return "", false
+}
+
 // Segment returns the first Segment with the given name, or nil if no such segment exists.
 func (f *File) Segment(name string) *Segment {
 	for _, l := range f.Loads {
