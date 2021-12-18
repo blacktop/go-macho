@@ -1621,11 +1621,11 @@ func (f *File) GetCString(strVMAdr uint64) (string, error) {
 // GetCStringAtOffset returns a c-string at a given offset into the MachO
 func (f *File) GetCStringAtOffset(strOffset int64) (string, error) {
 
-	if _, err := f.sr.Seek(strOffset, io.SeekStart); err != nil {
+	if _, err := f.cr.Seek(strOffset, io.SeekStart); err != nil {
 		return "", fmt.Errorf("failed to Seek to offset %#x: %v", strOffset, err)
 	}
 
-	s, err := bufio.NewReader(f.sr).ReadString('\x00')
+	s, err := bufio.NewReader(f.cr).ReadString('\x00')
 	if err != nil {
 		return "", fmt.Errorf("failed to ReadString as offset %#x, %v", strOffset, err)
 	}
