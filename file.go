@@ -8,6 +8,7 @@ import (
 	"compress/zlib"
 	"debug/dwarf"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -26,6 +27,8 @@ import (
 const (
 	pageAlign = 12 // 4096 = 1 << 12
 )
+
+var ErrMachOSectionNotFound = errors.New("MachO missing required section")
 
 type sections []*Section
 
@@ -1522,18 +1525,9 @@ func (f *File) readLeUint64(offset int64) (uint64, error) {
 	return binary.LittleEndian.Uint64(u64), nil
 }
 
-// fixLinkEditOffset corrects to "bad?" offsets of dylibs in iOS15+ dyld_shared_caches
-func (f *File) fixLinkEditOffset(offset uint64) (uint64, error) {
-	addr, err := f.GetVMAddress(offset)
-	if err != nil {
-		return 0, fmt.Errorf("failed to fix linkedit offset: %v", err)
-	}
-	return f.vma.VMAddr2Offet(addr)
-}
-
 // ReadAt reads data at offset within MachO
 func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
-	return f.sr.ReadAt(p, off)
+	return f.sr.ReadAt(p, off) // TODO: should this be f.cr ?
 }
 
 // GetOffset returns the file offset for a given virtual address
@@ -1559,6 +1553,32 @@ func (f *File) GetVMAddress(offset uint64) (uint64, error) {
 // GetBaseAddress returns the MachO's preferred load address
 func (f *File) GetBaseAddress() uint64 {
 	return f.preferredLoadAddress()
+}
+
+// GetPointer returns pointer at a given offset
+func (f *File) GetPointer(offset uint64) (uint64, error) {
+	if _, err := f.cr.Seek(int64(offset), io.SeekStart); err != nil {
+		return 0, fmt.Errorf("failed to Seek to offset %#x: %v", offset, err)
+	}
+	var ptr uint64
+	if err := binary.Read(f.cr, binary.LittleEndian, &ptr); err != nil {
+		return 0, fmt.Errorf("failed to read pointer at offset %#x: %v", offset, err)
+	}
+	return f.vma.Convert(ptr), nil
+}
+
+// GetPointerAtAddress returns pointer at a given virtual address
+func (f *File) GetPointerAtAddress(address uint64) (uint64, error) {
+	offset, err := f.vma.GetOffset(address)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get offset for address %#x: %v", address, err)
+	}
+	return f.GetPointer(offset)
+}
+
+// SlidePointer returns slid or un-chained pointer
+func (f *File) SlidePointer(ptr uint64) uint64 {
+	return f.vma.Convert(ptr)
 }
 
 func (f *File) convertToVMAddr(value uint64) uint64 {
@@ -1612,7 +1632,7 @@ func (f *File) GetCString(strVMAdr uint64) (string, error) {
 
 	strOffset, err := f.vma.GetOffset(strVMAdr)
 	if err != nil {
-		return "", fmt.Errorf("failed to get offset for cstring at virtual address: %#x; %w", strVMAdr, err)
+		return "", fmt.Errorf("failed to get offset for cstring at virtual address: %#x: %v", strVMAdr, err)
 	}
 
 	return f.GetCStringAtOffset(int64(strOffset))
