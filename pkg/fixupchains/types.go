@@ -33,6 +33,7 @@ type Bind interface {
 	Offset() uint64
 	Ordinal() uint64
 	Addend() uint64
+	Raw() uint64
 	String(baseAddr ...uint64) string
 }
 
@@ -286,13 +287,16 @@ func (d DyldChainedPtrArm64eBind) Kind() string {
 func (d DyldChainedPtrArm64eBind) Name() string {
 	return d.Import
 }
+func (d DyldChainedPtrArm64eBind) Raw() uint64 {
+	return d.Pointer
+}
 func (d DyldChainedPtrArm64eBind) String(baseAddr ...uint64) string {
 	if len(baseAddr) > 0 {
 		d.Fixup += baseAddr[0]
 	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, ordinal: %03d, addend: %d)",
 		d.Fixup,
-		d.Pointer,
+		d.Raw(),
 		d.Kind(),
 		d.Next(),
 		d.Ordinal(),
@@ -391,6 +395,9 @@ func (d DyldChainedPtrArm64eAuthBind) Kind() string {
 }
 func (d DyldChainedPtrArm64eAuthBind) Name() string {
 	return d.Import
+}
+func (d DyldChainedPtrArm64eAuthBind) Raw() uint64 {
+	return d.Pointer
 }
 func (d DyldChainedPtrArm64eAuthBind) String(baseAddr ...uint64) string {
 	if len(baseAddr) > 0 {
@@ -632,6 +639,9 @@ func (d DyldChainedPtrArm64eBind24) Kind() string {
 func (d DyldChainedPtrArm64eBind24) Name() string {
 	return d.Import
 }
+func (d DyldChainedPtrArm64eBind24) Raw() uint64 {
+	return d.Pointer
+}
 func (d DyldChainedPtrArm64eBind24) String(baseAddr ...uint64) string {
 	if len(baseAddr) > 0 {
 		d.Fixup += baseAddr[0]
@@ -682,6 +692,9 @@ func (d DyldChainedPtrArm64eAuthBind24) Kind() string {
 func (d DyldChainedPtrArm64eAuthBind24) Name() string {
 	return d.Import
 }
+func (d DyldChainedPtrArm64eAuthBind24) Raw() uint64 {
+	return d.Pointer
+}
 func (d DyldChainedPtrArm64eAuthBind24) String(baseAddr ...uint64) string {
 	if len(baseAddr) > 0 {
 		d.Fixup += baseAddr[0]
@@ -728,6 +741,9 @@ func (d DyldChainedPtr64Bind) Kind() string {
 }
 func (d DyldChainedPtr64Bind) Name() string {
 	return d.Import
+}
+func (d DyldChainedPtr64Bind) Raw() uint64 {
+	return d.Pointer
 }
 func (d DyldChainedPtr64Bind) String(baseAddr ...uint64) string {
 	if len(baseAddr) > 0 {
@@ -862,6 +878,9 @@ func (d DyldChainedPtr32Bind) Kind() string {
 }
 func (d DyldChainedPtr32Bind) Name() string {
 	return d.Import
+}
+func (d DyldChainedPtr32Bind) Raw() uint64 {
+	return uint64(d.Pointer)
 }
 func (d DyldChainedPtr32Bind) String(baseAddr ...uint64) string {
 	if len(baseAddr) > 0 {
