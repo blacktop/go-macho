@@ -23,9 +23,15 @@ func (f *File) GetSwiftProtocols() (*[]protocols.Protocol, error) {
 	var protos []protocols.Protocol
 
 	if sec := f.Section("__TEXT", "__swift5_protos"); sec != nil {
-		dat, err := sec.Data()
+		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read __swift5_protos: %v", err)
+			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
+		}
+		f.cr.Seek(int64(off), io.SeekStart)
+
+		dat := make([]byte, sec.Size)
+		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 		}
 
 		relOffsets := make([]int32, len(dat)/sizeOfInt32)
@@ -75,9 +81,15 @@ func (f *File) GetSwiftProtocolConformances() (*[]protocols.ConformanceDescripto
 	var protoConfDescs []protocols.ConformanceDescriptor
 
 	if sec := f.Section("__TEXT", "__swift5_proto"); sec != nil {
-		dat, err := sec.Data()
+		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read __swift5_protos: %v", err)
+			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
+		}
+		f.cr.Seek(int64(off), io.SeekStart)
+
+		dat := make([]byte, sec.Size)
+		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 		}
 
 		relOffsets := make([]int32, len(dat)/sizeOfInt32)
@@ -109,9 +121,15 @@ func (f *File) GetSwiftTypes() (*[]stypes.TypeDescriptor, error) {
 	var classes []stypes.TypeDescriptor
 
 	if sec := f.Section("__TEXT", "__swift5_types"); sec != nil {
-		dat, err := sec.Data()
+		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read __swift5_types: %v", err)
+			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
+		}
+		f.cr.Seek(int64(off), io.SeekStart)
+
+		dat := make([]byte, sec.Size)
+		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 		}
 
 		relOffsets := make([]int32, len(dat)/sizeOfInt32)
@@ -237,9 +255,15 @@ func (f *File) GetSwiftFields() (*[]fieldmd.Field, error) {
 	var fields []fieldmd.Field
 
 	if sec := f.Section("__TEXT", "__swift5_fieldmd"); sec != nil {
-		dat, err := sec.Data()
+		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read __swift5_fieldmd: %v", err)
+			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
+		}
+		f.cr.Seek(int64(off), io.SeekStart)
+
+		dat := make([]byte, sec.Size)
+		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 		}
 
 		r := bytes.NewReader(dat)
@@ -285,9 +309,15 @@ func (f *File) GetSwiftAssociatedTypes() (*[]swift.AssociatedTypeDescriptor, err
 	var accocTypes []swift.AssociatedTypeDescriptor
 
 	if sec := f.Section("__TEXT", "__swift5_assocty"); sec != nil {
-		dat, err := sec.Data()
+		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read __swift5_assocty: %v", err)
+			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
+		}
+		f.cr.Seek(int64(off), io.SeekStart)
+
+		dat := make([]byte, sec.Size)
+		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 		}
 
 		r := bytes.NewReader(dat)
@@ -326,9 +356,15 @@ func (f *File) GetSwiftBuiltinTypes() (*[]swift.BuiltinType, error) {
 	var builtins []swift.BuiltinType
 
 	if sec := f.Section("__TEXT", "__swift5_builtin"); sec != nil {
-		dat, err := sec.Data()
+		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read __swift5_builtin: %v", err)
+			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
+		}
+		f.cr.Seek(int64(off), io.SeekStart)
+
+		dat := make([]byte, sec.Size)
+		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 		}
 
 		builtInTypes := make([]swift.BuiltinTypeDescriptor, int(sec.Size)/binary.Size(swift.BuiltinTypeDescriptor{}))
@@ -364,9 +400,15 @@ func (f *File) GetSwiftClosures() (*[]swift.CaptureDescriptor, error) {
 	var closures []swift.CaptureDescriptor
 
 	if sec := f.Section("__TEXT", "__swift5_capture"); sec != nil {
-		dat, err := sec.Data()
+		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read __swift5_capture: %v", err)
+			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
+		}
+		f.cr.Seek(int64(off), io.SeekStart)
+
+		dat := make([]byte, sec.Size)
+		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 		}
 
 		r := bytes.NewReader(dat)

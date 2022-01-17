@@ -438,7 +438,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				sh.Flags = sh32.Flags
 				sh.Reserved1 = sh32.Reserve1
 				sh.Reserved2 = sh32.Reserve2
-				if err := f.pushSection(sh, f.sr); err != nil {
+				if err := f.pushSection(sh, f.cr); err != nil {
 					return nil, fmt.Errorf("failed to pushSection32: %v", err)
 				}
 			}
@@ -482,7 +482,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				sh.Reserved1 = sh64.Reserve1
 				sh.Reserved2 = sh64.Reserve2
 				sh.Reserved3 = sh64.Reserve3
-				if err := f.pushSection(sh, f.sr); err != nil {
+				if err := f.pushSection(sh, f.cr); err != nil {
 					return nil, fmt.Errorf("failed to pushSection64: %v", err)
 				}
 			}
@@ -2111,7 +2111,7 @@ func (f *File) GetBindInfo() ([]types.Bind, error) {
 	if dinfo := f.DyldInfo(); dinfo != nil {
 		if dinfo.BindSize > 0 {
 			dat := make([]byte, dinfo.BindSize)
-			if _, err := f.sr.ReadAt(dat, int64(dinfo.BindOff)); err != nil {
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.BindOff)); err != nil {
 				return nil, fmt.Errorf("failed to read bind info: %v", err)
 			}
 			bs, err := f.parseBinds(bytes.NewReader(dat), types.BIND_KIND)
@@ -2122,7 +2122,7 @@ func (f *File) GetBindInfo() ([]types.Bind, error) {
 		}
 		if dinfo.WeakBindSize > 0 {
 			dat := make([]byte, dinfo.WeakBindSize)
-			if _, err := f.sr.ReadAt(dat, int64(dinfo.WeakBindOff)); err != nil {
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.WeakBindOff)); err != nil {
 				return nil, fmt.Errorf("failed to read weak bind info: %v", err)
 			}
 			bs, err := f.parseBinds(bytes.NewReader(dat), types.WEAK_KIND)
@@ -2133,7 +2133,7 @@ func (f *File) GetBindInfo() ([]types.Bind, error) {
 		}
 		if dinfo.LazyBindSize > 0 {
 			dat := make([]byte, dinfo.LazyBindSize)
-			if _, err := f.sr.ReadAt(dat, int64(dinfo.LazyBindOff)); err != nil {
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.LazyBindOff)); err != nil {
 				return nil, fmt.Errorf("failed to read lazy bind info: %v", err)
 			}
 			bs, err := f.parseBinds(bytes.NewReader(dat), types.LAZY_KIND)
@@ -2156,7 +2156,7 @@ func (f *File) GetBindInfo() ([]types.Bind, error) {
 		}
 		if dinfo.WeakBindSize > 0 {
 			dat := make([]byte, dinfo.WeakBindSize)
-			if _, err := f.sr.ReadAt(dat, int64(dinfo.WeakBindOff)); err != nil {
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.WeakBindOff)); err != nil {
 				return nil, fmt.Errorf("failed to read weak bind info: %v", err)
 			}
 			bs, err := f.parseBinds(bytes.NewReader(dat), types.WEAK_KIND)
@@ -2167,7 +2167,7 @@ func (f *File) GetBindInfo() ([]types.Bind, error) {
 		}
 		if dinfo.LazyBindSize > 0 {
 			dat := make([]byte, dinfo.LazyBindSize)
-			if _, err := f.sr.ReadAt(dat, int64(dinfo.LazyBindOff)); err != nil {
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.LazyBindOff)); err != nil {
 				return nil, fmt.Errorf("failed to read lazy bind info: %v", err)
 			}
 			bs, err := f.parseBinds(bytes.NewReader(dat), types.LAZY_KIND)
