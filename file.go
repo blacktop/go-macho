@@ -2131,7 +2131,7 @@ func (f *File) DWARF() (*dwarf.Data, error) {
 	return d, nil
 }
 
-func (f *File) GetBindInfo() ([]types.Bind, error) {
+func (f *File) GetBindInfo() (types.Binds, error) {
 	if f.binds != nil {
 		return f.binds, nil
 	}
