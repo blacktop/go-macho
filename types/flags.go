@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -94,6 +95,16 @@ func (k BindKind) String() string {
 		return "LAZY"
 	}
 	return ""
+}
+
+type Binds []Bind
+
+func (bs Binds) Search(name string) (*Bind, error) {
+	i := sort.Search(len(bs), func(i int) bool { return bs[i].Name >= name })
+	if i < len(bs) && bs[i].Name == name {
+		return &bs[i], nil
+	}
+	return nil, fmt.Errorf("%s not found in bind info", name)
 }
 
 type Bind struct {

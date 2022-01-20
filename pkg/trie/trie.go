@@ -2,6 +2,7 @@ package trie
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -9,7 +10,12 @@ import (
 	"github.com/blacktop/go-macho/types"
 )
 
-type TrieEntry struct {
+type Node struct {
+	Offset uint64
+	Data   []byte
+}
+
+type TrieExport struct {
 	Name         string
 	ReExport     string
 	Flags        types.ExportFlag
@@ -18,20 +24,7 @@ type TrieEntry struct {
 	FoundInDylib string
 }
 
-type trieEntrys struct {
-	Entries           []TrieEntry
-	edgeStrings       [][]byte
-	cummulativeString []byte
-
-	r *bytes.Reader
-}
-
-type trieNode struct {
-	Offset   uint64
-	SymBytes []byte
-}
-
-func (e TrieEntry) String() string {
+func (e TrieExport) String() string {
 	if e.Flags.ReExport() {
 		if len(e.ReExport) == 0 {
 			return fmt.Sprintf("%#09x:\t(from %s)\t%s", e.Address, filepath.Base(e.FoundInDylib), e.Name)
@@ -170,17 +163,96 @@ func EncodeSleb128(out io.ByteWriter, x int64) {
 	}
 }
 
-func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {
+func ReadExport(r *bytes.Reader, symbol string, loadAddress uint64) (*TrieExport, error) {
+	var symFlagInt, symValueInt, symOtherInt uint64
+	var reExportSymBytes []byte
+	var reExportSymName string
 
-	var tNode trieNode
-	var entries []TrieEntry
+	symFlagInt, err := ReadUleb128(r)
+	if err != nil {
+		return nil, err
+	}
 
-	nodes := []trieNode{{
-		Offset:   0,
-		SymBytes: make([]byte, 0),
+	flags := types.ExportFlag(symFlagInt)
+
+	if flags.ReExport() {
+		symOtherInt, err = ReadUleb128(r)
+		if err != nil {
+			return nil, err
+		}
+
+		for {
+			s, err := r.ReadByte()
+			if err == io.EOF {
+				break
+			}
+			if s == '\x00' {
+				break
+			}
+			reExportSymBytes = append(reExportSymBytes, s)
+		}
+
+	} else if flags.StubAndResolver() {
+		symOtherInt, err = ReadUleb128(r)
+		if err != nil {
+			return nil, err
+		}
+		symOtherInt += loadAddress
+	}
+
+	symValueInt, err = ReadUleb128(r)
+	if err != nil {
+		return nil, err
+	}
+
+	if (flags.Regular() || flags.ThreadLocal()) && !flags.ReExport() {
+		symValueInt += loadAddress
+	}
+
+	if len(reExportSymBytes) > 0 {
+		reExportSymName = string(reExportSymBytes)
+	}
+
+	return &TrieExport{
+		Name:     symbol,
+		ReExport: reExportSymName,
+		Flags:    flags,
+		Other:    symOtherInt,
+		Address:  symValueInt,
+	}, nil
+}
+
+func ParseTrieExports(r *bytes.Reader, loadAddress uint64) ([]TrieExport, error) {
+	var exports []TrieExport
+
+	nodes, err := ParseTrie(r)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, node := range nodes {
+		if _, err := r.Seek(int64(node.Offset), io.SeekStart); err != nil {
+			return nil, err
+		}
+		export, err := ReadExport(r, string(node.Data), loadAddress)
+		if err != nil {
+			return nil, err
+		}
+		exports = append(exports, *export)
+	}
+
+	return exports, nil
+}
+
+func ParseTrie(r *bytes.Reader) ([]Node, error) {
+
+	var tNode Node
+	var outNodes []Node
+
+	nodes := []Node{{
+		Offset: 0,
+		Data:   make([]byte, 0),
 	}}
-
-	r := bytes.NewReader(trieData)
 
 	for len(nodes) > 0 {
 		tNode, nodes = nodes[len(nodes)-1], nodes[:len(nodes)-1]
@@ -193,65 +265,13 @@ func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {
 		}
 
 		if terminalSize != 0 {
-			var symFlagInt, symValueInt, symOtherInt uint64
-			var reExportSymBytes []byte
-			var symName string
-			var reExportSymName string
-
-			symFlagInt, err := ReadUleb128(r)
+			off, err := r.Seek(0, io.SeekCurrent)
 			if err != nil {
 				return nil, err
 			}
-
-			flags := types.ExportFlag(symFlagInt)
-
-			if flags.ReExport() {
-				symOtherInt, err = ReadUleb128(r)
-				if err != nil {
-					return nil, err
-				}
-
-				for {
-					s, err := r.ReadByte()
-					if err == io.EOF {
-						break
-					}
-					if s == '\x00' {
-						break
-					}
-					reExportSymBytes = append(reExportSymBytes, s)
-				}
-
-			} else if flags.StubAndResolver() {
-				symOtherInt, err = ReadUleb128(r)
-				if err != nil {
-					return nil, err
-				}
-				symOtherInt += loadAddress
-			}
-
-			symValueInt, err = ReadUleb128(r)
-			if err != nil {
-				return nil, err
-			}
-
-			if (flags.Regular() || flags.ThreadLocal()) && !flags.ReExport() {
-				symValueInt += loadAddress
-			}
-
-			if len(reExportSymBytes) > 0 {
-				symName = string(tNode.SymBytes)
-				reExportSymName = string(reExportSymBytes)
-			} else {
-				symName = string(tNode.SymBytes)
-			}
-
-			entries = append(entries, TrieEntry{
-				Name:     symName,
-				ReExport: reExportSymName,
-				Flags:    flags,
-				Other:    symOtherInt,
-				Address:  symValueInt,
+			outNodes = append(outNodes, Node{
+				Offset: uint64(off),
+				Data:   tNode.Data,
 			})
 		}
 
@@ -264,12 +284,12 @@ func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {
 
 		for i := 0; i < int(childrenRemaining); i++ {
 
-			if len(tNode.SymBytes) > 32768 {
-				return nil, fmt.Errorf("possible malformed export trie: len(tNode.SymBytes)=%d > 32768", len(tNode.SymBytes))
+			if len(tNode.Data) > 32768 {
+				return nil, fmt.Errorf("possible malformed export trie: len(tNode.SymBytes)=%d > 32768", len(tNode.Data))
 			}
 
-			tmp := make([]byte, len(tNode.SymBytes), 0x8000)
-			copy(tmp, tNode.SymBytes)
+			tmp := make([]byte, len(tNode.Data), 0x8000)
+			copy(tmp, tNode.Data)
 
 			for {
 				s, err := r.ReadByte()
@@ -287,39 +307,44 @@ func ParseTrie(trieData []byte, loadAddress uint64) ([]TrieEntry, error) {
 				return nil, err
 			}
 
-			// log.WithFields(log.Fields{
-			// 	"name":   string(tmp),
-			// 	"offset": childNodeOffset,
-			// }).Debug("Node")
-
-			nodes = append(nodes, trieNode{
-				Offset:   childNodeOffset,
-				SymBytes: tmp,
+			nodes = append(nodes, Node{
+				Offset: childNodeOffset,
+				Data:   tmp,
 			})
 		}
 
 	}
 
-	return entries, nil
+	return outNodes, nil
 }
 
-func WalkTrie(data []byte, symbol string) (uint64, error) {
+func WalkTrie(r *bytes.Reader, symbol string) (uint64, error) {
 
 	var strIndex int
 	var offset, nodeOffset uint64
 
-	r := bytes.NewReader(data)
-
 	for {
 		r.Seek(int64(offset), io.SeekStart)
 
-		terminalSize, err := ReadUleb128(r)
+		terminalSize, err := binary.ReadUvarint(r)
 		if err != nil {
 			return 0, err
 		}
 
+		r.Seek(int64(offset+1), io.SeekStart)
+
+		if terminalSize > 127 {
+			r.Seek(int64(offset), io.SeekStart)
+
+			terminalSize, err = ReadUleb128(r)
+			if err != nil {
+				return 0, err
+			}
+		}
+
 		if int(strIndex) == len(symbol) && (terminalSize != 0) {
 			// skip over zero terminator
+			r.Seek(int64(offset+1), io.SeekStart)
 			return offset + 1, nil
 		}
 
@@ -341,6 +366,9 @@ func WalkTrie(data []byte, symbol string) (uint64, error) {
 				if err == io.EOF {
 					break
 				}
+				if err != nil {
+					return 0, err
+				}
 				if c == '\x00' {
 					break
 				}
@@ -355,18 +383,14 @@ func WalkTrie(data []byte, symbol string) (uint64, error) {
 				}
 			}
 
-			if wrongEdge {
-				// advance to next child
-				r.Seek(1, io.SeekCurrent) // skip over zero terminator
+			if wrongEdge { // advance to next child
 				// skip over last byte of uleb128
 				_, err = ReadUleb128(r)
 				if err != nil {
 					return 0, err
 				}
-			} else {
-				// the symbol so far matches this edge (child)
+			} else { // the symbol so far matches this edge (child)
 				// so advance to the child's node
-				// r.Seek(1, io.SeekCurrent)
 				nodeOffset, err = ReadUleb128(r)
 				if err != nil {
 					return 0, err

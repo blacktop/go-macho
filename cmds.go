@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"unsafe"
 
@@ -531,6 +532,13 @@ func (s *Symtab) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 		return fmt.Errorf("failed to write LC_SYMTAB to buffer: %v", err)
 	}
 	return nil
+}
+func (s *Symtab) Search(name string) (*Symbol, error) {
+	i := sort.Search(len(s.Syms), func(i int) bool { return s.Syms[i].Name >= name })
+	if i < len(s.Syms) && s.Syms[i].Name == name {
+		return &s.Syms[i], nil
+	}
+	return nil, fmt.Errorf("%s not found in symtab", name)
 }
 
 // A Symbol is a Mach-O 32-bit or 64-bit symbol table entry.

@@ -39,12 +39,14 @@ type File struct {
 	Symtab   *Symtab
 	Dysymtab *Dysymtab
 
-	vma  *types.VMAddrConverter
-	dcf  *fixupchains.DyldChainedFixups
-	exp  []trie.TrieEntry
-	objc map[uint64]*objc.Class
-	sr   types.MachoReader
-	cr   types.MachoReader
+	vma         *types.VMAddrConverter
+	dcf         *fixupchains.DyldChainedFixups
+	exp         []trie.TrieExport
+	exptrieData []byte
+	binds       types.Binds
+	objc        map[uint64]*objc.Class
+	sr          types.MachoReader
+	cr          types.MachoReader
 
 	relativeSelectorBase uint64 // objc_opt version 16
 
@@ -1959,20 +1961,44 @@ func (f *File) DyldExportsTrie() *DyldExportsTrie {
 }
 
 // DyldExports returns the dyld export trie symbols
-func (f *File) DyldExports() ([]trie.TrieEntry, error) {
+func (f *File) GetDyldExport(symbol string) (*trie.TrieExport, error) {
+	if dxt := f.DyldExportsTrie(); dxt == nil {
+		return nil, fmt.Errorf("macho does not contain LC_DYLD_EXPORTS_TRIE")
+	} else {
+		var err error
+		var r *bytes.Reader
+		if f.exptrieData != nil {
+			r = bytes.NewReader(f.exptrieData)
+		} else {
+			f.exptrieData = make([]byte, dxt.Size)
+			if _, err := f.cr.ReadAt(f.exptrieData, int64(dxt.Offset)); err != nil {
+				f.exptrieData = nil
+				return nil, fmt.Errorf("failed to read %s data at offset=%#x; %v", types.LC_DYLD_EXPORTS_TRIE, int64(dxt.Offset), err)
+			}
+			r = bytes.NewReader(f.exptrieData)
+		}
+		if _, err = trie.WalkTrie(r, symbol); err != nil {
+			return nil, err
+		}
+		return trie.ReadExport(r, symbol, f.preferredLoadAddress())
+	}
+}
+
+// DyldExports returns the dyld export trie symbols
+func (f *File) DyldExports() ([]trie.TrieExport, error) {
 	var err error
 	if f.exp != nil {
 		return f.exp, nil
 	}
 	if dxt := f.DyldExportsTrie(); dxt != nil {
 		if dxt.Size == 0 {
-			return []trie.TrieEntry{}, nil
+			return []trie.TrieExport{}, nil
 		}
 		data := make([]byte, dxt.Size)
 		if _, err := f.cr.ReadAt(data, int64(dxt.Offset)); err != nil {
 			return nil, fmt.Errorf("failed to read %s data at offset=%#x; %v", types.LC_DYLD_EXPORTS_TRIE, int64(dxt.Offset), err)
 		}
-		f.exp, err = trie.ParseTrie(data, f.GetBaseAddress())
+		f.exp, err = trie.ParseTrieExports(bytes.NewReader(data), f.GetBaseAddress())
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse %s: %v", types.LC_DYLD_EXPORTS_TRIE, err)
 		}
@@ -2106,8 +2132,9 @@ func (f *File) DWARF() (*dwarf.Data, error) {
 }
 
 func (f *File) GetBindInfo() ([]types.Bind, error) {
-	var binds []types.Bind
-
+	if f.binds != nil {
+		return f.binds, nil
+	}
 	if dinfo := f.DyldInfo(); dinfo != nil {
 		if dinfo.BindSize > 0 {
 			dat := make([]byte, dinfo.BindSize)
@@ -2118,7 +2145,7 @@ func (f *File) GetBindInfo() ([]types.Bind, error) {
 			if err != nil {
 				return nil, err
 			}
-			binds = append(binds, bs...)
+			f.binds = append(f.binds, bs...)
 		}
 		if dinfo.WeakBindSize > 0 {
 			dat := make([]byte, dinfo.WeakBindSize)
@@ -2129,7 +2156,7 @@ func (f *File) GetBindInfo() ([]types.Bind, error) {
 			if err != nil {
 				return nil, err
 			}
-			binds = append(binds, bs...)
+			f.binds = append(f.binds, bs...)
 		}
 		if dinfo.LazyBindSize > 0 {
 			dat := make([]byte, dinfo.LazyBindSize)
@@ -2140,7 +2167,7 @@ func (f *File) GetBindInfo() ([]types.Bind, error) {
 			if err != nil {
 				return nil, err
 			}
-			binds = append(binds, bs...)
+			f.binds = append(f.binds, bs...)
 		}
 	} else if dinfo := f.DyldInfoOnly(); dinfo != nil {
 		if dinfo.BindSize > 0 {
@@ -2152,7 +2179,7 @@ func (f *File) GetBindInfo() ([]types.Bind, error) {
 			if err != nil {
 				return nil, err
 			}
-			binds = append(binds, bs...)
+			f.binds = append(f.binds, bs...)
 		}
 		if dinfo.WeakBindSize > 0 {
 			dat := make([]byte, dinfo.WeakBindSize)
@@ -2163,7 +2190,7 @@ func (f *File) GetBindInfo() ([]types.Bind, error) {
 			if err != nil {
 				return nil, err
 			}
-			binds = append(binds, bs...)
+			f.binds = append(f.binds, bs...)
 		}
 		if dinfo.LazyBindSize > 0 {
 			dat := make([]byte, dinfo.LazyBindSize)
@@ -2174,13 +2201,13 @@ func (f *File) GetBindInfo() ([]types.Bind, error) {
 			if err != nil {
 				return nil, err
 			}
-			binds = append(binds, bs...)
+			f.binds = append(f.binds, bs...)
 		}
 	} else {
 		return nil, fmt.Errorf("LC_DYLD_INFO|LC_DYLD_INFO_ONLY not found")
 	}
 
-	return binds, nil
+	return f.binds, nil
 }
 
 func (f *File) GetRebaseInfo() ([]types.Rebase, error) {
@@ -2206,14 +2233,14 @@ func (f *File) GetRebaseInfo() ([]types.Rebase, error) {
 	return nil, nil
 }
 
-func (f *File) GetExports() ([]trie.TrieEntry, error) {
+func (f *File) GetExports() ([]trie.TrieExport, error) {
 	if dinfo := f.DyldInfo(); dinfo != nil {
 		if dinfo.ExportSize > 0 {
 			dat := make([]byte, dinfo.ExportSize)
 			if _, err := f.sr.ReadAt(dat, int64(dinfo.ExportOff)); err != nil {
 				return nil, fmt.Errorf("failed to read bind info: %v", err)
 			}
-			return trie.ParseTrie(dat, f.GetBaseAddress())
+			return trie.ParseTrieExports(bytes.NewReader(dat), f.GetBaseAddress())
 		}
 	} else if dinfo := f.DyldInfoOnly(); dinfo != nil {
 		if dinfo.ExportSize > 0 {
@@ -2221,7 +2248,7 @@ func (f *File) GetExports() ([]trie.TrieEntry, error) {
 			if _, err := f.sr.ReadAt(dat, int64(dinfo.ExportOff)); err != nil {
 				return nil, fmt.Errorf("failed to read bind info: %v", err)
 			}
-			return trie.ParseTrie(dat, f.GetBaseAddress())
+			return trie.ParseTrieExports(bytes.NewReader(dat), f.GetBaseAddress())
 		}
 	} else {
 		return nil, fmt.Errorf("LC_DYLD_INFO|LC_DYLD_INFO_ONLY not found")
@@ -2244,7 +2271,6 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 		if err == io.EOF {
 			break
 		}
-
 		if err != nil {
 			return nil, err
 		}

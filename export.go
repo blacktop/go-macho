@@ -491,7 +491,7 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	var newSymCount uint32
 	var lebuf bytes.Buffer
 	var newSymNames bytes.Buffer
-	var exports []trie.TrieEntry
+	var exports []trie.TrieExport
 
 	linkedit := f.Segment("__LINKEDIT")
 	if linkedit == nil {
