@@ -24,19 +24,21 @@ type TrieExport struct {
 	FoundInDylib string
 }
 
-func (e TrieExport) String() string {
+func (e TrieExport) Type() string {
 	if e.Flags.ReExport() {
 		if len(e.ReExport) == 0 {
-			return fmt.Sprintf("%#09x:\t(from %s)\t%s", e.Address, filepath.Base(e.FoundInDylib), e.Name)
+			return fmt.Sprintf("from %s", filepath.Base(e.FoundInDylib))
 		} else {
-			return fmt.Sprintf("%#09x:\t(%s re-exported from %s)\t%s", e.Address, e.ReExport, filepath.Base(e.FoundInDylib), e.Name)
+			return fmt.Sprintf("%s re-exported from %s", e.ReExport, filepath.Base(e.FoundInDylib))
 		}
 	} else if e.Flags.StubAndResolver() {
-		return fmt.Sprintf("%#09x:\t(resolver=%#8x)\t%s", e.Address, e.Other, e.Name)
-	} else if len(e.FoundInDylib) > 0 {
-		return fmt.Sprintf("%#09x: %s\t%s", e.Address, e.Name, e.FoundInDylib)
+		return fmt.Sprintf("resolver=%#8x", e.Other)
 	}
-	return fmt.Sprintf("%#09x:\t(%s)\t%s", e.Address, e.Flags, e.Name)
+	return e.Flags.String()
+}
+
+func (e TrieExport) String() string {
+	return fmt.Sprintf("%#09x:\t(%s)\t%s", e.Address, e.Type(), e.Name)
 }
 
 func ReadUleb128(r *bytes.Reader) (uint64, error) {
