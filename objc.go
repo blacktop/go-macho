@@ -807,7 +807,6 @@ func (f *File) GetObjCMethodList() ([]objc.Method, error) {
 
 			currOffset, _ := r.Seek(0, io.SeekCurrent)
 			currOffset += int64(sec.Offset)
-			// currOffset += int64(sec.Offset) + int64(binary.Size(objc.MethodList{}))
 
 			if err == io.EOF {
 				break
@@ -850,6 +849,7 @@ func (f *File) GetObjCMethodList() ([]objc.Method, error) {
 					if err != nil {
 						return nil, fmt.Errorf("failed to convert offset %#x to vmaddr; %v", currOffset+8+int64(m.ImpOffset), err)
 					}
+					currOffset += int64(methodList.EntSize())
 					objcMethods = append(objcMethods, oMeth)
 				}
 			} else {
@@ -931,12 +931,13 @@ func (f *File) readSmallMethods(methodList objc.MethodList) (objcMethods []objc.
 		}
 
 		if f.Flags.DylibInCache() {
-			nameVMAddr, err = f.vma.GetVMAddress(uint64(currOffset + int64(method.NameOffset)))
-			if err != nil {
-				return nil, fmt.Errorf("failed to convert offset %#x to vmaddr; %v", currOffset+int64(method.NameOffset), err)
-			}
 			if f.relativeSelectorBase > 0 {
 				nameVMAddr = f.relativeSelectorBase + uint64(method.NameOffset)
+			} else {
+				nameVMAddr, err = f.vma.GetVMAddress(uint64(currOffset + int64(method.NameOffset)))
+				if err != nil {
+					return nil, fmt.Errorf("failed to convert offset %#x to vmaddr; %v", currOffset+int64(method.NameOffset), err)
+				}
 			}
 		}
 
