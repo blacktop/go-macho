@@ -30,7 +30,7 @@ var (
 
 func (i CDKind) String() string {
 	switch {
-	case 0 <= i && i <= 4:
+	case i <= 4:
 		return _CDKind_name_0[_CDKind_index_0[i]:_CDKind_index_0[i+1]]
 	case 16 <= i && i <= 18:
 		i -= 16

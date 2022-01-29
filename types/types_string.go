@@ -19,17 +19,30 @@ func _() {
 	_ = x[tvOSSimulator-8]
 	_ = x[watchOSSimulator-9]
 	_ = x[driverKit-10]
+	_ = x[firmware-13]
+	_ = x[sepOS-14]
 }
 
-const _Platform_name = "unknownmacOSiOStvOSwatchOSbridgeOSmacCatalystiOSSimulatortvOSSimulatorwatchOSSimulatordriverKit"
+const (
+	_Platform_name_0 = "unknownmacOSiOStvOSwatchOSbridgeOSmacCatalystiOSSimulatortvOSSimulatorwatchOSSimulatordriverKit"
+	_Platform_name_1 = "firmwaresepOS"
+)
 
-var _Platform_index = [...]uint8{0, 7, 12, 15, 19, 26, 34, 45, 57, 70, 86, 95}
+var (
+	_Platform_index_0 = [...]uint8{0, 7, 12, 15, 19, 26, 34, 45, 57, 70, 86, 95}
+	_Platform_index_1 = [...]uint8{0, 8, 13}
+)
 
 func (i Platform) String() string {
-	if i >= Platform(len(_Platform_index)-1) {
+	switch {
+	case i <= 10:
+		return _Platform_name_0[_Platform_index_0[i]:_Platform_index_0[i+1]]
+	case 13 <= i && i <= 14:
+		i -= 13
+		return _Platform_name_1[_Platform_index_1[i]:_Platform_index_1[i+1]]
+	default:
 		return "Platform(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
-	return _Platform_name[_Platform_index[i]:_Platform_index[i+1]]
 }
 func _() {
 	// An "invalid array index" compiler error signifies that the constant values have changed.
@@ -39,11 +52,12 @@ func _() {
 	_ = x[clang-1]
 	_ = x[swift-2]
 	_ = x[ld-3]
+	_ = x[lld-4]
 }
 
-const _Tool_name = "noneclangswiftld"
+const _Tool_name = "noneclangswiftldlld"
 
-var _Tool_index = [...]uint8{0, 4, 9, 14, 16}
+var _Tool_index = [...]uint8{0, 4, 9, 14, 16, 19}
 
 func (i Tool) String() string {
 	if i >= Tool(len(_Tool_index)-1) {
