@@ -72,6 +72,8 @@ const (
 	tvOSSimulator    Platform = 8  // PLATFORM_TVOSSIMULATOR
 	watchOSSimulator Platform = 9  // PLATFORM_WATCHOSSIMULATOR
 	driverKit        Platform = 10 // PLATFORM_DRIVERKIT
+	firmware         Platform = 13 // PLATFORM_FIRMWARE
+	sepOS            Platform = 14 // PLATFORM_SEPOS
 )
 
 type Version uint32
@@ -100,6 +102,7 @@ const (
 	clang Tool = 1 // TOOL_CLANG
 	swift Tool = 2 // TOOL_SWIFT
 	ld    Tool = 3 // TOOL_LD
+	lld   Tool = 4 // TOOL_LLD
 )
 
 type BuildToolVersion struct {

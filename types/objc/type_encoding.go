@@ -13,7 +13,7 @@ var typeEncoding = map[string]string{
 	"#": "Class",
 	":": "SEL",
 	// "c": "char",
-	"c": "BOOL",
+	"c": "BOOL", // or "char"
 	"C": "unsigned char",
 	"s": "short",
 	"S": "unsigned short",
@@ -35,16 +35,16 @@ var typeEncoding = map[string]string{
 	"Z": "int32",
 	"w": "wchar_t",
 	// "?": "unknown",
-	"?": "void",
+	"?": "void", // or "undefined"
 	"^": "*",
 	"*": "char *",
 	"%": "NXAtom",
-	// "[":  "",
-	// "]":  "",
-	// "(":  "",
-	// ")":  "",
-	// "{":  "",
-	// "}":  "",
+	// "[":  "", // _C_ARY_B
+	// "]":  "", // _C_ARY_E
+	// "(":  "", // _C_UNION_B
+	// ")":  "", // _C_UNION_E
+	// "{":  "", // _C_STRUCT_B
+	// "}":  "", // _C_STRUCT_E
 	"!":  "vector",
 	"Vv": "void",
 	"^?": "IMP", // void *
@@ -60,6 +60,7 @@ var typeSpecifiers = map[string]string{
 	"O": "by copy",
 	"R": "by ref",
 	"V": "one way",
+	"+": "gnu register",
 }
 
 const (
