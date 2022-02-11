@@ -61,19 +61,21 @@ func (u UUID) String() string {
 type Platform uint32
 
 const (
-	unknown          Platform = 0
-	macOS            Platform = 1  // PLATFORM_MACOS
-	iOS              Platform = 2  // PLATFORM_IOS
-	tvOS             Platform = 3  // PLATFORM_TVOS
-	watchOS          Platform = 4  // PLATFORM_WATCHOS
-	bridgeOS         Platform = 5  // PLATFORM_BRIDGEOS
-	macCatalyst      Platform = 6  // PLATFORM_MACCATALYST
-	iOSSimulator     Platform = 7  // PLATFORM_IOSSIMULATOR
-	tvOSSimulator    Platform = 8  // PLATFORM_TVOSSIMULATOR
-	watchOSSimulator Platform = 9  // PLATFORM_WATCHOSSIMULATOR
-	driverKit        Platform = 10 // PLATFORM_DRIVERKIT
-	firmware         Platform = 13 // PLATFORM_FIRMWARE
-	sepOS            Platform = 14 // PLATFORM_SEPOS
+	unknown            Platform = 0
+	macOS              Platform = 1  // PLATFORM_MACOS
+	iOS                Platform = 2  // PLATFORM_IOS
+	tvOS               Platform = 3  // PLATFORM_TVOS
+	watchOS            Platform = 4  // PLATFORM_WATCHOS
+	bridgeOS           Platform = 5  // PLATFORM_BRIDGEOS
+	macCatalyst        Platform = 6  // PLATFORM_MACCATALYST
+	iOSSimulator       Platform = 7  // PLATFORM_IOSSIMULATOR
+	tvOSSimulator      Platform = 8  // PLATFORM_TVOSSIMULATOR
+	watchOSSimulator   Platform = 9  // PLATFORM_WATCHOSSIMULATOR
+	driverKit          Platform = 10 // PLATFORM_DRIVERKIT
+	realityOS          Platform = 11 // PLATFORM_REALITYOS
+	realityOSSimulator Platform = 12 // PLATFORM_REALITYOSSIMULATOR
+	firmware           Platform = 13 // PLATFORM_FIRMWARE
+	sepOS              Platform = 14 // PLATFORM_SEPOS
 )
 
 type Version uint32
