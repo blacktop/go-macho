@@ -1474,7 +1474,7 @@ func (l *DataInCode) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 // A SourceVersion represents a Mach-O LC_SOURCE_VERSION command.
 type SourceVersion struct {
 	LoadBytes
-	types.DylibCodeSignDrsCmd
+	types.SourceVersionCmd
 	Version string
 }
 
