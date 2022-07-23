@@ -25,6 +25,7 @@ type Fixup interface {
 type Rebase interface {
 	Offset() uint64
 	Target() uint64
+	Raw() uint64
 	String(baseAddr ...uint64) string
 }
 
@@ -211,6 +212,9 @@ type DyldChainedPtrArm64eRebase struct {
 func (d DyldChainedPtrArm64eRebase) Offset() uint64 {
 	return d.Fixup
 }
+func (d DyldChainedPtrArm64eRebase) Raw() uint64 {
+	return d.Pointer
+}
 func (d DyldChainedPtrArm64eRebase) Target() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 0, 43) // runtimeOffset
 }
@@ -312,6 +316,9 @@ type DyldChainedPtrArm64eAuthRebase struct {
 
 func (d DyldChainedPtrArm64eAuthRebase) Offset() uint64 {
 	return d.Fixup
+}
+func (d DyldChainedPtrArm64eAuthRebase) Raw() uint64 {
+	return d.Pointer
 }
 func (d DyldChainedPtrArm64eAuthRebase) Target() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 0, 32) // target
@@ -424,6 +431,9 @@ type DyldChainedPtr64Rebase struct {
 func (d DyldChainedPtr64Rebase) Offset() uint64 {
 	return d.Fixup
 }
+func (d DyldChainedPtr64Rebase) Raw() uint64 {
+	return d.Pointer
+}
 func (d DyldChainedPtr64Rebase) Target() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 0, 36) // runtimeOffset 64GB max image size
 }
@@ -467,6 +477,9 @@ type DyldChainedPtr64RebaseOffset struct {
 
 func (d DyldChainedPtr64RebaseOffset) Offset() uint64 {
 	return d.Fixup
+}
+func (d DyldChainedPtr64RebaseOffset) Raw() uint64 {
+	return d.Pointer
 }
 func (d DyldChainedPtr64RebaseOffset) Target() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 0, 36) // vmAddr 64GB max image size
@@ -512,6 +525,9 @@ type DyldChainedPtrArm64eRebase24 struct {
 func (d DyldChainedPtrArm64eRebase24) Offset() uint64 {
 	return d.Fixup
 }
+func (d DyldChainedPtrArm64eRebase24) Raw() uint64 {
+	return d.Pointer
+}
 func (d DyldChainedPtrArm64eRebase24) Target() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 0, 24) // runtimeOffset
 }
@@ -556,6 +572,9 @@ type DyldChainedPtrArm64eAuthRebase24 struct {
 
 func (d DyldChainedPtrArm64eAuthRebase24) Offset() uint64 {
 	return d.Fixup
+}
+func (d DyldChainedPtrArm64eAuthRebase24) Raw() uint64 {
+	return d.Pointer
 }
 func (d DyldChainedPtrArm64eAuthRebase24) Target() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 0, 24) // target
@@ -768,6 +787,9 @@ type DyldChainedPtr64KernelCacheRebase struct {
 func (d DyldChainedPtr64KernelCacheRebase) Offset() uint64 {
 	return d.Fixup
 }
+func (d DyldChainedPtr64KernelCacheRebase) Raw() uint64 {
+	return d.Pointer
+}
 func (d DyldChainedPtr64KernelCacheRebase) Target() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 0, 30) // basePointers[cacheLevel] + target
 }
@@ -898,6 +920,9 @@ type DyldChainedPtr32CacheRebase struct {
 func (d DyldChainedPtr32CacheRebase) Offset() uint64 {
 	return d.Fixup
 }
+func (d DyldChainedPtr32CacheRebase) Raw() uint64 {
+	return uint64(d.Pointer)
+}
 func (d DyldChainedPtr32CacheRebase) Target() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 0, 30) // 1GB max dyld cache TEXT and DATA
 }
@@ -922,6 +947,9 @@ type DyldChainedPtr32FirmwareRebase struct {
 
 func (d DyldChainedPtr32FirmwareRebase) Offset() uint64 {
 	return d.Fixup
+}
+func (d DyldChainedPtr32FirmwareRebase) Raw() uint64 {
+	return uint64(d.Pointer)
 }
 func (d DyldChainedPtr32FirmwareRebase) Target() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 0, 26) // 64MB max firmware TEXT and DATA
