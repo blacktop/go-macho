@@ -1824,6 +1824,11 @@ func (f *File) GetFileSetFileByName(name string) (*File, error) {
 					Offset:        int64(fs.Offset),
 					SectionReader: f.sr,
 					CacheReader:   f.cr,
+					VMAddrConverter: types.VMAddrConverter{
+						Converter:    f.convertToVMAddr,
+						VMAddr2Offet: f.GetOffset,
+						Offet2VMAddr: f.GetVMAddress,
+					},
 				})
 			}
 		}
@@ -1919,9 +1924,9 @@ func (f *File) GetFunctions(data ...byte) []types.Function {
 
 // GetFunctionForVMAddr returns the function containing a given virual address
 func (f *File) GetFunctionForVMAddr(addr uint64) (types.Function, error) {
-	for _, f := range f.GetFunctions() {
-		if addr >= f.StartAddr && addr < f.EndAddr {
-			return f, nil
+	for _, fn := range f.GetFunctions() {
+		if addr >= fn.StartAddr && addr < fn.EndAddr {
+			return fn, nil
 		}
 	}
 	return types.Function{}, fmt.Errorf("address %#016x not in any function", addr)
@@ -2584,17 +2589,17 @@ func (f *File) ImportedSymbolNames() ([]string, error) {
 func (f *File) ImportedLibraries() []string {
 	var all []string
 	for _, l := range f.Loads {
-		if lib, ok := l.(*Dylib); ok {
-			all = append(all, lib.Name)
-		}
-		if lib, ok := l.(*WeakDylib); ok {
-			all = append(all, lib.Name)
-		}
-		if lib, ok := l.(*ReExportDylib); ok {
-			all = append(all, lib.Name)
-		}
-		if lib, ok := l.(*UpwardDylib); ok {
-			all = append(all, lib.Name)
+		switch v := l.(type) {
+		case *Dylib:
+			all = append(all, v.Name)
+		case *WeakDylib:
+			all = append(all, v.Name)
+		case *ReExportDylib:
+			all = append(all, v.Name)
+		// case *LazyLoadDylib:
+		// 	all = append(all, v.Name)
+		case *UpwardDylib:
+			all = append(all, v.Name)
 		}
 	}
 	return all
