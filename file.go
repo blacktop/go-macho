@@ -36,9 +36,9 @@ type sections []*Section
 type File struct {
 	FileTOC
 
-	Symtab   *Symtab
-	Dysymtab *Dysymtab
-
+	Symtab      *Symtab
+	Dysymtab    *Dysymtab
+	Dylibs      []*Dylib
 	vma         *types.VMAddrConverter
 	dcf         *fixupchains.DyldChainedFixups
 	exp         []trie.TrieExport
@@ -689,6 +689,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.CurrentVersion = hdr.CurrentVersion.String()
 			l.CompatVersion = hdr.CompatVersion.String()
 			f.Loads[i] = l
+			f.Dylibs = append(f.Dylibs, l)
 		case types.LC_ID_DYLIB:
 			var hdr types.DylibCmd
 			b := bytes.NewReader(cmddat)
