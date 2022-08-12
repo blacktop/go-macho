@@ -435,30 +435,3 @@ func TestNewFatFile(t *testing.T) {
 		t.Errorf("macho.UUID() = %s; want test", fat.Arches[0].UUID())
 	}
 }
-
-func TestNewFile(t *testing.T) {
-	// f, err := os.Open("/System/Library/PrivateFrameworks/PackageKit.framework/Resources/installd")
-	// f, err := os.Open("/Library/Developer/KDKs/KDK_11.0_20A5323l.kdk/System/Library/Kernels/kernel.development.t8020.dSYM/Contents/Resources/DWARF/kernel.development.t8020")
-	f, err := os.Open("/Library/Developer/KDKs/KDK_11.0_20A5323l.kdk/System/Library/Kernels/kernel.development.t8020")
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := NewFile(f)
-	if err != nil {
-		t.Errorf("NewFile() error = %v", err)
-		return
-	}
-
-	cs := got.CodeSignature()
-	if cs != nil {
-		fmt.Println(cs.Requirements[0].Detail)
-	}
-
-	fmt.Println(got.FileTOC.String())
-
-	if got.UUID().ID != "test" {
-		t.Errorf("macho.UUID() = %s; want test", got.UUID())
-	}
-}
