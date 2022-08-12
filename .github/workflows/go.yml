@@ -24,12 +24,14 @@ jobs:
 
     - name: Test
       run: go test
+      
     - name: Get the version
       id: get_version
       run: |
         echo ::set-output name=TAG::`echo $SOURCE_VERSION | cut -d / -f 2`
       env:
         SOURCE_VERSION: ${{ github.event.pull_request.head.ref }}
+        
     - name: Create Release
       id: create_release
       uses: actions/create-release@v1
@@ -40,4 +42,3 @@ jobs:
         release_name: ${{ steps.get_version.outputs.TAG }}
         draft: false
         prerelease: false
-
