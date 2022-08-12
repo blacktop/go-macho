@@ -7,7 +7,7 @@ import (
 	"io"
 	"path/filepath"
 
-	"github.com/blacktop/go-macho/types"
+	"github.com/appsworld/go-macho/types"
 )
 
 type Node struct {

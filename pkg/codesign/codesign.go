@@ -11,7 +11,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/blacktop/go-macho/pkg/codesign/types"
+	"github.com/appsworld/go-macho/pkg/codesign/types"
 )
 
 // ParseCodeSignature parses the LC_CODE_SIGNATURE data

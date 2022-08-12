@@ -8,8 +8,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/blacktop/go-macho/types"
-	"github.com/blacktop/go-macho/types/objc"
+	"github.com/appsworld/go-macho/types"
+	"github.com/appsworld/go-macho/types/objc"
 )
 
 var ErrObjcSectionNotFound = errors.New("missing required ObjC section")

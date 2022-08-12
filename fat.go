@@ -10,7 +10,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/blacktop/go-macho/types"
+	"github.com/appsworld/go-macho/types"
 )
 
 // A FatFile is a Mach-O universal binary that contains at least one architecture.

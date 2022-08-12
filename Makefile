@@ -1,4 +1,4 @@
-REPO=blacktop
+REPO=appsworld
 NAME=go-macho
 VERSION=$(shell svu current)
 NEXT_VERSION:=$(shell svu patch)

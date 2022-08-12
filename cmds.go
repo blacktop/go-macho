@@ -10,8 +10,8 @@ import (
 	"strings"
 	"unsafe"
 
-	ctypes "github.com/blacktop/go-macho/pkg/codesign/types"
-	"github.com/blacktop/go-macho/types"
+	ctypes "github.com/appsworld/go-macho/pkg/codesign/types"
+	"github.com/appsworld/go-macho/types"
 )
 
 // A Load represents any Mach-O load command.

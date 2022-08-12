@@ -17,11 +17,11 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/blacktop/go-macho/pkg/codesign"
-	"github.com/blacktop/go-macho/pkg/fixupchains"
-	"github.com/blacktop/go-macho/pkg/trie"
-	"github.com/blacktop/go-macho/types"
-	"github.com/blacktop/go-macho/types/objc"
+	"github.com/appsworld/go-macho/pkg/codesign"
+	"github.com/appsworld/go-macho/pkg/fixupchains"
+	"github.com/appsworld/go-macho/pkg/trie"
+	"github.com/appsworld/go-macho/types"
+	"github.com/appsworld/go-macho/types/objc"
 )
 
 const (

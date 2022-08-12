@@ -8,7 +8,7 @@ import (
 	"math"
 	"strings"
 
-	mtypes "github.com/blacktop/go-macho/types"
+	mtypes "github.com/appsworld/go-macho/types"
 )
 
 // Requirement object

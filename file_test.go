@@ -12,8 +12,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/blacktop/go-macho/internal/obscuretestdata"
-	"github.com/blacktop/go-macho/types"
+	"github.com/appsworld/go-macho/internal/obscuretestdata"
+	"github.com/appsworld/go-macho/types"
 )
 
 type fileTest struct {

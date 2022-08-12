@@ -8,7 +8,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/blacktop/go-macho/types"
+	"github.com/appsworld/go-macho/types"
 )
 
 // NewChainedFixups creates a new DyldChainedFixups instance

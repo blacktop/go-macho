@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 
-	mtypes "github.com/blacktop/go-macho/types"
+	mtypes "github.com/appsworld/go-macho/types"
 )
 
 const (
