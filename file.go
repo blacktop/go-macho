@@ -36,17 +36,22 @@ type sections []*Section
 type File struct {
 	FileTOC
 
-	Symtab      *Symtab
-	Dysymtab    *Dysymtab
-	Dylibs      []*Dylib
-	vma         *types.VMAddrConverter
-	dcf         *fixupchains.DyldChainedFixups
-	exp         []trie.TrieExport
-	exptrieData []byte
-	binds       types.Binds
-	objc        map[uint64]*objc.Class
-	sr          types.MachoReader
-	cr          types.MachoReader
+	Symtab           *Symtab
+	Dysymtab         *Dysymtab
+	Dylibs           []*Dylib
+	DylibIDs         []*DylibID
+	Dylinkers        []*LoadDylinker
+	DyldEnvironments []*DyldEnvironment
+	SourceVersions   []*SourceVersion
+	LinkerOptions    []*LinkerOption
+	vma              *types.VMAddrConverter
+	dcf              *fixupchains.DyldChainedFixups
+	exp              []trie.TrieExport
+	exptrieData      []byte
+	binds            types.Binds
+	objc             map[uint64]*objc.Class
+	sr               types.MachoReader
+	cr               types.MachoReader
 
 	relativeSelectorBase uint64 // objc_opt version 16
 
@@ -708,6 +713,8 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.CurrentVersion = hdr.CurrentVersion.String()
 			l.CompatVersion = hdr.CompatVersion.String()
 			f.Loads[i] = l
+			f.DylibIDs = append(f.DylibIDs, l)
+
 		case types.LC_LOAD_DYLINKER:
 			var hdr types.DylinkerCmd
 			b := bytes.NewReader(cmddat)
@@ -723,6 +730,8 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			}
 			l.Name = cstring(cmddat[hdr.Name:])
 			f.Loads[i] = l
+			f.Dylinkers = append(f.Dylinkers, l)
+
 		case types.LC_ID_DYLINKER:
 			var hdr types.DylinkerIDCmd
 			b := bytes.NewReader(cmddat)
@@ -1144,6 +1153,8 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			}
 			l.Name = cstring(cmddat[hdr.Name:])
 			f.Loads[i] = l
+			f.DyldEnvironments = append(f.DyldEnvironments, l)
+
 		case types.LC_MAIN:
 			var hdr types.EntryPointCmd
 			b := bytes.NewReader(cmddat)
@@ -1173,6 +1184,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Offset = led.Offset
 			l.Size = led.Size
 			f.Loads[i] = l
+
 		case types.LC_SOURCE_VERSION:
 			var sv types.SourceVersionCmd
 			b := bytes.NewReader(cmddat)
@@ -1185,6 +1197,8 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Len = siz
 			l.Version = sv.Version.String()
 			f.Loads[i] = l
+			f.SourceVersions = append(f.SourceVersions, l)
+
 		case types.LC_DYLIB_CODE_SIGN_DRS:
 			var led types.LinkEditDataCmd
 			b := bytes.NewReader(cmddat)
@@ -1231,6 +1245,8 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				l.Options = append(l.Options, o)
 			}
 			f.Loads[i] = l
+			f.LinkerOptions = append(f.LinkerOptions, l)
+
 		case types.LC_LINKER_OPTIMIZATION_HINT:
 			var led types.LinkEditDataCmd
 			b := bytes.NewReader(cmddat)
