@@ -38,5 +38,5 @@ jobs:
         draft: false
         prerelease: false
         release_name: latest
-        tag_name: 1.1.1
+        tag_name: v1.1.1
 
