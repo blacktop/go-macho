@@ -26,13 +26,18 @@ jobs:
       run: go test
       
     - name: Create Release
+      shell: bash
+      if: env.RG_VERSION == ''
+      run: |
+        echo "RG_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+        echo "version is: ${{ env.RG_VERSION }}"
       id: create_release
       uses: actions/create-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ github.ref }}
-        release_name: Release ${{ github.ref }}
+        tag_name: ${{ env.RG_VERSION }}
+        release_name: ${{ env.RG_VERSION }}
         draft: false
         prerelease: false
 
