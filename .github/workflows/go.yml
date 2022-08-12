@@ -24,20 +24,20 @@ jobs:
 
     - name: Test
       run: go test
-      
-    - name: Create Release
-      shell: bash
-      if: env.RG_VERSION == ''
+    - name: Get the version
+      id: get_version
       run: |
-        echo "RG_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
-        echo "version is: ${{ env.RG_VERSION }}"
+        echo ::set-output name=TAG::`echo $SOURCE_VERSION | cut -d / -f 2`
+      env:
+        SOURCE_VERSION: ${{ github.event.pull_request.head.ref }}
+    - name: Create Release
       id: create_release
       uses: actions/create-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ env.RG_VERSION }}
-        release_name: ${{ env.RG_VERSION }}
+        tag_name: ${{ steps.get_version.outputs.TAG }}
+        release_name: ${{ steps.get_version.outputs.TAG }}
         draft: false
         prerelease: false
 
