@@ -419,7 +419,7 @@ func TestTypeString(t *testing.T) {
 
 func TestNewFatFile(t *testing.T) {
 
-	f, err := os.Open("/usr/lib/libcompression.dylib")
+	f, err := os.Open("usr/lib/libLeaksAtExit.dylib")
 	if err != nil {
 		t.Fatal(err)
 	}
