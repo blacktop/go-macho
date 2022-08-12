@@ -1,3 +1,5 @@
-module github.com/blacktop/go-macho
+module github.com/appsworld/go-macho
 
 go 1.17
+
+require github.com/blacktop/go-macho v1.1.93
