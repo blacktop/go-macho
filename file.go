@@ -6,7 +6,6 @@ import (
 	"bufio"
 	"bytes"
 	"compress/zlib"
-	"debug/dwarf"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -16,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unsafe"
+
+	"github.com/blacktop/go-dwarf"
 
 	"github.com/blacktop/go-macho/pkg/codesign"
 	"github.com/blacktop/go-macho/pkg/fixupchains"
@@ -2060,12 +2061,17 @@ func (f *File) DWARF() (*dwarf.Data, error) {
 			return s.Name[8:]
 		case strings.HasPrefix(s.Name, "__zdebug_"):
 			return s.Name[9:]
+		default:
+			return ""
+		}
+	}
+	appleSuffix := func(s *Section) string {
+		switch {
 		case strings.HasPrefix(s.Name, "__apple_"):
 			return s.Name[8:]
 		default:
 			return ""
 		}
-
 	}
 	sectionData := func(s *Section) ([]byte, error) {
 		b, err := s.Data()
@@ -2115,10 +2121,14 @@ func (f *File) DWARF() (*dwarf.Data, error) {
 		return nil, err
 	}
 
-	// Look for DWARF4 .debug_types sections.
+	// Look for DWARF4 .debug_types sections and DWARF5 sections.
 	for i, s := range f.Sections {
 		suffix := dwarfSuffix(s)
-		if suffix != "types" {
+		if suffix == "" {
+			continue
+		}
+		if _, ok := dat[suffix]; ok {
+			// Already handled.
 			continue
 		}
 
@@ -2127,10 +2137,32 @@ func (f *File) DWARF() (*dwarf.Data, error) {
 			return nil, err
 		}
 
-		err = d.AddTypes(fmt.Sprintf("types-%d", i), b)
+		if suffix == "types" {
+			err = d.AddTypes(fmt.Sprintf("types-%d", i), b)
+		} else {
+			err = d.AddSection(".debug_"+suffix, b)
+		}
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	//
+	for _, s := range f.Sections {
+		suffix := appleSuffix(s)
+		if suffix == "" {
+			continue
+		}
+		if _, ok := dat[suffix]; ok {
+			// Already handled.
+			continue
+		}
+
+		b, err := sectionData(s)
+		if err != nil {
+			return nil, err
+		}
+		dat[suffix] = b
 	}
 
 	return d, nil
