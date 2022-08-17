@@ -1,4 +1,4 @@
-# go-macho [WIP] 🚧
+# go-macho
 
 [![Go](https://github.com/blacktop/go-macho/workflows/Go/badge.svg?branch=master)](https://github.com/blacktop/go-macho/actions) [![Go Reference](https://pkg.go.dev/badge/github.com/blacktop/go-macho.svg)](https://pkg.go.dev/github.com/blacktop/go-macho) [![License](http://img.shields.io/:license-mit-blue.svg)](http://doge.mit-license.org)
 
