@@ -254,7 +254,7 @@ func (t *FileTOC) Put(buffer []byte) int {
 type FormatError struct {
 	off int64
 	msg string
-	val interface{}
+	val any
 }
 
 func (e *FormatError) Error() string {
@@ -910,6 +910,9 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_RPATH: %v", err)
 			}
 			l := new(Rpath)
+			if hdr.Path >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid path in rpath command", hdr.Path}
+			}
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
@@ -2147,7 +2150,7 @@ func (f *File) DWARF() (*dwarf.Data, error) {
 		}
 	}
 
-	//
+	// Look for Apple HASH table .apple_names, .apple_types, .apple_namespaces or .apple_objc sections.
 	for _, s := range f.Sections {
 		suffix := appleSuffix(s)
 		if suffix == "" {
@@ -2163,6 +2166,7 @@ func (f *File) DWARF() (*dwarf.Data, error) {
 			return nil, err
 		}
 		dat[suffix] = b
+		// TODO: finish implementing this.
 	}
 
 	return d, nil
