@@ -2167,6 +2167,9 @@ func (f *File) DWARF() (*dwarf.Data, error) {
 		}
 		dat[suffix] = b
 		// TODO: finish implementing this.
+		if err := d.AddHashes(suffix, b); err != nil {
+			return nil, err
+		}
 	}
 
 	return d, nil

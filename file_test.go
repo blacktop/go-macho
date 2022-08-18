@@ -6,12 +6,16 @@ package macho
 
 import (
 	"bytes"
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/blacktop/go-dwarf"
 	"github.com/blacktop/go-macho/internal/obscuretestdata"
 	"github.com/blacktop/go-macho/types"
 )
@@ -436,29 +440,68 @@ func TestNewFatFile(t *testing.T) {
 	}
 }
 
-// func TestNewFile(t *testing.T) {
-// 	// f, err := os.Open("/System/Library/PrivateFrameworks/PackageKit.framework/Resources/installd")
-// 	// f, err := os.Open("/Library/Developer/KDKs/KDK_11.0_20A5323l.kdk/System/Library/Kernels/kernel.development.t8020.dSYM/Contents/Resources/DWARF/kernel.development.t8020")
-// 	f, err := os.Open("/Library/Developer/KDKs/KDK_13.0_22A5295i.kdk/System/Library/Kernels/kernel.development.t8112.dSYM/Contents/Resources/DWARF/kernel.development.t8112")
+var fname string
 
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
+func init() {
+	flag.StringVar(&fname, "file", "", "MachO file to test")
+}
 
-// 	got, err := NewFile(f)
-// 	if err != nil {
-// 		t.Errorf("NewFile() error = %v", err)
-// 		return
-// 	}
+func TestNewFile(t *testing.T) {
+	f, err := os.Open(fname)
 
-// 	cs := got.CodeSignature()
-// 	if cs != nil {
-// 		fmt.Println(cs.Requirements[0].Detail)
-// 	}
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			t.Skipf("file %s not found", fname)
+		}
+		t.Fatal(err)
+	}
 
-// 	fmt.Println(got.FileTOC.String())
+	got, err := NewFile(f)
+	if err != nil {
+		t.Errorf("NewFile() error = %v", err)
+		return
+	}
 
-// 	if got.UUID().ID != "test" {
-// 		t.Errorf("macho.UUID() = %s; want test", got.UUID())
-// 	}
-// }
+	cs := got.CodeSignature()
+	if cs != nil {
+		fmt.Println(cs.Requirements[0].Detail)
+	}
+
+	d, err := got.DWARF()
+	if err != nil {
+		t.Errorf("DWARF() error = %v", err)
+	}
+
+	r := d.Reader()
+
+	for {
+		entry, err := r.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			t.Errorf("DWARF.Reader().Next() error = %v", err)
+		}
+
+		if entry == nil {
+			break
+		}
+
+		if entry.Tag == dwarf.TagStructType {
+			typ, err := d.Type(entry.Offset)
+			if err != nil {
+				t.Errorf("DWARF entry.Type() error = %v", err)
+			}
+			if t1, ok := typ.(*dwarf.StructType); ok {
+				if strings.EqualFold(t1.StructName, "thread") {
+					if !t1.Incomplete {
+						fmt.Println(t1.Defn())
+						break
+					}
+				}
+			}
+		}
+	}
+
+	fmt.Println(got.FileTOC.String())
+}
