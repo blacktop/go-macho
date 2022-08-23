@@ -458,7 +458,7 @@ func TestNewFile(t *testing.T) {
 
 	got, err := NewFile(f)
 	if err != nil {
-		t.Errorf("NewFile() error = %v", err)
+		t.Fatalf("NewFile() error = %v", err)
 		return
 	}
 
@@ -469,10 +469,71 @@ func TestNewFile(t *testing.T) {
 
 	d, err := got.DWARF()
 	if err != nil {
-		t.Errorf("DWARF() error = %v", err)
+		t.Fatalf("DWARF() error = %v", err)
+	}
+
+	debugStrSec := got.Section("__DWARF", "__debug_str")
+	if debugStrSec == nil {
+		t.Fatalf("Section() error = section __DWARF.__debug_str not found")
+	}
+
+	names, err := d.DumpNames()
+	if err != nil {
+		t.Errorf("DWARF.DumpNames() error = %v", err)
+	}
+	for _, name := range names {
+		nameStr, err := got.GetCString(debugStrSec.Addr + uint64(name.StrOffset))
+		if err != nil {
+			t.Errorf("GetCString() error = %v", err)
+		}
+		fmt.Println(nameStr)
+	}
+
+	nameSpaces, err := d.DumpNamespaces()
+	if err != nil {
+		t.Fatalf("DWARF.DumpNamespaces() error = %v", err)
+	}
+	for _, ns := range nameSpaces {
+		nsStr, err := got.GetCString(debugStrSec.Addr + uint64(ns.StrOffset))
+		if err != nil {
+			t.Errorf("GetCString() error = %v", err)
+		}
+		fmt.Println(nsStr)
+	}
+
+	objc, err := d.DumpObjC()
+	if err != nil {
+		t.Fatalf("DWARF.DumpObjC() error = %v", err)
+	}
+	for _, oc := range objc {
+		nsStr, err := got.GetCString(debugStrSec.Addr + uint64(oc.StrOffset))
+		if err != nil {
+			t.Errorf("GetCString() error = %v", err)
+		}
+		fmt.Println(nsStr)
+	}
+
+	types, err := d.DumpTypes()
+	if err != nil {
+		t.Fatalf("DWARF.LookDumpTypesupType() error = %v", err)
+	}
+
+	for _, typ := range types {
+		typStr, err := got.GetCString(debugStrSec.Addr + uint64(typ.StrOffset))
+		if err != nil {
+			t.Errorf("GetCString() error = %v", err)
+		}
+		fmt.Println(typStr)
+	}
+
+	off, err := d.LookupType("thread")
+	if err != nil {
+		t.Fatalf("DWARF.LookupType() error = %v", err)
 	}
 
 	r := d.Reader()
+
+	r.Seek(off)
 
 	for {
 		entry, err := r.Next()
@@ -480,7 +541,7 @@ func TestNewFile(t *testing.T) {
 			if err == io.EOF {
 				break
 			}
-			t.Errorf("DWARF.Reader().Next() error = %v", err)
+			t.Fatalf("DWARF.Reader().Next() error = %v", err)
 		}
 
 		if entry == nil {

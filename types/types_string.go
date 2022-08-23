@@ -19,27 +19,28 @@ func _() {
 	_ = x[tvOSSimulator-8]
 	_ = x[watchOSSimulator-9]
 	_ = x[driverKit-10]
+	_ = x[realityOS-11]
+	_ = x[realityOSSimulator-12]
 	_ = x[firmware-13]
 	_ = x[sepOS-14]
+	_ = x[any-4294967295]
 }
 
 const (
-	_Platform_name_0 = "unknownmacOSiOStvOSwatchOSbridgeOSmacCatalystiOSSimulatortvOSSimulatorwatchOSSimulatordriverKit"
-	_Platform_name_1 = "firmwaresepOS"
+	_Platform_name_0 = "unknownmacOSiOStvOSwatchOSbridgeOSmacCatalystiOSSimulatortvOSSimulatorwatchOSSimulatordriverKitrealityOSrealityOSSimulatorfirmwaresepOS"
+	_Platform_name_1 = "any"
 )
 
 var (
-	_Platform_index_0 = [...]uint8{0, 7, 12, 15, 19, 26, 34, 45, 57, 70, 86, 95}
-	_Platform_index_1 = [...]uint8{0, 8, 13}
+	_Platform_index_0 = [...]uint8{0, 7, 12, 15, 19, 26, 34, 45, 57, 70, 86, 95, 104, 122, 130, 135}
 )
 
 func (i Platform) String() string {
 	switch {
-	case i <= 10:
+	case i <= 14:
 		return _Platform_name_0[_Platform_index_0[i]:_Platform_index_0[i+1]]
-	case 13 <= i && i <= 14:
-		i -= 13
-		return _Platform_name_1[_Platform_index_1[i]:_Platform_index_1[i+1]]
+	case i == 4294967295:
+		return _Platform_name_1
 	default:
 		return "Platform(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
