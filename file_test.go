@@ -472,6 +472,17 @@ func TestNewFile(t *testing.T) {
 		t.Fatalf("DWARF() error = %v", err)
 	}
 
+	r := d.Reader()
+
+	// cu, err := d.Reader().Next()
+	// if err != nil {
+	// 	t.Fatal("DWARF().Reader().Next:", err)
+	// }
+	// lr, err := d.LineReader(cu)
+	// if err != nil {
+	// 	t.Fatal("DWARF().LineReader:", err)
+	// }
+
 	debugStrSec := got.Section("__DWARF", "__debug_str")
 	if debugStrSec == nil {
 		t.Fatalf("Section() error = section __DWARF.__debug_str not found")
@@ -486,7 +497,50 @@ func TestNewFile(t *testing.T) {
 		if err != nil {
 			t.Errorf("GetCString() error = %v", err)
 		}
-		fmt.Println(nameStr)
+
+		for _, hdata := range name.HashData {
+			r.Seek(*hdata[0].(*dwarf.Offset))
+			entry, err := r.Next()
+			if err != nil {
+				t.Fatalf("DWARF.Reader().Next() error = %v", err)
+			}
+			if entry.Tag != dwarf.TagInlinedSubroutine {
+				ty, _ := d.Type(entry.Offset)
+				fmt.Printf("TAG: %s, NAME: %s, TYPE: %s\n", entry.Tag, nameStr, ty)
+			} else {
+				fmt.Printf("TAG: %s, NAME: %s\n", entry.Tag, nameStr)
+			}
+		}
+
+		r.Seek(name.GetFirstOffset())
+
+		entry, err := r.Next()
+		if err != nil {
+			t.Fatalf("DWARF.Reader().Next() error = %v", err)
+		}
+
+		if entry.Tag != dwarf.TagLabel &&
+			entry.Tag != dwarf.TagVariable &&
+			// entry.Tag != dwarf.TagInlinedSubroutine &&
+			entry.Tag != dwarf.TagSubprogram {
+			ty, _ := d.Type(entry.Offset)
+			fmt.Printf("TAG: %s, NAME: %s, TYPE: %s\n", entry.Tag, nameStr, ty)
+			continue
+		}
+
+		// if entry.Tag == dwarf.TagSubprogram {
+		// 	fn, _ := d.Type(entry.Offset)
+		// 	var line dwarf.LineEntry
+		// 	err = lr.SeekPC(fn.(*dwarf.FuncType).LowPC, &line)
+		// 	if err != nil {
+		// 		t.Errorf("DWARF.LineReader.SeekPC() error = %v", err)
+		// 	}
+		// 	pos := lr.Tell()
+		// 	fmt.Println(pos)
+		// 	fmt.Println(lr.Files())
+		// }
+
+		// fmt.Printf("TAG: %s, NAME: %s\n", entry.Tag, nameStr)
 	}
 
 	nameSpaces, err := d.DumpNamespaces()
@@ -498,7 +552,19 @@ func TestNewFile(t *testing.T) {
 		if err != nil {
 			t.Errorf("GetCString() error = %v", err)
 		}
-		fmt.Println(nsStr)
+		for _, hdata := range ns.HashData {
+			r.Seek(*hdata[0].(*dwarf.Offset))
+			entry, err := r.Next()
+			if err != nil {
+				t.Fatalf("DWARF.Reader().Next() error = %v", err)
+			}
+
+			typ, err := d.Type(entry.Offset)
+			if err != nil {
+				t.Fatalf("DWARF.Type() error = %v", err)
+			}
+			fmt.Printf("TAG: %s, NAME: %s, TYPE: %s\n", entry.Tag, nsStr, typ)
+		}
 	}
 
 	objc, err := d.DumpObjC()
@@ -517,7 +583,6 @@ func TestNewFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DWARF.LookDumpTypesupType() error = %v", err)
 	}
-
 	for _, typ := range types {
 		typStr, err := got.GetCString(debugStrSec.Addr + uint64(typ.StrOffset))
 		if err != nil {
@@ -531,34 +596,22 @@ func TestNewFile(t *testing.T) {
 		t.Fatalf("DWARF.LookupType() error = %v", err)
 	}
 
-	r := d.Reader()
-
 	r.Seek(off)
 
-	for {
-		entry, err := r.Next()
+	entry, err := r.Next()
+	if err != nil {
+		t.Fatalf("DWARF.Reader().Next() error = %v", err)
+	}
+
+	if entry.Tag == dwarf.TagStructType {
+		typ, err := d.Type(entry.Offset)
 		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			t.Fatalf("DWARF.Reader().Next() error = %v", err)
+			t.Errorf("DWARF entry.Type() error = %v", err)
 		}
-
-		if entry == nil {
-			break
-		}
-
-		if entry.Tag == dwarf.TagStructType {
-			typ, err := d.Type(entry.Offset)
-			if err != nil {
-				t.Errorf("DWARF entry.Type() error = %v", err)
-			}
-			if t1, ok := typ.(*dwarf.StructType); ok {
-				if strings.EqualFold(t1.StructName, "thread") {
-					if !t1.Incomplete {
-						fmt.Println(t1.Defn())
-						break
-					}
+		if t1, ok := typ.(*dwarf.StructType); ok {
+			if strings.EqualFold(t1.StructName, "thread") {
+				if !t1.Incomplete {
+					fmt.Println(t1.Defn())
 				}
 			}
 		}
