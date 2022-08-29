@@ -474,15 +474,6 @@ func TestNewFile(t *testing.T) {
 
 	r := d.Reader()
 
-	// cu, err := d.Reader().Next()
-	// if err != nil {
-	// 	t.Fatal("DWARF().Reader().Next:", err)
-	// }
-	// lr, err := d.LineReader(cu)
-	// if err != nil {
-	// 	t.Fatal("DWARF().LineReader:", err)
-	// }
-
 	debugStrSec := got.Section("__DWARF", "__debug_str")
 	if debugStrSec == nil {
 		t.Fatalf("Section() error = section __DWARF.__debug_str not found")
@@ -504,43 +495,33 @@ func TestNewFile(t *testing.T) {
 			if err != nil {
 				t.Fatalf("DWARF.Reader().Next() error = %v", err)
 			}
-			if entry.Tag != dwarf.TagInlinedSubroutine {
+
+			switch entry.Tag {
+			case dwarf.TagInlinedSubroutine:
+			case dwarf.TagSubroutineType, dwarf.TagSubprogram:
 				ty, _ := d.Type(entry.Offset)
-				fmt.Printf("TAG: %s, NAME: %s, TYPE: %s\n", entry.Tag, nameStr, ty)
-			} else {
-				fmt.Printf("TAG: %s, NAME: %s\n", entry.Tag, nameStr)
+				if ty.(*dwarf.FuncType).FileIndex > 0 {
+					fs, err := d.FilesForEntry(entry)
+					if err != nil {
+						t.Fatalf("DWARF.FilesForEntry() error = %v", err)
+					}
+					fmt.Printf("TAG: %s, NAME: %s, TYPE: %s\nFILE: %s\n", entry.Tag, nameStr, ty, fs[ty.(*dwarf.FuncType).FileIndex].Name)
+				}
+			default:
+				ty, _ := d.Type(entry.Offset)
+				declFile, dOK := entry.Val(dwarf.AttrDeclFile).(int64)
+				callFile, cOK := entry.Val(dwarf.AttrCallFile).(int64)
+				if dOK || cOK {
+					fs, err := d.FilesForEntry(entry)
+					if err != nil {
+						t.Fatalf("DWARF.FilesForEntry() error = %v", err)
+					}
+					fmt.Printf("TAG: %s, NAME: %s, TYPE: %s\nFILE: %s\n", entry.Tag, nameStr, ty, fs[declFile+callFile].Name)
+				} else {
+					fmt.Printf("TAG: %s, NAME: %s, TYPE: %s\n", entry.Tag, nameStr, ty)
+				}
 			}
 		}
-
-		r.Seek(name.GetFirstOffset())
-
-		entry, err := r.Next()
-		if err != nil {
-			t.Fatalf("DWARF.Reader().Next() error = %v", err)
-		}
-
-		if entry.Tag != dwarf.TagLabel &&
-			entry.Tag != dwarf.TagVariable &&
-			// entry.Tag != dwarf.TagInlinedSubroutine &&
-			entry.Tag != dwarf.TagSubprogram {
-			ty, _ := d.Type(entry.Offset)
-			fmt.Printf("TAG: %s, NAME: %s, TYPE: %s\n", entry.Tag, nameStr, ty)
-			continue
-		}
-
-		// if entry.Tag == dwarf.TagSubprogram {
-		// 	fn, _ := d.Type(entry.Offset)
-		// 	var line dwarf.LineEntry
-		// 	err = lr.SeekPC(fn.(*dwarf.FuncType).LowPC, &line)
-		// 	if err != nil {
-		// 		t.Errorf("DWARF.LineReader.SeekPC() error = %v", err)
-		// 	}
-		// 	pos := lr.Tell()
-		// 	fmt.Println(pos)
-		// 	fmt.Println(lr.Files())
-		// }
-
-		// fmt.Printf("TAG: %s, NAME: %s\n", entry.Tag, nameStr)
 	}
 
 	nameSpaces, err := d.DumpNamespaces()
