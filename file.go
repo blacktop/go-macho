@@ -336,8 +336,8 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 	} else {
 		f.vma = &types.VMAddrConverter{
 			Converter:    f.convertToVMAddr,
-			VMAddr2Offet: f.GetOffset,
-			Offet2VMAddr: f.GetVMAddress,
+			VMAddr2Offet: f.getOffset,
+			Offet2VMAddr: f.getVMAddress,
 		}
 		f.sr = types.NewCustomSectionReader(r, f.vma, 0, 1<<63-1)
 		f.cr = f.sr
@@ -1533,11 +1533,15 @@ func (f *File) readLeUint64(offset int64) (uint64, error) {
 
 // ReadAt reads data at offset within MachO
 func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
-	return f.sr.ReadAt(p, off) // TODO: should this be f.cr ?
+	return f.cr.ReadAt(p, off) // TODO: should this be f.cr  or f.sr?
 }
 
 // GetOffset returns the file offset for a given virtual address
 func (f *File) GetOffset(address uint64) (uint64, error) {
+	return f.vma.GetOffset(address)
+}
+
+func (f *File) getOffset(address uint64) (uint64, error) {
 	for _, seg := range f.Segments() {
 		if seg.Addr <= address && address < seg.Addr+seg.Memsz {
 			return (address - seg.Addr) + seg.Offset, nil
@@ -1548,6 +1552,10 @@ func (f *File) GetOffset(address uint64) (uint64, error) {
 
 // GetVMAddress returns the virtal address for a given file offset
 func (f *File) GetVMAddress(offset uint64) (uint64, error) {
+	return f.vma.GetVMAddress(offset)
+}
+
+func (f *File) getVMAddress(offset uint64) (uint64, error) {
 	for _, seg := range f.Segments() {
 		if seg.Offset <= offset && offset < seg.Offset+seg.Filesz {
 			return (offset - seg.Offset) + seg.Addr, nil
