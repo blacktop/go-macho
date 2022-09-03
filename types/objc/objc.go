@@ -136,7 +136,7 @@ func (f ImageInfoFlag) SwiftVersion() string {
 		case 1:
 			return "Swift 1.0"
 		case 2:
-			return "Swift 1.1"
+			return "Swift 1.2"
 		case 3:
 			return "Swift 2.0"
 		case 4:

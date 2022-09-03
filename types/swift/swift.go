@@ -1,5 +1,7 @@
 package swift
 
+import "fmt"
+
 // credit: https://knight.sc/reverse%20engineering/2019/07/17/swift-metadata.html
 
 const (
@@ -80,18 +82,25 @@ const (
 // An associated type records describe the mapping from an associated type to the type witness of a conformance.
 
 type AssociatedTypeRecord struct {
-	Name                int32
-	SubstitutedTypeName int32
+	Name                string
+	SubstitutedTypeName string
+	ATRecordType
+}
+type ATRecordType struct {
+	NameOffset                int32
+	SubstitutedTypeNameOffset int32
 }
 
-type AssociatedTypeDescriptorHeader struct {
-	ConformingTypeName       int32
-	ProtocolTypeName         int32
+type ATDHeader struct {
+	ConformingTypeNameOffset int32
+	ProtocolTypeNameOffset   int32
 	NumAssociatedTypes       uint32
 	AssociatedTypeRecordSize uint32
 }
 type AssociatedTypeDescriptor struct {
-	AssociatedTypeDescriptorHeader
+	ATDHeader
+	ConformingTypeName    string
+	ProtocolTypeName      string
 	AssociatedTypeRecords []AssociatedTypeRecord
 }
 
@@ -99,13 +108,21 @@ type AssociatedTypeDescriptor struct {
 // This section contains an array of builtin type descriptors.
 // A builtin type descriptor describes the basic layout information about any builtin types referenced from other sections.
 
-type BuiltinTypeFlag uint32
+type builtinTypeFlag uint32
 
-func (f BuiltinTypeFlag) IsBitwiseTakable() bool {
-	return (f>>16)&1 != 0
+func (f builtinTypeFlag) IsBitwiseTakable() bool {
+	return ((f >> 16) & 1) != 0
 }
-func (f BuiltinTypeFlag) Alignment() uint16 {
+func (f builtinTypeFlag) Alignment() uint16 {
 	return uint16(f & 0xffff)
+}
+
+type BuiltinTypeDescriptor struct {
+	TypeName            int32
+	Size                uint32
+	AlignmentAndFlags   builtinTypeFlag
+	Stride              uint32
+	NumExtraInhabitants uint32
 }
 
 // BuiltinType builtin swift type
@@ -118,12 +135,15 @@ type BuiltinType struct {
 	NumExtraInhabitants uint32
 }
 
-type BuiltinTypeDescriptor struct {
-	TypeName            int32
-	Size                uint32
-	AlignmentAndFlags   BuiltinTypeFlag
-	Stride              uint32
-	NumExtraInhabitants uint32
+func (b BuiltinType) String() string {
+	return fmt.Sprintf(
+		"Name:             %s\n"+
+			"Size:             %d\n"+
+			"Alignment:        %d\n"+
+			"BitwiseTakable:   %t\n"+
+			"Stride:           %d\n"+
+			"ExtraInhabitants: %d\n",
+		b.Name, b.Size, b.Alignment, b.BitwiseTakable, b.Stride, b.NumExtraInhabitants)
 }
 
 // __TEXT.__swift5_capture
@@ -151,14 +171,22 @@ type CaptureDescriptor struct {
 	MetadataSourceRecords []MetadataSourceRecord
 }
 
+// __TEXT.__swift5_typeref
+// This section contains a list of mangled type names that are referenced from other sections.
+// This is essentially all the different types that are used in the application.
+// The Swift docs and code are the best places to find out more information about mangled type names.
+
+// __TEXT.__swift5_reflstr
+// This section contains an array of C strings. The strings are field names for the properties of the metadata defined in other sections.
+
 // __TEXT.__swift5_replac
 // This section contains dynamic replacement information.
 // This is essentially the Swift equivalent of Objective-C method swizzling.
 
-type Replacement struct {
+type DynamicReplacementDescriptor struct {
 	ReplacedFunctionKey int32
-	NewFunction         int32
-	Replacement         int32
+	ReplacementFunction int32
+	ChainEntry          int32
 	Flags               uint32
 }
 
@@ -184,5 +212,5 @@ type Replacement2 struct {
 type AutomaticReplacementsSome struct {
 	Flags           uint32
 	NumReplacements uint32
-	Replacements    []Replacement
+	Replacements    []Replacement2
 }

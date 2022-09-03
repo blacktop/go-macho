@@ -1,22 +1,75 @@
 package protocols
 
+import (
+	"fmt"
+
+	"github.com/blacktop/go-macho/types/swift/types"
+)
+
 // Protocol swift protocol object
 type Protocol struct {
-	Name   string
-	Parent *Protocol
+	Name           string
+	AssociatedType string
+	Parent         *Protocol
 	Descriptor
 }
+
+func (p Protocol) String() string {
+	var associateType string
+	if p.Descriptor.AssociatedTypeNamesOffset != 0 {
+		associateType = fmt.Sprintf("AssociatedType: %s\n", p.AssociatedType)
+	}
+	var parent string
+	if p.Descriptor.ParentOffset != 0 {
+		parent = fmt.Sprintf("\n---\nParent %s\n", p.Parent)
+	}
+	return fmt.Sprintf(
+		"Name:           %s\n"+
+			"%s"+
+			"%s%s",
+		p.Name, associateType, p.Descriptor, parent)
+}
+
+// ProtocolContextDescriptorFlags flags for protocol context descriptors.
+// These values are used as the kindSpecificFlags of the ContextDescriptorFlags for the protocol.
+type ProtocolContextDescriptorFlags uint16
+
+const (
+	/// Whether this protocol is class-constrained.
+	HasClassConstraint       ProtocolContextDescriptorFlags = 0
+	HasClassConstraint_width ProtocolContextDescriptorFlags = 1
+
+	/// Whether this protocol is resilient.
+	IsResilient ProtocolContextDescriptorFlags = 1
+
+	/// Special protocol value.
+	SpecialProtocolKind       ProtocolContextDescriptorFlags = 2
+	SpecialProtocolKind_width ProtocolContextDescriptorFlags = 6
+)
 
 // Descriptor in __TEXT.__swift5_protos
 // This section contains an array of 32-bit signed integers.
 // Each integer is a relative offset that points to a protocol descriptor in the __TEXT.__const section.
 type Descriptor struct {
-	Flags                      uint32
-	Parent                     int32
-	Name                       int32
-	NumRequirementsInSignature uint32
-	NumRequirements            uint32
-	AssociatedTypeNames        int32
+	Flags                      types.ContextDescriptorFlags // overide kind specific flags w/ ProtocolContextDescriptorFlags TODO: handle kind specific flags
+	ParentOffset               int32
+	NameOffset                 int32  // The name of the protocol.
+	NumRequirementsInSignature uint32 // The number of generic requirements in the requirement signature of the protocol.
+	NumRequirements            uint32 /* The number of requirements in the protocol. If any requirements beyond MinimumWitnessTableSizeInWords are present
+	 * in the witness table template, they will be not be overwritten with defaults. */
+	AssociatedTypeNamesOffset int32 // Associated type names, as a space-separated list in the same order as the requirements.
+}
+
+func (d Descriptor) GetProtocolContextDescriptorFlags() ProtocolContextDescriptorFlags {
+	return ProtocolContextDescriptorFlags(d.Flags.KindSpecificFlags())
+}
+
+func (d Descriptor) String() string {
+	return fmt.Sprintf(
+		"Flags: (%s)\n"+
+			"NumRequirementsInSignature: %d\n"+
+			"NumRequirements:            %d",
+		d.Flags, d.NumRequirementsInSignature, d.NumRequirements)
 }
 
 type TargetGenericRequirementDescriptor struct {
@@ -117,9 +170,16 @@ func (f conformanceFlag) GetTypeReferenceKind() referenceKind {
 // ConformanceDescriptor in __TEXT.__swift5_proto
 // This section contains an array of 32-bit signed integers.
 // Each integer is a relative offset that points to a protocol conformance descriptor in the __TEXT.__const section.
+type CDType struct {
+	ProtocolDescriptorOffset int32
+	TypeRefOffset            int32
+	WitnessTableOffset       int32
+	Flags                    conformanceFlag
+}
+
 type ConformanceDescriptor struct {
-	ProtocolDescriptor    int32
-	NominalTypeDescriptor int32
-	ProtocolWitnessTable  int32
-	ConformanceFlags      conformanceFlag
+	Protocol     string
+	TypeRef      int32
+	WitnessTable int32
+	CDType
 }
