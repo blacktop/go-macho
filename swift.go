@@ -373,11 +373,8 @@ func (f *File) GetSwiftAssociatedTypes() ([]swift.AssociatedTypeDescriptor, erro
 
 		r := bytes.NewReader(dat)
 
-		offset := int64(sec.Offset)
-
 		for {
-			currOffset, _ := r.Seek(0, io.SeekCurrent)
-			offset += currOffset
+			currentOffset, _ := r.Seek(0, io.SeekCurrent)
 
 			var aType swift.AssociatedTypeDescriptor
 			err := binary.Read(r, f.ByteOrder, &aType.ATDHeader)
@@ -386,27 +383,76 @@ func (f *File) GetSwiftAssociatedTypes() ([]swift.AssociatedTypeDescriptor, erro
 				break
 			}
 			if err != nil {
-				return nil, fmt.Errorf("failed to read swift.AssociatedTypeDescriptorHeader: %v", err)
+				return nil, fmt.Errorf("failed to read swift AssociatedTypeDescriptor header: %v", err)
 			}
 
-			// currOffset += int64(binary.Size(aType.ATDHeader))
+			aType.Address = sec.Addr + uint64(currentOffset)
 
-			off := offset + int64(aType.ConformingTypeNameOffset) + 8
-			aType.ConformingTypeName, err = f.GetCStringAtOffset(off)
+			off, err := f.GetOffset(aType.Address)
 			if err != nil {
-				return nil, fmt.Errorf("failed to read cstring at %#x: %v", off, err)
+				return nil, fmt.Errorf("failed to get offset for associated type at addr %#x: %v", aType.Address, err)
 			}
 
-			off = offset + int64(aType.ProtocolTypeNameOffset) + 16
-			aType.ProtocolTypeName, err = f.GetCStringAtOffset(off)
+			// AssociatedTypeDescriptor.ConformingTypeName
+			coff, symbolic, err := f.makeSymbolicMangledNameStringRef(int64(off) + int64(aType.ConformingTypeNameOffset))
 			if err != nil {
-				return nil, fmt.Errorf("failed to read cstring at %#x: %v", off, err)
+				return nil, fmt.Errorf("failed to read conforming type for associated type at addr %#x: %v", aType.Address, err)
 			}
 
+			if symbolic {
+				aType.ConformingTypeAddr, err = f.GetVMAddress(uint64(coff))
+				if err != nil {
+					return nil, fmt.Errorf("failed to get vmaddr for associated types conforming type: %v", err)
+				}
+			} else {
+				aType.ConformingTypeAddr, err = f.GetVMAddress(uint64(coff))
+				if err != nil {
+					return nil, fmt.Errorf("failed to get vmaddr for associated types conforming type: %v", err)
+				}
+				aType.ConformingTypeName, err = f.GetCString(aType.ConformingTypeAddr)
+				if err != nil {
+					return nil, fmt.Errorf("failed to read associated type substituted type name: %v", err)
+				}
+			}
+			// AssociatedTypeDescriptor.ProtocolTypeName
+			addr := uint64(int64(aType.Address) + int64(aType.ProtocolTypeNameOffset) + sizeOfInt32)
+			aType.ProtocolTypeName, err = f.GetCString(addr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read swift assocated type protocol type name at addr %#x: %v", addr, err)
+			}
+
+			// AssociatedTypeRecord
 			aType.AssociatedTypeRecords = make([]swift.AssociatedTypeRecord, aType.ATDHeader.NumAssociatedTypes)
 			for i := uint32(0); i < aType.ATDHeader.NumAssociatedTypes; i++ {
-				if err := binary.Read(r, f.ByteOrder, &aType.AssociatedTypeRecords[0].ATRecordType); err != nil {
-					return nil, fmt.Errorf("failed to read %T: %v", aType.AssociatedTypeRecords[0].ATRecordType, err)
+				if err := binary.Read(r, f.ByteOrder, &aType.AssociatedTypeRecords[i].ATRecordType); err != nil {
+					return nil, fmt.Errorf("failed to read %T: %v", aType.AssociatedTypeRecords[i].ATRecordType, err)
+				}
+				// AssociatedTypeRecord.Name
+				addr := int64(aType.Address) + int64(binary.Size(aType.ATDHeader)) + int64(aType.AssociatedTypeRecords[i].NameOffset)
+				aType.AssociatedTypeRecords[i].Name, err = f.GetCString(uint64(addr))
+				if err != nil {
+					return nil, fmt.Errorf("failed to read associated type record name: %v", err)
+				}
+				// AssociatedTypeRecord.SubstitutedTypeName
+				symMangOff := int64(off) + int64(binary.Size(aType.ATDHeader)) + int64(aType.AssociatedTypeRecords[i].SubstitutedTypeNameOffset) + sizeOfInt32
+				coff, symbolic, err := f.makeSymbolicMangledNameStringRef(symMangOff)
+				if err != nil {
+					return nil, fmt.Errorf("failed to read associated type substituted type symbolic ref at offset %#x: %v", symMangOff, err)
+				}
+				if symbolic {
+					aType.AssociatedTypeRecords[i].SubstitutedTypeAddr, err = f.GetVMAddress(uint64(coff))
+					if err != nil {
+						return nil, fmt.Errorf("failed to get vmaddr for associated type record substituted type: %v", err)
+					}
+				} else {
+					aType.AssociatedTypeRecords[i].SubstitutedTypeAddr, err = f.GetVMAddress(uint64(coff))
+					if err != nil {
+						return nil, fmt.Errorf("failed to get vmaddr for associated type record substituted type: %v", err)
+					}
+					aType.AssociatedTypeRecords[i].SubstitutedTypeName, err = f.GetCString(aType.AssociatedTypeRecords[i].SubstitutedTypeAddr)
+					if err != nil {
+						return nil, fmt.Errorf("failed to read associated type record substituted type name: %v", err)
+					}
 				}
 			}
 
@@ -416,6 +462,30 @@ func (f *File) GetSwiftAssociatedTypes() ([]swift.AssociatedTypeDescriptor, erro
 		return accocTypes, nil
 	}
 	return nil, fmt.Errorf("file does not contain a '__swift5_assocty' section")
+}
+
+// ref: https://github.com/apple/swift/blob/1a7146fb04665e2434d02bada06e6296f966770b/lib/Demangling/Demangler.cpp#L155
+// ref: https://github.com/apple/swift/blob/main/docs/ABI/Mangling.rst#symbolic-references
+func (f *File) makeSymbolicMangledNameStringRef(offset int64) (int64, bool, error) {
+
+	controlData := make([]byte, 9)
+	f.cr.ReadAt(controlData, offset)
+
+	if controlData[0] >= 0x01 && controlData[0] <= 0x17 {
+		var reference int32
+		if err := binary.Read(bytes.NewReader(controlData[1:]), f.ByteOrder, &reference); err != nil {
+			return 0, false, fmt.Errorf("failed to read swift symbolic reference: %v", err)
+		}
+		return offset + 1 + int64(reference), true, nil
+	} else if controlData[0] >= 0x18 && controlData[0] <= 0x1f {
+		var reference uint64
+		if err := binary.Read(bytes.NewReader(controlData[1:]), f.ByteOrder, &reference); err != nil {
+			return 0, false, fmt.Errorf("failed to read swift symbolic reference: %v", err)
+		}
+		return offset + 1 + int64(reference), true, nil
+	} else {
+		return offset, false, nil
+	}
 }
 
 // GetSwiftBuiltinTypes parses all the built-in types in the __TEXT.__swift5_builtin section

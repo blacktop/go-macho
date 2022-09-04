@@ -84,6 +84,7 @@ const (
 type AssociatedTypeRecord struct {
 	Name                string
 	SubstitutedTypeName string
+	SubstitutedTypeAddr uint64
 	ATRecordType
 }
 type ATRecordType struct {
@@ -99,6 +100,8 @@ type ATDHeader struct {
 }
 type AssociatedTypeDescriptor struct {
 	ATDHeader
+	Address               uint64
+	ConformingTypeAddr    uint64
 	ConformingTypeName    string
 	ProtocolTypeName      string
 	AssociatedTypeRecords []AssociatedTypeRecord
