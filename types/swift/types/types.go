@@ -145,20 +145,27 @@ func (f ContextDescriptorFlags) String() string {
 		f.KindSpecificFlags())
 }
 
+type Type struct {
+	Address uint64
+	Name    string
+}
+
 type TypeDescriptor struct {
-	Parent         string
-	Name           string
-	AccessFunction int32
-	Field          *fields.Field
-	Type           any
+	Address           uint64
+	Parent            Type
+	Name              string
+	AccessFunction    uint64
+	FieldOffsetVector []uint32
+	Fields            []*fields.Field
+	Type              any
 }
 
 type TargetContextDescriptor struct {
-	Flags           ContextDescriptorFlags
-	Parent          int32
-	Name            int32
-	AccessFunction  int32
-	FieldDescriptor int32
+	Flags                 ContextDescriptorFlags
+	ParentOffset          int32
+	NameOffset            int32
+	AccessFunctionOffset  int32
+	FieldDescriptorOffset int32
 }
 
 type EnumDescriptor struct {
@@ -167,7 +174,7 @@ type EnumDescriptor struct {
 	NumEmptyCases                       uint32
 }
 
-type StructDescriptor struct {
+type TargetStructDescriptor struct {
 	TargetContextDescriptor
 	NumFields               uint32
 	FieldOffsetVectorOffset uint32
