@@ -6,6 +6,8 @@ import (
 	"github.com/blacktop/go-macho/types/swift/types"
 )
 
+//go:generate stringer -type ProtocolContextDescriptorFlags -output types_string.go
+
 // Protocol swift protocol object
 type Protocol struct {
 	Name           string
@@ -61,7 +63,7 @@ type Descriptor struct {
 }
 
 func (d Descriptor) GetProtocolContextDescriptorFlags() ProtocolContextDescriptorFlags {
-	return ProtocolContextDescriptorFlags(d.Flags.KindSpecificFlags())
+	return ProtocolContextDescriptorFlags(d.Flags.KindSpecific())
 }
 
 func (d Descriptor) String() string {

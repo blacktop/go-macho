@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -168,7 +167,7 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 
 	os.MkdirAll(filepath.Dir(path), os.ModePerm)
 
-	if err := ioutil.WriteFile(path, buf.Bytes(), 0755); err != nil {
+	if err := os.WriteFile(path, buf.Bytes(), 0755); err != nil {
 		return fmt.Errorf("failed to write exported MachO to file %s: %v", path, err)
 	}
 

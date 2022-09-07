@@ -2,11 +2,14 @@ package types
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/blacktop/go-macho/types"
+	"github.com/blacktop/go-macho/types/swift"
 	"github.com/blacktop/go-macho/types/swift/fields"
 )
 
-//go:generate stringer -type=ContextDescriptorKind -output types_string.go
+//go:generate stringer -type ContextDescriptorKind,TypeReferenceKind,MetadataInitializationKind -trimprefix=MetadataInit -output types_string.go
 
 // __TEXT.__swift5_types
 // This section contains an array of 32-bit signed integers.
@@ -117,7 +120,111 @@ const (
 	Class_HasVTable TypeContextDescriptorFlags = 15
 )
 
-// TODO: should I also add `MetadataInitializationKind`flag bit values?
+func (f TypeContextDescriptorFlags) MetadataInitialization() MetadataInitializationKind {
+	return MetadataInitializationKind(types.ExtractBits(uint64(f), int32(MetadataInitialization), int32(MetadataInitialization_width)))
+}
+func (f TypeContextDescriptorFlags) HasImportInfo() bool {
+	return types.ExtractBits(uint64(f), int32(HasImportInfo), 1) != 0
+}
+func (f TypeContextDescriptorFlags) IsActor() bool {
+	return types.ExtractBits(uint64(f), int32(Class_IsActor), 1) != 0
+}
+func (f TypeContextDescriptorFlags) IsDefaultActor() bool {
+	return types.ExtractBits(uint64(f), int32(Class_IsDefaultActor), 1) != 0
+}
+func (f TypeContextDescriptorFlags) ResilientSuperclassReferenceKind() TypeReferenceKind {
+	return TypeReferenceKind(types.ExtractBits(uint64(f), int32(Class_ResilientSuperclassReferenceKind), int32(Class_ResilientSuperclassReferenceKind_width)))
+}
+func (f TypeContextDescriptorFlags) AreImmediateMembersNegative() bool {
+	return types.ExtractBits(uint64(f), int32(Class_AreImmediateMembersNegative), 1) != 0
+}
+func (f TypeContextDescriptorFlags) HasResilientSuperclass() bool {
+	return types.ExtractBits(uint64(f), int32(Class_HasResilientSuperclass), 1) != 0
+}
+func (f TypeContextDescriptorFlags) HasOverrideTable() bool {
+	return types.ExtractBits(uint64(f), int32(Class_HasOverrideTable), 1) != 0
+}
+func (f TypeContextDescriptorFlags) HasVTable() bool {
+	return types.ExtractBits(uint64(f), int32(Class_HasVTable), 1) != 0
+}
+func (f TypeContextDescriptorFlags) String() string {
+	var flags []string
+	if f.MetadataInitialization() != MetadataInitNone {
+		flags = append(flags, fmt.Sprintf("metadata_init:%s", f.MetadataInitialization()))
+	}
+	if f.HasImportInfo() {
+		flags = append(flags, "import_info")
+	}
+	if f.IsActor() {
+		flags = append(flags, "actor")
+	}
+	if f.IsDefaultActor() {
+		flags = append(flags, "default_actor")
+	}
+	if f.AreImmediateMembersNegative() {
+		flags = append(flags, "negative_immediate_members")
+	}
+	if f.HasResilientSuperclass() {
+		flags = append(flags, "resilient_superclass")
+		flags = append(flags, fmt.Sprintf("resilient_superclass_ref:%s", f.ResilientSuperclassReferenceKind()))
+	}
+	if f.HasOverrideTable() {
+		flags = append(flags, "override_table")
+	}
+	if f.HasVTable() {
+		flags = append(flags, "vtable")
+	}
+	return strings.Join(flags, ",")
+}
+
+// TypeReferenceKind kinds of type metadata/protocol conformance records.
+type TypeReferenceKind uint8
+
+const (
+	//The conformance is for a nominal type referenced directly; getTypeDescriptor() points to the type context descriptor.
+	DirectTypeDescriptor TypeReferenceKind = 0x00
+	// The conformance is for a nominal type referenced indirectly; getTypeDescriptor() points to the type context descriptor.
+	IndirectTypeDescriptor TypeReferenceKind = 0x01
+	// The conformance is for an Objective-C class that should be looked up by class name.
+	DirectObjCClassName TypeReferenceKind = 0x02
+	// The conformance is for an Objective-C class that has no nominal type descriptor.
+	// getIndirectObjCClass() points to a variable that contains the pointer to
+	// the class object, which then requires a runtime call to get metadata.
+	//
+	// On platforms without Objective-C interoperability, this case is unused.
+	IndirectObjCClass TypeReferenceKind = 0x03
+	// We only reserve three bits for this in the various places we store it.
+	FirstKind = DirectTypeDescriptor
+	LastKind  = IndirectObjCClass
+)
+
+type MetadataInitializationKind uint8
+
+const (
+	// There are either no special rules for initializing the metadata or the metadata is generic.
+	// (Genericity is set in the non-kind-specific descriptor flags.)
+	MetadataInitNone MetadataInitializationKind = 0
+	//The type requires non-trivial singleton initialization using the "in-place" code pattern.
+	MetadataInitSingleton MetadataInitializationKind = 1
+	// The type requires non-trivial singleton initialization using the "foreign" code pattern.
+	MetadataInitForeign MetadataInitializationKind = 2
+	// We only have two bits here, so if you add a third special kind, include more flag bits in its out-of-line storage.
+)
+
+type TargetSingletonMetadataInitialization struct {
+	InitializationCacheOffset int32 // The initialization cache. Out-of-line because mutable.
+	IncompleteMetadata        int32 // UNION: The incomplete metadata, for structs, enums and classes without resilient ancestry.
+	// ResilientPattern
+	// If the class descriptor's hasResilientSuperclass() flag is set,
+	// this field instead points at a pattern used to allocate and
+	// initialize metadata for this class, since it's size and contents
+	// is not known at compile time.
+	CompletionFunction int32 // The completion function. The pattern will always be null, even for a resilient class.
+}
+
+type TargetForeignMetadataInitialization struct {
+	CompletionFunction int32 // The completion function. The pattern will always be null.
+}
 
 type ContextDescriptorFlags uint32
 
@@ -133,16 +240,16 @@ func (f ContextDescriptorFlags) IsUnique() bool {
 func (f ContextDescriptorFlags) Version() uint8 {
 	return uint8(f >> 8 & 0xFF)
 }
-func (f ContextDescriptorFlags) KindSpecificFlags() TypeContextDescriptorFlags {
-	return TypeContextDescriptorFlags(f >> 16 & 0xFFFF)
+func (f ContextDescriptorFlags) KindSpecific() TypeContextDescriptorFlags {
+	return TypeContextDescriptorFlags((f >> 16) & 0xFFFF)
 }
 func (f ContextDescriptorFlags) String() string {
-	return fmt.Sprintf("kind: %s, generic: %t, unique: %t, version: %d, kind_flags: %#x",
+	return fmt.Sprintf("kind: %s, generic: %t, unique: %t, version: %d, kind_flags: %s",
 		f.Kind(),
 		f.IsGeneric(),
 		f.IsUnique(),
 		f.Version(),
-		f.KindSpecificFlags())
+		f.KindSpecific())
 }
 
 type Type struct {
@@ -154,8 +261,10 @@ type TypeDescriptor struct {
 	Address           uint64
 	Parent            Type
 	Name              string
+	Kind              ContextDescriptorKind
 	AccessFunction    uint64
-	FieldOffsetVector []uint32
+	FieldOffsetVector []int32
+	VTable            *VTable
 	Fields            []*fields.Field
 	Type              any
 }
@@ -168,10 +277,39 @@ type TargetContextDescriptor struct {
 	FieldDescriptorOffset int32
 }
 
-type EnumDescriptor struct {
+type TargetModuleContextDescriptor struct {
+	NameOffset int32
+}
+
+func (t TypeDescriptor) IsCImportedModuleName() bool {
+	if t.Kind == Module {
+		return t.Name == swift.MANGLING_MODULE_OBJC
+	}
+	return false
+}
+
+type TargetExtensionContextDescriptor struct {
+	ExtendedContext int32
+}
+
+type TargetAnonymousContextDescriptor struct {
+	TargetContextDescriptor
+}
+
+type TargetEnumDescriptor struct {
 	TargetContextDescriptor
 	NumPayloadCasesAndPayloadSizeOffset uint32
 	NumEmptyCases                       uint32
+}
+
+func (e TargetEnumDescriptor) GetNumPayloadCases() uint32 {
+	return e.NumPayloadCasesAndPayloadSizeOffset & 0x00FFFFFF
+}
+func (e TargetEnumDescriptor) GetNumCases() uint32 {
+	return e.GetNumPayloadCases() + e.NumEmptyCases
+}
+func (e TargetEnumDescriptor) GetPayloadSizeOffset() uint32 {
+	return (e.NumPayloadCasesAndPayloadSizeOffset & 0xFF000000) >> 24
 }
 
 type TargetStructDescriptor struct {
@@ -190,10 +328,65 @@ type TargetClassDescriptor struct {
 	FieldOffsetVectorOffset     uint32 // ??
 }
 
-type mdFlags uint32
+type TargetTypeGenericContextDescriptorHeader struct {
+	InstantiationCache          int32
+	DefaultInstantiationPattern int32
+	Base                        TargetGenericContextDescriptorHeader
+}
+
+type TargetGenericContextDescriptorHeader struct {
+	NumParams         uint16
+	NumRequirements   uint16
+	NumKeyArguments   uint16
+	NumExtraArguments uint16
+}
+
+func (g TargetGenericContextDescriptorHeader) GetNumArguments() uint32 {
+	return uint32(g.NumKeyArguments + g.NumExtraArguments)
+}
+func (g TargetGenericContextDescriptorHeader) GetArgumentLayoutSizeInWords() uint32 {
+	return g.GetNumArguments()
+}
+func (g TargetGenericContextDescriptorHeader) HasArguments() bool {
+	return g.GetNumArguments() > 0
+}
+
+type VTable struct {
+	TargetVTableDescriptorHeader
+	MethodListOffset int64
+	Methods          []TargetMethodDescriptor
+}
+
+type method struct {
+	Flags   MethodDescriptorFlags
+	Address uint64
+}
+
+func (v *VTable) GetMethods(base uint64) []method {
+	var methods []method
+	for idx, m := range v.Methods {
+		methods = append(methods, method{
+			Flags:   m.Flags,
+			Address: base + uint64(v.MethodListOffset+int64(m.Impl)+int64((idx*8)+4)),
+		})
+	}
+	return methods
+}
+
+type TargetVTableDescriptorHeader struct {
+	VTableOffset uint32
+	VTableSize   uint32
+}
+
+type TargetMethodDescriptor struct {
+	Flags MethodDescriptorFlags
+	Impl  int32
+}
+
+type mdKind uint8
 
 const (
-	Method = iota
+	Method mdKind = iota
 	Init
 	Getter
 	Setter
@@ -201,8 +394,15 @@ const (
 	ReadCoroutine
 )
 
-func (f mdFlags) Kind() string {
-	switch f & 0x0F {
+const (
+	ExtraDiscriminatorShift = 16
+	ExtraDiscriminatorMask  = 0xFFFF0000
+)
+
+type MethodDescriptorFlags uint32
+
+func (f MethodDescriptorFlags) Kind() string {
+	switch mdKind(f & 0x0F) {
 	case Method:
 		return "method"
 	case Init:
@@ -216,17 +416,49 @@ func (f mdFlags) Kind() string {
 	case ReadCoroutine:
 		return "read coroutine"
 	default:
-		return "unknown"
+		return fmt.Sprintf("unknown kind %d", mdKind(f&0x0F))
 	}
 }
-func (f mdFlags) IsInstance() bool {
+func (f MethodDescriptorFlags) IsInstance() bool {
 	return (f & 0x10) != 0
 }
-func (f mdFlags) IsDynamic() bool {
+func (f MethodDescriptorFlags) IsDynamic() bool {
 	return (f & 0x20) != 0
 }
+func (f MethodDescriptorFlags) IsAsync() bool {
+	return (f & 0x40) != 0
+}
+func (f MethodDescriptorFlags) ExtraDiscriminator() uint16 {
+	return uint16(f >> ExtraDiscriminatorShift)
+}
+func (f MethodDescriptorFlags) String() string {
+	var flags []string
+	if f.IsInstance() {
+		flags = append(flags, "instance")
+	}
+	if f.IsDynamic() {
+		flags = append(flags, "dynamic")
+	}
+	if f.IsAsync() {
+		flags = append(flags, "async")
+	}
+	if f.ExtraDiscriminator() != 0 {
+		flags = append(flags, fmt.Sprintf("extra discriminator %#x", f.ExtraDiscriminator()))
+	}
+	if len(strings.Join(flags, "|")) == 0 {
+		return f.Kind()
+	}
+	return fmt.Sprintf("%s (%s)", f.Kind(), strings.Join(flags, "|"))
+}
 
-type MethodDescriptor struct {
-	Flags mdFlags
-	Impl  int32
+type TargetProtocolDescriptor struct {
+	TargetContextDescriptor
+	Name                       int32
+	NumRequirementsInSignature uint32
+	NumRequirements            uint32
+	AssociatedTypeNames        int32
+}
+
+type TargetOpaqueTypeDescriptor struct {
+	TargetContextDescriptor
 }
