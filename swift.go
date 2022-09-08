@@ -195,23 +195,12 @@ func (f *File) GetSwiftTypes() ([]*types.TypeDescriptor, error) {
 				return nil, fmt.Errorf("failed to get swift type context descriptor address: %v", err)
 			}
 
-			var metadataInitSize int
-
-			switch tDesc.Flags.KindSpecific().MetadataInitialization() {
-			case types.MetadataInitNone:
-				metadataInitSize = 0
-			case types.MetadataInitSingleton:
-				metadataInitSize = binary.Size(types.TargetSingletonMetadataInitialization{})
-			case types.MetadataInitForeign:
-				metadataInitSize = binary.Size(types.TargetForeignMetadataInitialization{})
-			}
-
-			_ = metadataInitSize // TODO: use this in size/offset calculations
-
 			typ.Kind = tDesc.Flags.Kind()
 
-			// var numFields uint32
-			switch tDesc.Flags.Kind() {
+			fmt.Println(tDesc.Flags)
+
+			var numFields uint32
+			switch typ.Kind {
 			case types.Module:
 				var mod types.TargetModuleContextDescriptor
 				if err := binary.Read(f.cr, f.ByteOrder, &mod); err != nil {
@@ -231,61 +220,48 @@ func (f *File) GetSwiftTypes() ([]*types.TypeDescriptor, error) {
 				}
 				typ.Type = &anon
 			case types.Class:
-				currentOffset, _ := f.cr.Seek(0, io.SeekCurrent)
-				addr, _ := f.GetVMAddress(uint64(currentOffset))
 				var cD types.TargetClassDescriptor
 				if err := binary.Read(f.cr, f.ByteOrder, &cD); err != nil {
 					return nil, fmt.Errorf("failed to read %T: %v", cD, err)
 				}
 				if cD.Flags.IsGeneric() {
-					var gcD types.TargetTypeGenericContextDescriptorHeader
-					if err := binary.Read(f.cr, f.ByteOrder, &gcD); err != nil {
-						return nil, fmt.Errorf("failed to read %T: %v", gcD, err)
+					var g types.TargetTypeGenericContextDescriptorHeader
+					if err := binary.Read(f.cr, f.ByteOrder, &g); err != nil {
+						return nil, fmt.Errorf("failed to read generic header: %v", err)
 					}
-					_ = gcD
+					typ.Generic = &g
 				}
-				currentOffset, _ = f.cr.Seek(0, io.SeekCurrent)
-				addr, _ = f.GetVMAddress(uint64(currentOffset))
-				fmt.Printf("class flags: %s\n", cD.Flags)
 				if cD.FieldOffsetVectorOffset != 0 {
-					typ.FieldOffsetVector = make([]int32, cD.NumFields)
-					// off := offset + int64(sizeOfInt32*6) + int64(cD.FieldOffsetVectorOffset)
-					// off = int64(ttypes.RoundUp(uint64(off), 8))
-					// f.cr.Seek(off, io.SeekStart)
-					if err := binary.Read(f.cr, f.ByteOrder, &typ.FieldOffsetVector); err != nil {
+					typ.FieldOffsets = make([]int32, cD.NumFields)
+					if err := binary.Read(f.cr, f.ByteOrder, &typ.FieldOffsets); err != nil {
 						return nil, fmt.Errorf("failed to read field offset vector: %v", err)
 					}
 				}
-				currentOffset, _ = f.cr.Seek(0, io.SeekCurrent)
-				addr, _ = f.GetVMAddress(uint64(currentOffset))
-				_ = addr
 				if cD.Flags.KindSpecific().HasVTable() {
-					var vtable types.VTable
-					if err := binary.Read(f.cr, f.ByteOrder, &vtable.TargetVTableDescriptorHeader); err != nil {
-						return nil, fmt.Errorf("failed to read %T: %v", vtable, err)
+					var v types.VTable
+					if err := binary.Read(f.cr, f.ByteOrder, &v.TargetVTableDescriptorHeader); err != nil {
+						return nil, fmt.Errorf("failed to read vtable header: %v", err)
 					}
-					addr, err := f.GetVMAddress(uint64(vtable.VTableOffset))
-					if err != nil {
-						return nil, fmt.Errorf("failed to get vtable address: %v", err)
+					v.MethodListOffset, _ = f.cr.Seek(0, io.SeekCurrent)
+					v.Methods = make([]types.TargetMethodDescriptor, v.VTableSize)
+					if err := binary.Read(f.cr, f.ByteOrder, &v.Methods); err != nil {
+						return nil, fmt.Errorf("failed to read vtable method descriptors: %v", err)
 					}
-					vtable.MethodListOffset, _ = f.cr.Seek(0, io.SeekCurrent)
-					addr, err = f.GetVMAddress(uint64(vtable.MethodListOffset))
-					if err != nil {
-						return nil, fmt.Errorf("failed to get vtable address: %v", err)
-					}
-					_ = addr
-					vtable.Methods = make([]types.TargetMethodDescriptor, vtable.VTableSize)
-					if err := binary.Read(f.cr, f.ByteOrder, &vtable.Methods); err != nil {
-						return nil, fmt.Errorf("failed to read %T: %v", vtable.Methods, err)
-					}
-					typ.VTable = &vtable
+					typ.VTable = &v
 				}
-				// numFields = cD.NumFields
+				numFields = cD.NumFields
 				typ.Type = &cD
 			case types.Enum:
 				var eD types.TargetEnumDescriptor
 				if err := binary.Read(f.cr, f.ByteOrder, &eD); err != nil {
 					return nil, fmt.Errorf("failed to read %T: %v", eD, err)
+				}
+				if eD.Flags.IsGeneric() {
+					var g types.TargetTypeGenericContextDescriptorHeader
+					if err := binary.Read(f.cr, f.ByteOrder, &g); err != nil {
+						return nil, fmt.Errorf("failed to read generic header: %v", err)
+					}
+					typ.Generic = &g
 				}
 				typ.Type = &eD
 			case types.Struct:
@@ -293,20 +269,20 @@ func (f *File) GetSwiftTypes() ([]*types.TypeDescriptor, error) {
 				if err := binary.Read(f.cr, f.ByteOrder, &sD); err != nil {
 					return nil, fmt.Errorf("failed to read %T: %v", sD, err)
 				}
-				var vtable types.TargetVTableDescriptorHeader
-				if err := binary.Read(f.cr, f.ByteOrder, &vtable); err != nil {
-					return nil, fmt.Errorf("failed to read %T: %v", vtable, err)
+				if sD.Flags.IsGeneric() {
+					var g types.TargetTypeGenericContextDescriptorHeader
+					if err := binary.Read(f.cr, f.ByteOrder, &g); err != nil {
+						return nil, fmt.Errorf("failed to read generic header: %v", err)
+					}
+					typ.Generic = &g
 				}
-				// if sD.FieldOffsetVectorOffset != 0 {
-				// 	typ.FieldOffsetVector = make([]int32, sD.NumFields)
-				// 	off := offset + int64(sizeOfInt32*6) + int64(sD.FieldOffsetVectorOffset)
-				// 	off = int64(ttypes.RoundUp(uint64(off), 8))
-				// 	f.cr.Seek(off, io.SeekStart)
-				// 	if err := binary.Read(f.cr, f.ByteOrder, &typ.FieldOffsetVector); err != nil {
-				// 		return nil, fmt.Errorf("failed to read field offset vector: %v", err)
-				// 	}
-				// }
-				// numFields = sD.NumFields
+				if sD.FieldOffsetVectorOffset != 0 {
+					typ.FieldOffsets = make([]int32, sD.NumFields)
+					if err := binary.Read(f.cr, f.ByteOrder, &typ.FieldOffsets); err != nil {
+						return nil, fmt.Errorf("failed to read field offset vector: %v", err)
+					}
+				}
+				numFields = sD.NumFields
 				typ.Type = &sD
 			case types.Protocol:
 				var pD types.TargetProtocolDescriptor
@@ -321,6 +297,19 @@ func (f *File) GetSwiftTypes() ([]*types.TypeDescriptor, error) {
 				}
 				typ.Type = &oD
 			}
+
+			var metadataInitSize int
+
+			switch tDesc.Flags.KindSpecific().MetadataInitialization() {
+			case types.MetadataInitNone:
+				metadataInitSize = 0
+			case types.MetadataInitSingleton:
+				metadataInitSize = binary.Size(types.TargetSingletonMetadataInitialization{})
+			case types.MetadataInitForeign:
+				metadataInitSize = binary.Size(types.TargetForeignMetadataInitialization{})
+			}
+
+			_ = metadataInitSize // TODO: use this in size/offset calculations
 
 			typ.Name, err = f.GetCStringAtOffset(offset + int64(sizeOfInt32*2) + int64(tDesc.NameOffset))
 			if err != nil {
@@ -345,54 +334,41 @@ func (f *File) GetSwiftTypes() ([]*types.TypeDescriptor, error) {
 
 			typ.AccessFunction = uint64(int64(typ.Address) + int64(sizeOfInt32*3) + int64(tDesc.AccessFunctionOffset))
 
-			fmt.Println("METHODS")
-			for idx, m := range typ.VTable.GetMethods(f.preferredLoadAddress()) {
-				fmt.Printf("%2d)  flags:   %s\n", idx, m.Flags)
-				if m.Flags.IsAsync() {
-					fmt.Println("ASYNC")
+			if typ.VTable != nil {
+				fmt.Println("METHODS")
+				for idx, m := range typ.VTable.GetMethods(f.preferredLoadAddress()) {
+					fmt.Printf("%2d)  flags:   %s\n", idx, m.Flags)
+					if m.Flags.IsAsync() {
+						fmt.Println("ASYNC")
+					}
+					// fmt.Printf("      impl:    %d\n", m.Impl)
+					fmt.Printf("      address: %#x\n", m.Address)
 				}
-				// fmt.Printf("      impl:    %d\n", m.Impl)
-				fmt.Printf("      address: %#x\n", m.Address)
 			}
-			// if typ.VTable != nil {
-			// 	f.cr.Seek(offset+int64(sizeOfInt32*4)+int64(tDesc.VTableOffset), io.SeekStart)
-			// 	typ.Methods = make([]types.TargetMethodDescriptor, typ.VTable.VTableSize)
-			// 	if err := binary.Read(f.cr, f.ByteOrder, &typ.Methods); err != nil {
-			// 		return nil, fmt.Errorf("failed to read %T: %v", typ.Methods, err)
-			// 	}
-			// }
 
-			// if tDesc.FieldDescriptorOffset != 0 {
-			// 	offset += int64(sizeOfInt32*4) + int64(tDesc.FieldDescriptorOffset)
-			// 	if numFields == 0 {
-			// 		fd, err := f.readField(offset)
-			// 		if err != nil {
-			// 			return nil, fmt.Errorf("failed to read swift field: %v", err)
-			// 		}
-			// 		typ.Fields = append(typ.Fields, fd)
-			// 	} else {
-			// 		for i := uint32(0); i < numFields; i++ {
-			// 			var fd *fields.Field
-			// 			if typ.FieldOffsetVector != nil && typ.FieldOffsetVector[i] != 0 {
-			// 				fmt.Println("ERROR")
-			// 				fd, err = f.readField(offset + int64(typ.FieldOffsetVector[i]))
-			// 				if err != nil {
-			// 					return nil, fmt.Errorf("failed to read swift field: %v", err)
-			// 				}
-			// 				typ.Fields = append(typ.Fields, fd)
-			// 			} else {
-			// 				fd, err = f.readField(offset)
-			// 				if err != nil {
-			// 					return nil, fmt.Errorf("failed to read swift field: %v", err)
-			// 				}
-			// 				typ.Fields = append(typ.Fields, fd)
-			// 			}
-			// 			offset += int64(binary.Size(fields.FDHeader{})) + int64(fd.Descriptor.FieldRecordSize)*int64(fd.Descriptor.NumFields)
-			// 		}
-			// 	}
-			// } else {
-			// 	fmt.Println("WAGWAN")
-			// }
+			if tDesc.FieldDescriptorOffset != 0 {
+				if numFields > 1 {
+					fmt.Println("FIELDS")
+				}
+				offset += int64(sizeOfInt32*4) + int64(tDesc.FieldDescriptorOffset)
+				switch typ.Kind {
+				case types.Class, types.Struct:
+				// 	for i := uint32(0); i < numFields; i++ {
+				// 		var fd *fields.Field
+				// 		fd, err = f.readField(offset + int64(typ.FieldOffsets[i]))
+				// 		if err != nil {
+				// 			return nil, fmt.Errorf("failed to read swift field: %v", err)
+				// 		}
+				// 		typ.Fields = append(typ.Fields, fd)
+				// 	}
+				default:
+					fd, err := f.readField(offset)
+					if err != nil {
+						return nil, fmt.Errorf("failed to read swift field: %v", err)
+					}
+					typ.Fields = append(typ.Fields, fd)
+				}
+			}
 
 			typs = append(typs, &typ)
 		}

@@ -174,7 +174,7 @@ func (f TypeContextDescriptorFlags) String() string {
 	if f.HasVTable() {
 		flags = append(flags, "vtable")
 	}
-	return strings.Join(flags, ",")
+	return strings.Join(flags, "|")
 }
 
 // TypeReferenceKind kinds of type metadata/protocol conformance records.
@@ -258,15 +258,16 @@ type Type struct {
 }
 
 type TypeDescriptor struct {
-	Address           uint64
-	Parent            Type
-	Name              string
-	Kind              ContextDescriptorKind
-	AccessFunction    uint64
-	FieldOffsetVector []int32
-	VTable            *VTable
-	Fields            []*fields.Field
-	Type              any
+	Address        uint64
+	Parent         Type
+	Name           string
+	Kind           ContextDescriptorKind
+	AccessFunction uint64
+	FieldOffsets   []int32
+	Generic        *TargetTypeGenericContextDescriptorHeader
+	VTable         *VTable
+	Fields         []*fields.Field
+	Type           any
 }
 
 type TargetContextDescriptor struct {

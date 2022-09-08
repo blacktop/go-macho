@@ -106,6 +106,14 @@ const (
 	swift Tool = 2 // TOOL_SWIFT
 	ld    Tool = 3 // TOOL_LD
 	lld   Tool = 4 // TOOL_LLD
+	/* values for gpu tools (1024 to 1048) */
+	Metal          Tool = 1024
+	AirLld         Tool = 1025
+	AirNt          Tool = 1026
+	AirNtPlugin    Tool = 1027
+	AirPack        Tool = 1028
+	GpuArchiver    Tool = 1031
+	MetalFramework Tool = 1032
 )
 
 type BuildToolVersion struct {
@@ -135,9 +143,11 @@ type Function struct {
 	EndAddr   uint64
 }
 
-/*******
+/*
+******
 HELPERS
-********/
+*******
+*/
 func PutAtMost16Bytes(b []byte, n string) {
 	for i := range n { // at most 16 bytes
 		if i == 16 {
