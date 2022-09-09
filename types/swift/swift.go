@@ -76,7 +76,7 @@ const (
 	BUILTIN_TYPE_NAME_WORD = "Builtin.Word"
 )
 
-//go:generate stringer -type SpecialPointerAuthDiscriminators -output swift_string.go
+//go:generate stringer -type SpecialPointerAuthDiscriminators,NBKind -output swift_string.go
 
 type SpecialPointerAuthDiscriminators uint16
 
@@ -272,16 +272,36 @@ type MetadataSourceRecord struct {
 	MangledMetadataSource int32
 }
 
+type MetadataSource struct {
+	MangledType           string
+	MangledMetadataSource string
+}
+
+type NBKind uint32
+
+const (
+	PartialApply NBKind = iota
+	AsyncFunction
+)
+
+type NecessaryBindings struct {
+	Kind               NBKind
+	RequirementsSet    int32
+	RequirementsVector int32
+	Conformances       int32
+}
+
 type CaptureDescriptorHeader struct {
-	NumCaptureTypes    uint32
-	NumMetadataSources uint32
-	NumBindings        uint32
+	NumCaptureTypes    uint32 // The number of captures in the closure and the number of typerefs that immediately follow this struct.
+	NumMetadataSources uint32 // The number of sources of metadata available in the MetadataSourceMap directly following the list of capture's typerefs.
+	NumBindings        uint32 // The number of items in the NecessaryBindings structure at the head of the closure.
 }
 
 type CaptureDescriptor struct {
 	CaptureDescriptorHeader
-	CaptureTypeRecords    []CaptureTypeRecord
-	MetadataSourceRecords []MetadataSourceRecord
+	CaptureTypes    []string
+	MetadataSources []MetadataSource
+	Bindings        []NecessaryBindings
 }
 
 // __TEXT.__swift5_typeref

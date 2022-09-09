@@ -10,6 +10,6 @@
 - [ ] `__swift5_proto`
 - [ ] `__swift5_types` (needs `getMangledTypeAtOffset`)
 - [x] `__swift5_protos`
-- [ ] `__swift5_capture` (needs `getMangledTypeAtOffset`)
+- [x] `__swift5_capture`
 - [ ] `__swift5_replace`
 - [ ] `__swift5_replac2`

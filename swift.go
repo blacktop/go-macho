@@ -1,7 +1,6 @@
 package macho
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/binary"
 	"fmt"
@@ -75,12 +74,12 @@ func (f *File) GetSwiftProtocols() ([]protocols.Protocol, error) {
 
 				proto.Parent = new(protocols.Protocol)
 				if err := binary.Read(f.cr, f.ByteOrder, &proto.Parent.Descriptor); err != nil {
-					return nil, fmt.Errorf("failed to read protocols.Descriptor: %v", err)
+					return nil, fmt.Errorf("failed to read protocols parent descriptor: %v", err)
 				}
 
 				proto.Parent.Name, err = f.GetCStringAtOffset(parentOffset + int64(sizeOfInt32*2) + int64(proto.Parent.Descriptor.NameOffset))
 				if err != nil {
-					return nil, fmt.Errorf("failed to read cstring: %v", err)
+					return nil, fmt.Errorf("failed to read protocols parent name: %v", err)
 				}
 
 				if proto.Parent.Descriptor.ParentOffset != 0 { // TODO: what if parent has parent ?
@@ -91,7 +90,7 @@ func (f *File) GetSwiftProtocols() ([]protocols.Protocol, error) {
 			if proto.AssociatedTypeNamesOffset != 0 { // FIXME: this needs to be tested
 				proto.AssociatedType, err = f.GetCStringAtOffset(offset + int64(sizeOfInt32*5) + int64(proto.AssociatedTypeNamesOffset))
 				if err != nil {
-					return nil, fmt.Errorf("failed to read cstring: %v", err)
+					return nil, fmt.Errorf("failed to read protocols assocated type names: %v", err)
 				}
 			}
 
@@ -709,7 +708,7 @@ func (f *File) GetSwiftBuiltinTypes() ([]swift.BuiltinType, error) {
 
 		for idx, bType := range builtInTypes {
 			currOffset := int64(sec.Offset) + int64(idx*binary.Size(swift.BuiltinTypeDescriptor{}))
-			name, _, err := f.getMangledTypeAtOffset(currOffset + int64(bType.TypeName))
+			name, err := f.makeSymbolicMangledNameStringRef(currOffset + int64(bType.TypeName))
 			if err != nil {
 				return nil, fmt.Errorf("failed to read record.MangledTypeName; %v", err)
 			}
@@ -749,10 +748,10 @@ func (f *File) GetSwiftClosures() ([]swift.CaptureDescriptor, error) {
 		r := bytes.NewReader(dat)
 
 		for {
-			var capture swift.CaptureDescriptor
 			currOffset, _ := r.Seek(0, io.SeekCurrent)
 			currOffset += int64(sec.Offset)
 
+			var capture swift.CaptureDescriptor
 			err := binary.Read(r, f.ByteOrder, &capture.CaptureDescriptorHeader)
 			if err == io.EOF {
 				break
@@ -763,18 +762,47 @@ func (f *File) GetSwiftClosures() ([]swift.CaptureDescriptor, error) {
 
 			currOffset += int64(binary.Size(capture.CaptureDescriptorHeader))
 
-			if capture.CaptureDescriptorHeader.NumCaptureTypes > 0 {
-				capture.CaptureTypeRecords = make([]swift.CaptureTypeRecord, capture.CaptureDescriptorHeader.NumCaptureTypes)
-				if err := binary.Read(r, f.ByteOrder, &capture.CaptureTypeRecords); err != nil {
-					return nil, fmt.Errorf("failed to read %T: %v", capture.CaptureTypeRecords, err)
+			if capture.NumCaptureTypes > 0 {
+				captureTypeRecords := make([]swift.CaptureTypeRecord, capture.NumCaptureTypes)
+				if err := binary.Read(r, f.ByteOrder, &captureTypeRecords); err != nil {
+					return nil, fmt.Errorf("failed to read %T: %v", captureTypeRecords, err)
 				}
-				for idx, capRecord := range capture.CaptureTypeRecords {
+				for idx, capRecord := range captureTypeRecords {
 					currOffset += int64(idx * binary.Size(swift.CaptureTypeRecord{}))
-					name, _, err := f.getMangledTypeAtOffset(currOffset + int64(capRecord.MangledTypeName))
+					name, err := f.makeSymbolicMangledNameStringRef(currOffset + int64(capRecord.MangledTypeName))
 					if err != nil {
 						return nil, fmt.Errorf("failed to read mangled type name at offset %#x: %v", currOffset+int64(capRecord.MangledTypeName), err)
 					}
-					fmt.Println(name)
+					capture.CaptureTypes = append(capture.CaptureTypes, name)
+				}
+			}
+
+			if capture.NumMetadataSources > 0 {
+				metadataSourceRecords := make([]swift.MetadataSourceRecord, capture.NumMetadataSources)
+				if err := binary.Read(r, f.ByteOrder, &metadataSourceRecords); err != nil {
+					return nil, fmt.Errorf("failed to read %T: %v", metadataSourceRecords, err)
+				}
+				for idx, metasource := range metadataSourceRecords {
+					currOffset += int64(idx * binary.Size(swift.MetadataSourceRecord{}))
+					typeName, err := f.makeSymbolicMangledNameStringRef(currOffset + int64(metasource.MangledTypeName))
+					if err != nil {
+						return nil, fmt.Errorf("failed to read mangled type name at offset %#x: %v", currOffset+int64(metasource.MangledTypeName), err)
+					}
+					metaSource, err := f.makeSymbolicMangledNameStringRef(currOffset + sizeOfInt32 + int64(metasource.MangledMetadataSource))
+					if err != nil {
+						return nil, fmt.Errorf("failed to read mangled metadata source at offset %#x: %v", currOffset+int64(metasource.MangledMetadataSource), err)
+					}
+					capture.MetadataSources = append(capture.MetadataSources, swift.MetadataSource{
+						MangledType:           typeName,
+						MangledMetadataSource: metaSource,
+					})
+				}
+			}
+
+			if capture.NumBindings > 0 {
+				capture.Bindings = make([]swift.NecessaryBindings, capture.NumBindings)
+				if err := binary.Read(r, f.ByteOrder, &capture.Bindings); err != nil {
+					return nil, fmt.Errorf("failed to read %T: %v", capture.Bindings, err)
 				}
 			}
 
@@ -785,114 +813,6 @@ func (f *File) GetSwiftClosures() ([]swift.CaptureDescriptor, error) {
 	}
 
 	return nil, fmt.Errorf("file does not contain a __swift5_capture section")
-}
-
-// getMangledTypeAtOffset reads a mangled type at a given offset in the MachO FIXME: this has a bug
-func (f *File) getMangledTypeAtOffset(offset int64) (string, *types.TargetContextDescriptor, error) {
-
-	if _, err := f.cr.Seek(offset, io.SeekStart); err != nil {
-		return "", nil, fmt.Errorf("failed to Seek: %v", err)
-	}
-
-	var refType uint8
-	if err := binary.Read(f.cr, f.ByteOrder, &refType); err != nil {
-		return "", nil, fmt.Errorf("failed to read possible symbolic reference type at offset %#x, %v", offset, err)
-	}
-
-	if refType >= 0x01 && refType <= 0x17 {
-
-		var t32 int32
-		if err := binary.Read(f.cr, f.ByteOrder, &t32); err != nil {
-			return "", nil, fmt.Errorf("failed to read 32bit symbolic ref: %v", err)
-		}
-
-		switch refType {
-		case 1:
-			typeDescOffset := offset + int64(t32) + 1
-			f.cr.Seek(typeDescOffset, io.SeekStart)
-			var tDesc types.TargetContextDescriptor
-			if err := binary.Read(f.cr, f.ByteOrder, &tDesc); err != nil {
-				return "", nil, fmt.Errorf("failed to read types.TypeDescriptor: %v", err)
-			}
-			parentDescOffset := typeDescOffset + sizeOfInt32 + int64(tDesc.ParentOffset)
-			f.cr.Seek(parentDescOffset, io.SeekStart)
-			var parentDesc types.TargetContextDescriptor
-			if err := binary.Read(f.cr, f.ByteOrder, &parentDesc); err != nil {
-				return "", nil, fmt.Errorf("failed to read types.TypeDescriptor: %v", err)
-			}
-			fmt.Println("parent:", parentDesc)
-			parent, err := f.GetCStringAtOffset(parentDescOffset + 2*sizeOfInt32 + int64(parentDesc.NameOffset))
-			if err != nil {
-				return "", nil, fmt.Errorf("failed to read cstring: %v", err)
-			}
-			if parentDesc.ParentOffset != 0 {
-				fmt.Printf("%#x\n", parentDescOffset+sizeOfInt32+int64(parentDesc.ParentOffset))
-			}
-			name, err := f.GetCStringAtOffset(typeDescOffset + 2*sizeOfInt32 + int64(tDesc.NameOffset))
-			if err != nil {
-				return "", nil, fmt.Errorf("failed to read cstring: %v", err)
-			}
-			fmt.Println("name:", parent, name, tDesc.Flags)
-			return parent + "." + name, &tDesc, nil
-		case 2:
-			f.cr.Seek(offset+int64(t32)+1, io.SeekStart)
-			var context uint64
-			if err := binary.Read(f.cr, f.ByteOrder, &context); err != nil {
-				return "", nil, fmt.Errorf("failed to read 32bit symbolic ref: %v", err)
-			}
-			// Check if context pointer is a dyld chain fixup REBASE
-			if fixupchains.DcpArm64eIsRebase(context) {
-				off, err := f.GetOffset(f.vma.Convert(context))
-				if err != nil {
-					return "", nil, fmt.Errorf("failed to GetOffset: %v", err)
-				}
-				f.cr.Seek(int64(off), io.SeekStart)
-
-				var tDesc types.TargetContextDescriptor
-				if err := binary.Read(f.cr, f.ByteOrder, &tDesc); err != nil {
-					return "", nil, fmt.Errorf("failed to read types.TypeDescriptor: %v", err)
-				}
-
-				name, err := f.GetCStringAtOffset(int64(off) + 8 + int64(tDesc.NameOffset))
-				if err != nil {
-					return "", nil, fmt.Errorf("failed to read cstring: %v", err)
-				}
-				fmt.Println("name:", name, tDesc.Flags)
-				return name, &tDesc, nil
-			}
-			// context pointer is a dyld chain fixup BIND
-			dcf, err := f.DyldChainedFixups()
-			if err != nil {
-				return "", nil, fmt.Errorf("failed to get DyldChainedFixups: %v", err)
-			}
-			name := dcf.Imports[fixupchains.DyldChainedPtrArm64eBind{Pointer: context}.Ordinal()].Name
-			return name, nil, nil
-		default:
-			return "", nil, fmt.Errorf("unsupported symbolic REF: %X, %#x", refType, offset+int64(t32))
-		}
-
-	} else if refType >= byte(0x18) && refType <= byte(0x1F) { // TODO: finish support for these types
-		int64Bytes := make([]byte, 8)
-		if _, err := f.cr.Read(int64Bytes); err != nil {
-			return "", nil, fmt.Errorf("unsupported symbolic REF: %X, %#x", refType, offset+int64(binary.LittleEndian.Uint64(int64Bytes)))
-		}
-	} else { // regular string mangled type
-		// revert the peek byte read
-		if _, err := f.cr.Seek(-1, io.SeekCurrent); err != nil {
-			return "", nil, fmt.Errorf("failed to Seek: %v", err)
-		}
-		s, err := bufio.NewReader(f.cr).ReadString('\x00')
-		if err != nil {
-			return "", nil, fmt.Errorf("failed to ReadBytes at offset %#x, %v", offset, err)
-		}
-		s = strings.Trim(s, "\x00")
-		if len(s) == 0 { // TODO this shouldn't happen
-			return "", nil, fmt.Errorf("failed to get read a string at offset %#x, %v", offset, err)
-		}
-		return "_$s" + strings.Trim(s, "\x00"), nil, nil // TODO: fix this append to be correct for all cases
-	}
-
-	return "", nil, fmt.Errorf("type data not found")
 }
 
 func (f *File) GetSwiftReflectionStrings() ([]string, error) {
