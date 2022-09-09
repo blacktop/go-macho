@@ -47,33 +47,52 @@ func (f *File) GetSwiftProtocols() ([]protocols.Protocol, error) {
 
 			var proto protocols.Protocol
 			if err := binary.Read(f.cr, f.ByteOrder, &proto.Descriptor); err != nil {
-				return nil, fmt.Errorf("failed to read protocols.Descriptor: %v", err)
+				return nil, fmt.Errorf("failed to read protocols descriptor: %v", err)
 			}
 
-			proto.Name, err = f.GetCStringAtOffset(offset + 8 + int64(proto.NameOffset))
-			if err != nil {
-				return nil, fmt.Errorf("failed to read cstring: %v", err)
-			}
-
-			if proto.AssociatedTypeNamesOffset > 0 { // FIXME: this needs to be tested
-				proto.AssociatedType, err = f.GetCStringAtOffset(offset + 20 + int64(proto.AssociatedTypeNamesOffset))
-				if err != nil {
-					return nil, fmt.Errorf("failed to read cstring: %v", err)
+			if proto.NumRequirementsInSignature > 0 {
+				proto.SignatureRequirements = make([]protocols.TargetGenericRequirementDescriptor, proto.NumRequirementsInSignature)
+				if err := binary.Read(f.cr, f.ByteOrder, &proto.SignatureRequirements); err != nil {
+					return nil, fmt.Errorf("failed to read protocols requirements in signature : %v", err)
 				}
 			}
 
-			// TODO: what if parent has parent ?
-			parentOffset := offset + 4 + int64(proto.Descriptor.ParentOffset)
-			f.cr.Seek(parentOffset, io.SeekStart)
-
-			proto.Parent = new(protocols.Protocol)
-			if err := binary.Read(f.cr, f.ByteOrder, &proto.Parent.Descriptor); err != nil {
-				return nil, fmt.Errorf("failed to read protocols.Descriptor: %v", err)
+			if proto.NumRequirements > 0 {
+				proto.Requirements = make([]protocols.TargetProtocolRequirement, proto.NumRequirements)
+				if err := binary.Read(f.cr, f.ByteOrder, &proto.Requirements); err != nil {
+					return nil, fmt.Errorf("failed to read protocols requirements: %v", err)
+				}
 			}
 
-			proto.Parent.Name, err = f.GetCStringAtOffset(parentOffset + 8 + int64(proto.Parent.Descriptor.NameOffset))
+			proto.Name, err = f.GetCStringAtOffset(offset + int64(sizeOfInt32*2) + int64(proto.NameOffset))
 			if err != nil {
 				return nil, fmt.Errorf("failed to read cstring: %v", err)
+			}
+
+			if proto.ParentOffset != 0 {
+				parentOffset := offset + 4 + int64(proto.Descriptor.ParentOffset)
+				f.cr.Seek(parentOffset, io.SeekStart)
+
+				proto.Parent = new(protocols.Protocol)
+				if err := binary.Read(f.cr, f.ByteOrder, &proto.Parent.Descriptor); err != nil {
+					return nil, fmt.Errorf("failed to read protocols.Descriptor: %v", err)
+				}
+
+				proto.Parent.Name, err = f.GetCStringAtOffset(parentOffset + int64(sizeOfInt32*2) + int64(proto.Parent.Descriptor.NameOffset))
+				if err != nil {
+					return nil, fmt.Errorf("failed to read cstring: %v", err)
+				}
+
+				if proto.Parent.Descriptor.ParentOffset != 0 { // TODO: what if parent has parent ?
+					fmt.Printf("found a grand parent while parsing %s", proto.Parent.Name) // FIXME: if this happens this should be recursive
+				}
+			}
+
+			if proto.AssociatedTypeNamesOffset != 0 { // FIXME: this needs to be tested
+				proto.AssociatedType, err = f.GetCStringAtOffset(offset + int64(sizeOfInt32*5) + int64(proto.AssociatedTypeNamesOffset))
+				if err != nil {
+					return nil, fmt.Errorf("failed to read cstring: %v", err)
+				}
 			}
 
 			protos = append(protos, proto)
@@ -530,34 +549,19 @@ func (f *File) GetSwiftAssociatedTypes() ([]swift.AssociatedTypeDescriptor, erro
 
 			aType.Address = sec.Addr + uint64(currentOffset)
 
-			// off, err := f.GetOffset(aType.Address) FIXME: put back
-			// if err != nil {
-			// 	return nil, fmt.Errorf("failed to get offset for associated type at addr %#x: %v", aType.Address, err)
-			// }
+			off, err := f.GetOffset(aType.Address)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get offset for associated type at addr %#x: %v", aType.Address, err)
+			}
 
 			// AssociatedTypeDescriptor.ConformingTypeName
-			// coff, symbolic, err := f.makeSymbolicMangledNameStringRef(int64(off) + int64(aType.ConformingTypeNameOffset))
-			// if err != nil {
-			// 	return nil, fmt.Errorf("failed to read conforming type for associated type at addr %#x: %v", aType.Address, err)
-			// }
+			aType.ConformingTypeName, err = f.makeSymbolicMangledNameStringRef(int64(off) + int64(aType.ConformingTypeNameOffset))
+			if err != nil {
+				return nil, fmt.Errorf("failed to read conforming type for associated type at addr %#x: %v", aType.Address, err)
+			}
 
-			// if symbolic {
-			// 	aType.ConformingTypeAddr, err = f.GetVMAddress(uint64(coff))
-			// 	if err != nil {
-			// 		return nil, fmt.Errorf("failed to get vmaddr for associated types conforming type: %v", err)
-			// 	}
-			// } else {
-			// 	aType.ConformingTypeAddr, err = f.GetVMAddress(uint64(coff))
-			// 	if err != nil {
-			// 		return nil, fmt.Errorf("failed to get vmaddr for associated types conforming type: %v", err)
-			// 	}
-			// 	aType.ConformingTypeName, err = f.GetCString(aType.ConformingTypeAddr)
-			// 	if err != nil {
-			// 		return nil, fmt.Errorf("failed to read associated type substituted type name: %v", err)
-			// 	}
-			// }
 			// AssociatedTypeDescriptor.ProtocolTypeName
-			addr := uint64(int64(aType.Address) + int64(aType.ProtocolTypeNameOffset) + sizeOfInt32)
+			addr := uint64(int64(aType.Address) + sizeOfInt32 + int64(aType.ProtocolTypeNameOffset))
 			aType.ProtocolTypeName, err = f.GetCString(addr)
 			if err != nil {
 				return nil, fmt.Errorf("failed to read swift assocated type protocol type name at addr %#x: %v", addr, err)
@@ -575,27 +579,12 @@ func (f *File) GetSwiftAssociatedTypes() ([]swift.AssociatedTypeDescriptor, erro
 				if err != nil {
 					return nil, fmt.Errorf("failed to read associated type record name: %v", err)
 				}
-				// AssociatedTypeRecord.SubstitutedTypeName FIXME: put this back
-				// symMangOff := int64(off) + int64(binary.Size(aType.ATDHeader)) + int64(aType.AssociatedTypeRecords[i].SubstitutedTypeNameOffset) + sizeOfInt32
-				// coff, symbolic, err := f.makeSymbolicMangledNameStringRef(symMangOff)
-				// if err != nil {
-				// 	return nil, fmt.Errorf("failed to read associated type substituted type symbolic ref at offset %#x: %v", symMangOff, err)
-				// }
-				// if symbolic {
-				// 	aType.AssociatedTypeRecords[i].SubstitutedTypeAddr, err = f.GetVMAddress(uint64(coff))
-				// 	if err != nil {
-				// 		return nil, fmt.Errorf("failed to get vmaddr for associated type record substituted type: %v", err)
-				// 	}
-				// } else {
-				// 	aType.AssociatedTypeRecords[i].SubstitutedTypeAddr, err = f.GetVMAddress(uint64(coff))
-				// 	if err != nil {
-				// 		return nil, fmt.Errorf("failed to get vmaddr for associated type record substituted type: %v", err)
-				// 	}
-				// 	aType.AssociatedTypeRecords[i].SubstitutedTypeName, err = f.GetCString(aType.AssociatedTypeRecords[i].SubstitutedTypeAddr)
-				// 	if err != nil {
-				// 		return nil, fmt.Errorf("failed to read associated type record substituted type name: %v", err)
-				// 	}
-				// }
+				// AssociatedTypeRecord.SubstitutedTypeName
+				symMangOff := int64(off) + int64(binary.Size(aType.ATDHeader)) + int64(aType.AssociatedTypeRecords[i].SubstitutedTypeNameOffset) + sizeOfInt32
+				aType.AssociatedTypeRecords[i].SubstitutedTypeName, err = f.makeSymbolicMangledNameStringRef(symMangOff)
+				if err != nil {
+					return nil, fmt.Errorf("failed to read associated type substituted type symbolic ref at offset %#x: %v", symMangOff, err)
+				}
 			}
 
 			accocTypes = append(accocTypes, aType)

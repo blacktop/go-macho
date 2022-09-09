@@ -54,17 +54,40 @@ func _() {
 	_ = x[swift-2]
 	_ = x[ld-3]
 	_ = x[lld-4]
+	_ = x[Metal-1024]
+	_ = x[AirLld-1025]
+	_ = x[AirNt-1026]
+	_ = x[AirNtPlugin-1027]
+	_ = x[AirPack-1028]
+	_ = x[GpuArchiver-1031]
+	_ = x[MetalFramework-1032]
 }
 
-const _Tool_name = "noneclangswiftldlld"
+const (
+	_Tool_name_0 = "noneclangswiftldlld"
+	_Tool_name_1 = "MetalAirLldAirNtAirNtPluginAirPack"
+	_Tool_name_2 = "GpuArchiverMetalFramework"
+)
 
-var _Tool_index = [...]uint8{0, 4, 9, 14, 16, 19}
+var (
+	_Tool_index_0 = [...]uint8{0, 4, 9, 14, 16, 19}
+	_Tool_index_1 = [...]uint8{0, 5, 11, 16, 27, 34}
+	_Tool_index_2 = [...]uint8{0, 11, 25}
+)
 
 func (i Tool) String() string {
-	if i >= Tool(len(_Tool_index)-1) {
+	switch {
+	case i <= 4:
+		return _Tool_name_0[_Tool_index_0[i]:_Tool_index_0[i+1]]
+	case 1024 <= i && i <= 1028:
+		i -= 1024
+		return _Tool_name_1[_Tool_index_1[i]:_Tool_index_1[i+1]]
+	case 1031 <= i && i <= 1032:
+		i -= 1031
+		return _Tool_name_2[_Tool_index_2[i]:_Tool_index_2[i+1]]
+	default:
 		return "Tool(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
-	return _Tool_name[_Tool_index[i]:_Tool_index[i+1]]
 }
 func _() {
 	// An "invalid array index" compiler error signifies that the constant values have changed.

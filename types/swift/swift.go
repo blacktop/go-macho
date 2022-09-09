@@ -76,6 +76,116 @@ const (
 	BUILTIN_TYPE_NAME_WORD = "Builtin.Word"
 )
 
+//go:generate stringer -type SpecialPointerAuthDiscriminators -output swift_string.go
+
+type SpecialPointerAuthDiscriminators uint16
+
+const (
+	// All of these values are the stable string hash of the corresponding
+	// variable name:
+	//   (computeStableStringHash % 65535 + 1)
+
+	/// HeapMetadataHeader::destroy
+	HeapDestructor SpecialPointerAuthDiscriminators = 0xbbbf
+
+	/// Type descriptor data pointers.
+	TypeDescriptor SpecialPointerAuthDiscriminators = 0xae86
+
+	/// Runtime function variables exported by the runtime.
+	RuntimeFunctionEntry SpecialPointerAuthDiscriminators = 0x625b
+
+	/// Protocol conformance descriptors.
+	ProtocolConformanceDescriptor SpecialPointerAuthDiscriminators = 0xc6eb
+
+	/// Pointer to value witness table stored in type metadata.
+	///
+	/// Computed with ptrauth_string_discriminator("value_witness_table_t").
+	ValueWitnessTable SpecialPointerAuthDiscriminators = 0x2e3f
+
+	/// Extended existential type shapes.
+	ExtendedExistentialTypeShape          SpecialPointerAuthDiscriminators = 0x5a3d // SpecialPointerAuthDiscriminators = 23101
+	NonUniqueExtendedExistentialTypeShape SpecialPointerAuthDiscriminators = 0xe798 // SpecialPointerAuthDiscriminators = 59288
+
+	/// Value witness functions.
+	InitializeBufferWithCopyOfBuffer   SpecialPointerAuthDiscriminators = 0xda4a
+	Destroy                            SpecialPointerAuthDiscriminators = 0x04f8
+	InitializeWithCopy                 SpecialPointerAuthDiscriminators = 0xe3ba
+	AssignWithCopy                     SpecialPointerAuthDiscriminators = 0x8751
+	InitializeWithTake                 SpecialPointerAuthDiscriminators = 0x48d8
+	AssignWithTake                     SpecialPointerAuthDiscriminators = 0xefda
+	DestroyArray                       SpecialPointerAuthDiscriminators = 0x2398
+	InitializeArrayWithCopy            SpecialPointerAuthDiscriminators = 0xa05c
+	InitializeArrayWithTakeFrontToBack SpecialPointerAuthDiscriminators = 0x1c3e
+	InitializeArrayWithTakeBackToFront SpecialPointerAuthDiscriminators = 0x8dd3
+	StoreExtraInhabitant               SpecialPointerAuthDiscriminators = 0x79c5
+	GetExtraInhabitantIndex            SpecialPointerAuthDiscriminators = 0x2ca8
+	GetEnumTag                         SpecialPointerAuthDiscriminators = 0xa3b5
+	DestructiveProjectEnumData         SpecialPointerAuthDiscriminators = 0x041d
+	DestructiveInjectEnumTag           SpecialPointerAuthDiscriminators = 0xb2e4
+	GetEnumTagSinglePayload            SpecialPointerAuthDiscriminators = 0x60f0
+	StoreEnumTagSinglePayload          SpecialPointerAuthDiscriminators = 0xa0d1
+
+	/// KeyPath metadata functions.
+	KeyPathDestroy           SpecialPointerAuthDiscriminators = 0x7072
+	KeyPathCopy              SpecialPointerAuthDiscriminators = 0x6f66
+	KeyPathEquals            SpecialPointerAuthDiscriminators = 0x756e
+	KeyPathHash              SpecialPointerAuthDiscriminators = 0x6374
+	KeyPathGetter            SpecialPointerAuthDiscriminators = 0x6f72
+	KeyPathNonmutatingSetter SpecialPointerAuthDiscriminators = 0x6f70
+	KeyPathMutatingSetter    SpecialPointerAuthDiscriminators = 0x7469
+	KeyPathGetLayout         SpecialPointerAuthDiscriminators = 0x6373
+	KeyPathInitializer       SpecialPointerAuthDiscriminators = 0x6275
+	KeyPathMetadataAccessor  SpecialPointerAuthDiscriminators = 0x7474
+
+	/// ObjC bridging entry points.
+	ObjectiveCTypeDiscriminator                    SpecialPointerAuthDiscriminators = 0x31c3 // SpecialPointerAuthDiscriminators = 12739
+	bridgeToObjectiveCDiscriminator                SpecialPointerAuthDiscriminators = 0xbca0 // SpecialPointerAuthDiscriminators = 48288
+	forceBridgeFromObjectiveCDiscriminator         SpecialPointerAuthDiscriminators = 0x22fb // SpecialPointerAuthDiscriminators = 8955
+	conditionallyBridgeFromObjectiveCDiscriminator SpecialPointerAuthDiscriminators = 0x9a9b // SpecialPointerAuthDiscriminators = 39579
+
+	/// Dynamic replacement pointers.
+	DynamicReplacementScope SpecialPointerAuthDiscriminators = 0x48F0 // SpecialPointerAuthDiscriminators = 18672
+	DynamicReplacementKey   SpecialPointerAuthDiscriminators = 0x2C7D // SpecialPointerAuthDiscriminators = 11389
+
+	/// Resume functions for yield-once coroutines that yield a single
+	/// opaque borrowed/inout value.  These aren't actually hard-coded, but
+	/// they're important enough to be worth writing in one place.
+	OpaqueReadResumeFunction   SpecialPointerAuthDiscriminators = 56769
+	OpaqueModifyResumeFunction SpecialPointerAuthDiscriminators = 3909
+
+	/// ObjC class pointers.
+	ObjCISA        SpecialPointerAuthDiscriminators = 0x6AE1
+	ObjCSuperclass SpecialPointerAuthDiscriminators = 0xB5AB
+
+	/// Resilient class stub initializer callback
+	ResilientClassStubInitCallback SpecialPointerAuthDiscriminators = 0xC671
+
+	/// Jobs, tasks, and continuations.
+	JobInvokeFunction                SpecialPointerAuthDiscriminators = 0xcc64 // SpecialPointerAuthDiscriminators = 52324
+	TaskResumeFunction               SpecialPointerAuthDiscriminators = 0x2c42 // SpecialPointerAuthDiscriminators = 11330
+	TaskResumeContext                SpecialPointerAuthDiscriminators = 0x753a // SpecialPointerAuthDiscriminators = 30010
+	AsyncRunAndBlockFunction         SpecialPointerAuthDiscriminators = 0x0f08 // 3848
+	AsyncContextParent               SpecialPointerAuthDiscriminators = 0xbda2 // SpecialPointerAuthDiscriminators = 48546
+	AsyncContextResume               SpecialPointerAuthDiscriminators = 0xd707 // SpecialPointerAuthDiscriminators = 55047
+	AsyncContextYield                SpecialPointerAuthDiscriminators = 0xe207 // SpecialPointerAuthDiscriminators = 57863
+	CancellationNotificationFunction SpecialPointerAuthDiscriminators = 0x1933 // SpecialPointerAuthDiscriminators = 6451
+	EscalationNotificationFunction   SpecialPointerAuthDiscriminators = 0x5be4 // SpecialPointerAuthDiscriminators = 23524
+	AsyncThinNullaryFunction         SpecialPointerAuthDiscriminators = 0x0f08 // SpecialPointerAuthDiscriminators = 3848
+	AsyncFutureFunction              SpecialPointerAuthDiscriminators = 0x720f // SpecialPointerAuthDiscriminators = 29199
+
+	/// Swift async context parameter stored in the extended frame info.
+	SwiftAsyncContextExtendedFrameEntry SpecialPointerAuthDiscriminators = 0xc31a // SpecialPointerAuthDiscriminators = 49946
+
+	// C type TaskContinuationFunction* descriminator.
+	ClangTypeTaskContinuationFunction SpecialPointerAuthDiscriminators = 0x2abe // SpecialPointerAuthDiscriminators = 10942
+
+	/// Dispatch integration.
+	DispatchInvokeFunction SpecialPointerAuthDiscriminators = 0xf493 // SpecialPointerAuthDiscriminators = 62611
+
+	/// Functions accessible at runtime (i.e. distributed method accessors).
+	AccessibleFunctionRecord SpecialPointerAuthDiscriminators = 0x438c // = 17292
+)
+
 // __TEXT.__swift5_assocty
 // This section contains an array of associated type descriptors.
 // An associated type descriptor contains a collection of associated type records for a conformance.

@@ -6,7 +6,7 @@ import (
 	"github.com/blacktop/go-macho/types/swift/types"
 )
 
-//go:generate stringer -type ProtocolContextDescriptorFlags -output types_string.go
+//go:generate stringer -type ProtocolContextDescriptorFlags,GRKind,PRKind -trimprefix=GRKind -output types_string.go
 
 // Protocol swift protocol object
 type Protocol struct {
@@ -14,6 +14,8 @@ type Protocol struct {
 	AssociatedType string
 	Parent         *Protocol
 	Descriptor
+	SignatureRequirements []TargetGenericRequirementDescriptor
+	Requirements          []TargetProtocolRequirement
 }
 
 func (p Protocol) String() string {
@@ -40,10 +42,8 @@ const (
 	/// Whether this protocol is class-constrained.
 	HasClassConstraint       ProtocolContextDescriptorFlags = 0
 	HasClassConstraint_width ProtocolContextDescriptorFlags = 1
-
 	/// Whether this protocol is resilient.
 	IsResilient ProtocolContextDescriptorFlags = 1
-
 	/// Special protocol value.
 	SpecialProtocolKind       ProtocolContextDescriptorFlags = 2
 	SpecialProtocolKind_width ProtocolContextDescriptorFlags = 6
@@ -74,8 +74,90 @@ func (d Descriptor) String() string {
 		d.Flags, d.NumRequirementsInSignature, d.NumRequirements)
 }
 
+type GRKind uint8
+
+const (
+	GRKindProtocol  GRKind = 0 // A protocol requirement.
+	GRKindSameType  GRKind = 1 // A same-type requirement.
+	GRKindBaseClass GRKind = 2 // A base class requirement.
+	// A "same-conformance" requirement, implied by a same-type or base-class constraint that binds a parameter with protocol requirements.
+	GRKindSameConformance GRKind = 3
+	GRKindLayout          GRKind = 0x1F // A layout constraint.
+)
+
+type GenericRequirementFlags uint32
+
+func (f GenericRequirementFlags) HasKeyArgument() bool {
+	return (f & 0x80) != 0
+}
+func (f GenericRequirementFlags) HasExtraArgument() bool {
+	return (f & 0x40) != 0
+}
+func (f GenericRequirementFlags) Kind() GRKind {
+	return GRKind(f & 0x1F)
+}
+func (f GenericRequirementFlags) String() string {
+	return fmt.Sprintf("key_arg: %t, extra_arg: %t, kind: %s", f.HasKeyArgument(), f.HasExtraArgument(), f.Kind())
+}
+
 type TargetGenericRequirementDescriptor struct {
-	Flags uint32
+	Flags                               GenericRequirementFlags
+	Param                               int32 // The type that's constrained, described as a mangled name.
+	TypeOrProtocolOrConformanceOrLayout int32 // UNION: flags determine type
+}
+
+type PRKind uint8
+
+const (
+	BaseProtocol PRKind = iota
+	Method
+	Init
+	Getter
+	Setter
+	ReadCoroutine
+	ModifyCoroutine
+	AssociatedTypeAccessFunction
+	AssociatedConformanceAccessFunction
+)
+
+type ProtocolRequirementFlags uint32
+
+func (f ProtocolRequirementFlags) Kind() PRKind {
+	return PRKind(f & 0x0F)
+}
+func (f ProtocolRequirementFlags) IsInstance() bool {
+	return (f & 0x10) != 0
+}
+func (f ProtocolRequirementFlags) IsAsync() bool {
+	return (f & 0x20) != 0
+}
+func (f ProtocolRequirementFlags) IsSignedWithAddress() bool {
+	return f.Kind() != BaseProtocol
+}
+func (f ProtocolRequirementFlags) ExtraDiscriminator() uint16 {
+	return uint16(f >> 16)
+}
+func (f ProtocolRequirementFlags) IsFunctionImpl() bool {
+	switch f.Kind() {
+	case Method, Init, Getter, Setter, ReadCoroutine, ModifyCoroutine:
+		return !f.IsAsync()
+	default:
+		return false
+	}
+}
+func (f ProtocolRequirementFlags) String() string {
+	return fmt.Sprintf("kind: %s, instance: %t, async: %t, signed_with_addr: %t, extra_discriminator: %d, function_impl: %t",
+		f.Kind(),
+		f.IsInstance(),
+		f.IsAsync(),
+		f.IsSignedWithAddress(),
+		f.ExtraDiscriminator(),
+		f.IsFunctionImpl())
+}
+
+type TargetProtocolRequirement struct {
+	Flags                 ProtocolRequirementFlags
+	DefaultImplementation int32
 }
 
 type conformanceFlag uint32
