@@ -30,6 +30,7 @@ const (
 )
 
 var ErrMachOSectionNotFound = errors.New("MachO missing required section")
+var ErrMachODyldInfoNotFound = errors.New("LC_DYLD_INFO|LC_DYLD_INFO_ONLY not found")
 
 type sections []*Section
 
@@ -2256,7 +2257,7 @@ func (f *File) GetBindInfo() (types.Binds, error) {
 			f.binds = append(f.binds, bs...)
 		}
 	} else {
-		return nil, fmt.Errorf("LC_DYLD_INFO|LC_DYLD_INFO_ONLY not found")
+		return nil, ErrMachODyldInfoNotFound
 	}
 
 	return f.binds, nil
@@ -2280,7 +2281,7 @@ func (f *File) GetRebaseInfo() ([]types.Rebase, error) {
 			return f.parseRebase(bytes.NewReader(dat))
 		}
 	} else {
-		return nil, fmt.Errorf("LC_DYLD_INFO|LC_DYLD_INFO_ONLY not found")
+		return nil, ErrMachODyldInfoNotFound
 	}
 	return nil, nil
 }
@@ -2303,7 +2304,7 @@ func (f *File) GetExports() ([]trie.TrieExport, error) {
 			return trie.ParseTrieExports(bytes.NewReader(dat), f.GetBaseAddress())
 		}
 	} else {
-		return nil, fmt.Errorf("LC_DYLD_INFO|LC_DYLD_INFO_ONLY not found")
+		return nil, ErrMachODyldInfoNotFound
 	}
 	return nil, nil
 }
