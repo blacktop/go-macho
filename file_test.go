@@ -416,8 +416,8 @@ func TestRelocTypeString(t *testing.T) {
 }
 
 func TestTypeString(t *testing.T) {
-	if types.Exec.String() != "Exec" {
-		t.Errorf("got %v, want %v", types.Exec.String(), "Exec")
+	if types.MH_EXECUTE.String() != "EXECUTE" {
+		t.Errorf("got %v, want %v", types.MH_EXECUTE.String(), "EXECUTE")
 	}
 }
 
@@ -597,6 +597,81 @@ func TestNewFile(t *testing.T) {
 			}
 		}
 	}
+
+	fmt.Println(got.FileTOC.String())
+}
+
+func TestNewFileWithSwift(t *testing.T) {
+	f, err := os.Open(fname)
+
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			t.Skipf("file %s not found", fname)
+		}
+		t.Fatal(err)
+	}
+
+	got, err := NewFile(f)
+	if err != nil {
+		t.Fatalf("NewFile() error = %v", err)
+		return
+	}
+
+	// prots, err := got.GetSwiftProtocols()
+	// if err != nil {
+	// 	t.Fatalf("GetSwiftProtocols() error = %v", err)
+	// }
+	// for _, prot := range prots {
+	// 	fmt.Println(prot)
+	// }
+
+	// protsconfs, err := got.GetSwiftProtocolConformances()
+	// if err != nil {
+	// 	t.Fatalf("GetSwiftProtocolConformances() error = %v", err)
+	// }
+	// for _, prot := range protsconfs {
+	// 	fmt.Println(prot)
+	// }
+
+	// atyps, err := got.GetSwiftAssociatedTypes()
+	// if err != nil {
+	// 	t.Fatalf("GetSwiftAssociatedTypes() error = %v", err)
+	// }
+	// for _, at := range atyps {
+	// 	fmt.Println(at)
+	// }
+
+	// bins, err := got.GetSwiftBuiltinTypes()
+	// if err != nil {
+	// 	t.Fatalf("GetSwiftBuiltinTypes() error = %v", err)
+	// }
+	// for _, bin := range bins {
+	// 	fmt.Println(bin)
+	// }
+
+	// fds, err := got.GetSwiftFields()
+	// if err != nil {
+	// 	t.Fatalf("GetSwiftFields() error = %v", err)
+	// }
+	// for _, f := range fds {
+	// 	fmt.Println(f)
+	// }
+
+	typs, err := got.GetSwiftTypes()
+	if err != nil {
+		t.Fatalf("GetSwiftTypes() error = %v", err)
+	}
+	for _, t := range typs {
+		fmt.Println(t)
+	}
+
+	// clos, err := got.GetSwiftClosures()
+	// if err != nil {
+	// 	t.Fatalf("GetSwiftClosures() error = %v", err)
+	// }
+	// for _, c := range clos {
+	// 	fmt.Println(c)
+	// }
 
 	fmt.Println(got.FileTOC.String())
 }
