@@ -12,7 +12,11 @@ This package goes beyond the Go's `debug/macho` to:
 
 - Cover ALL load commands and architectures
 - Provide nice summary string output
-- Allow for creating custom macho
+- Allow for creating custom MachO files
+- Parse Objective-C runtime information
+- Parse Swift runtime information
+- Parse code signature information
+- Parse fixup chain information
 
 ## Install
 

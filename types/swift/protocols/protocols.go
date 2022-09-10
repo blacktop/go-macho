@@ -216,7 +216,7 @@ const (
 // in which the conforming type is defined. With retroactive conformance,
 // it is possible to detect a conflict at run time.
 func (f ConformanceFlags) IsRetroactive() bool {
-	return f&IsRetroactiveMask != 0
+	return (f & IsRetroactiveMask) != 0
 }
 
 // IsSynthesizedNonUnique is the conformance synthesized in a non-unique manner?
