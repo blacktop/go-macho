@@ -6,7 +6,7 @@ import (
 	"github.com/blacktop/go-macho/types/swift/types"
 )
 
-//go:generate stringer -type ProtocolContextDescriptorFlags,GRKind,PRKind -trimprefix=GRKind -output types_string.go
+//go:generate stringer -type ProtocolContextDescriptorFlags,GRKind,PRKind,referenceKind -trimprefix=GRKind -output types_string.go
 
 // Protocol swift protocol object
 type Protocol struct {
@@ -160,22 +160,22 @@ type TargetProtocolRequirement struct {
 	DefaultImplementation int32
 }
 
-type conformanceFlag uint32
+type ConformanceFlags uint32
 
 const (
-	UnusedLowBits conformanceFlag = 0x07 // historical conformance kind
+	UnusedLowBits ConformanceFlags = 0x07 // historical conformance kind
 
-	TypeMetadataKindMask  conformanceFlag = 0x7 << 3 // 8 type reference kinds
-	TypeMetadataKindShift conformanceFlag = 3
+	TypeMetadataKindMask  ConformanceFlags = 0x7 << 3 // 8 type reference kinds
+	TypeMetadataKindShift ConformanceFlags = 3
 
-	IsRetroactiveMask          conformanceFlag = 0x01 << 6
-	IsSynthesizedNonUniqueMask conformanceFlag = 0x01 << 7
+	IsRetroactiveMask          ConformanceFlags = 0x01 << 6
+	IsSynthesizedNonUniqueMask ConformanceFlags = 0x01 << 7
 
-	NumConditionalRequirementsMask  conformanceFlag = 0xFF << 8
-	NumConditionalRequirementsShift conformanceFlag = 8
+	NumConditionalRequirementsMask  ConformanceFlags = 0xFF << 8
+	NumConditionalRequirementsShift ConformanceFlags = 8
 
-	HasResilientWitnessesMask  conformanceFlag = 0x01 << 16
-	HasGenericWitnessTableMask conformanceFlag = 0x01 << 17
+	HasResilientWitnessesMask  ConformanceFlags = 0x01 << 16
+	HasGenericWitnessTableMask ConformanceFlags = 0x01 << 17
 )
 
 // Kinds of type metadata/protocol conformance records.
@@ -215,7 +215,7 @@ const (
 // neither the module in which the protocol is defined nor the module
 // in which the conforming type is defined. With retroactive conformance,
 // it is possible to detect a conflict at run time.
-func (f conformanceFlag) IsRetroactive() bool {
+func (f ConformanceFlags) IsRetroactive() bool {
 	return f&IsRetroactiveMask != 0
 }
 
@@ -226,44 +226,60 @@ func (f conformanceFlag) IsRetroactive() bool {
 // Such conformances are retroactive by nature, but the presence of multiple
 // such conformances is not a conflict because all synthesized conformances
 // will be equivalent.
-func (f conformanceFlag) IsSynthesizedNonUnique() bool {
-	return f&IsSynthesizedNonUniqueMask != 0
+func (f ConformanceFlags) IsSynthesizedNonUnique() bool {
+	return (f & IsSynthesizedNonUniqueMask) != 0
 }
 
 // GetNumConditionalRequirements retrieve the # of conditional requirements.
-func (f conformanceFlag) GetNumConditionalRequirements() int {
+func (f ConformanceFlags) GetNumConditionalRequirements() int {
 	return int((f & NumConditionalRequirementsMask) >> NumConditionalRequirementsShift)
 }
 
 // HasResilientWitnesses whether this conformance has any resilient witnesses.
-func (f conformanceFlag) HasResilientWitnesses() bool {
-	return f&HasResilientWitnessesMask != 0
+func (f ConformanceFlags) HasResilientWitnesses() bool {
+	return (f & HasResilientWitnessesMask) != 0
 }
 
 // HasGenericWitnessTable whether this conformance has a generic witness table that may need to
 // be instantiated.
-func (f conformanceFlag) HasGenericWitnessTable() bool {
-	return f&HasGenericWitnessTableMask != 0
+func (f ConformanceFlags) HasGenericWitnessTable() bool {
+	return (f & HasGenericWitnessTableMask) != 0
 }
 
 // GetTypeReferenceKind retrieve the type reference kind kind.
-func (f conformanceFlag) GetTypeReferenceKind() referenceKind {
+func (f ConformanceFlags) GetTypeReferenceKind() referenceKind {
 	return referenceKind((f & TypeMetadataKindMask) >> TypeMetadataKindShift)
+}
+
+func (f ConformanceFlags) String() string {
+	return fmt.Sprintf("retroactive: %t, synthesized_nonunique: %t, num_cond_reqs: %d, has_resilient_witnesses: %t, has_generic_witness_table: %t, type_reference_kind: %s",
+		f.IsRetroactive(),
+		f.IsSynthesizedNonUnique(),
+		f.GetNumConditionalRequirements(),
+		f.HasResilientWitnesses(),
+		f.HasGenericWitnessTable(),
+		f.GetTypeReferenceKind(),
+	)
 }
 
 // ConformanceDescriptor in __TEXT.__swift5_proto
 // This section contains an array of 32-bit signed integers.
 // Each integer is a relative offset that points to a protocol conformance descriptor in the __TEXT.__const section.
-type CDType struct {
-	ProtocolDescriptorOffset int32
-	TypeRefOffset            int32
-	WitnessTableOffset       int32
-	Flags                    conformanceFlag
+
+type TargetProtocolConformanceDescriptor struct {
+	ProtocolOffsest            int32
+	TypeRefOffsest             int32
+	WitnessTablePatternOffsest int32
+	Flags                      ConformanceFlags
 }
 
 type ConformanceDescriptor struct {
+	TargetProtocolConformanceDescriptor
 	Protocol     string
-	TypeRef      int32
+	TypeRef      *types.TypeDescriptor
 	WitnessTable int32
-	CDType
+}
+
+type TargetWitnessTable struct {
+	Description int32
 }

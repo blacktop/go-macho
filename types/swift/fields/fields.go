@@ -1,5 +1,10 @@
 package fields
 
+import (
+	"fmt"
+	"strings"
+)
+
 //go:generate stringer -type=FieldDescriptorKind,FieldRecordFlags -output fields_string.go
 
 // ref: swift/include/swift/Reflection/Records.h
@@ -97,4 +102,31 @@ func (f Field) IsClass() bool {
 }
 func (f Field) IsProtocol() bool {
 	return f.Descriptor.Kind == Protocol || f.Descriptor.Kind == ClassProtocol || f.Descriptor.Kind == ObjCProtocol
+}
+func (f Field) String() string {
+	var recs string
+	if len(f.Records) > 0 {
+		recs = "\n"
+	}
+	for _, r := range f.Records {
+		var flags string
+		var hasType string
+		if f.Kind == "Enum" {
+			flags = "case"
+		} else {
+			if r.Flags == "IsVar" {
+				flags = "var"
+			} else {
+				flags = "let"
+			}
+		}
+		if len(r.MangledType) > 0 {
+			hasType = " : "
+		}
+		recs += fmt.Sprintf("        %s %s%s%s\n", flags, r.Name, hasType, r.MangledType)
+	}
+	if len(f.SuperClass) > 0 {
+		return fmt.Sprintf("%#x:\n%s %s.%s {%s}\n", f.Address, f.Kind, f.MangledType, f.SuperClass, recs)
+	}
+	return fmt.Sprintf("%#x:\n%s %s {%s}", f.Address, strings.ToLower(f.Kind), f.MangledType, recs)
 }

@@ -326,7 +326,7 @@ type TargetClassDescriptor struct {
 	MetadataPositiveSizeInWords uint32
 	NumImmediateMembers         uint32
 	NumFields                   uint32
-	FieldOffsetVectorOffset     uint32 // ??
+	FieldOffsetVectorOffset     uint32
 }
 
 type TargetTypeGenericContextDescriptorHeader struct {

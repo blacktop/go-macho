@@ -131,19 +131,19 @@ func (f *File) GetSwiftProtocolConformances() ([]protocols.ConformanceDescriptor
 			f.cr.Seek(offset, io.SeekStart)
 
 			var pcd protocols.ConformanceDescriptor
-			if err := binary.Read(f.cr, f.ByteOrder, &pcd.CDType); err != nil {
+			if err := binary.Read(f.cr, f.ByteOrder, &pcd.TargetProtocolConformanceDescriptor); err != nil {
 				return nil, fmt.Errorf("failed to read swift ProtocolDescriptor: %v", err)
 			}
 
 			var ptr uint64
-			if (pcd.ProtocolDescriptorOffset & 1) == 1 {
-				pcd.ProtocolDescriptorOffset = pcd.ProtocolDescriptorOffset &^ 1
-				f.cr.Seek(offset+int64(pcd.ProtocolDescriptorOffset), io.SeekStart)
+			if (pcd.ProtocolOffsest & 1) == 1 {
+				pcd.ProtocolOffsest = pcd.ProtocolOffsest &^ 1
+				f.cr.Seek(offset+int64(pcd.ProtocolOffsest), io.SeekStart)
 				if err := binary.Read(f.cr, f.ByteOrder, &ptr); err != nil {
 					return nil, fmt.Errorf("failed to read protocol name offset: %v", err)
 				}
 			} else {
-				ptr = uint64(offset + int64(pcd.ProtocolDescriptorOffset))
+				ptr = uint64(offset + int64(pcd.ProtocolOffsest))
 			}
 
 			if fixupchains.DcpArm64eIsBind(ptr) {
@@ -158,11 +158,28 @@ func (f *File) GetSwiftProtocolConformances() ([]protocols.ConformanceDescriptor
 				}
 			}
 
+			// Parse the TargetTypeReference
 			switch pcd.Flags.GetTypeReferenceKind() {
 			case protocols.DirectTypeDescriptor:
+				if (pcd.TypeRefOffsest & 1) == 1 {
+					pcd.TypeRefOffsest = pcd.TypeRefOffsest &^ 1
+					f.cr.Seek(offset+int64(pcd.TypeRefOffsest), io.SeekStart)
+					if err := binary.Read(f.cr, f.ByteOrder, &ptr); err != nil {
+						return nil, fmt.Errorf("failed to read protocol name offset: %v", err)
+					}
+				} else {
+					ptr = uint64(offset + sizeOfInt32 + int64(pcd.TypeRefOffsest))
+				}
+				pcd.TypeRef, err = f.readType(offset + sizeOfInt32 + int64(pcd.TypeRefOffsest))
+				if err != nil {
+					return nil, fmt.Errorf("failed to read type: %v", err)
+				}
 			case protocols.IndirectTypeDescriptor:
+				fmt.Println("SUP - IndirectTypeDescriptor")
 			case protocols.DirectObjCClassName:
+				fmt.Println("SUP - DirectObjCClassName")
 			case protocols.IndirectObjCClass:
+				fmt.Println("SUP - IndirectObjCClass")
 			}
 
 			protoConfDescs = append(protoConfDescs, pcd)
@@ -197,204 +214,200 @@ func (f *File) GetSwiftTypes() ([]*types.TypeDescriptor, error) {
 		for idx, relOff := range relOffsets {
 			offset := int64(sec.Offset+uint32(idx*sizeOfInt32)) + int64(relOff)
 
-			f.cr.Seek(offset, io.SeekStart)
-
-			var tDesc types.TargetContextDescriptor
-			if err := binary.Read(f.cr, f.ByteOrder, &tDesc); err != nil {
-				return nil, fmt.Errorf("failed to read swift type context descriptor: %v", err)
-			}
-
-			f.cr.Seek(-int64(binary.Size(tDesc)), io.SeekCurrent) // rewind
-
-			var typ types.TypeDescriptor
-
-			typ.Address, err = f.GetVMAddress(uint64(offset))
+			typ, err := f.readType(offset)
 			if err != nil {
-				return nil, fmt.Errorf("failed to get swift type context descriptor address: %v", err)
+				return nil, fmt.Errorf("failed to read type: %v", err)
 			}
 
-			typ.Kind = tDesc.Flags.Kind()
-
-			fmt.Println(tDesc.Flags)
-
-			var numFields uint32
-			switch typ.Kind {
-			case types.Module:
-				var mod types.TargetModuleContextDescriptor
-				if err := binary.Read(f.cr, f.ByteOrder, &mod); err != nil {
-					return nil, fmt.Errorf("failed to read swift module descriptor: %v", err)
-				}
-				typ.Type = &mod
-			case types.Extension:
-				var ext types.TargetExtensionContextDescriptor
-				if err := binary.Read(f.cr, f.ByteOrder, &ext); err != nil {
-					return nil, fmt.Errorf("failed to read swift extension descriptor: %v", err)
-				}
-				typ.Type = &ext
-			case types.Anonymous:
-				var anon types.TargetAnonymousContextDescriptor
-				if err := binary.Read(f.cr, f.ByteOrder, &anon); err != nil {
-					return nil, fmt.Errorf("failed to read swift anonymous descriptor: %v", err)
-				}
-				typ.Type = &anon
-			case types.Class:
-				var cD types.TargetClassDescriptor
-				if err := binary.Read(f.cr, f.ByteOrder, &cD); err != nil {
-					return nil, fmt.Errorf("failed to read %T: %v", cD, err)
-				}
-				if cD.Flags.IsGeneric() {
-					var g types.TargetTypeGenericContextDescriptorHeader
-					if err := binary.Read(f.cr, f.ByteOrder, &g); err != nil {
-						return nil, fmt.Errorf("failed to read generic header: %v", err)
-					}
-					typ.Generic = &g
-				}
-				if cD.FieldOffsetVectorOffset != 0 {
-					typ.FieldOffsets = make([]int32, cD.NumFields)
-					if err := binary.Read(f.cr, f.ByteOrder, &typ.FieldOffsets); err != nil {
-						return nil, fmt.Errorf("failed to read field offset vector: %v", err)
-					}
-				}
-				if cD.Flags.KindSpecific().HasVTable() {
-					var v types.VTable
-					if err := binary.Read(f.cr, f.ByteOrder, &v.TargetVTableDescriptorHeader); err != nil {
-						return nil, fmt.Errorf("failed to read vtable header: %v", err)
-					}
-					v.MethodListOffset, _ = f.cr.Seek(0, io.SeekCurrent)
-					v.Methods = make([]types.TargetMethodDescriptor, v.VTableSize)
-					if err := binary.Read(f.cr, f.ByteOrder, &v.Methods); err != nil {
-						return nil, fmt.Errorf("failed to read vtable method descriptors: %v", err)
-					}
-					typ.VTable = &v
-				}
-				numFields = cD.NumFields
-				typ.Type = &cD
-			case types.Enum:
-				var eD types.TargetEnumDescriptor
-				if err := binary.Read(f.cr, f.ByteOrder, &eD); err != nil {
-					return nil, fmt.Errorf("failed to read %T: %v", eD, err)
-				}
-				if eD.Flags.IsGeneric() {
-					var g types.TargetTypeGenericContextDescriptorHeader
-					if err := binary.Read(f.cr, f.ByteOrder, &g); err != nil {
-						return nil, fmt.Errorf("failed to read generic header: %v", err)
-					}
-					typ.Generic = &g
-				}
-				typ.Type = &eD
-			case types.Struct:
-				var sD types.TargetStructDescriptor
-				if err := binary.Read(f.cr, f.ByteOrder, &sD); err != nil {
-					return nil, fmt.Errorf("failed to read %T: %v", sD, err)
-				}
-				if sD.Flags.IsGeneric() {
-					var g types.TargetTypeGenericContextDescriptorHeader
-					if err := binary.Read(f.cr, f.ByteOrder, &g); err != nil {
-						return nil, fmt.Errorf("failed to read generic header: %v", err)
-					}
-					typ.Generic = &g
-				}
-				if sD.FieldOffsetVectorOffset != 0 {
-					typ.FieldOffsets = make([]int32, sD.NumFields)
-					if err := binary.Read(f.cr, f.ByteOrder, &typ.FieldOffsets); err != nil {
-						return nil, fmt.Errorf("failed to read field offset vector: %v", err)
-					}
-				}
-				numFields = sD.NumFields
-				typ.Type = &sD
-			case types.Protocol:
-				var pD types.TargetProtocolDescriptor
-				if err := binary.Read(f.cr, f.ByteOrder, &pD); err != nil {
-					return nil, fmt.Errorf("failed to read %T: %v", pD, err)
-				}
-				typ.Type = &pD
-			case types.OpaqueType:
-				var oD types.TargetOpaqueTypeDescriptor
-				if err := binary.Read(f.cr, f.ByteOrder, &oD); err != nil {
-					return nil, fmt.Errorf("failed to read %T: %v", oD, err)
-				}
-				typ.Type = &oD
-			}
-
-			var metadataInitSize int
-
-			switch tDesc.Flags.KindSpecific().MetadataInitialization() {
-			case types.MetadataInitNone:
-				metadataInitSize = 0
-			case types.MetadataInitSingleton:
-				metadataInitSize = binary.Size(types.TargetSingletonMetadataInitialization{})
-			case types.MetadataInitForeign:
-				metadataInitSize = binary.Size(types.TargetForeignMetadataInitialization{})
-			}
-
-			_ = metadataInitSize // TODO: use this in size/offset calculations
-
-			typ.Name, err = f.GetCStringAtOffset(offset + int64(sizeOfInt32*2) + int64(tDesc.NameOffset))
-			if err != nil {
-				return nil, fmt.Errorf("failed to read cstring: %v", err)
-			}
-
-			typ.Parent.Address = uint64(int64(typ.Address) + sizeOfInt32 + int64(tDesc.ParentOffset))
-			parentOffset := offset + sizeOfInt32 + int64(tDesc.ParentOffset)
-			f.cr.Seek(parentOffset, io.SeekStart)
-
-			var parentDesc types.TargetContextDescriptor
-			if err := binary.Read(f.cr, f.ByteOrder, &parentDesc); err != nil {
-				return nil, fmt.Errorf("failed to read type swift parent type context descriptor: %v", err)
-			}
-
-			typ.Parent.Name, err = f.GetCStringAtOffset(parentOffset + int64(sizeOfInt32*2) + int64(parentDesc.NameOffset))
-			if err != nil {
-				fmt.Println(tDesc.Flags.String())
-				// return nil, fmt.Errorf("failed to read cstring: %v", err)
-				fmt.Println("ERROR")
-			}
-
-			typ.AccessFunction = uint64(int64(typ.Address) + int64(sizeOfInt32*3) + int64(tDesc.AccessFunctionOffset))
-
-			if typ.VTable != nil {
-				fmt.Println("METHODS")
-				for idx, m := range typ.VTable.GetMethods(f.preferredLoadAddress()) {
-					fmt.Printf("%2d)  flags:   %s\n", idx, m.Flags)
-					if m.Flags.IsAsync() {
-						fmt.Println("ASYNC")
-					}
-					// fmt.Printf("      impl:    %d\n", m.Impl)
-					fmt.Printf("      address: %#x\n", m.Address)
-				}
-			}
-
-			if tDesc.FieldDescriptorOffset != 0 {
-				if numFields > 1 {
-					fmt.Println("FIELDS")
-				}
-				offset += int64(sizeOfInt32*4) + int64(tDesc.FieldDescriptorOffset)
-				switch typ.Kind {
-				case types.Class, types.Struct:
-				// 	for i := uint32(0); i < numFields; i++ {
-				// 		var fd *fields.Field
-				// 		fd, err = f.readField(offset + int64(typ.FieldOffsets[i]))
-				// 		if err != nil {
-				// 			return nil, fmt.Errorf("failed to read swift field: %v", err)
-				// 		}
-				// 		typ.Fields = append(typ.Fields, fd)
-				// 	}
-				default:
-					fd, err := f.readField(offset)
-					if err != nil {
-						return nil, fmt.Errorf("failed to read swift field: %v", err)
-					}
-					typ.Fields = append(typ.Fields, fd)
-				}
-			}
-
-			typs = append(typs, &typ)
+			typs = append(typs, typ)
 		}
 
 		return typs, nil
 	}
 
 	return nil, fmt.Errorf("file does not contain a '__swift5_types' section")
+}
+
+func (f *File) readType(offset int64) (*types.TypeDescriptor, error) {
+	var err error
+	var typ types.TypeDescriptor
+
+	f.cr.Seek(offset, io.SeekStart)
+
+	var tDesc types.TargetContextDescriptor
+	if err := binary.Read(f.cr, f.ByteOrder, &tDesc); err != nil {
+		return nil, fmt.Errorf("failed to read swift type context descriptor: %v", err)
+	}
+
+	f.cr.Seek(-int64(binary.Size(tDesc)), io.SeekCurrent) // rewind
+
+	typ.Address, err = f.GetVMAddress(uint64(offset))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get swift type context descriptor address: %v", err)
+	}
+
+	typ.Kind = tDesc.Flags.Kind()
+
+	fmt.Println(tDesc.Flags)
+
+	var metadataInitSize int
+
+	switch tDesc.Flags.KindSpecific().MetadataInitialization() {
+	case types.MetadataInitNone:
+		metadataInitSize = 0
+	case types.MetadataInitSingleton:
+		metadataInitSize = binary.Size(types.TargetSingletonMetadataInitialization{})
+	case types.MetadataInitForeign:
+		metadataInitSize = binary.Size(types.TargetForeignMetadataInitialization{})
+	}
+
+	_ = metadataInitSize // TODO: use this in size/offset calculations
+
+	switch typ.Kind {
+	case types.Module:
+		var mod types.TargetModuleContextDescriptor
+		if err := binary.Read(f.cr, f.ByteOrder, &mod); err != nil {
+			return nil, fmt.Errorf("failed to read swift module descriptor: %v", err)
+		}
+		typ.Type = &mod
+	case types.Extension:
+		var ext types.TargetExtensionContextDescriptor
+		if err := binary.Read(f.cr, f.ByteOrder, &ext); err != nil {
+			return nil, fmt.Errorf("failed to read swift extension descriptor: %v", err)
+		}
+		typ.Type = &ext
+	case types.Anonymous:
+		var anon types.TargetAnonymousContextDescriptor
+		if err := binary.Read(f.cr, f.ByteOrder, &anon); err != nil {
+			return nil, fmt.Errorf("failed to read swift anonymous descriptor: %v", err)
+		}
+		typ.Type = &anon
+	case types.Class:
+		var cD types.TargetClassDescriptor
+		if err := binary.Read(f.cr, f.ByteOrder, &cD); err != nil {
+			return nil, fmt.Errorf("failed to read %T: %v", cD, err)
+		}
+		if cD.Flags.IsGeneric() {
+			var g types.TargetTypeGenericContextDescriptorHeader
+			if err := binary.Read(f.cr, f.ByteOrder, &g); err != nil {
+				return nil, fmt.Errorf("failed to read generic header: %v", err)
+			}
+			typ.Generic = &g
+		}
+		if cD.FieldOffsetVectorOffset != 0 {
+			if cD.Flags.KindSpecific().HasResilientSuperclass() {
+				cD.FieldOffsetVectorOffset += cD.MetadataNegativeSizeInWords
+			}
+			fmt.Printf("FieldOffsetVectorOffset: %d\n", offset+int64(cD.FieldOffsetVectorOffset*8))
+			typ.FieldOffsets = make([]int32, cD.NumFields)
+			if err := binary.Read(f.cr, f.ByteOrder, &typ.FieldOffsets); err != nil {
+				return nil, fmt.Errorf("failed to read field offset vector: %v", err)
+			}
+		}
+		if cD.Flags.KindSpecific().HasVTable() {
+			var v types.VTable
+			if err := binary.Read(f.cr, f.ByteOrder, &v.TargetVTableDescriptorHeader); err != nil {
+				return nil, fmt.Errorf("failed to read vtable header: %v", err)
+			}
+			v.MethodListOffset, _ = f.cr.Seek(0, io.SeekCurrent)
+			v.Methods = make([]types.TargetMethodDescriptor, v.VTableSize)
+			if err := binary.Read(f.cr, f.ByteOrder, &v.Methods); err != nil {
+				return nil, fmt.Errorf("failed to read vtable method descriptors: %v", err)
+			}
+			typ.VTable = &v
+		}
+		typ.Type = &cD
+	case types.Enum:
+		var eD types.TargetEnumDescriptor
+		if err := binary.Read(f.cr, f.ByteOrder, &eD); err != nil {
+			return nil, fmt.Errorf("failed to read %T: %v", eD, err)
+		}
+		if eD.Flags.IsGeneric() {
+			var g types.TargetTypeGenericContextDescriptorHeader
+			if err := binary.Read(f.cr, f.ByteOrder, &g); err != nil {
+				return nil, fmt.Errorf("failed to read generic header: %v", err)
+			}
+			typ.Generic = &g
+		}
+		typ.Type = &eD
+	case types.Struct:
+		var sD types.TargetStructDescriptor
+		if err := binary.Read(f.cr, f.ByteOrder, &sD); err != nil {
+			return nil, fmt.Errorf("failed to read %T: %v", sD, err)
+		}
+		if sD.Flags.IsGeneric() {
+			var g types.TargetTypeGenericContextDescriptorHeader
+			if err := binary.Read(f.cr, f.ByteOrder, &g); err != nil {
+				return nil, fmt.Errorf("failed to read generic header: %v", err)
+			}
+			typ.Generic = &g
+		}
+		if sD.FieldOffsetVectorOffset != 0 {
+			typ.FieldOffsets = make([]int32, sD.NumFields)
+			if err := binary.Read(f.cr, f.ByteOrder, &typ.FieldOffsets); err != nil {
+				return nil, fmt.Errorf("failed to read field offset vector: %v", err)
+			}
+		}
+		typ.Type = &sD
+	case types.Protocol:
+		var pD types.TargetProtocolDescriptor
+		if err := binary.Read(f.cr, f.ByteOrder, &pD); err != nil {
+			return nil, fmt.Errorf("failed to read %T: %v", pD, err)
+		}
+		typ.Type = &pD
+	case types.OpaqueType:
+		var oD types.TargetOpaqueTypeDescriptor
+		if err := binary.Read(f.cr, f.ByteOrder, &oD); err != nil {
+			return nil, fmt.Errorf("failed to read %T: %v", oD, err)
+		}
+		typ.Type = &oD
+	}
+
+	typ.Name, err = f.GetCStringAtOffset(offset + int64(sizeOfInt32*2) + int64(tDesc.NameOffset))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read cstring: %v", err)
+	}
+
+	typ.Parent.Address = uint64(int64(typ.Address) + sizeOfInt32 + int64(tDesc.ParentOffset))
+	parentOffset := offset + sizeOfInt32 + int64(tDesc.ParentOffset)
+	f.cr.Seek(parentOffset, io.SeekStart)
+
+	var parentDesc types.TargetContextDescriptor
+	if err := binary.Read(f.cr, f.ByteOrder, &parentDesc); err != nil {
+		return nil, fmt.Errorf("failed to read type swift parent type context descriptor: %v", err)
+	}
+
+	typ.Parent.Name, err = f.GetCStringAtOffset(parentOffset + int64(sizeOfInt32*2) + int64(parentDesc.NameOffset))
+	if err != nil {
+		fmt.Println(tDesc.Flags.String())
+		// return nil, fmt.Errorf("failed to read cstring: %v", err)
+		fmt.Println("ERROR")
+	}
+
+	typ.AccessFunction = uint64(int64(typ.Address) + int64(sizeOfInt32*3) + int64(tDesc.AccessFunctionOffset))
+
+	if typ.VTable != nil {
+		fmt.Println("METHODS")
+		for idx, m := range typ.VTable.GetMethods(f.preferredLoadAddress()) {
+			fmt.Printf("%2d)  flags:   %s\n", idx, m.Flags)
+			if m.Flags.IsAsync() {
+				fmt.Println("ASYNC")
+			}
+			// fmt.Printf("      impl:    %d\n", m.Impl)
+			fmt.Printf("      address: %#x\n", m.Address)
+		}
+	}
+
+	if tDesc.FieldDescriptorOffset != 0 {
+		offset += int64(sizeOfInt32*4) + int64(tDesc.FieldDescriptorOffset)
+		fd, err := f.readField(offset, typ.FieldOffsets...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read swift field: %v", err)
+		}
+		typ.Fields = append(typ.Fields, fd)
+	}
+
+	return &typ, nil
 }
 
 // GetSwiftFields parses all the fields in the __TEXT.__swift5_fields section
@@ -445,7 +458,7 @@ func (f *File) GetSwiftFields() ([]*fields.Field, error) {
 	return nil, fmt.Errorf("file does not contain a '__swift5_fieldmd' section")
 }
 
-func (f *File) readField(offset int64) (*fields.Field, error) {
+func (f *File) readField(offset int64, fieldOffsets ...int32) (*fields.Field, error) {
 	var field fields.Field
 
 	currOffset, err := f.cr.Seek(offset, io.SeekStart)
@@ -469,9 +482,7 @@ func (f *File) readField(offset int64) (*fields.Field, error) {
 		return nil, fmt.Errorf("failed to read swift field mangled type name at %#x: %v", currOffset+int64(field.Descriptor.MangledTypeNameOffset), err)
 	}
 
-	if field.Descriptor.SuperclassOffset == 0 {
-		field.SuperClass = swift.MANGLING_MODULE_OBJC
-	} else {
+	if field.Descriptor.SuperclassOffset != 0 {
 		field.SuperClass, err = f.makeSymbolicMangledNameStringRef(currOffset + sizeOfInt32 + int64(field.Descriptor.SuperclassOffset))
 		if err != nil {
 			return nil, fmt.Errorf("failed to read cstring: %v", err)
@@ -483,33 +494,34 @@ func (f *File) readField(offset int64) (*fields.Field, error) {
 		return nil, err
 	}
 
+	if field.Descriptor.FieldRecordSize != uint16(binary.Size(fields.FieldRecordType{})) {
+		return nil, fmt.Errorf("invalid field record size: got %d, want %d", field.Descriptor.FieldRecordSize, binary.Size(fields.FieldRecordType{}))
+	}
+
 	field.Descriptor.FieldRecords = make([]fields.FieldRecordType, field.Descriptor.NumFields)
 	if err := binary.Read(f.cr, f.ByteOrder, &field.Descriptor.FieldRecords); err != nil {
 		return nil, fmt.Errorf("failed to read swift field records: %v", err)
 	}
 
-	for idx, record := range field.Descriptor.FieldRecords {
+	for _, record := range field.Descriptor.FieldRecords {
 		rec := fields.FieldRecord{
 			Flags: record.Flags.String(),
 		}
 
-		currOffset += int64(idx * int(field.Descriptor.FieldRecordSize))
-
 		if record.MangledTypeNameOffset != 0 {
-			addr, _ := f.GetVMAddress(uint64(currOffset + sizeOfInt32 + int64(record.MangledTypeNameOffset)))
-			_ = addr
 			rec.MangledType, err = f.makeSymbolicMangledNameStringRef(currOffset + sizeOfInt32 + int64(record.MangledTypeNameOffset))
 			if err != nil {
 				return nil, fmt.Errorf("failed to read swift field record mangled type name at %#x; %v", currOffset+sizeOfInt32+int64(record.MangledTypeNameOffset), err)
 			}
 		}
 
-		rec.Name, err = f.GetCStringAtOffset(currOffset + 8 + int64(record.FieldNameOffset))
+		rec.Name, err = f.GetCStringAtOffset(currOffset + int64(sizeOfInt32*2) + int64(record.FieldNameOffset))
 		if err != nil {
 			return nil, fmt.Errorf("failed to read cstring: %v", err)
 		}
 
 		field.Records = append(field.Records, rec)
+		currOffset += int64(binary.Size(record))
 	}
 
 	return &field, nil
@@ -875,4 +887,52 @@ func (f *File) GetSwiftEntry() (uint64, error) {
 	}
 
 	return 0, fmt.Errorf("failed to find '__swift5_entry' section")
+}
+
+func (f *File) GetSwiftDynamicReplacementInfo() (uint64, error) {
+	if sec := f.Section("__TEXT", "__swift5_replace"); sec != nil {
+		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
+		if err != nil {
+			return 0, fmt.Errorf("failed to convert vmaddr: %v", err)
+		}
+		f.cr.Seek(int64(off), io.SeekStart)
+
+		dat := make([]byte, sec.Size)
+		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+			return 0, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
+		}
+
+		var swiftEntry int32
+		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &swiftEntry); err != nil {
+			return 0, fmt.Errorf("failed to read __swift5_replace data: %v", err)
+		}
+
+		return sec.Addr + uint64(swiftEntry), nil
+	}
+
+	return 0, fmt.Errorf("failed to find '__swift5_replace' section")
+}
+
+func (f *File) GetSwiftDynamicReplacementInfoForOpaqueTypes() (uint64, error) {
+	if sec := f.Section("__TEXT", "__swift5_replac2"); sec != nil {
+		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
+		if err != nil {
+			return 0, fmt.Errorf("failed to convert vmaddr: %v", err)
+		}
+		f.cr.Seek(int64(off), io.SeekStart)
+
+		dat := make([]byte, sec.Size)
+		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+			return 0, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
+		}
+
+		var swiftEntry int32
+		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &swiftEntry); err != nil {
+			return 0, fmt.Errorf("failed to read __swift5_replac2 data: %v", err)
+		}
+
+		return sec.Addr + uint64(swiftEntry), nil
+	}
+
+	return 0, fmt.Errorf("failed to find '__swift5_replac2' section")
 }
