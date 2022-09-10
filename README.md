@@ -32,15 +32,11 @@ package main
 import "github.com/blacktop/go-macho"
 
 func main() {
-    f, err := os.Open("/path/to/macho")
+    m, err := macho.Open("/path/to/macho")
     if err != nil {
         panic(err)
     }
-
-    m, err := macho.NewFile(f)
-    if err != nil {
-        panic(err)
-    }
+    defer m.Close()
 
     fmt.Println(m.FileTOC.String())
 }
