@@ -23,7 +23,7 @@ func (p Protocol) String() string {
 	}
 	var parent string
 	if p.Descriptor.ParentOffset != 0 {
-		parent = fmt.Sprintf("\n---\nParent %s\n", p.Parent)
+		parent = fmt.Sprintf("\n---\nParent: %s\n", p.Parent)
 	}
 	return fmt.Sprintf(
 		"Name:           %s\n"+

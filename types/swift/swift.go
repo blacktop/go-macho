@@ -76,7 +76,7 @@ const (
 	BUILTIN_TYPE_NAME_WORD = "Builtin.Word"
 )
 
-//go:generate stringer -type SpecialPointerAuthDiscriminators,NBKind -output swift_string.go
+//go:generate stringer -type SpecialPointerAuthDiscriminators,NecessaryBindingsKind -output swift_string.go
 
 type SpecialPointerAuthDiscriminators uint16
 
@@ -277,15 +277,15 @@ type MetadataSource struct {
 	MangledMetadataSource string
 }
 
-type NBKind uint32
+type NecessaryBindingsKind uint32
 
 const (
-	PartialApply NBKind = iota
+	PartialApply NecessaryBindingsKind = iota
 	AsyncFunction
 )
 
 type NecessaryBindings struct {
-	Kind               NBKind
+	Kind               NecessaryBindingsKind
 	RequirementsSet    int32
 	RequirementsVector int32
 	Conformances       int32

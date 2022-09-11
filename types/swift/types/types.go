@@ -287,15 +287,6 @@ func (t TypeDescriptor) IsCImportedModuleName() bool {
 	return false
 }
 
-type TargetProtocolDescriptor struct {
-	TargetContextDescriptor
-	NameOffset                 int32  // The name of the protocol.
-	NumRequirementsInSignature uint32 // The number of generic requirements in the requirement signature of the protocol.
-	NumRequirements            uint32 /* The number of requirements in the protocol. If any requirements beyond MinimumWitnessTableSizeInWords are present
-	 * in the witness table template, they will be not be overwritten with defaults. */
-	AssociatedTypeNamesOffset int32 // Associated type names, as a space-separated list in the same order as the requirements.
-}
-
 type TargetTypeContextDescriptor struct {
 	TargetContextDescriptor
 	NameOffset        int32 // The name of the type.
@@ -304,6 +295,7 @@ type TargetTypeContextDescriptor struct {
 }
 
 type TargetExtensionContextDescriptor struct {
+	TargetContextDescriptor
 	ExtendedContext int32
 }
 
@@ -312,7 +304,7 @@ type TargetAnonymousContextDescriptor struct {
 }
 
 type TargetEnumDescriptor struct {
-	TargetContextDescriptor
+	TargetTypeContextDescriptor
 	NumPayloadCasesAndPayloadSizeOffset uint32
 	NumEmptyCases                       uint32
 }
@@ -328,13 +320,26 @@ func (e TargetEnumDescriptor) GetPayloadSizeOffset() uint32 {
 }
 
 type TargetStructDescriptor struct {
-	TargetContextDescriptor
+	TargetTypeContextDescriptor
 	NumFields               uint32
 	FieldOffsetVectorOffset uint32
 }
 
-type TargetClassDescriptor struct {
+type TargetProtocolDescriptor struct {
 	TargetContextDescriptor
+	NameOffset                 int32  // The name of the protocol.
+	NumRequirementsInSignature uint32 // The number of generic requirements in the requirement signature of the protocol.
+	NumRequirements            uint32 /* The number of requirements in the protocol. If any requirements beyond MinimumWitnessTableSizeInWords are present
+	 * in the witness table template, they will be not be overwritten with defaults. */
+	AssociatedTypeNamesOffset int32 // Associated type names, as a space-separated list in the same order as the requirements.
+}
+
+type TargetOpaqueTypeDescriptor struct {
+	TargetContextDescriptor
+}
+
+type TargetClassDescriptor struct {
+	TargetTypeContextDescriptor
 	SuperclassType              int32
 	MetadataNegativeSizeInWords uint32
 	MetadataPositiveSizeInWords uint32
@@ -464,8 +469,4 @@ func (f MethodDescriptorFlags) String() string {
 		return f.Kind()
 	}
 	return fmt.Sprintf("%s (%s)", f.Kind(), strings.Join(flags, "|"))
-}
-
-type TargetOpaqueTypeDescriptor struct {
-	TargetContextDescriptor
 }
