@@ -995,6 +995,7 @@ func (f *File) GetSwiftDynamicReplacementInfo() (*types.AutomaticDynamicReplacem
 		}
 
 		f.cr.Seek(int64(off)+int64(sizeOfInt32*2)+int64(rep.ReplacementScope), io.SeekStart)
+
 		var rscope types.DynamicReplacementScope
 		if err := binary.Read(f.cr, f.ByteOrder, &rscope); err != nil {
 			return nil, fmt.Errorf("failed to read %T: %v", rscope, err)
@@ -1021,14 +1022,14 @@ func (f *File) GetSwiftDynamicReplacementInfoForOpaqueTypes() (*types.AutomaticD
 
 		var rep2 types.AutomaticDynamicReplacementsSome
 		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &rep2.Flags); err != nil {
-			return nil, fmt.Errorf("failed to read __swift5_replac2 data: %v", err)
+			return nil, fmt.Errorf("failed to read %T: %v", rep2.Flags, err)
 		}
 		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &rep2.NumReplacements); err != nil {
-			return nil, fmt.Errorf("failed to read __swift5_replac2 data: %v", err)
+			return nil, fmt.Errorf("failed to read %T: %v", rep2.NumReplacements, err)
 		}
 		rep2.Replacements = make([]types.DynamicReplacementSomeDescriptor, rep2.NumReplacements)
-		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &rep2.NumReplacements); err != nil {
-			return nil, fmt.Errorf("failed to read __swift5_replac2 data: %v", err)
+		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &rep2.Replacements); err != nil {
+			return nil, fmt.Errorf("failed to read %T: %v", rep2.Replacements, err)
 		}
 
 		return &rep2, nil
@@ -1037,27 +1038,26 @@ func (f *File) GetSwiftDynamicReplacementInfoForOpaqueTypes() (*types.AutomaticD
 	return nil, fmt.Errorf("MachO has no '__swift5_replac2' section: %w", ErrSwiftSectionError)
 }
 
-// FIXME: implement this
-func (f *File) GetSwiftAccessibleFunctions() (uint64, error) {
+func (f *File) GetSwiftAccessibleFunctions() (*types.AccessibleFunctionsSection, error) {
 	if sec := f.Section("__TEXT", "__swift5_acfuncs"); sec != nil {
 		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
 		if err != nil {
-			return 0, fmt.Errorf("failed to convert vmaddr: %v", err)
+			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
 		}
 		f.cr.Seek(int64(off), io.SeekStart)
 
 		dat := make([]byte, sec.Size)
 		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
-			return 0, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
+			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 		}
 
-		var swiftEntry int32
-		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &swiftEntry); err != nil {
-			return 0, fmt.Errorf("failed to read __swift5_acfuncs data: %v", err)
+		var afsec types.AccessibleFunctionsSection
+		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &afsec); err != nil {
+			return nil, fmt.Errorf("failed to read %T: %v", afsec, err)
 		}
 
-		return sec.Addr + uint64(swiftEntry), nil
+		return &afsec, nil
 	}
 
-	return 0, fmt.Errorf("MachO has no '__swift5_acfuncs' section: %w", ErrSwiftSectionError)
+	return nil, fmt.Errorf("MachO has no '__swift5_acfuncs' section: %w", ErrSwiftSectionError)
 }
