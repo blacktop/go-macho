@@ -11,7 +11,7 @@
 - [ ] `__swift5_types`
 - [x] ~~`__swift5_protos`~~
 - [ ] `__swift5_capture`
-- [ ] `__swift5_replace`
-- [ ] `__swift5_replac2`
-- [ ] `__swift5_acfuncs`
+- [x] `__swift5_replace`
+- [x] `__swift5_replac2`
+- [x] `__swift5_acfuncs`
 - [ ] `__swift5_mpenum`
