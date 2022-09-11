@@ -9,7 +9,7 @@ import (
 	"github.com/blacktop/go-macho/types/swift/fields"
 )
 
-//go:generate stringer -type ContextDescriptorKind,TypeReferenceKind,MetadataInitializationKind -trimprefix=MetadataInit -output types_string.go
+//go:generate stringer -type ContextDescriptorKind,TypeReferenceKind,MetadataInitializationKind -linecomment -output types_string.go
 
 // __TEXT.__swift5_types
 // This section contains an array of 32-bit signed integers.
@@ -19,35 +19,35 @@ type ContextDescriptorKind uint8
 
 const (
 	// This context descriptor represents a module.
-	Module ContextDescriptorKind = 0
+	CDKindModule ContextDescriptorKind = 0 // module
 
 	/// This context descriptor represents an extension.
-	Extension ContextDescriptorKind = 1
+	CDKindExtension ContextDescriptorKind = 1 // extension
 
 	/// This context descriptor represents an anonymous possibly-generic context
 	/// such as a function body.
-	Anonymous ContextDescriptorKind = 2
+	CDKindAnonymous ContextDescriptorKind = 2 // anonymous
 
 	/// This context descriptor represents a protocol context.
-	Protocol ContextDescriptorKind = 3
+	CDKindProtocol ContextDescriptorKind = 3 // protocol
 
 	/// This context descriptor represents an opaque type alias.
-	OpaqueType ContextDescriptorKind = 4
+	CDKindOpaqueType ContextDescriptorKind = 4 // opaque_type
 
 	/// First kind that represents a type of any sort.
-	TypeFirst = 16
+	CDKindTypeFirst = 16 // type_first
 
 	/// This context descriptor represents a class.
-	Class ContextDescriptorKind = TypeFirst
+	CDKindClass ContextDescriptorKind = CDKindTypeFirst // class
 
 	/// This context descriptor represents a struct.
-	Struct ContextDescriptorKind = TypeFirst + 1
+	CDKindStruct ContextDescriptorKind = CDKindTypeFirst + 1 // struct
 
 	/// This context descriptor represents an enum.
-	Enum ContextDescriptorKind = TypeFirst + 2
+	CDKindEnum ContextDescriptorKind = CDKindTypeFirst + 2 // enum
 
 	/// Last kind that represents a type of any sort.
-	TypeLast = 31
+	CDKindTypeLast = 31 // type_last
 )
 
 type TypeContextDescriptorFlags uint16
@@ -203,11 +203,11 @@ type MetadataInitializationKind uint8
 const (
 	// There are either no special rules for initializing the metadata or the metadata is generic.
 	// (Genericity is set in the non-kind-specific descriptor flags.)
-	MetadataInitNone MetadataInitializationKind = 0
+	MetadataInitNone MetadataInitializationKind = 0 // none
 	//The type requires non-trivial singleton initialization using the "in-place" code pattern.
-	MetadataInitSingleton MetadataInitializationKind = 1
+	MetadataInitSingleton MetadataInitializationKind = 1 // singleton
 	// The type requires non-trivial singleton initialization using the "foreign" code pattern.
-	MetadataInitForeign MetadataInitializationKind = 2
+	MetadataInitForeign MetadataInitializationKind = 2 // foreign
 	// We only have two bits here, so if you add a third special kind, include more flag bits in its out-of-line storage.
 )
 
@@ -271,22 +271,36 @@ type TypeDescriptor struct {
 }
 
 type TargetContextDescriptor struct {
-	Flags                 ContextDescriptorFlags
-	ParentOffset          int32
-	NameOffset            int32
-	AccessFunctionOffset  int32
-	FieldDescriptorOffset int32
+	Flags        ContextDescriptorFlags
+	ParentOffset int32
 }
 
 type TargetModuleContextDescriptor struct {
+	TargetContextDescriptor
 	NameOffset int32
 }
 
 func (t TypeDescriptor) IsCImportedModuleName() bool {
-	if t.Kind == Module {
+	if t.Kind == CDKindModule {
 		return t.Name == swift.MANGLING_MODULE_OBJC
 	}
 	return false
+}
+
+type TargetProtocolDescriptor struct {
+	TargetContextDescriptor
+	NameOffset                 int32  // The name of the protocol.
+	NumRequirementsInSignature uint32 // The number of generic requirements in the requirement signature of the protocol.
+	NumRequirements            uint32 /* The number of requirements in the protocol. If any requirements beyond MinimumWitnessTableSizeInWords are present
+	 * in the witness table template, they will be not be overwritten with defaults. */
+	AssociatedTypeNamesOffset int32 // Associated type names, as a space-separated list in the same order as the requirements.
+}
+
+type TargetTypeContextDescriptor struct {
+	TargetContextDescriptor
+	NameOffset        int32 // The name of the type.
+	AccessFunctionPtr int32 // The access function for the type.
+	FieldsOffset      int32 // A pointer to the field descriptor for the type, if any.
 }
 
 type TargetExtensionContextDescriptor struct {
@@ -450,14 +464,6 @@ func (f MethodDescriptorFlags) String() string {
 		return f.Kind()
 	}
 	return fmt.Sprintf("%s (%s)", f.Kind(), strings.Join(flags, "|"))
-}
-
-type TargetProtocolDescriptor struct {
-	TargetContextDescriptor
-	Name                       int32
-	NumRequirementsInSignature uint32
-	NumRequirements            uint32
-	AssociatedTypeNames        int32
 }
 
 type TargetOpaqueTypeDescriptor struct {

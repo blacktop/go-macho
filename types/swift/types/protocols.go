@@ -1,18 +1,16 @@
-package protocols
+package types
 
 import (
 	"fmt"
-
-	"github.com/blacktop/go-macho/types/swift/types"
 )
 
-//go:generate stringer -type ProtocolContextDescriptorFlags,GRKind,PRKind,referenceKind -trimprefix=GRKind -output types_string.go
+//go:generate stringer -type GenericRequirementKind,ProtocolRequirementKind -linecomment -output protocols_string.go
 
 // Protocol swift protocol object
 type Protocol struct {
 	Name           string
 	AssociatedType string
-	Parent         *Protocol
+	Parent         string
 	Descriptor
 	SignatureRequirements []TargetGenericRequirementDescriptor
 	Requirements          []TargetProtocolRequirement
@@ -53,7 +51,7 @@ const (
 // This section contains an array of 32-bit signed integers.
 // Each integer is a relative offset that points to a protocol descriptor in the __TEXT.__const section.
 type Descriptor struct {
-	Flags                      types.ContextDescriptorFlags // overide kind specific flags w/ ProtocolContextDescriptorFlags TODO: handle kind specific flags
+	Flags                      ContextDescriptorFlags // overide kind specific flags w/ ProtocolContextDescriptorFlags TODO: handle kind specific flags
 	ParentOffset               int32
 	NameOffset                 int32  // The name of the protocol.
 	NumRequirementsInSignature uint32 // The number of generic requirements in the requirement signature of the protocol.
@@ -74,15 +72,15 @@ func (d Descriptor) String() string {
 		d.Flags, d.NumRequirementsInSignature, d.NumRequirements)
 }
 
-type GRKind uint8
+type GenericRequirementKind uint8
 
 const (
-	GRKindProtocol  GRKind = 0 // A protocol requirement.
-	GRKindSameType  GRKind = 1 // A same-type requirement.
-	GRKindBaseClass GRKind = 2 // A base class requirement.
-	// A "same-conformance" requirement, implied by a same-type or base-class constraint that binds a parameter with protocol requirements.
-	GRKindSameConformance GRKind = 3
-	GRKindLayout          GRKind = 0x1F // A layout constraint.
+	GRKindProtocol  GenericRequirementKind = 0 // protocol
+	GRKindSameType  GenericRequirementKind = 1 // same-type
+	GRKindBaseClass GenericRequirementKind = 2 // base class
+	// implied by a same-type or base-class constraint that binds a parameter with protocol requirements.
+	GRKindSameConformance GenericRequirementKind = 3    // same-conformance
+	GRKindLayout          GenericRequirementKind = 0x1F // layout
 )
 
 type GenericRequirementFlags uint32
@@ -93,8 +91,8 @@ func (f GenericRequirementFlags) HasKeyArgument() bool {
 func (f GenericRequirementFlags) HasExtraArgument() bool {
 	return (f & 0x40) != 0
 }
-func (f GenericRequirementFlags) Kind() GRKind {
-	return GRKind(f & 0x1F)
+func (f GenericRequirementFlags) Kind() GenericRequirementKind {
+	return GenericRequirementKind(f & 0x1F)
 }
 func (f GenericRequirementFlags) String() string {
 	return fmt.Sprintf("key_arg: %t, extra_arg: %t, kind: %s", f.HasKeyArgument(), f.HasExtraArgument(), f.Kind())
@@ -106,24 +104,31 @@ type TargetGenericRequirementDescriptor struct {
 	TypeOrProtocolOrConformanceOrLayout int32 // UNION: flags determine type
 }
 
-type PRKind uint8
+const (
+	// Bit used to indicate that an associated type witness is a pointer to a mangled name (vs. a pointer to metadata).
+	AssociatedTypeMangledNameBit uint32 = 0x01
+	// Prefix byte used to identify an associated type whose mangled name is relative to the protocol's context rather than the conforming type's context.
+	AssociatedTypeInProtocolContextByte uint8 = 0xFF
+)
+
+type ProtocolRequirementKind uint8
 
 const (
-	BaseProtocol PRKind = iota
-	Method
-	Init
-	Getter
-	Setter
-	ReadCoroutine
-	ModifyCoroutine
-	AssociatedTypeAccessFunction
-	AssociatedConformanceAccessFunction
+	PRKindBaseProtocol                        ProtocolRequirementKind = iota // base protocol
+	PRKindMethodc                                                            // method
+	PRKindInit                                                               // initializer
+	PRKindGetter                                                             // getter
+	PRKindSetter                                                             // setter
+	PRKindReadCoroutine                                                      // read coroutine
+	PRKindModifyCoroutine                                                    // modify coroutine
+	PRKindAssociatedTypeAccessFunction                                       // associated type access function
+	PRKindAssociatedConformanceAccessFunction                                // associated conformance access function
 )
 
 type ProtocolRequirementFlags uint32
 
-func (f ProtocolRequirementFlags) Kind() PRKind {
-	return PRKind(f & 0x0F)
+func (f ProtocolRequirementFlags) Kind() ProtocolRequirementKind {
+	return ProtocolRequirementKind(f & 0x0F)
 }
 func (f ProtocolRequirementFlags) IsInstance() bool {
 	return (f & 0x10) != 0
@@ -132,14 +137,14 @@ func (f ProtocolRequirementFlags) IsAsync() bool {
 	return (f & 0x20) != 0
 }
 func (f ProtocolRequirementFlags) IsSignedWithAddress() bool {
-	return f.Kind() != BaseProtocol
+	return f.Kind() != PRKindBaseProtocol
 }
 func (f ProtocolRequirementFlags) ExtraDiscriminator() uint16 {
 	return uint16(f >> 16)
 }
 func (f ProtocolRequirementFlags) IsFunctionImpl() bool {
 	switch f.Kind() {
-	case Method, Init, Getter, Setter, ReadCoroutine, ModifyCoroutine:
+	case PRKindMethodc, PRKindInit, PRKindGetter, PRKindSetter, PRKindReadCoroutine, PRKindModifyCoroutine:
 		return !f.IsAsync()
 	default:
 		return false
@@ -176,37 +181,6 @@ const (
 
 	HasResilientWitnessesMask  ConformanceFlags = 0x01 << 16
 	HasGenericWitnessTableMask ConformanceFlags = 0x01 << 17
-)
-
-// Kinds of type metadata/protocol conformance records.
-type referenceKind uint32
-
-const (
-	// The conformance is for a nominal type referenced directly;
-	// getTypeDescriptor() points to the type context descriptor.
-	DirectTypeDescriptor referenceKind = 0x00
-
-	// The conformance is for a nominal type referenced indirectly;
-	// getTypeDescriptor() points to the type context descriptor.
-	IndirectTypeDescriptor referenceKind = 0x01
-
-	// The conformance is for an Objective-C class that should be looked up
-	// by class name.
-	DirectObjCClassName referenceKind = 0x02
-
-	// The conformance is for an Objective-C class that has no nominal type
-	// descriptor.
-	// getIndirectObjCClass() points to a variable that contains the pointer to
-	// the class object, which then requires a runtime call to get metadata.
-	//
-	// On platforms without Objective-C interoperability, this case is
-	// unused.
-	IndirectObjCClass referenceKind = 0x03
-
-	// We only reserve three bits for this in the various places we store it.
-
-	// First_Kind = DirectTypeDescriptor
-	// Last_Kind  = IndirectObjCClass
 )
 
 // IsRetroactive Is the conformance "retroactive"?
@@ -247,8 +221,8 @@ func (f ConformanceFlags) HasGenericWitnessTable() bool {
 }
 
 // GetTypeReferenceKind retrieve the type reference kind kind.
-func (f ConformanceFlags) GetTypeReferenceKind() referenceKind {
-	return referenceKind((f & TypeMetadataKindMask) >> TypeMetadataKindShift)
+func (f ConformanceFlags) GetTypeReferenceKind() TypeReferenceKind {
+	return TypeReferenceKind((f & TypeMetadataKindMask) >> TypeMetadataKindShift)
 }
 
 func (f ConformanceFlags) String() string {
@@ -276,7 +250,7 @@ type TargetProtocolConformanceDescriptor struct {
 type ConformanceDescriptor struct {
 	TargetProtocolConformanceDescriptor
 	Protocol     string
-	TypeRef      *types.TypeDescriptor
+	TypeRef      *TypeDescriptor
 	WitnessTable int32
 }
 

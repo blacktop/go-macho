@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-//go:generate stringer -type=FieldDescriptorKind,FieldRecordFlags -output fields_string.go
+//go:generate stringer -type=FieldDescriptorKind,FieldRecordFlags -linecomment -output fields_string.go
 
 // ref: swift/include/swift/Reflection/Records.h
 
@@ -31,9 +31,9 @@ type FieldDescriptorKind uint16
 
 const (
 	// Swift nominal types.
-	Struct FieldDescriptorKind = iota
-	Class
-	Enum
+	FDKindStruct FieldDescriptorKind = iota // struct
+	FDKindClass                             // class
+	FDKindEnum                              // enum
 
 	// Fixed-size multi-payload enums have a special descriptor format that
 	// encodes spare bits.
@@ -41,22 +41,22 @@ const (
 	// FIXME: Actually implement this. For now, a descriptor with this kind
 	// just means we also have a builtin descriptor from which we get the
 	// size and alignment.
-	MultiPayloadEnum
+	FDKindMultiPayloadEnum // multi-payload enum
 
 	// A Swift opaque protocol. There are no fields, just a record for the
 	// type itself.
-	Protocol
+	FDKindProtocol // protocol
 
 	// A Swift class-bound protocol.
-	ClassProtocol
+	FDKindClassProtocol // class protocol
 
 	// An Objective-C protocol, which may be imported or defined in Swift.
-	ObjCProtocol
+	FDKindObjCProtocol // objc protocol
 
 	// An Objective-C class, which may be imported or defined in Swift.
 	// In the former case, field type metadata is not emitted, and
 	// must be obtained from the Objective-C runtime.
-	ObjCClass
+	FDKindObjCClass // objc class
 )
 
 type FDHeader struct {
@@ -95,13 +95,13 @@ type Field struct {
 }
 
 func (f Field) IsEnum() bool {
-	return f.Descriptor.Kind == Enum || f.Descriptor.Kind == MultiPayloadEnum
+	return f.Descriptor.Kind == FDKindEnum || f.Descriptor.Kind == FDKindMultiPayloadEnum
 }
 func (f Field) IsClass() bool {
-	return f.Descriptor.Kind == Class || f.Descriptor.Kind == ObjCClass
+	return f.Descriptor.Kind == FDKindClass || f.Descriptor.Kind == FDKindObjCClass
 }
 func (f Field) IsProtocol() bool {
-	return f.Descriptor.Kind == Protocol || f.Descriptor.Kind == ClassProtocol || f.Descriptor.Kind == ObjCProtocol
+	return f.Descriptor.Kind == FDKindProtocol || f.Descriptor.Kind == FDKindClassProtocol || f.Descriptor.Kind == FDKindObjCProtocol
 }
 func (f Field) String() string {
 	var recs string

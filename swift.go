@@ -10,7 +10,6 @@ import (
 	"github.com/blacktop/go-macho/pkg/fixupchains"
 	"github.com/blacktop/go-macho/types/swift"
 	"github.com/blacktop/go-macho/types/swift/fields"
-	"github.com/blacktop/go-macho/types/swift/protocols"
 	"github.com/blacktop/go-macho/types/swift/types"
 )
 
@@ -18,8 +17,8 @@ const sizeOfInt32 = 4
 const sizeOfInt64 = 8
 
 // GetSwiftProtocols parses all the protocols in the __TEXT.__swift5_protos section
-func (f *File) GetSwiftProtocols() ([]protocols.Protocol, error) {
-	var protos []protocols.Protocol
+func (f *File) GetSwiftProtocols() ([]types.Protocol, error) {
+	var protos []types.Protocol
 
 	if sec := f.Section("__TEXT", "__swift5_protos"); sec != nil {
 		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
@@ -44,20 +43,58 @@ func (f *File) GetSwiftProtocols() ([]protocols.Protocol, error) {
 
 			f.cr.Seek(offset, io.SeekStart)
 
-			var proto protocols.Protocol
+			var proto types.Protocol
 			if err := binary.Read(f.cr, f.ByteOrder, &proto.Descriptor); err != nil {
 				return nil, fmt.Errorf("failed to read protocols descriptor: %v", err)
 			}
 
 			if proto.NumRequirementsInSignature > 0 {
-				proto.SignatureRequirements = make([]protocols.TargetGenericRequirementDescriptor, proto.NumRequirementsInSignature)
+				currentOffset, _ := f.cr.Seek(0, io.SeekCurrent)
+				proto.SignatureRequirements = make([]types.TargetGenericRequirementDescriptor, proto.NumRequirementsInSignature)
 				if err := binary.Read(f.cr, f.ByteOrder, &proto.SignatureRequirements); err != nil {
 					return nil, fmt.Errorf("failed to read protocols requirements in signature : %v", err)
 				}
+				name, err := f.makeSymbolicMangledNameStringRef(currentOffset + 4 + int64(proto.SignatureRequirements[0].Param))
+				if err != nil {
+					return nil, fmt.Errorf("failed to read protocols requirements in signature : %v", err)
+				}
+				fmt.Printf("%s: %s\n", name, proto.SignatureRequirements[0].Flags)
+				switch proto.SignatureRequirements[0].Flags.Kind() {
+				case types.GRKindProtocol:
+					fmt.Println("protocol")
+					off := currentOffset + 8 + int64(proto.SignatureRequirements[0].TypeOrProtocolOrConformanceOrLayout)
+					_ = off
+					var ptr uint64
+					if (off & 1) == 1 {
+						off = off &^ 1
+						ptr, _ = f.GetPointer(uint64(off))
+					} else {
+						ptr = uint64(offset + int64(off))
+					}
+
+					if fixupchains.DcpArm64eIsBind(ptr) {
+						name, err = f.GetBindName(ptr)
+						if err != nil {
+							return nil, fmt.Errorf("failed to read protocol name: %v", err)
+						}
+					} else {
+						name, err = f.GetCString(f.SlidePointer(ptr))
+						if err != nil {
+							return nil, fmt.Errorf("failed to read protocol name: %v", err)
+						}
+					}
+				case types.GRKindSameType:
+					fmt.Println("same type")
+				case types.GRKindSameConformance:
+					fmt.Println("same conformance")
+				case types.GRKindLayout:
+					fmt.Println("layout")
+				}
+				f.cr.Seek(currentOffset+int64(binary.Size(proto.SignatureRequirements)), io.SeekStart)
 			}
 
 			if proto.NumRequirements > 0 {
-				proto.Requirements = make([]protocols.TargetProtocolRequirement, proto.NumRequirements)
+				proto.Requirements = make([]types.TargetProtocolRequirement, proto.NumRequirements)
 				if err := binary.Read(f.cr, f.ByteOrder, &proto.Requirements); err != nil {
 					return nil, fmt.Errorf("failed to read protocols requirements: %v", err)
 				}
@@ -72,22 +109,22 @@ func (f *File) GetSwiftProtocols() ([]protocols.Protocol, error) {
 				parentOffset := offset + 4 + int64(proto.Descriptor.ParentOffset)
 				f.cr.Seek(parentOffset, io.SeekStart)
 
-				proto.Parent = new(protocols.Protocol)
-				if err := binary.Read(f.cr, f.ByteOrder, &proto.Parent.Descriptor); err != nil {
+				var pcDesc types.TargetModuleContextDescriptor
+				if err := binary.Read(f.cr, f.ByteOrder, &pcDesc); err != nil {
 					return nil, fmt.Errorf("failed to read protocols parent descriptor: %v", err)
 				}
 
-				proto.Parent.Name, err = f.GetCStringAtOffset(parentOffset + int64(sizeOfInt32*2) + int64(proto.Parent.Descriptor.NameOffset))
+				proto.Parent, err = f.GetCStringAtOffset(parentOffset + int64(sizeOfInt32*2) + int64(pcDesc.NameOffset))
 				if err != nil {
 					return nil, fmt.Errorf("failed to read protocols parent name: %v", err)
 				}
 
-				if proto.Parent.Descriptor.ParentOffset != 0 { // TODO: what if parent has parent ?
-					fmt.Printf("found a grand parent while parsing %s", proto.Parent.Name) // FIXME: if this happens this should be recursive
+				if pcDesc.ParentOffset != 0 { // TODO: what if parent has parent ?
+					fmt.Printf("found a grand parent while parsing %s", proto.Parent) // FIXME: if this happens this should be recursive
 				}
 			}
 
-			if proto.AssociatedTypeNamesOffset != 0 { // FIXME: this needs to be tested
+			if proto.AssociatedTypeNamesOffset != 0 {
 				proto.AssociatedType, err = f.GetCStringAtOffset(offset + int64(sizeOfInt32*5) + int64(proto.AssociatedTypeNamesOffset))
 				if err != nil {
 					return nil, fmt.Errorf("failed to read protocols assocated type names: %v", err)
@@ -104,8 +141,8 @@ func (f *File) GetSwiftProtocols() ([]protocols.Protocol, error) {
 }
 
 // GetSwiftProtocolConformances parses all the protocol conformances in the __TEXT.__swift5_proto section
-func (f *File) GetSwiftProtocolConformances() ([]protocols.ConformanceDescriptor, error) {
-	var protoConfDescs []protocols.ConformanceDescriptor
+func (f *File) GetSwiftProtocolConformances() ([]types.ConformanceDescriptor, error) {
+	var protoConfDescs []types.ConformanceDescriptor
 
 	if sec := f.Section("__TEXT", "__swift5_proto"); sec != nil {
 		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
@@ -130,7 +167,7 @@ func (f *File) GetSwiftProtocolConformances() ([]protocols.ConformanceDescriptor
 
 			f.cr.Seek(offset, io.SeekStart)
 
-			var pcd protocols.ConformanceDescriptor
+			var pcd types.ConformanceDescriptor
 			if err := binary.Read(f.cr, f.ByteOrder, &pcd.TargetProtocolConformanceDescriptor); err != nil {
 				return nil, fmt.Errorf("failed to read swift ProtocolDescriptor: %v", err)
 			}
@@ -160,7 +197,7 @@ func (f *File) GetSwiftProtocolConformances() ([]protocols.ConformanceDescriptor
 
 			// Parse the TargetTypeReference
 			switch pcd.Flags.GetTypeReferenceKind() {
-			case protocols.DirectTypeDescriptor:
+			case types.DirectTypeDescriptor:
 				if (pcd.TypeRefOffsest & 1) == 1 {
 					pcd.TypeRefOffsest = pcd.TypeRefOffsest &^ 1
 					f.cr.Seek(offset+int64(pcd.TypeRefOffsest), io.SeekStart)
@@ -174,11 +211,11 @@ func (f *File) GetSwiftProtocolConformances() ([]protocols.ConformanceDescriptor
 				if err != nil {
 					return nil, fmt.Errorf("failed to read type: %v", err)
 				}
-			case protocols.IndirectTypeDescriptor:
+			case types.IndirectTypeDescriptor:
 				fmt.Println("SUP - IndirectTypeDescriptor")
-			case protocols.DirectObjCClassName:
+			case types.DirectObjCClassName:
 				fmt.Println("SUP - DirectObjCClassName")
-			case protocols.IndirectObjCClass:
+			case types.IndirectObjCClass:
 				fmt.Println("SUP - IndirectObjCClass")
 			}
 
@@ -234,7 +271,7 @@ func (f *File) readType(offset int64) (*types.TypeDescriptor, error) {
 
 	f.cr.Seek(offset, io.SeekStart)
 
-	var tDesc types.TargetContextDescriptor
+	var tDesc types.TargetTypeContextDescriptor
 	if err := binary.Read(f.cr, f.ByteOrder, &tDesc); err != nil {
 		return nil, fmt.Errorf("failed to read swift type context descriptor: %v", err)
 	}
@@ -264,25 +301,25 @@ func (f *File) readType(offset int64) (*types.TypeDescriptor, error) {
 	_ = metadataInitSize // TODO: use this in size/offset calculations
 
 	switch typ.Kind {
-	case types.Module:
+	case types.CDKindModule:
 		var mod types.TargetModuleContextDescriptor
 		if err := binary.Read(f.cr, f.ByteOrder, &mod); err != nil {
 			return nil, fmt.Errorf("failed to read swift module descriptor: %v", err)
 		}
 		typ.Type = &mod
-	case types.Extension:
+	case types.CDKindExtension:
 		var ext types.TargetExtensionContextDescriptor
 		if err := binary.Read(f.cr, f.ByteOrder, &ext); err != nil {
 			return nil, fmt.Errorf("failed to read swift extension descriptor: %v", err)
 		}
 		typ.Type = &ext
-	case types.Anonymous:
+	case types.CDKindAnonymous:
 		var anon types.TargetAnonymousContextDescriptor
 		if err := binary.Read(f.cr, f.ByteOrder, &anon); err != nil {
 			return nil, fmt.Errorf("failed to read swift anonymous descriptor: %v", err)
 		}
 		typ.Type = &anon
-	case types.Class:
+	case types.CDKindClass:
 		var cD types.TargetClassDescriptor
 		if err := binary.Read(f.cr, f.ByteOrder, &cD); err != nil {
 			return nil, fmt.Errorf("failed to read %T: %v", cD, err)
@@ -317,7 +354,7 @@ func (f *File) readType(offset int64) (*types.TypeDescriptor, error) {
 			typ.VTable = &v
 		}
 		typ.Type = &cD
-	case types.Enum:
+	case types.CDKindEnum:
 		var eD types.TargetEnumDescriptor
 		if err := binary.Read(f.cr, f.ByteOrder, &eD); err != nil {
 			return nil, fmt.Errorf("failed to read %T: %v", eD, err)
@@ -330,7 +367,7 @@ func (f *File) readType(offset int64) (*types.TypeDescriptor, error) {
 			typ.Generic = &g
 		}
 		typ.Type = &eD
-	case types.Struct:
+	case types.CDKindStruct:
 		var sD types.TargetStructDescriptor
 		if err := binary.Read(f.cr, f.ByteOrder, &sD); err != nil {
 			return nil, fmt.Errorf("failed to read %T: %v", sD, err)
@@ -349,13 +386,13 @@ func (f *File) readType(offset int64) (*types.TypeDescriptor, error) {
 			}
 		}
 		typ.Type = &sD
-	case types.Protocol:
+	case types.CDKindProtocol:
 		var pD types.TargetProtocolDescriptor
 		if err := binary.Read(f.cr, f.ByteOrder, &pD); err != nil {
 			return nil, fmt.Errorf("failed to read %T: %v", pD, err)
 		}
 		typ.Type = &pD
-	case types.OpaqueType:
+	case types.CDKindOpaqueType:
 		var oD types.TargetOpaqueTypeDescriptor
 		if err := binary.Read(f.cr, f.ByteOrder, &oD); err != nil {
 			return nil, fmt.Errorf("failed to read %T: %v", oD, err)
@@ -372,7 +409,7 @@ func (f *File) readType(offset int64) (*types.TypeDescriptor, error) {
 	parentOffset := offset + sizeOfInt32 + int64(tDesc.ParentOffset)
 	f.cr.Seek(parentOffset, io.SeekStart)
 
-	var parentDesc types.TargetContextDescriptor
+	var parentDesc types.TargetModuleContextDescriptor
 	if err := binary.Read(f.cr, f.ByteOrder, &parentDesc); err != nil {
 		return nil, fmt.Errorf("failed to read type swift parent type context descriptor: %v", err)
 	}
@@ -384,7 +421,7 @@ func (f *File) readType(offset int64) (*types.TypeDescriptor, error) {
 		fmt.Println("ERROR")
 	}
 
-	typ.AccessFunction = uint64(int64(typ.Address) + int64(sizeOfInt32*3) + int64(tDesc.AccessFunctionOffset))
+	typ.AccessFunction = uint64(int64(typ.Address) + int64(sizeOfInt32*3) + int64(tDesc.AccessFunctionPtr))
 
 	if typ.VTable != nil {
 		fmt.Println("METHODS")
@@ -398,8 +435,8 @@ func (f *File) readType(offset int64) (*types.TypeDescriptor, error) {
 		}
 	}
 
-	if tDesc.FieldDescriptorOffset != 0 {
-		offset += int64(sizeOfInt32*4) + int64(tDesc.FieldDescriptorOffset)
+	if tDesc.FieldsOffset != 0 {
+		offset += int64(sizeOfInt32*4) + int64(tDesc.FieldsOffset)
 		fd, err := f.readField(offset, typ.FieldOffsets...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read swift field: %v", err)
@@ -639,7 +676,7 @@ func (f *File) makeSymbolicMangledNameStringRef(offset int64) (string, error) {
 	switch uint8(controlData[0]) {
 	case 1: // Reference points directly to context descriptor
 		var err error
-		var tDesc types.TargetContextDescriptor
+		var tDesc types.TargetModuleContextDescriptor
 		if err := binary.Read(f.cr, f.ByteOrder, &tDesc); err != nil {
 			return "", fmt.Errorf("failed to read types.TypeDescriptor: %v", err)
 		}
