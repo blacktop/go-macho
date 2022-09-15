@@ -1167,15 +1167,20 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &led); err != nil {
 				return nil, fmt.Errorf("failed to read LC_DATA_IN_CODE: %v", err)
 			}
-
 			l := new(DataInCode)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			// TODO: finish parsing Dice entries
-			// var e DataInCodeEntry
 			l.Offset = led.Offset
 			l.Size = led.Size
+			ldat := make([]byte, l.Size)
+			if _, err := f.cr.ReadAt(ldat, int64(l.Offset)); err != nil {
+				return nil, fmt.Errorf("failed to read DataInCode data at offset=%#x; %v", int64(led.Offset), err)
+			}
+			l.Entries = make([]types.DataInCodeEntry, len(ldat)/binary.Size(types.DataInCodeEntry{}))
+			if err := binary.Read(bytes.NewReader(ldat), bo, &l.Entries); err != nil {
+				return nil, fmt.Errorf("failed to read LC_DATA_IN_CODE entries: %v", err)
+			}
 			f.Loads[i] = l
 		case types.LC_SOURCE_VERSION:
 			var sv types.SourceVersionCmd
