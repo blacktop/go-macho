@@ -4,7 +4,7 @@
 
 - [x] ~~`__swift5_entry`~~
 - [x] ~~`__swift5_builtin`~~
-- [x] ~~`__swift5_reflstr`~~~
+- [x] ~~`__swift5_reflstr`~~
 - [x] ~~`__swift5_fieldmd`~~
 - [x] ~~`__swift5_assocty`~~
 - [ ] `__swift5_proto`
@@ -14,4 +14,4 @@
 - [x] `__swift5_replace`
 - [x] `__swift5_replac2`
 - [x] `__swift5_acfuncs`
-- [ ] `__swift5_mpenum`
+- [ ] `__swift5_mpenum` ??

@@ -368,6 +368,9 @@ func (f *File) readType(offset int64) (*types.TypeDescriptor, error) {
 			}
 			typ.Generic = &g
 		}
+		if eD.NumPayloadCasesAndPayloadSizeOffset != 0 {
+			fmt.Println("NumPayloadCasesAndPayloadSizeOffset: ", eD.NumPayloadCasesAndPayloadSizeOffset)
+		}
 		typ.Type = &eD
 	case types.CDKindStruct:
 		var sD types.TargetStructDescriptor
@@ -391,32 +394,13 @@ func (f *File) readType(offset int64) (*types.TypeDescriptor, error) {
 		}
 		current, _ = f.cr.Seek(0, io.SeekCurrent)
 		_ = current
-		// var tt types.TargetTypeContextDescriptor
-		// if err := binary.Read(f.cr, f.ByteOrder, &tt); err != nil {
-		// 	return nil, fmt.Errorf("failed to read type context descriptor: %v", err)
-		// }
-
-		// cur := current + int64(tt.ParentOffset)
-		// var ptr uint64
-		// if (cur & 1) == 1 {
-		// 	cur = cur &^ 1
-		// 	ptr, _ = f.GetPointer(uint64(cur))
-		// } else {
-		// 	ptr, _ = f.GetPointer(uint64(cur))
-		// }
-		// var name string
-		// if fixupchains.DcpArm64eIsBind(ptr) {
-		// 	name, err = f.GetBindName(ptr)
-		// 	if err != nil {
-		// 		return nil, fmt.Errorf("failed to read protocol name: %v", err)
-		// 	}
-		// } else {
-		// 	name, err = f.GetCString(f.SlidePointer(ptr))
-		// 	if err != nil {
-		// 		return nil, fmt.Errorf("failed to read protocol name: %v", err)
-		// 	}
-		// }
-		// _ = name
+		if sD.Flags.KindSpecific().MetadataInitialization() == types.MetadataInitSingleton {
+			var md types.TargetSingletonMetadataInitialization
+			if err := binary.Read(f.cr, f.ByteOrder, &md); err != nil {
+				return nil, fmt.Errorf("failed to read singleton metadata initialization: %v", err)
+			}
+			fmt.Println(md)
+		}
 		typ.Type = &sD
 	case types.CDKindProtocol:
 		var pD types.TargetProtocolDescriptor
@@ -859,19 +843,18 @@ func (f *File) GetSwiftClosures() ([]swift.CaptureDescriptor, error) {
 				return nil, fmt.Errorf("failed to read swift %T: %v", capture.CaptureDescriptorHeader, err)
 			}
 
-			currOffset += int64(binary.Size(capture.CaptureDescriptorHeader))
-
 			if capture.NumCaptureTypes > 0 {
+				numCapsOffset := currOffset + int64(binary.Size(capture.CaptureDescriptorHeader))
 				captureTypeRecords := make([]swift.CaptureTypeRecord, capture.NumCaptureTypes)
 				if err := binary.Read(r, f.ByteOrder, &captureTypeRecords); err != nil {
 					return nil, fmt.Errorf("failed to read %T: %v", captureTypeRecords, err)
 				}
 				for _, capRecord := range captureTypeRecords {
-					name, err := f.makeSymbolicMangledNameStringRef(currOffset + int64(capRecord.MangledTypeName))
+					name, err := f.makeSymbolicMangledNameStringRef(numCapsOffset + int64(capRecord.MangledTypeName))
 					if err != nil {
-						return nil, fmt.Errorf("failed to read mangled type name at offset %#x: %v", currOffset+int64(capRecord.MangledTypeName), err)
+						return nil, fmt.Errorf("failed to read mangled type name at offset %#x: %v", numCapsOffset+int64(capRecord.MangledTypeName), err)
 					}
-					currOffset += int64(binary.Size(capRecord))
+					numCapsOffset += int64(binary.Size(capRecord))
 					capture.CaptureTypes = append(capture.CaptureTypes, name)
 				}
 			}

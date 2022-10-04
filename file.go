@@ -1950,9 +1950,20 @@ func (f *File) GetFunctionForVMAddr(addr uint64) (types.Function, error) {
 	return types.Function{}, fmt.Errorf("address %#016x not in any function", addr)
 }
 
+// GetFunctionsForRange returns the functions contained in a given virual address range
+func (f *File) GetFunctionsForRange(start, end uint64) ([]types.Function, error) {
+	var funcs []types.Function
+	for _, fn := range f.GetFunctions() {
+		if start >= fn.StartAddr && fn.StartAddr < end {
+			funcs = append(funcs, fn)
+		}
+	}
+	return funcs, nil
+}
+
 func (f *File) GetFunctionData(fn types.Function) ([]byte, error) {
 	data := make([]byte, fn.EndAddr-fn.StartAddr)
-	offset, err := f.GetOffset(fn.StartAddr)
+	offset, err := f.vma.GetOffset(fn.StartAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get offset of function start: %v", err)
 	}

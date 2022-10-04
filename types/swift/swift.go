@@ -311,39 +311,3 @@ type CaptureDescriptor struct {
 
 // __TEXT.__swift5_reflstr
 // This section contains an array of C strings. The strings are field names for the properties of the metadata defined in other sections.
-
-// __TEXT.__swift5_replac
-// This section contains dynamic replacement information.
-// This is essentially the Swift equivalent of Objective-C method swizzling.
-
-type DynamicReplacementDescriptor struct {
-	ReplacedFunctionKey int32
-	ReplacementFunction int32
-	ChainEntry          int32
-	Flags               uint32
-}
-
-type ReplacementScope struct {
-	Flags           uint32
-	NumReplacements uint32
-}
-
-type AutomaticReplacements struct {
-	Flags           uint32
-	NumReplacements uint32 // hard coded to 1
-	Replacements    int32
-}
-
-// __TEXT.__swift5_replac2
-// This section contains dynamica replacement information for opaque types.
-
-type Replacement2 struct {
-	Original    int32
-	Replacement int32
-}
-
-type AutomaticReplacementsSome struct {
-	Flags           uint32
-	NumReplacements uint32
-	Replacements    []Replacement2
-}

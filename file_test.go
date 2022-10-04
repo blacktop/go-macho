@@ -679,6 +679,29 @@ func TestNewFileWithSwift(t *testing.T) {
 	for _, t := range typs {
 		fmt.Println(t)
 	}
+}
 
-	fmt.Println(got.FileTOC.String())
+func TestNewFileWithObjC(t *testing.T) {
+	f, err := os.Open(fname)
+
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			t.Skipf("file %s not found", fname)
+		}
+		t.Fatal(err)
+	}
+
+	got, err := NewFile(f)
+	if err != nil {
+		t.Fatalf("NewFile() error = %v", err)
+		return
+	}
+
+	classes, err := got.GetObjCClasses()
+	if err != nil {
+		t.Fatalf("GetObjCClasses() error = %v", err)
+	}
+	for _, class := range classes {
+		fmt.Println(class)
+	}
 }
