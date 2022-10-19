@@ -1963,13 +1963,8 @@ func (f *File) GetFunctionsForRange(start, end uint64) ([]types.Function, error)
 
 func (f *File) GetFunctionData(fn types.Function) ([]byte, error) {
 	data := make([]byte, fn.EndAddr-fn.StartAddr)
-	offset, err := f.vma.GetOffset(fn.StartAddr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get offset of function start: %v", err)
-	}
-	_, err = f.ReadAt(data, int64(offset))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read data at offset %#x: %v", int64(offset), err)
+	if _, err := f.cr.ReadAtAddr(data, fn.StartAddr); err != nil {
+		return nil, fmt.Errorf("failed to read data at address %#x: %v", fn.StartAddr, err)
 	}
 	return data, nil
 }
