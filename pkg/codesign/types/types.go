@@ -23,6 +23,7 @@ type CodeSignature struct {
 	CMSSignature    []byte
 	Entitlements    string
 	EntitlementsDER []byte
+	Errors          []error
 }
 
 type magic uint32

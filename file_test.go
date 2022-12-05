@@ -697,6 +697,14 @@ func TestNewFileWithObjC(t *testing.T) {
 		return
 	}
 
+	nlcats, err := got.GetObjCNonLazyCategories()
+	if err != nil {
+		t.Fatalf("GetObjCNonLazyCategories() error = %v", err)
+	}
+	for _, cat := range nlcats {
+		fmt.Println(cat)
+	}
+
 	classes, err := got.GetObjCClasses()
 	if err != nil {
 		t.Fatalf("GetObjCClasses() error = %v", err)

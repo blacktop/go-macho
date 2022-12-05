@@ -110,7 +110,7 @@ func ParseCodeSignature(cmddat []byte) (*types.CodeSignature, error) {
 		case types.CSSLOT_TICKETSLOT:
 			fallthrough // TODO 🤷‍♂️
 		default:
-			fmt.Printf("Found unsupported codesign slot %s, please notify author\n", index.Type)
+			cs.Errors = append(cs.Errors, fmt.Errorf("unknown slot type: %s, please notify author", index.Type))
 		}
 	}
 	return cs, nil
@@ -138,7 +138,7 @@ func parseCodeDirectory(r *bytes.Reader, offset uint32) (*types.CodeDirectory, e
 		h.Write(cdData)
 		cd.CDHash = fmt.Sprintf("%x", h.Sum(nil))
 	default:
-		fmt.Printf("Found unsupported code directory hash type %s, please notify author\n", cd.Header.HashType)
+		cd.CDHash = fmt.Sprintf("unsupported code directory hash type %s, please notify author\n", cd.Header.HashType)
 	}
 
 	// Parse version
