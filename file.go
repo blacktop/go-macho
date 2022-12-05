@@ -1512,6 +1512,20 @@ func (f *File) pointerSize() uint64 {
 	return 4
 }
 
+func (f *File) has16KPages() bool {
+	switch f.CPU {
+	case types.CPUArm64, types.CPUArm6432:
+		return true
+	case types.CPUArm:
+		if f.Type != types.MH_KEXT_BUNDLE {
+			return false
+		}
+		return f.SubCPU == types.CPUSubtypeArmV7K
+	default:
+		return false
+	}
+}
+
 func (f *File) preferredLoadAddress() uint64 {
 	for _, s := range f.Segments() {
 		if strings.EqualFold(s.Name, "__TEXT") {
