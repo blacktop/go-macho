@@ -25,10 +25,6 @@ import (
 	"github.com/blacktop/go-macho/types/objc"
 )
 
-const (
-	pageAlign = 12 // 4096 = 1 << 12
-)
-
 var ErrMachOSectionNotFound = errors.New("MachO missing required section")
 var ErrMachODyldInfoNotFound = errors.New("LC_DYLD_INFO|LC_DYLD_INFO_ONLY not found")
 
