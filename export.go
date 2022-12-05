@@ -94,7 +94,7 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 		return fmt.Errorf("failed to optimize load commands: %v", err)
 	}
 
-	if inCache {
+	if inCache && f.Type != types.MH_KEXT_BUNDLE {
 		lebuf, err = f.optimizeLinkedit(locals)
 		if err != nil {
 			return fmt.Errorf("failed to optimize load commands: %v", err)
@@ -133,7 +133,7 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 					return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
 				}
 			case "__LINKEDIT":
-				if inCache {
+				if inCache && f.Type != types.MH_KEXT_BUNDLE {
 					if _, err := buf.Write(lebuf.Bytes()); err != nil {
 						return fmt.Errorf("failed to write optimized segment %s to export buffer: %v", seg.Name, err)
 					}
@@ -261,47 +261,59 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 				// f.Sections[i+seg.Firstsect].Reloff = uint32(roff)
 			}
 		case types.LC_SYMTAB:
-			// symoff, err := segMap.Remap(uint64(l.(*Symtab).Symoff))
-			// if err != nil {
-			// 	return fmt.Errorf("failed to remap symbol offset in %s: %v", l.Command(), err)
-			// }
-			// stroff, err := segMap.Remap(uint64(l.(*Symtab).Stroff))
-			// if err != nil {
-			// 	return fmt.Errorf("failed to remap string offset in %s: %v", l.Command(), err)
-			// }
-			// l.(*Symtab).Symoff = uint32(symoff)
-			// l.(*Symtab).Stroff = uint32(stroff)
+			symoff, err := segMap.Remap(uint64(l.(*Symtab).Symoff))
+			if err != nil {
+				return fmt.Errorf("failed to remap symbol offset in %s: %v", l.Command(), err)
+			}
+			stroff, err := segMap.Remap(uint64(l.(*Symtab).Stroff))
+			if err != nil {
+				return fmt.Errorf("failed to remap string offset in %s: %v", l.Command(), err)
+			}
+			l.(*Symtab).Symoff = uint32(symoff)
+			l.(*Symtab).Stroff = uint32(stroff)
 		case types.LC_DYSYMTAB:
-			// tocoffset, err := segMap.Remap(uint64(l.(*Dysymtab).Tocoffset))
-			// if err != nil {
-			// 	return fmt.Errorf("failed to remap Tocoffset in %s: %v", l.Command(), err)
-			// }
-			// l.(*Dysymtab).Tocoffset = uint32(tocoffset)
-			// modtaboff, err := segMap.Remap(uint64(l.(*Dysymtab).Modtaboff))
-			// if err != nil {
-			// 	return fmt.Errorf("failed to remap Modtaboff in %s: %v", l.Command(), err)
-			// }
-			// l.(*Dysymtab).Modtaboff = uint32(modtaboff)
-			// extrefsymoff, err := segMap.Remap(uint64(l.(*Dysymtab).Extrefsymoff))
-			// if err != nil {
-			// 	return fmt.Errorf("failed to remap Extrefsymoff %s: %v", l.Command(), err)
-			// }
-			// l.(*Dysymtab).Extrefsymoff = uint32(extrefsymoff)
-			// indirectsymoff, err := segMap.Remap(uint64(l.(*Dysymtab).Indirectsymoff))
-			// if err != nil {
-			// 	return fmt.Errorf("failed to remap Indirectsymoff in %s: %v", l.Command(), err)
-			// }
-			// l.(*Dysymtab).Indirectsymoff = uint32(indirectsymoff)
-			// extreloff, err := segMap.Remap(uint64(l.(*Dysymtab).Extreloff))
-			// if err != nil {
-			// 	return fmt.Errorf("failed to remap Extreloff in %s: %v", l.Command(), err)
-			// }
-			// l.(*Dysymtab).Extreloff = uint32(extreloff)
-			// locreloff, err := segMap.Remap(uint64(l.(*Dysymtab).Locreloff))
-			// if err != nil {
-			// 	return fmt.Errorf("failed to remap Locreloff in %s: %v", l.Command(), err)
-			// }
-			// l.(*Dysymtab).Locreloff = uint32(locreloff)
+			if l.(*Dysymtab).Tocoffset > 0 {
+				tocoffset, err := segMap.Remap(uint64(l.(*Dysymtab).Tocoffset))
+				if err != nil {
+					return fmt.Errorf("failed to remap Tocoffset in %s: %v", l.Command(), err)
+				}
+				l.(*Dysymtab).Tocoffset = uint32(tocoffset)
+			}
+			if l.(*Dysymtab).Modtaboff > 0 {
+				modtaboff, err := segMap.Remap(uint64(l.(*Dysymtab).Modtaboff))
+				if err != nil {
+					return fmt.Errorf("failed to remap Modtaboff in %s: %v", l.Command(), err)
+				}
+				l.(*Dysymtab).Modtaboff = uint32(modtaboff)
+			}
+			if l.(*Dysymtab).Extrefsymoff > 0 {
+				extrefsymoff, err := segMap.Remap(uint64(l.(*Dysymtab).Extrefsymoff))
+				if err != nil {
+					return fmt.Errorf("failed to remap Extrefsymoff %s: %v", l.Command(), err)
+				}
+				l.(*Dysymtab).Extrefsymoff = uint32(extrefsymoff)
+			}
+			if l.(*Dysymtab).Indirectsymoff > 0 {
+				indirectsymoff, err := segMap.Remap(uint64(l.(*Dysymtab).Indirectsymoff))
+				if err != nil {
+					return fmt.Errorf("failed to remap Indirectsymoff in %s: %v", l.Command(), err)
+				}
+				l.(*Dysymtab).Indirectsymoff = uint32(indirectsymoff)
+			}
+			if l.(*Dysymtab).Extreloff > 0 {
+				extreloff, err := segMap.Remap(uint64(l.(*Dysymtab).Extreloff))
+				if err != nil {
+					return fmt.Errorf("failed to remap Extreloff in %s: %v", l.Command(), err)
+				}
+				l.(*Dysymtab).Extreloff = uint32(extreloff)
+			}
+			if l.(*Dysymtab).Locreloff > 0 {
+				locreloff, err := segMap.Remap(uint64(l.(*Dysymtab).Locreloff))
+				if err != nil {
+					return fmt.Errorf("failed to remap Locreloff in %s: %v", l.Command(), err)
+				}
+				l.(*Dysymtab).Locreloff = uint32(locreloff)
+			}
 		case types.LC_CODE_SIGNATURE:
 			// off, err := segMap.Remap(uint64(l.(*CodeSignature).Offset))
 			// if err != nil {
@@ -740,7 +752,10 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	newIndSymTabOffset := uint64(lebuf.Len())
 
 	// Copy (and adjust) indirect symbol table
-	undefSymbolShift := uint32(len(locals)) - f.Dysymtab.Nlocalsym
+	var undefSymbolShift uint32
+	if len(locals) > 0 {
+		undefSymbolShift = uint32(len(locals)) - f.Dysymtab.Nlocalsym
+	}
 	if undefSymbolShift > 0 {
 		for idx, indSym := range f.Dysymtab.IndirectSyms {
 			f.Dysymtab.IndirectSyms[idx] = indSym + undefSymbolShift
