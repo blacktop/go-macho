@@ -220,7 +220,7 @@ func (ml MethodList) FixedUp() bool {
 	return (ml.Flags() & METHOD_LIST_FIXED_UP) == 1
 }
 func (ml MethodList) IsSmall() bool {
-	return (ml.Flags() & METHOD_LIST_SMALL) == 1
+	return (ml.EntSizeAndFlags & METHOD_LIST_SMALL) == METHOD_LIST_SMALL
 }
 func (ml MethodList) EntSize() uint32 {
 	return ml.EntSizeAndFlags & ^METHOD_LIST_FLAGS_MASK
@@ -229,7 +229,7 @@ func (ml MethodList) Flags() MLFlags {
 	return MLFlags(ml.EntSizeAndFlags & METHOD_LIST_FLAGS_MASK)
 }
 func (ml MethodList) String() string {
-	return fmt.Sprintf("entrysize=0x%08x, flags=%#x, fixed_up=%t, uniqued=%t, small=%t", ml.EntSize(), ml.Flags(), ml.FixedUp(), ml.IsUniqued(), ml.IsSmall())
+	return fmt.Sprintf("count=%d, entsiz_flags=%#x, entrysize=%d, flags=%#x, fixed_up=%t, uniqued=%t, small=%t", ml.Count, ml.EntSizeAndFlags, ml.EntSize(), ml.Flags(), ml.FixedUp(), ml.IsUniqued(), ml.IsSmall())
 }
 
 type MethodT struct {
