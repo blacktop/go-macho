@@ -162,11 +162,6 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 		}
 	}
 
-	// Page align file
-	for (buf.Len() % 0x1000) != 0 {
-		buf.WriteByte(0)
-	}
-
 	os.MkdirAll(filepath.Dir(path), os.ModePerm)
 
 	if err := os.WriteFile(path, buf.Bytes(), 0755); err != nil {
@@ -808,6 +803,13 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 
 	linkedit.Filesz = pageAlign(uint64(f.Symtab.Stroff + f.Symtab.Strsize))
 	linkedit.Memsz = linkedit.Filesz
+
+	if linkedit.Filesz > uint64(lebuf.Len()) {
+		pad = linkedit.Filesz - uint64(lebuf.Len())
+		if _, err := lebuf.Write(make([]byte, pad)); err != nil {
+			return nil, fmt.Errorf("failed to write linkedit segment padding: %v", err)
+		}
+	}
 
 	return &lebuf, nil
 }
