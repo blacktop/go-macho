@@ -435,7 +435,7 @@ func TestNewFatFile(t *testing.T) {
 
 	fmt.Println(fat.Arches[0].FileTOC.String())
 
-	if fat.Arches[0].UUID().ID != "CCA67965-C1C5-3521-9CC6-BB47C6561696" {
+	if fat.Arches[0].UUID().ID != "CC3C8D85-B0DE-3445-85BE-85111E9CC36F" {
 		t.Errorf("macho.UUID() = %s; want test", fat.Arches[0].UUID())
 	}
 }
