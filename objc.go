@@ -1430,6 +1430,33 @@ func (f *File) GetCFStrings() ([]objc.CFString, error) {
 	return cfstrings, nil
 }
 
+// GetObjCIntObj parses the __objc_intobj section and returns a map of
+func (f *File) GetObjCIntegerObjects() (map[uint64]*objc.IntObj, error) {
+	if sec := f.Section("__TEXT", "__objc_intobj"); sec != nil {
+		if err := f.cr.SeekToAddr(sec.Addr); err != nil {
+			return nil, fmt.Errorf("failed to seek to %s addr %#x: %v", sec.Name, sec.Addr, err)
+		}
+		dat := make([]byte, sec.Size)
+		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
+		}
+
+		intObjs := make([]objc.IntObj, int(sec.Size)/binary.Size(objc.IntObj{}))
+		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &intObjs); err != nil {
+			return nil, fmt.Errorf("failed to read %T structs: %v", intObjs, err)
+		}
+
+		intObjMap := make(map[uint64]*objc.IntObj)
+		for idx, intObj := range intObjs {
+			intObjMap[sec.Addr+uint64(idx*binary.Size(objc.IntObj{}))] = &intObj
+		}
+
+		return intObjMap, nil
+	}
+
+	return nil, fmt.Errorf("macho does not contain __objc_intobj section: %w", ErrObjcSectionNotFound)
+}
+
 // GetObjCStubs returns the Objective-C stubs
 func (f *File) GetObjCStubs(parse func(uint64, []byte) (map[uint64]*objc.Stub, error)) (map[uint64]*objc.Stub, error) {
 	if sec := f.Section("__TEXT", "__objc_stubs"); sec != nil {

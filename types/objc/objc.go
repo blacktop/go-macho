@@ -845,6 +845,12 @@ type Stub struct {
 	SelectorRef uint64
 }
 
+type IntObj struct {
+	ISA          uint64
+	EncodingAddr uint64
+	Number       uint64
+}
+
 type ImpCache2 struct {
 	PreoptCache2T
 	Entries []PreoptCacheEntry2T
