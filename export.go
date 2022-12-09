@@ -186,11 +186,10 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 				for _, fixup := range start.Fixups {
 					off, err := segMap.Remap(fixup.Offset())
 					if err != nil {
-						off = fixup.Offset()
-						// return fmt.Errorf("failed to remap fixup at offset %#x: %v", off, err)
+						continue
 					}
 
-					if off == 0 || off > uint64(fileSize) {
+					if off == 0 || off >= uint64(fileSize) {
 						continue
 					}
 
