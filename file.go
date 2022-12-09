@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"github.com/blacktop/go-dwarf"
@@ -22,7 +23,6 @@ import (
 	"github.com/blacktop/go-macho/pkg/fixupchains"
 	"github.com/blacktop/go-macho/pkg/trie"
 	"github.com/blacktop/go-macho/types"
-	"github.com/blacktop/go-macho/types/objc"
 )
 
 var ErrMachOSectionNotFound = errors.New("MachO missing required section")
@@ -42,12 +42,13 @@ type File struct {
 	exp         []trie.TrieExport
 	exptrieData []byte
 	binds       types.Binds
-	objc        map[uint64]*objc.Class
+	objc        map[uint64]any
 	sr          types.MachoReader
 	cr          types.MachoReader
 
-	relativeSelectorBase uint64 // objc_opt version 16
+	sharedCacheRelativeSelectorBaseVMAddress uint64 // objc_opt version 16
 
+	mu     sync.Mutex
 	closer io.Closer
 }
 
@@ -316,7 +317,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 
 	f := new(File)
 
-	f.objc = make(map[uint64]*objc.Class)
+	f.objc = make(map[uint64]any)
 
 	if config != nil {
 		if config[0].SectionReader != nil {
@@ -329,7 +330,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 		}
 		f.vma = &config[0].VMAddrConverter
 		loadsFilter = config[0].LoadFilter
-		f.relativeSelectorBase = config[0].RelativeSelectorBase
+		f.sharedCacheRelativeSelectorBaseVMAddress = config[0].RelativeSelectorBase
 	} else {
 		f.vma = &types.VMAddrConverter{
 			Converter:    f.convertToVMAddr,
@@ -1612,6 +1613,9 @@ func (f *File) SlidePointer(ptr uint64) uint64 {
 }
 
 func (f *File) convertToVMAddr(value uint64) uint64 {
+	if value == 0 {
+		return 0
+	}
 	if f.HasFixups() {
 		if fixupchains.DcpArm64eIsRebase(value) {
 			if fixupchains.DcpArm64eIsAuth(value) {
@@ -1619,7 +1623,7 @@ func (f *File) convertToVMAddr(value uint64) uint64 {
 				return dcp.Target() + f.preferredLoadAddress()
 			}
 			dcp := fixupchains.DyldChainedPtrArm64eRebase{Pointer: value}
-			return dcp.UnpackTarget()
+			return dcp.UnpackTarget() + f.preferredLoadAddress()
 		}
 	}
 	return value

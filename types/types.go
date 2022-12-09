@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"unicode"
 )
 
 type VmProtection int32
@@ -162,6 +163,15 @@ func PutAtMost16Bytes(b []byte, n string) {
 
 func RoundUp(x, align uint64) uint64 {
 	return uint64((x + align - 1) & -align)
+}
+
+func IsASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] > unicode.MaxASCII {
+			return false
+		}
+	}
+	return true
 }
 
 type IntName struct {

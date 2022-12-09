@@ -697,6 +697,17 @@ func TestNewFileWithObjC(t *testing.T) {
 		return
 	}
 
+	meths, err := got.GetObjCMethodLists()
+	if err != nil {
+		if errors.Is(err, ErrObjcSectionNotFound) {
+			t.Skipf("objc section not found: %v", err)
+		}
+		t.Fatal(err)
+	}
+	for _, meth := range meths {
+		fmt.Println(meth)
+	}
+
 	nlcats, err := got.GetObjCNonLazyCategories()
 	if err != nil {
 		t.Fatalf("GetObjCNonLazyCategories() error = %v", err)

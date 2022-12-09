@@ -169,17 +169,21 @@ func (i ImageInfo) IsDyldPreoptimized() bool {
 
 const (
 	bigSignedMethodListFlag              uint64 = 0x8000000000000000
-	smallMethodListFlag                  uint32 = 0x80000000
 	relativeMethodSelectorsAreDirectFlag uint32 = 0x40000000
+	smallMethodListFlag                  uint32 = 0x80000000
+	METHOD_LIST_FLAGS_MASK               uint32 = 0xffff0003
+	// The size is bits 2 through 16 of the entsize field
+	// The low 2 bits are uniqued/sorted as above.  The upper 16-bits
+	// are reserved for other flags
+	METHOD_LIST_SIZE_MASK uint32 = 0x0000FFFC
 )
 
 type MLFlags uint32
 
 const (
-	METHOD_LIST_FLAGS_MASK uint32  = 0xffff0003
 	METHOD_LIST_IS_UNIQUED MLFlags = 1
+	METHOD_LIST_IS_SORTED  MLFlags = 2
 	METHOD_LIST_FIXED_UP   MLFlags = 3
-	METHOD_LIST_SMALL              = 0x80000000
 )
 
 type MLKind uint32
@@ -216,20 +220,38 @@ type MethodList struct {
 func (ml MethodList) IsUniqued() bool {
 	return (ml.Flags() & METHOD_LIST_IS_UNIQUED) == 1
 }
+func (ml MethodList) Sorted() bool {
+	return (ml.Flags() & METHOD_LIST_IS_SORTED) == 1
+}
 func (ml MethodList) FixedUp() bool {
 	return (ml.Flags() & METHOD_LIST_FIXED_UP) == 1
 }
-func (ml MethodList) IsSmall() bool {
-	return (ml.EntSizeAndFlags & METHOD_LIST_SMALL) == METHOD_LIST_SMALL
+func (ml MethodList) UsesDirectOffsetsToSelectors() bool {
+	return (ml.EntSizeAndFlags & relativeMethodSelectorsAreDirectFlag) != 0
+}
+func (ml MethodList) UsesRelativeOffsets() bool {
+	return (ml.EntSizeAndFlags & smallMethodListFlag) != 0
 }
 func (ml MethodList) EntSize() uint32 {
-	return ml.EntSizeAndFlags & ^METHOD_LIST_FLAGS_MASK
+	return ml.EntSizeAndFlags & METHOD_LIST_SIZE_MASK
 }
 func (ml MethodList) Flags() MLFlags {
 	return MLFlags(ml.EntSizeAndFlags & METHOD_LIST_FLAGS_MASK)
 }
 func (ml MethodList) String() string {
-	return fmt.Sprintf("count=%d, entsiz_flags=%#x, entrysize=%d, flags=%#x, fixed_up=%t, uniqued=%t, small=%t", ml.Count, ml.EntSizeAndFlags, ml.EntSize(), ml.Flags(), ml.FixedUp(), ml.IsUniqued(), ml.IsSmall())
+	offType := "direct"
+	if ml.UsesRelativeOffsets() {
+		offType = "relative"
+	}
+	return fmt.Sprintf("count=%d, entsiz_flags=%#x, entrysize=%d, flags=%#x, fixed_up=%t, sorted=%t, uniqued=%t, type=%s",
+		ml.Count,
+		ml.EntSizeAndFlags,
+		ml.EntSize(),
+		ml.Flags(),
+		ml.FixedUp(),
+		ml.Sorted(),
+		ml.IsUniqued(),
+		offType)
 }
 
 type MethodT struct {
@@ -238,7 +260,7 @@ type MethodT struct {
 	ImpVMAddr   uint64 // IMP
 }
 
-type MethodSmallT struct {
+type RelativeMethodT struct {
 	NameOffset  int32 // SEL
 	TypesOffset int32 // const char *
 	ImpOffset   int32 // IMP
