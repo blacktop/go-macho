@@ -120,7 +120,7 @@ func (f *File) GetObjCImageInfo() (*objc.ImageInfo, error) {
 	for _, s := range f.Segments() {
 		if strings.HasPrefix(s.Name, "__DATA") {
 			if sec := f.Section(s.Name, "__objc_imageinfo"); sec != nil {
-				off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
+				off, err := f.vma.GetOffset(sec.Addr)
 				if err != nil {
 					return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
 				}
@@ -1441,7 +1441,7 @@ func (f *File) GetObjCStubs(parse func(uint64, []byte) (map[uint64]*objc.Stub, e
 			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 		}
 		return parse(sec.Addr, dat)
-	} else {
-		return nil, fmt.Errorf("failed to find __TEXT.__objc_stubs section")
 	}
+
+	return nil, fmt.Errorf("macho does not contain __objc_stubs section: %w", ErrObjcSectionNotFound)
 }

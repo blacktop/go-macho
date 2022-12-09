@@ -697,30 +697,115 @@ func TestNewFileWithObjC(t *testing.T) {
 		return
 	}
 
-	meths, err := got.GetObjCMethodLists()
-	if err != nil {
-		if errors.Is(err, ErrObjcSectionNotFound) {
-			t.Skipf("objc section not found: %v", err)
+	if got.HasObjC() {
+		fmt.Println("HasPlusLoadMethod: ", got.HasPlusLoadMethod())
+		fmt.Println(got.GetObjCToc())
+
+		info, err := got.GetObjCImageInfo()
+		if err != nil && !errors.Is(err, ErrObjcSectionNotFound) {
+			t.Fatalf("GetObjCImageInfo() error = %v", err)
 		}
-		t.Fatal(err)
-	}
-	for _, meth := range meths {
-		fmt.Println(meth)
-	}
+		fmt.Printf("ObjCImageInfo:\n%s\n\n", info.Flags)
 
-	nlcats, err := got.GetObjCNonLazyCategories()
-	if err != nil {
-		t.Fatalf("GetObjCNonLazyCategories() error = %v", err)
-	}
-	for _, cat := range nlcats {
-		fmt.Println(cat)
-	}
+		if cfstrs, err := got.GetCFStrings(); err == nil {
+			fmt.Println("CFStrings")
+			fmt.Println("---------")
+			for _, cfstr := range cfstrs {
+				fmt.Printf("%#x: %#v\n", cfstr.Address, cfstr.Name)
+			}
+		} else {
+			t.Errorf(err.Error())
+		}
 
-	classes, err := got.GetObjCClasses()
-	if err != nil {
-		t.Fatalf("GetObjCClasses() error = %v", err)
-	}
-	for _, class := range classes {
-		fmt.Println(class)
+		if meths, err := got.GetObjCMethodLists(); err == nil {
+			fmt.Println("_OBJC_INSTANCE_METHODS")
+			fmt.Println("----------------------")
+			for _, m := range meths {
+				fmt.Printf("0x%011x: (%s) %s [%d]\n", m.ImpVMAddr, m.ReturnType(), m.Name, m.NumberOfArguments())
+			}
+		} else {
+			t.Errorf(err.Error())
+		}
+
+		if protos, err := got.GetObjCProtocols(); err == nil {
+			for _, proto := range protos {
+				fmt.Println(proto.String())
+			}
+		} else {
+			t.Errorf(err.Error())
+		}
+
+		if classes, err := got.GetObjCClasses(); err == nil {
+			for _, class := range classes {
+				fmt.Println(class.Verbose())
+			}
+		} else {
+			t.Errorf(err.Error())
+		}
+
+		if nlclasses, err := got.GetObjCNonLazyClasses(); err == nil {
+			for _, class := range nlclasses {
+				fmt.Println(class.String())
+			}
+		} else {
+			t.Errorf(err.Error())
+		}
+
+		if cats, err := got.GetObjCCategories(); err == nil {
+			for _, cat := range cats {
+				fmt.Println(cat.String())
+			}
+		} else {
+			t.Errorf(err.Error())
+		}
+
+		if nlcats, err := got.GetObjCNonLazyCategories(); err == nil {
+			for _, cat := range nlcats {
+				fmt.Println(cat.String())
+			}
+		} else {
+			t.Errorf(err.Error())
+		}
+
+		if selRefs, err := got.GetObjCProtoReferences(); err == nil {
+			fmt.Println("@proto refs")
+			for off, prot := range selRefs {
+				fmt.Printf("0x%011x -> 0x%011x: %s\n", off, prot.Ptr, prot.Name)
+			}
+		} else {
+			t.Errorf(err.Error())
+		}
+		if selRefs, err := got.GetObjCClassReferences(); err == nil {
+			fmt.Println("@class refs")
+			for off, sel := range selRefs {
+				fmt.Printf("0x%011x -> 0x%011x: %s\n", off, sel.ClassPtr, sel.Name)
+			}
+		} else {
+			t.Errorf(err.Error())
+		}
+		if selRefs, err := got.GetObjCSuperReferences(); err == nil {
+			fmt.Println("@super refs")
+			for off, sel := range selRefs {
+				fmt.Printf("0x%011x -> 0x%011x: %s\n", off, sel.ClassPtr, sel.SuperClass)
+			}
+		} else {
+			t.Errorf(err.Error())
+		}
+		if selRefs, err := got.GetObjCSelectorReferences(); err == nil {
+			fmt.Println("@selectors refs")
+			for off, sel := range selRefs {
+				fmt.Printf("0x%011x -> 0x%011x: %s\n", off, sel.VMAddr, sel.Name)
+			}
+		} else {
+			t.Errorf(err.Error())
+		}
+		if methods, err := got.GetObjCMethodNames(); err == nil {
+			fmt.Printf("\n@methods\n")
+			for vmaddr, method := range methods {
+				fmt.Printf("0x%011x: %s\n", vmaddr, method)
+			}
+		} else {
+			t.Errorf(err.Error())
+		}
 	}
 }
