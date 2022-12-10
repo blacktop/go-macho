@@ -418,13 +418,6 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 				return fmt.Errorf("failed to remap offset in %s: %v", l.Command(), err)
 			}
 			l.(*EntryPoint).EntryOffset = off
-		case types.LC_UNIXTHREAD:
-			// TODO:is this an offset or vmaddr ?
-			off, err := segMap.Remap(l.(*UnixThread).EntryPoint)
-			if err != nil {
-				return fmt.Errorf("failed to remap offset in %s: %v", l.Command(), err)
-			}
-			l.(*UnixThread).EntryPoint = off
 		case types.LC_DATA_IN_CODE:
 			// off, err := segMap.Remap(uint64(l.(*DataInCode).Offset))
 			// if err != nil {
