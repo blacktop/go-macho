@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -168,59 +167,60 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 		return fmt.Errorf("failed to write exported MachO to file %s: %v", path, err)
 	}
 
-	if dcf != nil {
-		newFile, err := os.OpenFile(path, os.O_WRONLY, 0755)
-		if err != nil {
-			return fmt.Errorf("failed to open exported MachO %s: %v", path, err)
-		}
-		defer newFile.Close()
+	// FIXME: fixup chains are not yet supported (this should be done in the linkedit optimization step and create a REAL LC_DYLD_CHAINED_FIXUPS load command)
+	// if dcf != nil {
+	// 	newFile, err := os.OpenFile(path, os.O_WRONLY, 0755)
+	// 	if err != nil {
+	// 		return fmt.Errorf("failed to open exported MachO %s: %v", path, err)
+	// 	}
+	// 	defer newFile.Close()
 
-		fi, err := newFile.Stat()
-		if err != nil {
-			return fmt.Errorf("failed to stat file %s: %v", path, err)
-		}
-		fileSize := fi.Size()
+	// 	fi, err := newFile.Stat()
+	// 	if err != nil {
+	// 		return fmt.Errorf("failed to stat file %s: %v", path, err)
+	// 	}
+	// 	fileSize := fi.Size()
 
-		for _, start := range dcf.Starts {
-			if start.PageStarts != nil {
-				for _, fixup := range start.Fixups {
-					off, err := segMap.Remap(fixup.Offset())
-					if err != nil {
-						continue
-					}
+	// 	for _, start := range dcf.Starts {
+	// 		if start.PageStarts != nil {
+	// 			for _, fixup := range start.Fixups {
+	// 				off, err := segMap.Remap(fixup.Offset())
+	// 				if err != nil {
+	// 					continue
+	// 				}
 
-					if off == 0 || off >= uint64(fileSize) {
-						continue
-					}
+	// 				if off == 0 || off >= uint64(fileSize) {
+	// 					continue
+	// 				}
 
-					if _, err := newFile.Seek(int64(off), io.SeekStart); err != nil {
-						return fmt.Errorf("failed to seek in exported file to offset %#x from the start: %v", off, err)
-					}
+	// 				if _, err := newFile.Seek(int64(off), io.SeekStart); err != nil {
+	// 					return fmt.Errorf("failed to seek in exported file to offset %#x from the start: %v", off, err)
+	// 				}
 
-					switch fx := fixup.(type) {
-					case fixupchains.Bind:
-						// var addend string
-						// addr := uint64(f.Offset()) + m.GetBaseAddress()
-						// if fullAddend := dcf.Imports[f.Ordinal()].Addend() + f.Addend(); fullAddend > 0 {
-						// 	addend = fmt.Sprintf(" + %#x", fullAddend)
-						// 	addr += fullAddend
-						// }
-						// sec = m.FindSectionForVMAddr(addr)
-						// lib := m.LibraryOrdinalName(dcf.Imports[f.Ordinal()].LibOrdinal())
-						// if sec != nil && sec != lastSec {
-						// 	fmt.Printf("%s.%s\n", sec.Seg, sec.Name)
-						// }
-						// fmt.Printf("%s\t%s/%s%s\n", fixupchains.Bind(f).String(m.GetBaseAddress()), lib, f.Name(), addend)
-					case fixupchains.Rebase:
-						addr := uint64(fx.Target()) + baseAddress
-						if err := binary.Write(newFile, f.ByteOrder, addr); err != nil {
-							return fmt.Errorf("failed to write fixup address %#x: %v", addr, err)
-						}
-					}
-				}
-			}
-		}
-	}
+	// 				switch fx := fixup.(type) {
+	// 				case fixupchains.Bind:
+	// 					// var addend string
+	// 					// addr := uint64(f.Offset()) + m.GetBaseAddress()
+	// 					// if fullAddend := dcf.Imports[f.Ordinal()].Addend() + f.Addend(); fullAddend > 0 {
+	// 					// 	addend = fmt.Sprintf(" + %#x", fullAddend)
+	// 					// 	addr += fullAddend
+	// 					// }
+	// 					// sec = m.FindSectionForVMAddr(addr)
+	// 					// lib := m.LibraryOrdinalName(dcf.Imports[f.Ordinal()].LibOrdinal())
+	// 					// if sec != nil && sec != lastSec {
+	// 					// 	fmt.Printf("%s.%s\n", sec.Seg, sec.Name)
+	// 					// }
+	// 					// fmt.Printf("%s\t%s/%s%s\n", fixupchains.Bind(f).String(m.GetBaseAddress()), lib, f.Name(), addend)
+	// 				case fixupchains.Rebase:
+	// 					addr := uint64(fx.Target()) + baseAddress
+	// 					if err := binary.Write(newFile, f.ByteOrder, addr); err != nil {
+	// 						return fmt.Errorf("failed to write fixup address %#x: %v", addr, err)
+	// 					}
+	// 				}
+	// 			}
+	// 		}
+	// 	}
+	// }
 
 	return nil
 }

@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+// ref - https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ObjCRuntimeGuide/Articles/ocrtTypeEncodings.html
+
 var typeEncoding = map[string]string{
 	"":  "void",
 	"@": "id",
