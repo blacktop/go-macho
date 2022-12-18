@@ -645,11 +645,11 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, fmt.Errorf("failed to read LC_DYSYMTAB: %v", err)
 			}
-			if hdr.Iundefsym > uint32(len(f.Symtab.Syms)) {
+			if f.Symtab != nil && hdr.Iundefsym > uint32(len(f.Symtab.Syms)) {
 				return nil, &FormatError{offset, fmt.Sprintf(
 					"undefined symbols index in dynamic symbol table command is greater than symbol table length (%d > %d)",
 					hdr.Iundefsym, len(f.Symtab.Syms)), nil}
-			} else if hdr.Iundefsym+hdr.Nundefsym > uint32(len(f.Symtab.Syms)) {
+			} else if f.Symtab != nil && hdr.Iundefsym+hdr.Nundefsym > uint32(len(f.Symtab.Syms)) {
 				return nil, &FormatError{offset, fmt.Sprintf(
 					"number of undefined symbols after index in dynamic symbol table command is greater than symbol table length (%d > %d)",
 					hdr.Iundefsym+hdr.Nundefsym, len(f.Symtab.Syms)), nil}
@@ -2773,6 +2773,9 @@ func (f *File) LibraryOrdinalName(libraryOrdinal int) string {
 }
 
 func (f *File) FindSymbolAddress(symbol string) (uint64, error) {
+	if f.Symtab == nil {
+		return 0, &FormatError{0, "missing symbol table", nil}
+	}
 	for _, sym := range f.Symtab.Syms {
 		if strings.EqualFold(sym.Name, symbol) {
 			return sym.Value, nil
@@ -2782,6 +2785,9 @@ func (f *File) FindSymbolAddress(symbol string) (uint64, error) {
 }
 
 func (f *File) FindAddressSymbols(addr uint64) ([]Symbol, error) {
+	if f.Symtab == nil {
+		return nil, &FormatError{0, "missing symbol table", nil}
+	}
 	var syms []Symbol
 	for _, sym := range f.Symtab.Syms {
 		if sym.Value == addr {

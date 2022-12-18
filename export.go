@@ -696,22 +696,24 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	}
 	// now start copying symbol table from start of externs instead of start of locals
 	// for _, sym := range f.Symtab.Syms[f.Dysymtab.Iextdefsym:] {
-	for _, sym := range f.Symtab.Syms {
-		if err := binary.Write(&lebuf, binary.LittleEndian, types.Nlist64{
-			Nlist: types.Nlist{
-				Name: uint32(newSymNames.Len()),
-				Type: sym.Type,
-				Sect: sym.Sect,
-				Desc: sym.Desc,
-			},
-			Value: sym.Value,
-		}); err != nil {
-			return nil, fmt.Errorf("failed to write symtab nlist entry to NEW linkedit data: %v", err)
+	if f.Symtab != nil {
+		for _, sym := range f.Symtab.Syms {
+			if err := binary.Write(&lebuf, binary.LittleEndian, types.Nlist64{
+				Nlist: types.Nlist{
+					Name: uint32(newSymNames.Len()),
+					Type: sym.Type,
+					Sect: sym.Sect,
+					Desc: sym.Desc,
+				},
+				Value: sym.Value,
+			}); err != nil {
+				return nil, fmt.Errorf("failed to write symtab nlist entry to NEW linkedit data: %v", err)
+			}
+			if _, err := newSymNames.WriteString(sym.Name + "\x00"); err != nil {
+				return nil, fmt.Errorf("failed to write symbol name string to NEW linkedit data: %v", err)
+			}
+			newSymCount++
 		}
-		if _, err := newSymNames.WriteString(sym.Name + "\x00"); err != nil {
-			return nil, fmt.Errorf("failed to write symbol name string to NEW linkedit data: %v", err)
-		}
-		newSymCount++
 	}
 	// get all re-exports from LC_DYLD_EXPORTS_TRIE
 	for _, exp := range exports {
@@ -778,11 +780,12 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		return nil, fmt.Errorf("failed to write symbol name strings to NEW linkedit data: %v", err)
 	}
 
-	f.Symtab.Nsyms = newSymCount
-	f.Symtab.Symoff = uint32(linkedit.Offset + newSymTabOffset)
-	f.Symtab.Stroff = uint32(linkedit.Offset + newStringPoolOffset)
-	f.Symtab.Strsize = uint32(newSymNames.Len())
-
+	if f.Symtab != nil {
+		f.Symtab.Nsyms = newSymCount
+		f.Symtab.Symoff = uint32(linkedit.Offset + newSymTabOffset)
+		f.Symtab.Stroff = uint32(linkedit.Offset + newStringPoolOffset)
+		f.Symtab.Strsize = uint32(newSymNames.Len())
+	}
 	// f.Dysymtab.Ilocalsym = uint32(len(locals)) + f. .Nextdefsym + f.Dysymtab.Nundefsym
 	// f.Dysymtab.Nlocalsym = uint32(len(locals))
 	// f.Dysymtab.Iextdefsym = uint32(len(locals))
