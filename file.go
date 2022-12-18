@@ -948,7 +948,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO: %v", err)
 			}
-
 			l := new(SplitInfo)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
@@ -963,21 +962,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(fsr, bo, &l.Version); err != nil {
 				return nil, fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO Version: %v", err)
 			}
-			// var offset uint64
-			// for {
-			// 	o, err := trie.ReadUleb128(fsr)
-			// 	if err == io.EOF {
-			// 		break
-			// 	}
-			// 	if err != nil {
-			// 		return nil, err
-			// 	}
-			// 	// if o == 0 {
-			// 	// 	break
-			// 	// }
-			// 	offset += o
-			// 	l.Offsets = append(l.Offsets, offset)
-			// }
 			f.Loads[i] = l
 		case types.LC_REEXPORT_DYLIB:
 			var hdr types.ReExportDylibCmd
@@ -2088,6 +2072,91 @@ func (f *File) DyldChainedFixups() (*fixupchains.DyldChainedFixups, error) {
 		}
 	}
 	return nil, fmt.Errorf("macho does not contain LC_DYLD_CHAINED_FIXUPS")
+}
+
+func (f *File) ForEachV2SplitSegReference(handler func(fromSectionIndex, fromSectionOffset, toSectionIndex, toSectionOffset uint64, kind types.SplitInfoKind)) error {
+	for _, l := range f.Loads {
+		if si, ok := l.(*SplitInfo); ok {
+			if si.Size == 0 {
+				return nil
+			}
+			data := make([]byte, si.Size)
+			if _, err := f.cr.ReadAt(data, int64(si.Offset)); err != nil {
+				return fmt.Errorf("failed to read %s data at offset=%#x; %v", types.LC_SEGMENT_SPLIT_INFO, int64(si.Offset), err)
+			}
+
+			r := bytes.NewReader(data)
+
+			var version uint8
+			if err := binary.Read(r, f.ByteOrder, &version); err != nil {
+				return fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO Version: %v", err)
+			}
+			if version != types.DYLD_CACHE_ADJ_V2_FORMAT {
+				return nil
+			}
+
+			sectionCount, err := trie.ReadUleb128(r)
+			if err != nil {
+				return fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO SectionCount: %v", err)
+			}
+
+			for i := uint64(0); i < sectionCount; i++ {
+				fromSectionIndex, err := trie.ReadUleb128(r)
+				if err != nil {
+					return fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO fromSectionIndex: %v", err)
+				}
+				toSectionIndex, err := trie.ReadUleb128(r)
+				if err != nil {
+					return fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO toSectionIndex: %v", err)
+				}
+				toOffsetCount, err := trie.ReadUleb128(r)
+				if err != nil {
+					return fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO toOffsetCount: %v", err)
+				}
+
+				var toSectionOffset uint64
+				for j := uint64(0); j < toOffsetCount; j++ {
+					toSectionDelta, err := trie.ReadUleb128(r)
+					if err != nil {
+						return fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO toSectionDelta: %v", err)
+					}
+					fromOffsetCount, err := trie.ReadUleb128(r)
+					if err != nil {
+						return fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO fromOffsetCount: %v", err)
+					}
+
+					toSectionOffset += toSectionDelta
+					for k := uint64(0); k < fromOffsetCount; k++ {
+						kind, err := trie.ReadUleb128(r)
+						if err != nil {
+							return fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO kind: %v", err)
+						}
+						if kind > 13 {
+							return fmt.Errorf("invalid LC_SEGMENT_SPLIT_INFO kind: %d", kind)
+						}
+
+						fromSectDeltaCount, err := trie.ReadUleb128(r)
+						if err != nil {
+							return fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO fromSectDeltaCount: %v", err)
+						}
+
+						var fromSectionOffset uint64
+						for l := uint64(0); l < fromSectDeltaCount; l++ {
+							delta, err := trie.ReadUleb128(r)
+							if err != nil {
+								return fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO delta: %v", err)
+							}
+
+							fromSectionOffset += delta
+
+							handler(fromSectionIndex, fromSectionOffset, toSectionIndex, toSectionOffset, types.SplitInfoKind(kind))
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // DWARF returns the DWARF debug information for the Mach-O file.

@@ -1077,7 +1077,7 @@ func (s *SplitInfo) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 }
 
 func (s *SplitInfo) String() string {
-	version := "1"
+	version := "format=v1"
 	if s.Version == types.DYLD_CACHE_ADJ_V2_FORMAT {
 		version = "format=v2"
 	} else {
