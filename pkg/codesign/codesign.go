@@ -138,7 +138,7 @@ func parseCodeDirectory(r *bytes.Reader, offset uint32) (*types.CodeDirectory, e
 		h.Write(cdData)
 		cd.CDHash = fmt.Sprintf("%x", h.Sum(nil))
 	default:
-		cd.CDHash = fmt.Sprintf("unsupported code directory hash type %s, please notify author\n", cd.Header.HashType)
+		cd.CDHash = fmt.Sprintf("unsupported code directory hash type %s, please notify author", cd.Header.HashType)
 	}
 
 	// Parse version

@@ -519,6 +519,19 @@ func ParseRequirements(r *bytes.Reader, reqs Requirements) (string, error) {
 	r.Seek(int64(reqs.Offset), io.SeekStart)
 
 	switch reqs.Type {
+	case HostRequirementType:
+		var reqSet []string
+		for {
+			rsPart, err := evalExpression(r, slTop)
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return "", err
+			}
+			reqSet = append(reqSet, rsPart)
+		}
+		return "host => " + strings.Join(reqSet, " "), nil
 	case DesignatedRequirementType:
 		var reqSet []string
 		for {
@@ -533,6 +546,6 @@ func ParseRequirements(r *bytes.Reader, reqs Requirements) (string, error) {
 		}
 		return strings.Join(reqSet, " "), nil
 	default:
-		return "", fmt.Errorf("failed to dump requirements set; found unsupported codesign requirement type %s, please notify author\n", reqs.Type)
+		return "", fmt.Errorf("failed to dump requirements set; found unsupported codesign requirement type '%s', please notify author", reqs.Type)
 	}
 }
