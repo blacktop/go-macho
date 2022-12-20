@@ -37,6 +37,6 @@ jobs:
       with:
         draft: false
         prerelease: false
-        release_name: v1.1.6
-        tag_name: v1.1.6
+        release_name: v1.1.7
+        tag_name: v1.1.7
 
