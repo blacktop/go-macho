@@ -14,6 +14,7 @@ import (
 
 	"github.com/appsworld/go-macho/internal/obscuretestdata"
 	"github.com/appsworld/go-macho/types"
+	"github.com/google/go-cmp/cmp"
 )
 
 type fileTest struct {
@@ -39,8 +40,8 @@ var fileTests = []fileTest{
 			nil, // LC_LOAD_DYLINKER
 			nil, // LC_UUID
 			nil, // LC_UNIXTHREAD
-			&Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x34, Name: 0x0, Time: 0x0, CurrentVersion: 0x0, CompatVersion: 0x0}, Name: "/usr/lib/libgcc_s.1.dylib", Time: 0x2, CurrentVersion: "1.0.0", CompatVersion: "1.0.0"},
-			&Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x34, Name: 0x0, Time: 0x0, CurrentVersion: 0x0, CompatVersion: 0x0}, Name: "/usr/lib/libSystem.B.dylib", Time: 0x2, CurrentVersion: "111.1.4", CompatVersion: "1.0.0"},
+			&Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x34, Name: 0x0, Time: 0x0, CurrentVersion: 0x0, CompatVersion: 0x0}, Name: "/usr/lib/libgcc_s.1.dylib", Time: 0x2, CurrentVersion: "1.0", CompatVersion: "1.0"},
+			&Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x34, Name: 0x0, Time: 0x0, CurrentVersion: 0x0, CompatVersion: 0x0}, Name: "/usr/lib/libSystem.B.dylib", Time: 0x2, CurrentVersion: "111.1.4", CompatVersion: "1.0"},
 		},
 		[]*SectionHeader{
 			{Name: "__text", Seg: "__TEXT", Addr: 0x1f68, Size: 0x88, Offset: 0xf68, Align: 0x2, Reloff: 0x0, Nreloc: 0x0, Flags: 0x80000400, Reserved1: 0x0, Reserved2: 0x0, Reserved3: 0x0, Type: 0x20},
@@ -64,8 +65,8 @@ var fileTests = []fileTest{
 			nil, // LC_LOAD_DYLINKER
 			nil, // LC_UUID
 			nil, // LC_UNIXTHREAD
-			&Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x38, Name: 0x0, Time: 0x0, CurrentVersion: 0x0, CompatVersion: 0x0}, Name: "/usr/lib/libgcc_s.1.dylib", Time: 0x2, CurrentVersion: "1.0.0", CompatVersion: "1.0.0"},
-			&Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x38, Name: 0x0, Time: 0x0, CurrentVersion: 0x0, CompatVersion: 0x0}, Name: "/usr/lib/libSystem.B.dylib", Time: 0x2, CurrentVersion: "111.1.4", CompatVersion: "1.0.0"},
+			&Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x38, Name: 0x0, Time: 0x0, CurrentVersion: 0x0, CompatVersion: 0x0}, Name: "/usr/lib/libgcc_s.1.dylib", Time: 0x2, CurrentVersion: "1.0", CompatVersion: "1.0"},
+			&Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x38, Name: 0x0, Time: 0x0, CurrentVersion: 0x0, CompatVersion: 0x0}, Name: "/usr/lib/libSystem.B.dylib", Time: 0x2, CurrentVersion: "111.1.4", CompatVersion: "1.0"},
 		},
 		[]*SectionHeader{
 			{Name: "__text", Seg: "__TEXT", Addr: 0x100000f14, Size: 0x6d, Offset: 0xf14, Align: 0x2, Reloff: 0x0, Nreloc: 0x0, Flags: 0x80000400, Reserved1: 0x0, Reserved2: 0x0, Reserved3: 0x0, Type: 0x40},
@@ -295,19 +296,19 @@ func TestOpen(t *testing.T) {
 				switch l := l.(type) {
 				case *Segment:
 					have := &l.SegmentHeader
-					if !reflect.DeepEqual(have, want) {
+					if !cmp.Equal(have, want, cmp.AllowUnexported()) {
 						t.Errorf("open %s, command %d:\n\thave %#v\n\twant %#v\n", tt.file, i, have, want)
 					}
 				case *Dylib:
 					have := l
 					have.LoadBytes = nil
-					if !reflect.DeepEqual(have, want) {
+					if !cmp.Equal(have, want, cmp.AllowUnexported()) {
 						t.Errorf("open %s, command %d:\n\thave %#v\n\twant %#v\n", tt.file, i, have, want)
 					}
 				case *Rpath:
 					have := l
 					have.LoadBytes = nil
-					if !reflect.DeepEqual(have, want) {
+					if !cmp.Equal(have, want, cmp.AllowUnexported()) {
 						t.Errorf("open %s, command %d:\n\thave %#v\n\twant %#v\n", tt.file, i, have, want)
 					}
 				default:
@@ -431,7 +432,7 @@ func TestNewFatFile(t *testing.T) {
 
 	fmt.Println(fat.Arches[0].FileTOC.String())
 
-	if fat.Arches[0].UUID().ID != "CCA67965-C1C5-3521-9CC6-BB47C6561696" {
+	if fat.Arches[0].UUID().ID != "CC3C8D85-B0DE-3445-85BE-85111E9CC36F" {
 		t.Errorf("macho.UUID() = %s; want test", fat.Arches[0].UUID())
 	}
 }
