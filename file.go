@@ -1518,7 +1518,7 @@ func (f *File) preferredLoadAddress() uint64 {
 
 func (f *File) readLeUint32(offset int64) (uint32, error) {
 	u32 := make([]byte, 4)
-	if _, err := f.sr.ReadAt(u32, offset); err != nil {
+	if _, err := f.cr.ReadAt(u32, offset); err != nil {
 		return 0, err
 	}
 	return binary.LittleEndian.Uint32(u32), nil
@@ -1526,7 +1526,7 @@ func (f *File) readLeUint32(offset int64) (uint32, error) {
 
 func (f *File) readLeUint64(offset int64) (uint64, error) {
 	u64 := make([]byte, 8)
-	if _, err := f.sr.ReadAt(u64, offset); err != nil {
+	if _, err := f.cr.ReadAt(u64, offset); err != nil {
 		return 0, err
 	}
 	return binary.LittleEndian.Uint64(u64), nil
@@ -2053,7 +2053,7 @@ func (f *File) DyldChainedFixups() (*fixupchains.DyldChainedFixups, error) {
 			if _, err := f.cr.ReadAt(data, int64(dcfLC.Offset)); err != nil {
 				return nil, fmt.Errorf("failed to read DyldChainedFixups data at offset=%#x; %v", int64(dcfLC.Offset), err)
 			}
-			dcf := fixupchains.NewChainedFixups(bytes.NewReader(data), &f.sr, f.ByteOrder)
+			dcf := fixupchains.NewChainedFixups(bytes.NewReader(data), &f.cr, f.ByteOrder)
 			if err := dcf.ParseStarts(); err != nil {
 				return nil, fmt.Errorf("failed to parse dyld chained fixup starts: %v", err)
 			}
@@ -2361,7 +2361,7 @@ func (f *File) GetRebaseInfo() ([]types.Rebase, error) {
 	if dinfo := f.DyldInfo(); dinfo != nil {
 		if dinfo.RebaseSize > 0 {
 			dat := make([]byte, dinfo.RebaseSize)
-			if _, err := f.sr.ReadAt(dat, int64(dinfo.RebaseOff)); err != nil {
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.RebaseOff)); err != nil {
 				return nil, fmt.Errorf("failed to read rebase info: %v", err)
 			}
 			return f.parseRebase(bytes.NewReader(dat))
@@ -2369,7 +2369,7 @@ func (f *File) GetRebaseInfo() ([]types.Rebase, error) {
 	} else if dinfo := f.DyldInfoOnly(); dinfo != nil {
 		if dinfo.RebaseSize > 0 {
 			dat := make([]byte, dinfo.RebaseSize)
-			if _, err := f.sr.ReadAt(dat, int64(dinfo.RebaseOff)); err != nil {
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.RebaseOff)); err != nil {
 				return nil, fmt.Errorf("failed to read rebase info: %v", err)
 			}
 			return f.parseRebase(bytes.NewReader(dat))
@@ -2384,15 +2384,16 @@ func (f *File) GetExports() ([]trie.TrieExport, error) {
 	if dinfo := f.DyldInfo(); dinfo != nil {
 		if dinfo.ExportSize > 0 {
 			dat := make([]byte, dinfo.ExportSize)
-			if _, err := f.sr.ReadAt(dat, int64(dinfo.ExportOff)); err != nil {
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.ExportOff)); err != nil {
 				return nil, fmt.Errorf("failed to read bind info: %v", err)
 			}
 			return trie.ParseTrieExports(bytes.NewReader(dat), f.GetBaseAddress())
 		}
 	} else if dinfo := f.DyldInfoOnly(); dinfo != nil {
 		if dinfo.ExportSize > 0 {
+			// addr := linkedit.Addr + (uint64(dinfo.ExportOff) - linkedit.Offset)
 			dat := make([]byte, dinfo.ExportSize)
-			if _, err := f.sr.ReadAt(dat, int64(dinfo.ExportOff)); err != nil {
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.ExportOff)); err != nil {
 				return nil, fmt.Errorf("failed to read bind info: %v", err)
 			}
 			return trie.ParseTrieExports(bytes.NewReader(dat), f.GetBaseAddress())
@@ -2531,8 +2532,8 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 				delta := uint64(0)
 				for {
 					var ptr uint64
-					f.sr.Seek(int64(f.Segment(bind.Segment).Offset+segOffset), io.SeekStart)
-					if err := binary.Read(f.sr, f.ByteOrder, &ptr); err != nil {
+					f.cr.Seek(int64(f.Segment(bind.Segment).Offset+segOffset), io.SeekStart)
+					if err := binary.Read(f.cr, f.ByteOrder, &ptr); err != nil {
 						return nil, fmt.Errorf("failed to read pointer: %v", err)
 					}
 					if (ptr & (1 << 62)) == 0 { // isRebase TODO: handle rebases
@@ -2624,8 +2625,8 @@ func (f *File) parseRebase(r *bytes.Reader) ([]types.Rebase, error) {
 			rebase.Offset += uint64(imm) * f.pointerSize()
 		case types.REBASE_OPCODE_DO_REBASE_IMM_TIMES:
 			for i := byte(0); i < imm; i++ {
-				f.sr.Seek(int64(f.Segment(rebase.Segment).Offset+rebase.Offset), io.SeekStart)
-				if err := binary.Read(f.sr, f.ByteOrder, &rebase.Value); err != nil {
+				f.cr.Seek(int64(f.Segment(rebase.Segment).Offset+rebase.Offset), io.SeekStart)
+				if err := binary.Read(f.cr, f.ByteOrder, &rebase.Value); err != nil {
 					return nil, fmt.Errorf("failed to read pointer: %v", err)
 				}
 				if sec := f.FindSectionForVMAddr(f.Segment(rebase.Segment).Addr + rebase.Offset); sec != nil {
@@ -2640,8 +2641,8 @@ func (f *File) parseRebase(r *bytes.Reader) ([]types.Rebase, error) {
 				return nil, err
 			}
 			for i := uint64(0); i < count; i++ {
-				f.sr.Seek(int64(f.Segment(rebase.Segment).Offset+rebase.Offset), io.SeekStart)
-				if err := binary.Read(f.sr, f.ByteOrder, &rebase.Value); err != nil {
+				f.cr.Seek(int64(f.Segment(rebase.Segment).Offset+rebase.Offset), io.SeekStart)
+				if err := binary.Read(f.cr, f.ByteOrder, &rebase.Value); err != nil {
 					return nil, fmt.Errorf("failed to read pointer: %v", err)
 				}
 				if sec := f.FindSectionForVMAddr(f.Segment(rebase.Segment).Addr + rebase.Offset); sec != nil {
@@ -2651,8 +2652,8 @@ func (f *File) parseRebase(r *bytes.Reader) ([]types.Rebase, error) {
 				rebase.Offset += f.pointerSize()
 			}
 		case types.REBASE_OPCODE_DO_REBASE_ADD_ADDR_ULEB:
-			f.sr.Seek(int64(f.Segment(rebase.Segment).Offset+rebase.Offset), io.SeekStart)
-			if err := binary.Read(f.sr, f.ByteOrder, &rebase.Value); err != nil {
+			f.cr.Seek(int64(f.Segment(rebase.Segment).Offset+rebase.Offset), io.SeekStart)
+			if err := binary.Read(f.cr, f.ByteOrder, &rebase.Value); err != nil {
 				return nil, fmt.Errorf("failed to read pointer: %v", err)
 			}
 			off, err := trie.ReadUleb128(r)
@@ -2674,8 +2675,8 @@ func (f *File) parseRebase(r *bytes.Reader) ([]types.Rebase, error) {
 				return nil, err
 			}
 			for i := uint64(0); i < count; i++ {
-				f.sr.Seek(int64(f.Segment(rebase.Segment).Offset+rebase.Offset), io.SeekStart)
-				if err := binary.Read(f.sr, f.ByteOrder, &rebase.Value); err != nil {
+				f.cr.Seek(int64(f.Segment(rebase.Segment).Offset+rebase.Offset), io.SeekStart)
+				if err := binary.Read(f.cr, f.ByteOrder, &rebase.Value); err != nil {
 					return nil, fmt.Errorf("failed to read pointer: %v", err)
 				}
 				if sec := f.FindSectionForVMAddr(f.Segment(rebase.Segment).Addr + rebase.Offset); sec != nil {
