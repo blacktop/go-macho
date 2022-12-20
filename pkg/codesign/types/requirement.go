@@ -58,7 +58,6 @@ func (cm RequirementType) GoString() string {
 
 // NOTE: https://opensource.apple.com/source/libsecurity_codesigning/libsecurity_codesigning-36591/lib/requirement.h.auto.html
 
-//
 // exprForm opcodes.
 //
 // Opcodes are broken into flags in the (HBO) high byte, and an opcode value
@@ -71,7 +70,6 @@ func (cm RequirementType) GoString() string {
 // disregarding the parts it doesn't know about. An unrecognized opcode with zero
 // flag byte causes evaluation to categorically fail, since the semantics of such
 // an opcode cannot safely be predicted.
-//
 const (
 	// semantic bits or'ed into the opcode
 	opFlagMask     exprOp = 0xFF000000 // high bit flags
@@ -521,6 +519,19 @@ func ParseRequirements(r *bytes.Reader, reqs Requirements) (string, error) {
 	r.Seek(int64(reqs.Offset), io.SeekStart)
 
 	switch reqs.Type {
+	case HostRequirementType:
+		var reqSet []string
+		for {
+			rsPart, err := evalExpression(r, slTop)
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return "", err
+			}
+			reqSet = append(reqSet, rsPart)
+		}
+		return "host => " + strings.Join(reqSet, " "), nil
 	case DesignatedRequirementType:
 		var reqSet []string
 		for {
@@ -535,7 +546,6 @@ func ParseRequirements(r *bytes.Reader, reqs Requirements) (string, error) {
 		}
 		return strings.Join(reqSet, " "), nil
 	default:
-		fmt.Printf("Found unsupported codesign requirement type %s, please notify author\n", reqs.Type)
+		return "", fmt.Errorf("failed to dump requirements set; found unsupported codesign requirement type '%s', please notify author", reqs.Type)
 	}
-	return "", fmt.Errorf("failed to dump requirements set")
 }

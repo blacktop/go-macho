@@ -1,4 +1,4 @@
-# go-macho [WIP] 🚧
+# go-macho
 
 [![Go](https://github.com/appsworld/go-macho/workflows/Go/badge.svg?branch=master)](https://github.com/appsworld/go-macho/actions) [![Go Reference](https://pkg.go.dev/badge/github.com/appsworld/go-macho.svg)](https://pkg.go.dev/github.com/appsworld/go-macho) [![License](http://img.shields.io/:license-mit-blue.svg)](http://doge.mit-license.org)
 
@@ -12,7 +12,11 @@ This package goes beyond the Go's `debug/macho` to:
 
 - Cover ALL load commands and architectures
 - Provide nice summary string output
-- Allow for creating custom macho
+- Allow for creating custom MachO files
+- Parse Objective-C runtime information
+- Parse Swift runtime information
+- Parse code signature information
+- Parse fixup chain information
 
 ## Install
 
@@ -28,15 +32,11 @@ package main
 import "github.com/appsworld/go-macho"
 
 func main() {
-    f, err := os.Open("/path/to/macho")
+    m, err := macho.Open("/path/to/macho")
     if err != nil {
         panic(err)
     }
-
-    m, err := macho.NewFile(f)
-    if err != nil {
-        panic(err)
-    }
+    defer m.Close()
 
     fmt.Println(m.FileTOC.String())
 }

@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -52,16 +50,20 @@ func (m exportSegMap) Remap(offset uint64) (uint64, error) {
 			return segInfo.New.Start + (offset - segInfo.Old.Start), nil
 		}
 	}
-	return 0, fmt.Errorf("failed to remapp offset %#x", offset)
+	return 0, fmt.Errorf("failed to remap offset %#x", offset)
 }
 
-func (m exportSegMap) RemapSeg(name string, offset uint64) (uint64, error) {
+func (m exportSegMap) RemapSeg(name string, offset uint64) (uint64, uint64, error) {
 	for _, segInfo := range m {
 		if segInfo.Name == name {
-			return segInfo.New.Start + (offset - segInfo.Old.Start), nil
+			return segInfo.New.Start + (offset - segInfo.Old.Start), (segInfo.New.End - segInfo.New.Start), nil
 		}
 	}
-	return 0, fmt.Errorf("failed to remapp offset %#x", offset)
+	return 0, 0, fmt.Errorf("failed to remap offset %#x", offset)
+}
+
+func pageAlign(offset uint64) uint64 {
+	return offset + (0x1000 - (offset % 0x1000))
 }
 
 // Export exports an in-memory or cached dylib|kext MachO to a file
@@ -83,10 +85,10 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 			},
 			New: segInfo{
 				Start: newSegOffset,
-				End:   newSegOffset + seg.Filesz,
+				End:   newSegOffset + pageAlign(seg.Filesz),
 			},
 		})
-		newSegOffset += seg.Filesz
+		newSegOffset += pageAlign(seg.Filesz)
 	}
 
 	sort.Sort(segMap)
@@ -126,13 +128,13 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 			switch seg.Name {
 			case "__TEXT":
 				dat := make([]byte, seg.Filesz)
-				_, err := f.cr.ReadAtAddr(dat, seg.Addr)
-				if err != nil {
+				if _, err := f.cr.ReadAtAddr(dat, seg.Addr); err != nil {
 					return fmt.Errorf("failed to read segment %s data: %v", seg.Name, err)
 				}
 				if _, err := buf.Write(dat[endOfLoadsOffset:]); err != nil {
 					return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
 				}
+
 			case "__LINKEDIT":
 				if inCache {
 					if _, err := buf.Write(lebuf.Bytes()); err != nil {
@@ -140,8 +142,7 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 					}
 				} else {
 					dat := make([]byte, seg.Filesz)
-					_, err := f.cr.ReadAtAddr(dat, seg.Addr)
-					if err != nil {
+					if _, err := f.cr.ReadAtAddr(dat, seg.Addr); err != nil {
 						return fmt.Errorf("failed to read segment %s data: %v", seg.Name, err)
 					}
 					if _, err := buf.Write(dat); err != nil {
@@ -150,8 +151,7 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 				}
 			default:
 				dat := make([]byte, seg.Filesz)
-				_, err := f.cr.ReadAtAddr(dat, seg.Addr)
-				if err != nil {
+				if _, err := f.cr.ReadAtAddr(dat, seg.Addr); err != nil {
 					return fmt.Errorf("failed to read segment %s data: %v", seg.Name, err)
 				}
 				if _, err := buf.Write(dat); err != nil {
@@ -161,71 +161,66 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 		}
 	}
 
-	// Page align file
-	for (buf.Len() % 0x1000) != 0 {
-		buf.WriteByte(0)
-	}
-
 	os.MkdirAll(filepath.Dir(path), os.ModePerm)
 
-	if err := ioutil.WriteFile(path, buf.Bytes(), 0755); err != nil {
+	if err := os.WriteFile(path, buf.Bytes(), 0755); err != nil {
 		return fmt.Errorf("failed to write exported MachO to file %s: %v", path, err)
 	}
 
-	if dcf != nil {
-		newFile, err := os.OpenFile(path, os.O_WRONLY, 0755)
-		if err != nil {
-			return fmt.Errorf("failed to open exported MachO %s: %v", path, err)
-		}
-		defer newFile.Close()
+	// FIXME: fixup chains are not yet supported (this should be done in the linkedit optimization step and create a REAL LC_DYLD_CHAINED_FIXUPS load command)
+	// if dcf != nil {
+	// 	newFile, err := os.OpenFile(path, os.O_WRONLY, 0755)
+	// 	if err != nil {
+	// 		return fmt.Errorf("failed to open exported MachO %s: %v", path, err)
+	// 	}
+	// 	defer newFile.Close()
 
-		fi, err := newFile.Stat()
-		if err != nil {
-			return fmt.Errorf("failed to stat file %s: %v", path, err)
-		}
-		fileSize := fi.Size()
+	// 	fi, err := newFile.Stat()
+	// 	if err != nil {
+	// 		return fmt.Errorf("failed to stat file %s: %v", path, err)
+	// 	}
+	// 	fileSize := fi.Size()
 
-		for _, start := range dcf.Starts {
-			if start.PageStarts != nil {
-				for _, fixup := range start.Fixups {
-					off, err := segMap.Remap(fixup.Offset())
-					if err != nil {
-						off = fixup.Offset()
-						// return fmt.Errorf("failed to remap fixup at offset %#x: %v", off, err)
-					}
+	// 	for _, start := range dcf.Starts {
+	// 		if start.PageStarts != nil {
+	// 			for _, fixup := range start.Fixups {
+	// 				off, err := segMap.Remap(fixup.Offset())
+	// 				if err != nil {
+	// 					continue
+	// 				}
 
-					if off == 0 || off > uint64(fileSize) {
-						continue
-					}
+	// 				if off == 0 || off >= uint64(fileSize) {
+	// 					continue
+	// 				}
 
-					if _, err := newFile.Seek(int64(off), io.SeekStart); err != nil {
-						return fmt.Errorf("failed to seek in exported file to offset %#x from the start: %v", off, err)
-					}
+	// 				if _, err := newFile.Seek(int64(off), io.SeekStart); err != nil {
+	// 					return fmt.Errorf("failed to seek in exported file to offset %#x from the start: %v", off, err)
+	// 				}
 
-					switch fx := fixup.(type) {
-					case fixupchains.Bind:
-						// var addend string
-						// addr := uint64(f.Offset()) + m.GetBaseAddress()
-						// if fullAddend := dcf.Imports[f.Ordinal()].Addend() + f.Addend(); fullAddend > 0 {
-						// 	addend = fmt.Sprintf(" + %#x", fullAddend)
-						// 	addr += fullAddend
-						// }
-						// sec = m.FindSectionForVMAddr(addr)
-						// lib := m.LibraryOrdinalName(dcf.Imports[f.Ordinal()].LibOrdinal())
-						// if sec != nil && sec != lastSec {
-						// 	fmt.Printf("%s.%s\n", sec.Seg, sec.Name)
-						// }
-						// fmt.Printf("%s\t%s/%s%s\n", fixupchains.Bind(f).String(m.GetBaseAddress()), lib, f.Name(), addend)
-					case fixupchains.Rebase:
-						addr := uint64(fx.Target()) + baseAddress
-						if err := binary.Write(newFile, f.ByteOrder, addr); err != nil {
-							return fmt.Errorf("failed to write fixup address %#x: %v", addr, err)
-						}
-					}
-				}
-			}
-		}
-	}
+	// 				switch fx := fixup.(type) {
+	// 				case fixupchains.Bind:
+	// 					// var addend string
+	// 					// addr := uint64(f.Offset()) + m.GetBaseAddress()
+	// 					// if fullAddend := dcf.Imports[f.Ordinal()].Addend() + f.Addend(); fullAddend > 0 {
+	// 					// 	addend = fmt.Sprintf(" + %#x", fullAddend)
+	// 					// 	addr += fullAddend
+	// 					// }
+	// 					// sec = m.FindSectionForVMAddr(addr)
+	// 					// lib := m.LibraryOrdinalName(dcf.Imports[f.Ordinal()].LibOrdinal())
+	// 					// if sec != nil && sec != lastSec {
+	// 					// 	fmt.Printf("%s.%s\n", sec.Seg, sec.Name)
+	// 					// }
+	// 					// fmt.Printf("%s\t%s/%s%s\n", fixupchains.Bind(f).String(m.GetBaseAddress()), lib, f.Name(), addend)
+	// 				case fixupchains.Rebase:
+	// 					addr := uint64(fx.Target()) + baseAddress
+	// 					if err := binary.Write(newFile, f.ByteOrder, addr); err != nil {
+	// 						return fmt.Errorf("failed to write fixup address %#x: %v", addr, err)
+	// 					}
+	// 				}
+	// 			}
+	// 		}
+	// 	}
+	// }
 
 	return nil
 }
@@ -239,11 +234,13 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 		case types.LC_SEGMENT_64:
 			seg := l.(*Segment)
 
-			off, err := segMap.RemapSeg(seg.Name, seg.Offset)
+			off, sz, err := segMap.RemapSeg(seg.Name, seg.Offset)
 			if err != nil {
 				return fmt.Errorf("failed to remap offset in segment %s: %v", seg.Name, err)
 			}
 			seg.Offset = off
+			seg.Filesz = sz
+			seg.Memsz = sz
 
 			for i := uint32(0); i < seg.Nsect; i++ {
 				if f.Sections[i+seg.Firstsect].Offset != 0 {
@@ -262,6 +259,8 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 				// f.Sections[i+seg.Firstsect].Reloff = uint32(roff)
 			}
 		case types.LC_SYMTAB:
+			// symtab := l.(*Symtab)
+			// _ = symtab
 			// symoff, err := segMap.Remap(uint64(l.(*Symtab).Symoff))
 			// if err != nil {
 			// 	return fmt.Errorf("failed to remap symbol offset in %s: %v", l.Command(), err)
@@ -273,36 +272,48 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 			// l.(*Symtab).Symoff = uint32(symoff)
 			// l.(*Symtab).Stroff = uint32(stroff)
 		case types.LC_DYSYMTAB:
-			// tocoffset, err := segMap.Remap(uint64(l.(*Dysymtab).Tocoffset))
-			// if err != nil {
-			// 	return fmt.Errorf("failed to remap Tocoffset in %s: %v", l.Command(), err)
+			// if l.(*Dysymtab).Tocoffset > 0 {
+			// 	tocoffset, err := segMap.Remap(uint64(l.(*Dysymtab).Tocoffset))
+			// 	if err != nil {
+			// 		return fmt.Errorf("failed to remap Tocoffset in %s: %v", l.Command(), err)
+			// 	}
+			// 	l.(*Dysymtab).Tocoffset = uint32(tocoffset)
 			// }
-			// l.(*Dysymtab).Tocoffset = uint32(tocoffset)
-			// modtaboff, err := segMap.Remap(uint64(l.(*Dysymtab).Modtaboff))
-			// if err != nil {
-			// 	return fmt.Errorf("failed to remap Modtaboff in %s: %v", l.Command(), err)
+			// if l.(*Dysymtab).Modtaboff > 0 {
+			// 	modtaboff, err := segMap.Remap(uint64(l.(*Dysymtab).Modtaboff))
+			// 	if err != nil {
+			// 		return fmt.Errorf("failed to remap Modtaboff in %s: %v", l.Command(), err)
+			// 	}
+			// 	l.(*Dysymtab).Modtaboff = uint32(modtaboff)
 			// }
-			// l.(*Dysymtab).Modtaboff = uint32(modtaboff)
-			// extrefsymoff, err := segMap.Remap(uint64(l.(*Dysymtab).Extrefsymoff))
-			// if err != nil {
-			// 	return fmt.Errorf("failed to remap Extrefsymoff %s: %v", l.Command(), err)
+			// if l.(*Dysymtab).Extrefsymoff > 0 {
+			// 	extrefsymoff, err := segMap.Remap(uint64(l.(*Dysymtab).Extrefsymoff))
+			// 	if err != nil {
+			// 		return fmt.Errorf("failed to remap Extrefsymoff %s: %v", l.Command(), err)
+			// 	}
+			// 	l.(*Dysymtab).Extrefsymoff = uint32(extrefsymoff)
 			// }
-			// l.(*Dysymtab).Extrefsymoff = uint32(extrefsymoff)
-			// indirectsymoff, err := segMap.Remap(uint64(l.(*Dysymtab).Indirectsymoff))
-			// if err != nil {
-			// 	return fmt.Errorf("failed to remap Indirectsymoff in %s: %v", l.Command(), err)
+			// if l.(*Dysymtab).Indirectsymoff > 0 {
+			// 	indirectsymoff, err := segMap.Remap(uint64(l.(*Dysymtab).Indirectsymoff))
+			// 	if err != nil {
+			// 		return fmt.Errorf("failed to remap Indirectsymoff in %s: %v", l.Command(), err)
+			// 	}
+			// 	l.(*Dysymtab).Indirectsymoff = uint32(indirectsymoff)
 			// }
-			// l.(*Dysymtab).Indirectsymoff = uint32(indirectsymoff)
-			// extreloff, err := segMap.Remap(uint64(l.(*Dysymtab).Extreloff))
-			// if err != nil {
-			// 	return fmt.Errorf("failed to remap Extreloff in %s: %v", l.Command(), err)
+			// if l.(*Dysymtab).Extreloff > 0 {
+			// 	extreloff, err := segMap.Remap(uint64(l.(*Dysymtab).Extreloff))
+			// 	if err != nil {
+			// 		return fmt.Errorf("failed to remap Extreloff in %s: %v", l.Command(), err)
+			// 	}
+			// 	l.(*Dysymtab).Extreloff = uint32(extreloff)
 			// }
-			// l.(*Dysymtab).Extreloff = uint32(extreloff)
-			// locreloff, err := segMap.Remap(uint64(l.(*Dysymtab).Locreloff))
-			// if err != nil {
-			// 	return fmt.Errorf("failed to remap Locreloff in %s: %v", l.Command(), err)
+			// if l.(*Dysymtab).Locreloff > 0 {
+			// 	locreloff, err := segMap.Remap(uint64(l.(*Dysymtab).Locreloff))
+			// 	if err != nil {
+			// 		return fmt.Errorf("failed to remap Locreloff in %s: %v", l.Command(), err)
+			// 	}
+			// 	l.(*Dysymtab).Locreloff = uint32(locreloff)
 			// }
-			// l.(*Dysymtab).Locreloff = uint32(locreloff)
 		case types.LC_CODE_SIGNATURE:
 			// off, err := segMap.Remap(uint64(l.(*CodeSignature).Offset))
 			// if err != nil {
@@ -502,8 +513,7 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	if dinfo := f.DyldInfo(); dinfo != nil {
 		if dinfo.RebaseSize > 0 {
 			dat := make([]byte, dinfo.RebaseSize)
-			_, err := f.cr.ReadAt(dat, int64(dinfo.RebaseOff))
-			if err != nil {
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.RebaseOff)); err != nil {
 				return nil, fmt.Errorf("failed to read %s rebase data: %v", dinfo.LoadCmd, err)
 			}
 			dinfo.RebaseOff = uint32(linkedit.Offset) + uint32(lebuf.Len())
@@ -513,8 +523,7 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		}
 		if dinfo.BindSize > 0 {
 			dat := make([]byte, dinfo.BindSize)
-			_, err := f.cr.ReadAt(dat, int64(dinfo.BindOff))
-			if err != nil {
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.BindOff)); err != nil {
 				return nil, fmt.Errorf("failed to read %s bind data: %v", dinfo.LoadCmd, err)
 			}
 			dinfo.BindOff = uint32(linkedit.Offset) + uint32(lebuf.Len())
@@ -524,8 +533,7 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		}
 		if dinfo.WeakBindSize > 0 {
 			dat := make([]byte, dinfo.WeakBindSize)
-			_, err := f.cr.ReadAt(dat, int64(dinfo.WeakBindOff))
-			if err != nil {
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.WeakBindOff)); err != nil {
 				return nil, fmt.Errorf("failed to read %s weak bind data: %v", dinfo.LoadCmd, err)
 			}
 			dinfo.WeakBindOff = uint32(linkedit.Offset) + uint32(lebuf.Len())
@@ -535,8 +543,7 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		}
 		if dinfo.LazyBindSize > 0 {
 			dat := make([]byte, dinfo.LazyBindSize)
-			_, err := f.cr.ReadAt(dat, int64(dinfo.LazyBindOff))
-			if err != nil {
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.LazyBindOff)); err != nil {
 				return nil, fmt.Errorf("failed to read %s lazy bind data: %v", dinfo.LoadCmd, err)
 			}
 			dinfo.LazyBindOff = uint32(linkedit.Offset) + uint32(lebuf.Len())
@@ -546,8 +553,7 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		}
 		if dinfo.ExportSize > 0 {
 			dat := make([]byte, dinfo.ExportSize)
-			_, err := f.cr.ReadAt(dat, int64(dinfo.ExportOff))
-			if err != nil {
+			if _, err := f.cr.ReadAt(dat, int64(dinfo.ExportOff)); err != nil {
 				return nil, fmt.Errorf("failed to read %s export data: %v", dinfo.LoadCmd, err)
 			}
 			dinfo.ExportOff = uint32(linkedit.Offset) + uint32(lebuf.Len())
@@ -558,8 +564,7 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	} else if dionly := f.DyldInfoOnly(); dionly != nil {
 		if dionly.RebaseSize > 0 {
 			dat := make([]byte, dionly.RebaseSize)
-			_, err := f.cr.ReadAt(dat, int64(dionly.RebaseOff))
-			if err != nil {
+			if _, err := f.cr.ReadAt(dat, int64(dionly.RebaseOff)); err != nil {
 				return nil, fmt.Errorf("failed to read %s rebase data: %v", dionly.LoadCmd, err)
 			}
 			dionly.RebaseOff = uint32(linkedit.Offset) + uint32(lebuf.Len())
@@ -569,8 +574,7 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		}
 		if dionly.BindSize > 0 {
 			dat := make([]byte, dionly.BindSize)
-			_, err := f.cr.ReadAt(dat, int64(dionly.BindOff))
-			if err != nil {
+			if _, err := f.cr.ReadAt(dat, int64(dionly.BindOff)); err != nil {
 				return nil, fmt.Errorf("failed to read %s bind data: %v", dionly.LoadCmd, err)
 			}
 			dionly.BindOff = uint32(linkedit.Offset) + uint32(lebuf.Len())
@@ -580,8 +584,7 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		}
 		if dionly.WeakBindSize > 0 {
 			dat := make([]byte, dionly.WeakBindSize)
-			_, err := f.cr.ReadAt(dat, int64(dionly.WeakBindOff))
-			if err != nil {
+			if _, err := f.cr.ReadAt(dat, int64(dionly.WeakBindOff)); err != nil {
 				return nil, fmt.Errorf("failed to read %s weak bind data: %v", dionly.LoadCmd, err)
 			}
 			dionly.WeakBindOff = uint32(linkedit.Offset) + uint32(lebuf.Len())
@@ -591,8 +594,7 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		}
 		if dionly.LazyBindSize > 0 {
 			dat := make([]byte, dionly.LazyBindSize)
-			_, err := f.cr.ReadAt(dat, int64(dionly.LazyBindOff))
-			if err != nil {
+			if _, err := f.cr.ReadAt(dat, int64(dionly.LazyBindOff)); err != nil {
 				return nil, fmt.Errorf("failed to read %s lazy bind data: %v", dionly.LoadCmd, err)
 			}
 			dionly.LazyBindOff = uint32(linkedit.Offset) + uint32(lebuf.Len())
@@ -602,8 +604,7 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		}
 		if dionly.ExportSize > 0 {
 			dat := make([]byte, dionly.ExportSize)
-			_, err := f.cr.ReadAt(dat, int64(dionly.ExportOff))
-			if err != nil {
+			if _, err := f.cr.ReadAt(dat, int64(dionly.ExportOff)); err != nil {
 				return nil, fmt.Errorf("failed to read %s export data: %v", dionly.LoadCmd, err)
 			}
 			dionly.ExportOff = uint32(linkedit.Offset) + uint32(lebuf.Len())
@@ -611,19 +612,22 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 				return nil, fmt.Errorf("failed to write %s export data: %v", dionly.LoadCmd, err)
 			}
 		}
+		pad := linkedit.Offset + (uint64(lebuf.Len()) % f.pointerSize())
+		if _, err := lebuf.Write(make([]byte, pad)); err != nil {
+			return nil, fmt.Errorf("failed to write LC_DYLD_INFO|LC_DYLD_INFO_ONLY padding: %v", err)
+		}
 	}
 	// fix LC_FUNCTION_STARTS
 	if fstarts := f.FunctionStarts(); fstarts != nil {
 		dat := make([]byte, fstarts.Size)
-		_, err := f.cr.ReadAt(dat, int64(fstarts.Offset))
-		if err != nil {
+		if _, err := f.cr.ReadAt(dat, int64(fstarts.Offset)); err != nil {
 			return nil, fmt.Errorf("failed to read LC_FUNCTION_STARTS data: %v", err)
 		}
 		fstarts.Offset = uint32(linkedit.Offset) + uint32(lebuf.Len())
 		if _, err := lebuf.Write(dat); err != nil {
 			return nil, fmt.Errorf("failed to write LC_FUNCTION_STARTS data: %v", err)
 		}
-		pad := linkedit.Offset + uint64(lebuf.Len())%f.pointerSize()
+		pad := linkedit.Offset + (uint64(lebuf.Len()) % f.pointerSize())
 		if _, err := lebuf.Write(make([]byte, pad)); err != nil {
 			return nil, fmt.Errorf("failed to write LC_FUNCTION_STARTS padding: %v", err)
 		}
@@ -631,15 +635,14 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	// fix LC_DATA_IN_CODE
 	if dataNCode := f.DataInCode(); dataNCode != nil {
 		dat := make([]byte, dataNCode.Size)
-		_, err = f.cr.ReadAt(dat, int64(dataNCode.Offset))
-		if err != nil {
+		if _, err = f.cr.ReadAt(dat, int64(dataNCode.Offset)); err != nil {
 			return nil, fmt.Errorf("failed to read LC_DATA_IN_CODE data: %v", err)
 		}
 		dataNCode.Offset = uint32(linkedit.Offset) + uint32(lebuf.Len())
 		if _, err := lebuf.Write(dat); err != nil {
 			return nil, fmt.Errorf("failed to write LC_DATA_IN_CODE data: %v", err)
 		}
-		pad := linkedit.Offset + uint64(lebuf.Len())%f.pointerSize()
+		pad := linkedit.Offset + (uint64(lebuf.Len()) % f.pointerSize())
 		if _, err := lebuf.Write(make([]byte, pad)); err != nil {
 			return nil, fmt.Errorf("failed to write LC_DATA_IN_CODE padding: %v", err)
 		}
@@ -651,15 +654,14 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 			return nil, fmt.Errorf("failed to get LC_DYLD_EXPORTS_TRIE exports: %v", err)
 		}
 		dat := make([]byte, dexpTrie.Size)
-		_, err = f.cr.ReadAt(dat, int64(dexpTrie.Offset))
-		if err != nil {
+		if _, err = f.cr.ReadAt(dat, int64(dexpTrie.Offset)); err != nil {
 			return nil, fmt.Errorf("failed to read LC_DYLD_EXPORTS_TRIE data: %v", err)
 		}
 		dexpTrie.Offset = uint32(linkedit.Offset) + uint32(lebuf.Len())
 		if _, err := lebuf.Write(dat); err != nil {
 			return nil, fmt.Errorf("failed to write LC_DYLD_EXPORTS_TRIE data: %v", err)
 		}
-		pad := linkedit.Offset + uint64(lebuf.Len())%f.pointerSize()
+		pad := linkedit.Offset + (uint64(lebuf.Len()) % f.pointerSize())
 		if _, err := lebuf.Write(make([]byte, pad)); err != nil {
 			return nil, fmt.Errorf("failed to write LC_DYLD_EXPORTS_TRIE padding: %v", err)
 		}
@@ -693,22 +695,25 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		newSymCount++
 	}
 	// now start copying symbol table from start of externs instead of start of locals
-	for _, sym := range f.Symtab.Syms[f.Dysymtab.Iextdefsym:] {
-		if err := binary.Write(&lebuf, binary.LittleEndian, types.Nlist64{
-			Nlist: types.Nlist{
-				Name: uint32(newSymNames.Len()),
-				Type: sym.Type,
-				Sect: sym.Sect,
-				Desc: sym.Desc,
-			},
-			Value: sym.Value,
-		}); err != nil {
-			return nil, fmt.Errorf("failed to write symtab nlist entry to NEW linkedit data: %v", err)
+	// for _, sym := range f.Symtab.Syms[f.Dysymtab.Iextdefsym:] {
+	if f.Symtab != nil {
+		for _, sym := range f.Symtab.Syms {
+			if err := binary.Write(&lebuf, binary.LittleEndian, types.Nlist64{
+				Nlist: types.Nlist{
+					Name: uint32(newSymNames.Len()),
+					Type: sym.Type,
+					Sect: sym.Sect,
+					Desc: sym.Desc,
+				},
+				Value: sym.Value,
+			}); err != nil {
+				return nil, fmt.Errorf("failed to write symtab nlist entry to NEW linkedit data: %v", err)
+			}
+			if _, err := newSymNames.WriteString(sym.Name + "\x00"); err != nil {
+				return nil, fmt.Errorf("failed to write symbol name string to NEW linkedit data: %v", err)
+			}
+			newSymCount++
 		}
-		if _, err := newSymNames.WriteString(sym.Name + "\x00"); err != nil {
-			return nil, fmt.Errorf("failed to write symbol name string to NEW linkedit data: %v", err)
-		}
-		newSymCount++
 	}
 	// get all re-exports from LC_DYLD_EXPORTS_TRIE
 	for _, exp := range exports {
@@ -738,10 +743,18 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		}
 	}
 
+	pad := linkedit.Offset + (uint64(lebuf.Len()) % f.pointerSize())
+	if _, err := lebuf.Write(make([]byte, pad)); err != nil {
+		return nil, fmt.Errorf("failed to write symtab padding: %v", err)
+	}
+
 	newIndSymTabOffset := uint64(lebuf.Len())
 
 	// Copy (and adjust) indirect symbol table
-	undefSymbolShift := uint32(len(locals)) - f.Dysymtab.Nlocalsym
+	var undefSymbolShift uint32
+	if len(locals) > 0 {
+		undefSymbolShift = uint32(len(locals)) - f.Dysymtab.Nlocalsym
+	}
 	if undefSymbolShift > 0 {
 		for idx, indSym := range f.Dysymtab.IndirectSyms {
 			f.Dysymtab.IndirectSyms[idx] = indSym + undefSymbolShift
@@ -749,6 +762,11 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	}
 	if err := binary.Write(&lebuf, binary.LittleEndian, f.Dysymtab.IndirectSyms); err != nil {
 		return nil, fmt.Errorf("failed to write indirect symbol table to NEW linkedit data: %v", err)
+	}
+
+	pad = linkedit.Offset + (uint64(lebuf.Len()) % f.pointerSize())
+	if _, err := lebuf.Write(make([]byte, pad)); err != nil {
+		return nil, fmt.Errorf("failed to write indirect symtab padding: %v", err)
 	}
 
 	newStringPoolOffset := uint64(lebuf.Len())
@@ -762,23 +780,31 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		return nil, fmt.Errorf("failed to write symbol name strings to NEW linkedit data: %v", err)
 	}
 
-	f.Symtab.Nsyms = newSymCount
-	f.Symtab.Symoff = uint32(linkedit.Offset + newSymTabOffset)
-	f.Symtab.Stroff = uint32(linkedit.Offset + newStringPoolOffset)
-	f.Symtab.Strsize = uint32(newSymNames.Len())
-
+	if f.Symtab != nil {
+		f.Symtab.Nsyms = newSymCount
+		f.Symtab.Symoff = uint32(linkedit.Offset + newSymTabOffset)
+		f.Symtab.Stroff = uint32(linkedit.Offset + newStringPoolOffset)
+		f.Symtab.Strsize = uint32(newSymNames.Len())
+	}
 	// f.Dysymtab.Ilocalsym = uint32(len(locals)) + f. .Nextdefsym + f.Dysymtab.Nundefsym
-	f.Dysymtab.Nlocalsym = uint32(len(locals))
-	f.Dysymtab.Iextdefsym = uint32(len(locals))
-	f.Dysymtab.Iundefsym = f.Dysymtab.Iextdefsym + f.Dysymtab.Nextdefsym
-	f.Dysymtab.Extreloff = 0
-	f.Dysymtab.Nextrel = 0
-	f.Dysymtab.Locreloff = 0
-	f.Dysymtab.Nlocrel = 0
+	// f.Dysymtab.Nlocalsym = uint32(len(locals))
+	// f.Dysymtab.Iextdefsym = uint32(len(locals))
+	// f.Dysymtab.Iundefsym = f.Dysymtab.Iextdefsym + f.Dysymtab.Nextdefsym
+	// f.Dysymtab.Extreloff = 0
+	// f.Dysymtab.Nextrel = 0
+	// f.Dysymtab.Locreloff = 0
+	// f.Dysymtab.Nlocrel = 0
 	f.Dysymtab.Indirectsymoff = uint32(linkedit.Offset + newIndSymTabOffset)
 
-	linkedit.Filesz = uint64(f.Symtab.Stroff+f.Symtab.Strsize) - linkedit.Offset
-	linkedit.Memsz = uint64(linkedit.Filesz+4095) & ^uint64(4095)
+	linkedit.Filesz = pageAlign(uint64(f.Symtab.Stroff + f.Symtab.Strsize))
+	linkedit.Memsz = linkedit.Filesz
+
+	if linkedit.Filesz > uint64(lebuf.Len()) {
+		pad = linkedit.Filesz - uint64(lebuf.Len())
+		if _, err := lebuf.Write(make([]byte, pad)); err != nil {
+			return nil, fmt.Errorf("failed to write linkedit segment padding: %v", err)
+		}
+	}
 
 	return &lebuf, nil
 }

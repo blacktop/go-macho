@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"unicode"
 )
 
 type VmProtection int32
@@ -84,6 +85,9 @@ type Version uint32
 func (v Version) String() string {
 	s := make([]byte, 4)
 	binary.BigEndian.PutUint32(s, uint32(v))
+	if (s[3] & 0xFF) == 0 {
+		return fmt.Sprintf("%d.%d", binary.BigEndian.Uint16(s[:2]), s[2])
+	}
 	return fmt.Sprintf("%d.%d.%d", binary.BigEndian.Uint16(s[:2]), s[2], s[3])
 }
 
@@ -106,6 +110,14 @@ const (
 	swift Tool = 2 // TOOL_SWIFT
 	ld    Tool = 3 // TOOL_LD
 	lld   Tool = 4 // TOOL_LLD
+	/* values for gpu tools (1024 to 1048) */
+	Metal          Tool = 1024
+	AirLld         Tool = 1025
+	AirNt          Tool = 1026
+	AirNtPlugin    Tool = 1027
+	AirPack        Tool = 1028
+	GpuArchiver    Tool = 1031
+	MetalFramework Tool = 1032
 )
 
 type BuildToolVersion struct {
@@ -135,9 +147,11 @@ type Function struct {
 	EndAddr   uint64
 }
 
-/*******
+/*
+******
 HELPERS
-********/
+*******
+*/
 func PutAtMost16Bytes(b []byte, n string) {
 	for i := range n { // at most 16 bytes
 		if i == 16 {
@@ -149,6 +163,15 @@ func PutAtMost16Bytes(b []byte, n string) {
 
 func RoundUp(x, align uint64) uint64 {
 	return uint64((x + align - 1) & -align)
+}
+
+func IsASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] > unicode.MaxASCII {
+			return false
+		}
+	}
+	return true
 }
 
 type IntName struct {

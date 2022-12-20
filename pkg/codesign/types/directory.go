@@ -6,13 +6,18 @@ import (
 
 // CodeDirectory object
 type CodeDirectory struct {
-	ID           string
-	TeamID       string
-	Scatter      Scatter
-	CDHash       string
-	SpecialSlots []SpecialSlot
-	CodeSlots    []CodeSlot
-	Header       CodeDirectoryType
+	ID             string
+	TeamID         string
+	Scatter        Scatter
+	CDHash         string
+	SpecialSlots   []SpecialSlot
+	CodeSlots      []CodeSlot
+	Header         CodeDirectoryType
+	RuntimeVersion string
+	CodeLimit      uint64
+
+	PreEncryptSlots [][]byte
+	LinkageData     []byte
 }
 
 type SpecialSlot struct {
@@ -215,6 +220,19 @@ type CodeDirectoryType struct {
 	ExecSegFlags   execSegFlag /* exec segment flags */
 	EndWithExecSeg [0]uint8
 
+	/* Version 0x20500 */
+	Runtime                 mtypes.Version // Runtime version
+	PreEncryptOffset        uint32         // offset of pre-encrypt hash slots
+	EndWithPreEncryptOffset [0]uint8
+
+	/* Version 0x20600 */
+	LinkageHashType  uint8
+	LinkageTruncated uint8
+	Spare4           uint16
+	LinkageOffset    uint32
+	LinkageSize      uint32
+	EndWithLinkage   [0]uint8
+
 	/* followed by dynamic content as located by offset fields above */
 }
 
@@ -265,13 +283,13 @@ const (
 )
 
 var execSegFlagStrings = []mtypes.Int64Name{
-	{uint64(EXECSEG_MAIN_BINARY), "Main Binary"},
-	{uint64(EXECSEG_ALLOW_UNSIGNED), "Allow Unsigned"},
-	{uint64(EXECSEG_DEBUGGER), "Debugger"},
-	{uint64(EXECSEG_JIT), "JIT"},
-	{uint64(EXECSEG_SKIP_LV), "Skip LV"},
-	{uint64(EXECSEG_CAN_LOAD_CDHASH), "Can Load CDHash"},
-	{uint64(EXECSEG_CAN_EXEC_CDHASH), "Can Exec CDHash"},
+	{I: uint64(EXECSEG_MAIN_BINARY), S: "Main Binary"},
+	{I: uint64(EXECSEG_ALLOW_UNSIGNED), S: "Allow Unsigned"},
+	{I: uint64(EXECSEG_DEBUGGER), S: "Debugger"},
+	{I: uint64(EXECSEG_JIT), S: "JIT"},
+	{I: uint64(EXECSEG_SKIP_LV), S: "Skip LV"},
+	{I: uint64(EXECSEG_CAN_LOAD_CDHASH), S: "Can Load CDHash"},
+	{I: uint64(EXECSEG_CAN_EXEC_CDHASH), S: "Can Exec CDHash"},
 }
 
 func (f execSegFlag) String() string {

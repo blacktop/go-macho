@@ -9,8 +9,8 @@ GIT_DESCRIBE=$(git describe --tags)
 
 .PHONY: dev-deps
 dev-deps: ## Install the dev dependencies
-	@brew install gh 
-	@go install github.com/goreleaser/chglog/cmd/chglog
+	@brew install gh
+	@go install github.com/goreleaser/chglog/cmd/chglog@latest
 	@go install github.com/caarlos0/svu@v1.4.1
 
 .PHONY: bump

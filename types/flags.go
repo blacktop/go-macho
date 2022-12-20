@@ -169,23 +169,59 @@ func getBindFlag(f uint8, k BindKind) string {
 	return fmt.Sprintf("bad bind flag %#02x", f)
 }
 
+type SplitInfoKind uint64
+
 const (
 	DYLD_CACHE_ADJ_V2_FORMAT = 0x7F
 
-	DYLD_CACHE_ADJ_V2_POINTER_32          = 0x01
-	DYLD_CACHE_ADJ_V2_POINTER_64          = 0x02
-	DYLD_CACHE_ADJ_V2_DELTA_32            = 0x03
-	DYLD_CACHE_ADJ_V2_DELTA_64            = 0x04
-	DYLD_CACHE_ADJ_V2_ARM64_ADRP          = 0x05
-	DYLD_CACHE_ADJ_V2_ARM64_OFF12         = 0x06
-	DYLD_CACHE_ADJ_V2_ARM64_BR26          = 0x07
-	DYLD_CACHE_ADJ_V2_ARM_MOVW_MOVT       = 0x08
-	DYLD_CACHE_ADJ_V2_ARM_BR24            = 0x09
-	DYLD_CACHE_ADJ_V2_THUMB_MOVW_MOVT     = 0x0A
-	DYLD_CACHE_ADJ_V2_THUMB_BR22          = 0x0B
-	DYLD_CACHE_ADJ_V2_IMAGE_OFF_32        = 0x0C
-	DYLD_CACHE_ADJ_V2_THREADED_POINTER_64 = 0x0D
+	DYLD_CACHE_ADJ_V2_POINTER_32          SplitInfoKind = 0x01
+	DYLD_CACHE_ADJ_V2_POINTER_64          SplitInfoKind = 0x02
+	DYLD_CACHE_ADJ_V2_DELTA_32            SplitInfoKind = 0x03
+	DYLD_CACHE_ADJ_V2_DELTA_64            SplitInfoKind = 0x04
+	DYLD_CACHE_ADJ_V2_ARM64_ADRP          SplitInfoKind = 0x05
+	DYLD_CACHE_ADJ_V2_ARM64_OFF12         SplitInfoKind = 0x06
+	DYLD_CACHE_ADJ_V2_ARM64_BR26          SplitInfoKind = 0x07
+	DYLD_CACHE_ADJ_V2_ARM_MOVW_MOVT       SplitInfoKind = 0x08
+	DYLD_CACHE_ADJ_V2_ARM_BR24            SplitInfoKind = 0x09
+	DYLD_CACHE_ADJ_V2_THUMB_MOVW_MOVT     SplitInfoKind = 0x0A
+	DYLD_CACHE_ADJ_V2_THUMB_BR22          SplitInfoKind = 0x0B
+	DYLD_CACHE_ADJ_V2_IMAGE_OFF_32        SplitInfoKind = 0x0C
+	DYLD_CACHE_ADJ_V2_THREADED_POINTER_64 SplitInfoKind = 0x0D
 )
+
+func (k SplitInfoKind) String() string {
+	switch k {
+	case DYLD_CACHE_ADJ_V2_POINTER_32:
+		return "pointer_32"
+	case DYLD_CACHE_ADJ_V2_POINTER_64:
+		return "pointer_64"
+	case DYLD_CACHE_ADJ_V2_DELTA_32:
+		return "delta_32"
+	case DYLD_CACHE_ADJ_V2_DELTA_64:
+		return "delta_64"
+	case DYLD_CACHE_ADJ_V2_ARM64_ADRP:
+		return "arm64_adrp"
+	case DYLD_CACHE_ADJ_V2_ARM64_OFF12:
+		return "arm64_off_12"
+	case DYLD_CACHE_ADJ_V2_ARM64_BR26:
+		return "arm64_br_26"
+	case DYLD_CACHE_ADJ_V2_ARM_MOVW_MOVT:
+		return "arm_movw_movt"
+	case DYLD_CACHE_ADJ_V2_ARM_BR24:
+		return "arm_br_24"
+	case DYLD_CACHE_ADJ_V2_THUMB_MOVW_MOVT:
+		return "thumb_movw_movt"
+	case DYLD_CACHE_ADJ_V2_THUMB_BR22:
+		return "thumb_br_22"
+	case DYLD_CACHE_ADJ_V2_IMAGE_OFF_32:
+		return "image_off_32"
+	case DYLD_CACHE_ADJ_V2_THREADED_POINTER_64:
+		return "threaded_pointer_64"
+	default:
+		return fmt.Sprintf("unknown kind %#02x", k)
+	}
+
+}
 
 type ExportFlag int
 

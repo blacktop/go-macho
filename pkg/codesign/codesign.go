@@ -110,7 +110,7 @@ func ParseCodeSignature(cmddat []byte) (*types.CodeSignature, error) {
 		case types.CSSLOT_TICKETSLOT:
 			fallthrough // TODO 🤷‍♂️
 		default:
-			fmt.Printf("Found unsupported codesign slot %s, please notify author\n", index.Type)
+			cs.Errors = append(cs.Errors, fmt.Errorf("unknown slot type: %s, please notify author", index.Type))
 		}
 	}
 	return cs, nil
@@ -127,6 +127,7 @@ func parseCodeDirectory(r *bytes.Reader, offset uint32) (*types.CodeDirectory, e
 	if err := binary.Read(r, binary.LittleEndian, &cdData); err != nil {
 		return nil, err
 	}
+
 	switch cd.Header.HashType {
 	case types.HASHTYPE_SHA1:
 		h := sha1.New()
@@ -137,7 +138,7 @@ func parseCodeDirectory(r *bytes.Reader, offset uint32) (*types.CodeDirectory, e
 		h.Write(cdData)
 		cd.CDHash = fmt.Sprintf("%x", h.Sum(nil))
 	default:
-		fmt.Printf("Found unsupported code directory hash type %s, please notify author\n", cd.Header.HashType)
+		cd.CDHash = fmt.Sprintf("unsupported code directory hash type %s, please notify author", cd.Header.HashType)
 	}
 
 	// Parse version
@@ -146,35 +147,69 @@ func parseCodeDirectory(r *bytes.Reader, offset uint32) (*types.CodeDirectory, e
 	} else if cd.Header.Version > types.COMPATIBILITY_LIMIT {
 		fmt.Printf("unsupported type or version of signature: %#x (too new)\n", cd.Header.Version)
 	}
-	switch cd.Header.Version {
-	case types.SUPPORTS_SCATTER:
+
+	// SUPPORTS_SCATTER
+	if cd.Header.Version >= types.SUPPORTS_SCATTER {
 		if cd.Header.ScatterOffset > 0 {
 			r.Seek(int64(offset+cd.Header.ScatterOffset), io.SeekStart)
 			scatter := types.Scatter{}
 			if err := binary.Read(r, binary.BigEndian, &scatter); err != nil {
-				return nil, fmt.Errorf("failed to read SUPPORTS_SCATTER at: %d: %v", offset+cd.Header.ScatterOffset, err)
+				return nil, fmt.Errorf("failed to read SUPPORTS_SCATTER @ %#x: %v", offset+cd.Header.ScatterOffset, err)
 			}
 			cd.Scatter = scatter
 		}
-	case types.SUPPORTS_TEAMID:
+	}
+	// SUPPORTS_TEAMID
+	if cd.Header.Version >= types.SUPPORTS_TEAMID {
 		if cd.Header.TeamOffset > 0 {
 			r.Seek(int64(offset+cd.Header.TeamOffset), io.SeekStart)
 			teamID, err := bufio.NewReader(r).ReadString('\x00')
 			if err != nil {
-				return nil, fmt.Errorf("failed to read SUPPORTS_TEAMID at: %d: %v", offset+cd.Header.TeamOffset, err)
+				return nil, fmt.Errorf("failed to read SUPPORTS_TEAMID @ %#x: %v", offset+cd.Header.TeamOffset, err)
 			}
 			cd.TeamID = strings.Trim(teamID, "\x00")
 		}
-	case types.SUPPORTS_EXECSEG:
-	case types.SUPPORTS_CODELIMIT64:
-		fallthrough // TODO 🤷‍♂️
-	case types.SUPPORTS_RUNTIME:
-		fallthrough // TODO 🤷‍♂️
-	case types.SUPPORTS_LINKAGE:
-		fallthrough // TODO 🤷‍♂️
-	default:
-		fmt.Printf("Unsupported code directory version %s, please notify author\n", cd.Header.Version)
 	}
+	// SUPPORTS_CODELIMIT64
+	cd.CodeLimit = uint64(cd.Header.CodeLimit)
+	if cd.Header.Version >= types.SUPPORTS_CODELIMIT64 {
+		if cd.Header.CodeLimit64 > 0 {
+			cd.CodeLimit = cd.Header.CodeLimit64
+		}
+	}
+	// SUPPORTS_EXECSEG
+	if cd.Header.Version >= types.SUPPORTS_EXECSEG {
+		if cd.Header.ExecSegBase > 0 {
+			// TODO: I don't think we do anything with this ?
+		}
+	}
+	// SUPPORTS_RUNTIME
+	if cd.Header.Version >= types.SUPPORTS_RUNTIME {
+		cd.RuntimeVersion = cd.Header.Runtime.String()
+		if cd.Header.PreEncryptOffset > 0 {
+			r.Seek(int64(offset+cd.Header.PreEncryptOffset), io.SeekStart)
+			for i := uint8(0); i < uint8(cd.Header.NCodeSlots); i++ {
+				slot := make([]byte, cd.Header.HashSize)
+				if err := binary.Read(r, binary.BigEndian, &slot); err != nil {
+					return nil, fmt.Errorf("failed to read SUPPORTS_RUNTIME PreEncrypt hash slot #%d @ %#x: %v",
+						i, offset+cd.Header.PreEncryptOffset+uint32(i*cd.Header.HashSize), err)
+				}
+				cd.PreEncryptSlots = append(cd.PreEncryptSlots, slot)
+			}
+		}
+	}
+	// SUPPORTS_LINKAGE
+	if cd.Header.Version >= types.SUPPORTS_LINKAGE {
+		if cd.Header.LinkageOffset > 0 {
+			r.Seek(int64(offset+cd.Header.LinkageOffset), io.SeekStart)
+			cd.LinkageData = make([]byte, cd.Header.LinkageSize)
+			if err := binary.Read(r, binary.BigEndian, &cd.LinkageData); err != nil {
+				return nil, fmt.Errorf("failed to read SUPPORTS_LINKAGE @ %#x: %v", offset+cd.Header.LinkageOffset, err)
+			}
+			// TODO: what IS linkage
+		}
+	}
+
 	// Parse Indentity
 	r.Seek(int64(offset+cd.Header.IdentOffset), io.SeekStart)
 	id, err := bufio.NewReader(r).ReadString('\x00')

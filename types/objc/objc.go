@@ -18,6 +18,7 @@ type Toc struct {
 	ClassRefs        uint64
 	SuperRefs        uint64
 	SelRefs          uint64
+	Stubs            uint64
 }
 
 func (i Toc) String() string {
@@ -32,6 +33,7 @@ func (i Toc) String() string {
 			"  __objc_classrefs  = %d\n"+
 			"  __objc_superrefs  = %d\n"+
 			"  __objc_selrefs    = %d\n",
+		// "  __objc_stubs      = %d\n",
 		i.ClassList,
 		i.NonLazyClassList,
 		i.CatList,
@@ -40,6 +42,7 @@ func (i Toc) String() string {
 		i.ClassRefs,
 		i.SuperRefs,
 		i.SelRefs,
+		// i.Stubs,
 	)
 }
 
@@ -50,11 +53,10 @@ const (
 	SupportsGC                 ImageInfoFlag = 1 << 1 // image supports GC
 	RequiresGC                 ImageInfoFlag = 1 << 2 // image requires GC
 	OptimizedByDyld            ImageInfoFlag = 1 << 3 // image is from an optimized shared cache
-	CorrectedSynthesize        ImageInfoFlag = 1 << 4 // used for an old workaround, now ignored
+	SignedClassRO              ImageInfoFlag = 1 << 4 // class_ro_t pointers are signed
 	IsSimulated                ImageInfoFlag = 1 << 5 // image compiled for a simulator platform
-	HasCategoryClassProperties ImageInfoFlag = 1 << 6 // New ABI: category_t.classProperties fields are present, Old ABI: Set by some compilers. Not used by the runtime.
+	HasCategoryClassProperties ImageInfoFlag = 1 << 6 // class properties in category_t
 	OptimizedByDyldClosure     ImageInfoFlag = 1 << 7 // dyld (not the shared cache) optimized this.
-
 	// 1 byte Swift unstable ABI version number
 	SwiftUnstableVersionMaskShift = 8
 	SwiftUnstableVersionMask      = 0xff << SwiftUnstableVersionMaskShift
@@ -76,8 +78,8 @@ func (f ImageInfoFlag) RequiresGC() bool {
 func (f ImageInfoFlag) OptimizedByDyld() bool {
 	return f&OptimizedByDyld != 0
 }
-func (f ImageInfoFlag) CorrectedSynthesize() bool {
-	return f&CorrectedSynthesize != 0
+func (f ImageInfoFlag) SignedClassRO() bool {
+	return f&SignedClassRO != 0
 }
 func (f ImageInfoFlag) IsSimulated() bool {
 	return f&IsSimulated != 0
@@ -91,28 +93,28 @@ func (f ImageInfoFlag) OptimizedByDyldClosure() bool {
 
 func (f ImageInfoFlag) List() []string {
 	var flags []string
-	if f&IsReplacement != 0 {
+	if (f & IsReplacement) != 0 {
 		flags = append(flags, "IsReplacement")
 	}
-	if f&SupportsGC != 0 {
+	if (f & SupportsGC) != 0 {
 		flags = append(flags, "SupportsGC")
 	}
-	if f&RequiresGC != 0 {
+	if (f & RequiresGC) != 0 {
 		flags = append(flags, "RequiresGC")
 	}
-	if f&OptimizedByDyld != 0 {
+	if (f & OptimizedByDyld) != 0 {
 		flags = append(flags, "OptimizedByDyld")
 	}
-	if f&CorrectedSynthesize != 0 {
-		flags = append(flags, "CorrectedSynthesize")
+	if (f & SignedClassRO) != 0 {
+		flags = append(flags, "SignedClassRO")
 	}
-	if f&IsSimulated != 0 {
+	if (f & IsSimulated) != 0 {
 		flags = append(flags, "IsSimulated")
 	}
-	if f&HasCategoryClassProperties != 0 {
+	if (f & HasCategoryClassProperties) != 0 {
 		flags = append(flags, "HasCategoryClassProperties")
 	}
-	if f&OptimizedByDyldClosure != 0 {
+	if (f & OptimizedByDyldClosure) != 0 {
 		flags = append(flags, "OptimizedByDyldClosure")
 	}
 	return flags
@@ -136,7 +138,7 @@ func (f ImageInfoFlag) SwiftVersion() string {
 		case 1:
 			return "Swift 1.0"
 		case 2:
-			return "Swift 1.1"
+			return "Swift 1.2"
 		case 3:
 			return "Swift 2.0"
 		case 4:
@@ -154,21 +156,59 @@ func (f ImageInfoFlag) SwiftVersion() string {
 	return "not swift"
 }
 
+const dyldPreoptimized = 1 << 7
+
 type ImageInfo struct {
 	Version uint32
 	Flags   ImageInfoFlag
-
-	// DyldPreoptimized uint32
 }
+
+func (i ImageInfo) IsDyldPreoptimized() bool {
+	return (i.Flags & dyldPreoptimized) != 0
+}
+
+const (
+	bigSignedMethodListFlag              uint64 = 0x8000000000000000
+	relativeMethodSelectorsAreDirectFlag uint32 = 0x40000000
+	smallMethodListFlag                  uint32 = 0x80000000
+	METHOD_LIST_FLAGS_MASK               uint32 = 0xffff0003
+	// The size is bits 2 through 16 of the entsize field
+	// The low 2 bits are uniqued/sorted as above.  The upper 16-bits
+	// are reserved for other flags
+	METHOD_LIST_SIZE_MASK uint32 = 0x0000FFFC
+)
 
 type MLFlags uint32
 
 const (
-	METHOD_LIST_FLAGS_MASK uint32  = 0xffff0003
 	METHOD_LIST_IS_UNIQUED MLFlags = 1
+	METHOD_LIST_IS_SORTED  MLFlags = 2
 	METHOD_LIST_FIXED_UP   MLFlags = 3
-	METHOD_LIST_SMALL              = 0x80000000
 )
+
+type MLKind uint32
+
+const (
+	kindMask = 3
+	// Note: method_invoke detects small methods by detecting 1 in the low
+	// bit. Any change to that will require a corresponding change to
+	// method_invoke.
+	big MLKind = 0
+	// `small` encompasses both small and small direct methods. We
+	// distinguish those cases by doing a range check against the shared
+	// cache.
+	small     MLKind = 1
+	bigSigned MLKind = 2
+)
+
+type methodPtr uint64
+
+func (m methodPtr) Kind() MLKind {
+	return MLKind(m & kindMask)
+}
+func (m methodPtr) Pointer() uint64 {
+	return uint64(m & ^methodPtr(kindMask))
+}
 
 type MethodList struct {
 	EntSizeAndFlags uint32
@@ -178,19 +218,40 @@ type MethodList struct {
 }
 
 func (ml MethodList) IsUniqued() bool {
-	return MLFlags(ml.EntSizeAndFlags&METHOD_LIST_FLAGS_MASK)&METHOD_LIST_IS_UNIQUED == 1
+	return (ml.Flags() & METHOD_LIST_IS_UNIQUED) == 1
+}
+func (ml MethodList) Sorted() bool {
+	return (ml.Flags() & METHOD_LIST_IS_SORTED) == 1
 }
 func (ml MethodList) FixedUp() bool {
-	return MLFlags(ml.EntSizeAndFlags&METHOD_LIST_FLAGS_MASK)&METHOD_LIST_FIXED_UP == 1
+	return (ml.Flags() & METHOD_LIST_FIXED_UP) == 1
 }
-func (ml MethodList) IsSmall() bool {
-	return ml.EntSizeAndFlags&METHOD_LIST_SMALL == METHOD_LIST_SMALL
+func (ml MethodList) UsesDirectOffsetsToSelectors() bool {
+	return (ml.EntSizeAndFlags & relativeMethodSelectorsAreDirectFlag) != 0
+}
+func (ml MethodList) UsesRelativeOffsets() bool {
+	return (ml.EntSizeAndFlags & smallMethodListFlag) != 0
 }
 func (ml MethodList) EntSize() uint32 {
-	return ml.EntSizeAndFlags & ^METHOD_LIST_FLAGS_MASK
+	return ml.EntSizeAndFlags & METHOD_LIST_SIZE_MASK
+}
+func (ml MethodList) Flags() MLFlags {
+	return MLFlags(ml.EntSizeAndFlags & METHOD_LIST_FLAGS_MASK)
 }
 func (ml MethodList) String() string {
-	return fmt.Sprintf("entrysize=0x%08x, fixed_up=%t, uniqued=%t, small=%t", ml.EntSize(), ml.FixedUp(), ml.IsUniqued(), ml.IsSmall())
+	offType := "direct"
+	if ml.UsesRelativeOffsets() {
+		offType = "relative"
+	}
+	return fmt.Sprintf("count=%d, entsiz_flags=%#x, entrysize=%d, flags=%#x, fixed_up=%t, sorted=%t, uniqued=%t, type=%s",
+		ml.Count,
+		ml.EntSizeAndFlags,
+		ml.EntSize(),
+		ml.Flags(),
+		ml.FixedUp(),
+		ml.Sorted(),
+		ml.IsUniqued(),
+		offType)
 }
 
 type MethodT struct {
@@ -199,7 +260,7 @@ type MethodT struct {
 	ImpVMAddr   uint64 // IMP
 }
 
-type MethodSmallT struct {
+type RelativeMethodT struct {
 	NameOffset  int32 // SEL
 	TypesOffset int32 // const char *
 	ImpOffset   int32 // IMP
@@ -626,16 +687,16 @@ const (
 )
 
 func (f ClassRoFlags) IsMeta() bool {
-	return f&RO_META != 0
+	return (f & RO_META) != 0
 }
 func (f ClassRoFlags) IsRoot() bool {
-	return f&RO_ROOT != 0
+	return (f & RO_ROOT) != 0
 }
 func (f ClassRoFlags) HasCxxStructors() bool {
-	return f&RO_HAS_CXX_STRUCTORS != 0
+	return (f & RO_HAS_CXX_STRUCTORS) != 0
 }
 func (f ClassRoFlags) HasFuture() bool {
-	return f&RO_FUTURE != 0
+	return (f & RO_FUTURE) != 0
 }
 
 type ClassRO struct {
@@ -741,6 +802,7 @@ type PreoptCacheEntryT struct {
 	SelOffset uint32
 	ImpOffset uint32
 }
+
 type PreoptCacheT struct {
 	FallbackClassOffset int32
 	Info                uint32
@@ -770,6 +832,79 @@ func (p PreoptCacheT) Capacity() uint32 {
 	return p.CacheMask() + 1
 }
 func (p PreoptCacheT) String() string {
+	return fmt.Sprintf("cache_shift: %d, cache_mask: %d, occupied: %d, has_inlines: %t, bit_one: %t",
+		p.CacheShift(),
+		p.CacheMask(),
+		p.Occupied(),
+		p.HasInlines(),
+		p.BitOne())
+}
+
+type Stub struct {
+	Name        string
+	SelectorRef uint64
+}
+
+type IntObj struct {
+	ISA          uint64
+	EncodingAddr uint64
+	Number       uint64
+}
+
+type ImpCache2 struct {
+	PreoptCache2T
+	Entries []PreoptCacheEntry2T
+}
+type PreoptCacheEntry2T struct {
+	ImpOffset int64
+	SelOffset uint64
+}
+
+func (e PreoptCacheEntry2T) GetImpOffset() int64 {
+	return int64(types.ExtractBits(uint64(e.ImpOffset), 0, 38))
+}
+func (e PreoptCacheEntry2T) GetSelOffset() uint32 {
+	return uint32(types.ExtractBits(uint64(e.SelOffset), 0, 26))
+}
+
+type PreoptCache2T struct { // FIXME: 64bit new version
+	FallbackClassOffset int64
+	Info                uint64
+	// int64_t  fallback_class_offset;
+	// union {
+	//     struct {
+	//         uint16_t shift       :  5;
+	//         uint16_t mask        : 11;
+	//     };
+	//     uint16_t hash_params;
+	// };
+	// uint16_t occupied    : 14;
+	// uint16_t has_inlines :  1;
+	// uint16_t padding     :  1;
+	// uint32_t unused      : 31;
+	// uint32_t bit_one     :  1;
+	// preopt_cache_entry_t entries[];
+}
+
+func (p PreoptCache2T) CacheShift() uint32 {
+	return uint32(types.ExtractBits(uint64(p.Info), 0, 5))
+}
+func (p PreoptCache2T) CacheMask() uint32 {
+	return uint32(types.ExtractBits(uint64(p.Info), 5, 11))
+}
+func (p PreoptCache2T) Occupied() uint32 {
+	return uint32(types.ExtractBits(uint64(p.Info), 16, 14))
+}
+func (p PreoptCache2T) HasInlines() bool {
+	return types.ExtractBits(uint64(p.Info), 30, 1) != 0
+}
+func (p PreoptCache2T) BitOne() bool {
+	return types.ExtractBits(uint64(p.Info), 63, 1) != 0
+}
+func (p PreoptCache2T) Capacity() uint32 {
+	return p.CacheMask() + 1
+}
+func (p PreoptCache2T) String() string {
 	return fmt.Sprintf("cache_shift: %d, cache_mask: %d, occupied: %d, has_inlines: %t, bit_one: %t",
 		p.CacheShift(),
 		p.CacheMask(),

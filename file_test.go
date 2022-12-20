@@ -412,8 +412,8 @@ func TestRelocTypeString(t *testing.T) {
 }
 
 func TestTypeString(t *testing.T) {
-	if types.Exec.String() != "Exec" {
-		t.Errorf("got %v, want %v", types.Exec.String(), "Exec")
+	if types.MH_EXECUTE.String() != "EXECUTE" {
+		t.Errorf("got %v, want %v", types.MH_EXECUTE.String(), "EXECUTE")
 	}
 }
 

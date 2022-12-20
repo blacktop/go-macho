@@ -19,27 +19,28 @@ func _() {
 	_ = x[tvOSSimulator-8]
 	_ = x[watchOSSimulator-9]
 	_ = x[driverKit-10]
+	_ = x[realityOS-11]
+	_ = x[realityOSSimulator-12]
 	_ = x[firmware-13]
 	_ = x[sepOS-14]
+	_ = x[any-4294967295]
 }
 
 const (
-	_Platform_name_0 = "unknownmacOSiOStvOSwatchOSbridgeOSmacCatalystiOSSimulatortvOSSimulatorwatchOSSimulatordriverKit"
-	_Platform_name_1 = "firmwaresepOS"
+	_Platform_name_0 = "unknownmacOSiOStvOSwatchOSbridgeOSmacCatalystiOSSimulatortvOSSimulatorwatchOSSimulatordriverKitrealityOSrealityOSSimulatorfirmwaresepOS"
+	_Platform_name_1 = "any"
 )
 
 var (
-	_Platform_index_0 = [...]uint8{0, 7, 12, 15, 19, 26, 34, 45, 57, 70, 86, 95}
-	_Platform_index_1 = [...]uint8{0, 8, 13}
+	_Platform_index_0 = [...]uint8{0, 7, 12, 15, 19, 26, 34, 45, 57, 70, 86, 95, 104, 122, 130, 135}
 )
 
 func (i Platform) String() string {
 	switch {
-	case i <= 10:
+	case i <= 14:
 		return _Platform_name_0[_Platform_index_0[i]:_Platform_index_0[i+1]]
-	case 13 <= i && i <= 14:
-		i -= 13
-		return _Platform_name_1[_Platform_index_1[i]:_Platform_index_1[i+1]]
+	case i == 4294967295:
+		return _Platform_name_1
 	default:
 		return "Platform(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
@@ -53,17 +54,40 @@ func _() {
 	_ = x[swift-2]
 	_ = x[ld-3]
 	_ = x[lld-4]
+	_ = x[Metal-1024]
+	_ = x[AirLld-1025]
+	_ = x[AirNt-1026]
+	_ = x[AirNtPlugin-1027]
+	_ = x[AirPack-1028]
+	_ = x[GpuArchiver-1031]
+	_ = x[MetalFramework-1032]
 }
 
-const _Tool_name = "noneclangswiftldlld"
+const (
+	_Tool_name_0 = "noneclangswiftldlld"
+	_Tool_name_1 = "MetalAirLldAirNtAirNtPluginAirPack"
+	_Tool_name_2 = "GpuArchiverMetalFramework"
+)
 
-var _Tool_index = [...]uint8{0, 4, 9, 14, 16, 19}
+var (
+	_Tool_index_0 = [...]uint8{0, 4, 9, 14, 16, 19}
+	_Tool_index_1 = [...]uint8{0, 5, 11, 16, 27, 34}
+	_Tool_index_2 = [...]uint8{0, 11, 25}
+)
 
 func (i Tool) String() string {
-	if i >= Tool(len(_Tool_index)-1) {
+	switch {
+	case i <= 4:
+		return _Tool_name_0[_Tool_index_0[i]:_Tool_index_0[i+1]]
+	case 1024 <= i && i <= 1028:
+		i -= 1024
+		return _Tool_name_1[_Tool_index_1[i]:_Tool_index_1[i+1]]
+	case 1031 <= i && i <= 1032:
+		i -= 1031
+		return _Tool_name_2[_Tool_index_2[i]:_Tool_index_2[i+1]]
+	default:
 		return "Tool(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
-	return _Tool_name[_Tool_index[i]:_Tool_index[i+1]]
 }
 func _() {
 	// An "invalid array index" compiler error signifies that the constant values have changed.

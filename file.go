@@ -6,7 +6,6 @@ import (
 	"bufio"
 	"bytes"
 	"compress/zlib"
-	"debug/dwarf"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -15,20 +14,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"github.com/appsworld/go-macho/pkg/codesign"
 	"github.com/appsworld/go-macho/pkg/fixupchains"
 	"github.com/appsworld/go-macho/pkg/trie"
 	"github.com/appsworld/go-macho/types"
-	"github.com/appsworld/go-macho/types/objc"
-)
-
-const (
-	pageAlign = 12 // 4096 = 1 << 12
+	"github.com/blacktop/go-dwarf"
 )
 
 var ErrMachOSectionNotFound = errors.New("MachO missing required section")
+var ErrMachODyldInfoNotFound = errors.New("LC_DYLD_INFO|LC_DYLD_INFO_ONLY not found")
 
 type sections []*Section
 
@@ -49,12 +46,13 @@ type File struct {
 	exp              []trie.TrieExport
 	exptrieData      []byte
 	binds            types.Binds
-	objc             map[uint64]*objc.Class
+	objc             map[uint64]any
 	sr               types.MachoReader
 	cr               types.MachoReader
 
-	relativeSelectorBase uint64 // objc_opt version 16
+	sharedCacheRelativeSelectorBaseVMAddress uint64 // objc_opt version 16
 
+	mu     sync.Mutex
 	closer io.Closer
 }
 
@@ -258,7 +256,7 @@ func (t *FileTOC) Put(buffer []byte) int {
 type FormatError struct {
 	off int64
 	msg string
-	val interface{}
+	val any
 }
 
 func (e *FormatError) Error() string {
@@ -323,7 +321,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 
 	f := new(File)
 
-	f.objc = make(map[uint64]*objc.Class)
+	f.objc = make(map[uint64]any)
 
 	if config != nil {
 		if config[0].SectionReader != nil {
@@ -336,12 +334,12 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 		}
 		f.vma = &config[0].VMAddrConverter
 		loadsFilter = config[0].LoadFilter
-		f.relativeSelectorBase = config[0].RelativeSelectorBase
+		f.sharedCacheRelativeSelectorBaseVMAddress = config[0].RelativeSelectorBase
 	} else {
 		f.vma = &types.VMAddrConverter{
 			Converter:    f.convertToVMAddr,
-			VMAddr2Offet: f.GetOffset,
-			Offet2VMAddr: f.GetVMAddress,
+			VMAddr2Offet: f.getOffset,
+			Offet2VMAddr: f.getVMAddress,
 		}
 		f.sr = types.NewCustomSectionReader(r, f.vma, 0, 1<<63-1)
 		f.cr = f.sr
@@ -651,11 +649,11 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, fmt.Errorf("failed to read LC_DYSYMTAB: %v", err)
 			}
-			if hdr.Iundefsym > uint32(len(f.Symtab.Syms)) {
+			if f.Symtab != nil && hdr.Iundefsym > uint32(len(f.Symtab.Syms)) {
 				return nil, &FormatError{offset, fmt.Sprintf(
 					"undefined symbols index in dynamic symbol table command is greater than symbol table length (%d > %d)",
 					hdr.Iundefsym, len(f.Symtab.Syms)), nil}
-			} else if hdr.Iundefsym+hdr.Nundefsym > uint32(len(f.Symtab.Syms)) {
+			} else if f.Symtab != nil && hdr.Iundefsym+hdr.Nundefsym > uint32(len(f.Symtab.Syms)) {
 				return nil, &FormatError{offset, fmt.Sprintf(
 					"number of undefined symbols after index in dynamic symbol table command is greater than symbol table length (%d > %d)",
 					hdr.Iundefsym+hdr.Nundefsym, len(f.Symtab.Syms)), nil}
@@ -919,6 +917,9 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_RPATH: %v", err)
 			}
 			l := new(Rpath)
+			if hdr.Path >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid path in rpath command", hdr.Path}
+			}
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
@@ -956,7 +957,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO: %v", err)
 			}
-
 			l := new(SplitInfo)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
@@ -971,21 +971,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(fsr, bo, &l.Version); err != nil {
 				return nil, fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO Version: %v", err)
 			}
-			// var offset uint64
-			// for {
-			// 	o, err := trie.ReadUleb128(fsr)
-			// 	if err == io.EOF {
-			// 		break
-			// 	}
-			// 	if err != nil {
-			// 		return nil, err
-			// 	}
-			// 	// if o == 0 {
-			// 	// 	break
-			// 	// }
-			// 	offset += o
-			// 	l.Offsets = append(l.Offsets, offset)
-			// }
 			f.Loads[i] = l
 		case types.LC_REEXPORT_DYLIB:
 			var hdr types.ReExportDylibCmd
@@ -1174,15 +1159,20 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &led); err != nil {
 				return nil, fmt.Errorf("failed to read LC_DATA_IN_CODE: %v", err)
 			}
-
 			l := new(DataInCode)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			// TODO: finish parsing Dice entries
-			// var e DataInCodeEntry
 			l.Offset = led.Offset
 			l.Size = led.Size
+			ldat := make([]byte, l.Size)
+			if _, err := f.cr.ReadAt(ldat, int64(l.Offset)); err != nil {
+				return nil, fmt.Errorf("failed to read DataInCode data at offset=%#x; %v", int64(led.Offset), err)
+			}
+			l.Entries = make([]types.DataInCodeEntry, len(ldat)/binary.Size(types.DataInCodeEntry{}))
+			if err := binary.Read(bytes.NewReader(ldat), bo, &l.Entries); err != nil {
+				return nil, fmt.Errorf("failed to read LC_DATA_IN_CODE entries: %v", err)
+			}
 			f.Loads[i] = l
 
 		case types.LC_SOURCE_VERSION:
@@ -1519,6 +1509,20 @@ func (f *File) pointerSize() uint64 {
 	return 4
 }
 
+func (f *File) has16KPages() bool {
+	switch f.CPU {
+	case types.CPUArm64, types.CPUArm6432:
+		return true
+	case types.CPUArm:
+		if f.Type != types.MH_KEXT_BUNDLE {
+			return false
+		}
+		return f.SubCPU == types.CPUSubtypeArmV7K
+	default:
+		return false
+	}
+}
+
 func (f *File) preferredLoadAddress() uint64 {
 	for _, s := range f.Segments() {
 		if strings.EqualFold(s.Name, "__TEXT") {
@@ -1546,11 +1550,15 @@ func (f *File) readLeUint64(offset int64) (uint64, error) {
 
 // ReadAt reads data at offset within MachO
 func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
-	return f.sr.ReadAt(p, off) // TODO: should this be f.cr ?
+	return f.cr.ReadAt(p, off) // TODO: should this be f.cr  or f.sr?
 }
 
 // GetOffset returns the file offset for a given virtual address
 func (f *File) GetOffset(address uint64) (uint64, error) {
+	return f.vma.GetOffset(address)
+}
+
+func (f *File) getOffset(address uint64) (uint64, error) {
 	for _, seg := range f.Segments() {
 		if seg.Addr <= address && address < seg.Addr+seg.Memsz {
 			return (address - seg.Addr) + seg.Offset, nil
@@ -1561,6 +1569,10 @@ func (f *File) GetOffset(address uint64) (uint64, error) {
 
 // GetVMAddress returns the virtal address for a given file offset
 func (f *File) GetVMAddress(offset uint64) (uint64, error) {
+	return f.vma.GetVMAddress(offset)
+}
+
+func (f *File) getVMAddress(offset uint64) (uint64, error) {
 	for _, seg := range f.Segments() {
 		if seg.Offset <= offset && offset < seg.Offset+seg.Filesz {
 			return (offset - seg.Offset) + seg.Addr, nil
@@ -1601,6 +1613,9 @@ func (f *File) SlidePointer(ptr uint64) uint64 {
 }
 
 func (f *File) convertToVMAddr(value uint64) uint64 {
+	if value == 0 {
+		return 0
+	}
 	if f.HasFixups() {
 		if fixupchains.DcpArm64eIsRebase(value) {
 			if fixupchains.DcpArm64eIsAuth(value) {
@@ -1608,7 +1623,7 @@ func (f *File) convertToVMAddr(value uint64) uint64 {
 				return dcp.Target() + f.preferredLoadAddress()
 			}
 			dcp := fixupchains.DyldChainedPtrArm64eRebase{Pointer: value}
-			return dcp.UnpackTarget()
+			return dcp.UnpackTarget() + f.preferredLoadAddress()
 		}
 	}
 	return value
@@ -1949,15 +1964,21 @@ func (f *File) GetFunctionForVMAddr(addr uint64) (types.Function, error) {
 	return types.Function{}, fmt.Errorf("address %#016x not in any function", addr)
 }
 
+// GetFunctionsForRange returns the functions contained in a given virual address range
+func (f *File) GetFunctionsForRange(start, end uint64) ([]types.Function, error) {
+	var funcs []types.Function
+	for _, fn := range f.GetFunctions() {
+		if start >= fn.StartAddr && fn.StartAddr < end {
+			funcs = append(funcs, fn)
+		}
+	}
+	return funcs, nil
+}
+
 func (f *File) GetFunctionData(fn types.Function) ([]byte, error) {
 	data := make([]byte, fn.EndAddr-fn.StartAddr)
-	offset, err := f.GetOffset(fn.StartAddr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get offset of function start: %v", err)
-	}
-	_, err = f.ReadAt(data, int64(offset))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read data at offset %#x: %v", int64(offset), err)
+	if _, err := f.cr.ReadAtAddr(data, fn.StartAddr); err != nil {
+		return nil, fmt.Errorf("failed to read data at address %#x: %v", fn.StartAddr, err)
 	}
 	return data, nil
 }
@@ -2069,6 +2090,91 @@ func (f *File) DyldChainedFixups() (*fixupchains.DyldChainedFixups, error) {
 	return nil, fmt.Errorf("macho does not contain LC_DYLD_CHAINED_FIXUPS")
 }
 
+func (f *File) ForEachV2SplitSegReference(handler func(fromSectionIndex, fromSectionOffset, toSectionIndex, toSectionOffset uint64, kind types.SplitInfoKind)) error {
+	for _, l := range f.Loads {
+		if si, ok := l.(*SplitInfo); ok {
+			if si.Size == 0 {
+				return nil
+			}
+			data := make([]byte, si.Size)
+			if _, err := f.cr.ReadAt(data, int64(si.Offset)); err != nil {
+				return fmt.Errorf("failed to read %s data at offset=%#x; %v", types.LC_SEGMENT_SPLIT_INFO, int64(si.Offset), err)
+			}
+
+			r := bytes.NewReader(data)
+
+			var version uint8
+			if err := binary.Read(r, f.ByteOrder, &version); err != nil {
+				return fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO Version: %v", err)
+			}
+			if version != types.DYLD_CACHE_ADJ_V2_FORMAT {
+				return nil
+			}
+
+			sectionCount, err := trie.ReadUleb128(r)
+			if err != nil {
+				return fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO SectionCount: %v", err)
+			}
+
+			for i := uint64(0); i < sectionCount; i++ {
+				fromSectionIndex, err := trie.ReadUleb128(r)
+				if err != nil {
+					return fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO fromSectionIndex: %v", err)
+				}
+				toSectionIndex, err := trie.ReadUleb128(r)
+				if err != nil {
+					return fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO toSectionIndex: %v", err)
+				}
+				toOffsetCount, err := trie.ReadUleb128(r)
+				if err != nil {
+					return fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO toOffsetCount: %v", err)
+				}
+
+				var toSectionOffset uint64
+				for j := uint64(0); j < toOffsetCount; j++ {
+					toSectionDelta, err := trie.ReadUleb128(r)
+					if err != nil {
+						return fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO toSectionDelta: %v", err)
+					}
+					fromOffsetCount, err := trie.ReadUleb128(r)
+					if err != nil {
+						return fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO fromOffsetCount: %v", err)
+					}
+
+					toSectionOffset += toSectionDelta
+					for k := uint64(0); k < fromOffsetCount; k++ {
+						kind, err := trie.ReadUleb128(r)
+						if err != nil {
+							return fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO kind: %v", err)
+						}
+						if kind > 13 {
+							return fmt.Errorf("invalid LC_SEGMENT_SPLIT_INFO kind: %d", kind)
+						}
+
+						fromSectDeltaCount, err := trie.ReadUleb128(r)
+						if err != nil {
+							return fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO fromSectDeltaCount: %v", err)
+						}
+
+						var fromSectionOffset uint64
+						for l := uint64(0); l < fromSectDeltaCount; l++ {
+							delta, err := trie.ReadUleb128(r)
+							if err != nil {
+								return fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO delta: %v", err)
+							}
+
+							fromSectionOffset += delta
+
+							handler(fromSectionIndex, fromSectionOffset, toSectionIndex, toSectionOffset, types.SplitInfoKind(kind))
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // DWARF returns the DWARF debug information for the Mach-O file.
 func (f *File) DWARF() (*dwarf.Data, error) {
 	dwarfSuffix := func(s *Section) string {
@@ -2077,12 +2183,17 @@ func (f *File) DWARF() (*dwarf.Data, error) {
 			return s.Name[8:]
 		case strings.HasPrefix(s.Name, "__zdebug_"):
 			return s.Name[9:]
+		default:
+			return ""
+		}
+	}
+	appleSuffix := func(s *Section) string {
+		switch {
 		case strings.HasPrefix(s.Name, "__apple_"):
 			return s.Name[8:]
 		default:
 			return ""
 		}
-
 	}
 	sectionData := func(s *Section) ([]byte, error) {
 		b, err := s.Data()
@@ -2132,10 +2243,14 @@ func (f *File) DWARF() (*dwarf.Data, error) {
 		return nil, err
 	}
 
-	// Look for DWARF4 .debug_types sections.
+	// Look for DWARF4 .debug_types sections and DWARF5 sections.
 	for i, s := range f.Sections {
 		suffix := dwarfSuffix(s)
-		if suffix != "types" {
+		if suffix == "" {
+			continue
+		}
+		if _, ok := dat[suffix]; ok {
+			// Already handled.
 			continue
 		}
 
@@ -2144,8 +2259,34 @@ func (f *File) DWARF() (*dwarf.Data, error) {
 			return nil, err
 		}
 
-		err = d.AddTypes(fmt.Sprintf("types-%d", i), b)
+		if suffix == "types" {
+			err = d.AddTypes(fmt.Sprintf("types-%d", i), b)
+		} else {
+			err = d.AddSection(".debug_"+suffix, b)
+		}
 		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Look for Apple HASH table .apple_names, .apple_types, .apple_namespaces or .apple_objc sections.
+	for _, s := range f.Sections {
+		suffix := appleSuffix(s)
+		if suffix == "" {
+			continue
+		}
+		if _, ok := dat[suffix]; ok {
+			// Already handled.
+			continue
+		}
+
+		b, err := sectionData(s)
+		if err != nil {
+			return nil, err
+		}
+		dat[suffix] = b
+		// TODO: finish implementing this.
+		if err := d.AddHashes(suffix, b); err != nil {
 			return nil, err
 		}
 	}
@@ -2226,7 +2367,7 @@ func (f *File) GetBindInfo() (types.Binds, error) {
 			f.binds = append(f.binds, bs...)
 		}
 	} else {
-		return nil, fmt.Errorf("LC_DYLD_INFO|LC_DYLD_INFO_ONLY not found")
+		return nil, ErrMachODyldInfoNotFound
 	}
 
 	return f.binds, nil
@@ -2250,7 +2391,7 @@ func (f *File) GetRebaseInfo() ([]types.Rebase, error) {
 			return f.parseRebase(bytes.NewReader(dat))
 		}
 	} else {
-		return nil, fmt.Errorf("LC_DYLD_INFO|LC_DYLD_INFO_ONLY not found")
+		return nil, ErrMachODyldInfoNotFound
 	}
 	return nil, nil
 }
@@ -2273,7 +2414,7 @@ func (f *File) GetExports() ([]trie.TrieExport, error) {
 			return trie.ParseTrieExports(bytes.NewReader(dat), f.GetBaseAddress())
 		}
 	} else {
-		return nil, fmt.Errorf("LC_DYLD_INFO|LC_DYLD_INFO_ONLY not found")
+		return nil, ErrMachODyldInfoNotFound
 	}
 	return nil, nil
 }
@@ -2648,6 +2789,9 @@ func (f *File) LibraryOrdinalName(libraryOrdinal int) string {
 }
 
 func (f *File) FindSymbolAddress(symbol string) (uint64, error) {
+	if f.Symtab == nil {
+		return 0, &FormatError{0, "missing symbol table", nil}
+	}
 	for _, sym := range f.Symtab.Syms {
 		if strings.EqualFold(sym.Name, symbol) {
 			return sym.Value, nil
@@ -2657,6 +2801,9 @@ func (f *File) FindSymbolAddress(symbol string) (uint64, error) {
 }
 
 func (f *File) FindAddressSymbols(addr uint64) ([]Symbol, error) {
+	if f.Symtab == nil {
+		return nil, &FormatError{0, "missing symbol table", nil}
+	}
 	var syms []Symbol
 	for _, sym := range f.Symtab.Syms {
 		if sym.Value == addr {

@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+// ref - https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ObjCRuntimeGuide/Articles/ocrtTypeEncodings.html
+
 var typeEncoding = map[string]string{
 	"":  "void",
 	"@": "id",
@@ -250,9 +252,9 @@ func getReturnType(types string) string {
 	return decodeType(encodedRet)
 }
 
-func skipFirstType(types string) string {
+func skipFirstType(typedesc string) string {
 	i := 0
-	typesStr := []byte(types)
+	typesStr := []byte(typedesc)
 
 	for {
 		char := typesStr[i]
@@ -272,7 +274,6 @@ func skipFirstType(types string) string {
 			fallthrough
 		case '^': /* pointers */
 			break
-
 		case '@': /* objects */
 			if typesStr[0] == '?' {
 				i++ /* Blocks */
@@ -280,10 +281,13 @@ func skipFirstType(types string) string {
 			return string(typesStr[i:])
 		case '[': /* arrays */
 			return string(typesStr[bytes.IndexByte(typesStr, ']')+1:])
+			// return typedesc[subtypeUntil(typedesc, ']')+1:]
 		case '{': /* structures */
 			return string(typesStr[bytes.IndexByte(typesStr, '}')+1:])
+			// return typedesc[subtypeUntil(typedesc, '}')+1:]
 		case '(': /* unions */
 			return string(typesStr[bytes.IndexByte(typesStr, ')')+1:])
+			// return typedesc[subtypeUntil(typedesc, ')')+1:]
 		default: /* basic types */
 			return string(typesStr[i:])
 		}
@@ -292,7 +296,6 @@ func skipFirstType(types string) string {
 
 func getNumberOfArguments(types string) int {
 	var nargs int
-
 	// First, skip the return type
 	types = skipFirstType(types)
 	// Next, skip stack size
@@ -314,13 +317,6 @@ func getNumberOfArguments(types string) int {
 		nargs++
 	}
 
-	// a := regexp.MustCompile(`\d+`)
-	// for _, t := range a.Split(types, -1) {
-	// 	if len(t) > 0 && t != "+" && t != "-" {
-	// 		nargs++
-	// 	}
-	// }
-
 	return nargs
 }
 
@@ -335,4 +331,69 @@ func getArguments(encArgs string) []methodEncodedArg {
 		})
 	}
 	return args
+}
+
+// func skipFirstType(typedesc string) string {
+// 	for {
+// 		switch typedesc[0] {
+// 		case 'O': // bycopy
+// 			fallthrough
+// 		case 'n': // in
+// 			fallthrough
+// 		case 'o': // out
+// 			fallthrough
+// 		case 'N': // inout
+// 			fallthrough
+// 		case 'r': // const
+// 			fallthrough
+// 		case 'V': // oneway
+// 			fallthrough
+// 		case '^': // pointers
+// 			typedesc = typedesc[1:]
+// 		case '@': // objects
+// 			if typedesc[1] == '?' {
+// 				typedesc = typedesc[2:] // Blocks
+// 			}
+// 			return typedesc[1:]
+// 			// arrays
+// 		case '[':
+// 			for typedesc[0] >= '0' && typedesc[0] <= '9' {
+// 				typedesc = typedesc[1:]
+// 			}
+// 			return typedesc[subtypeUntil(typedesc, ']')+1:]
+// 			// structures
+// 		case '{':
+// 			return typedesc[subtypeUntil(typedesc, '}')+1:]
+// 			// unions
+// 		case '(':
+// 			return typedesc[subtypeUntil(typedesc, ')')+1:]
+// 			// basic types
+// 		default:
+// 			return typedesc
+// 		}
+// 		typedesc = typedesc[1:]
+// 	}
+// }
+
+func subtypeUntil(typedesc string, end byte) int {
+	var level int = 0
+	typedesc += "\x00" // Ensure null termination
+	var head = typedesc
+
+	for typedesc[0] != 0 {
+		if typedesc[0] == 0 || (level == 0 && typedesc[0] == end) {
+			return len(typedesc) - len(head)
+		}
+
+		switch typedesc[0] {
+		case ']', '}', ')':
+			level -= 1
+		case '[', '{', '(':
+			level += 1
+		}
+
+		typedesc = typedesc[1:]
+	}
+
+	return 0
 }

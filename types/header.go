@@ -1,6 +1,6 @@
 package types
 
-//go:generate stringer -type=HeaderFileType,HeaderFlag -output header_string.go
+//go:generate stringer -type=HeaderFileType,HeaderFlag -trimprefix=MH_ -output header_string.go
 
 import (
 	"bytes"
@@ -70,18 +70,20 @@ func (i Magic) GoString() string { return StringName(uint32(i), magicStrings, tr
 type HeaderFileType uint32
 
 const (
-	Obj        HeaderFileType = 1
-	Exec       HeaderFileType = 2
-	FVMLib     HeaderFileType = 3
-	Core       HeaderFileType = 4
-	Preload    HeaderFileType = 5 /* preloaded executable file */
-	Dylib      HeaderFileType = 6 /* dynamically bound shared library */
-	Dylinker   HeaderFileType = 7 /* dynamic link editor */
-	Bundle     HeaderFileType = 8
-	DylibStub  HeaderFileType = 0x9 /* shared library stub for static */
-	Dsym       HeaderFileType = 0xa /* companion file with only debug */
-	KextBundle HeaderFileType = 0xb /* x86_64 kexts */
-	FileSet    HeaderFileType = 0xc /* a file composed of other Mach-Os to be run in the same userspace sharing a single linkedit. */
+	MH_OBJECT      HeaderFileType = 0x1 /* relocatable object file */
+	MH_EXECUTE     HeaderFileType = 0x2 /* demand paged executable file */
+	MH_FVMLIB      HeaderFileType = 0x3 /* fixed VM shared library file */
+	MH_CORE        HeaderFileType = 0x4 /* core file */
+	MH_PRELOAD     HeaderFileType = 0x5 /* preloaded executable file */
+	MH_DYLIB       HeaderFileType = 0x6 /* dynamically bound shared library */
+	MH_DYLINKER    HeaderFileType = 0x7 /* dynamic link editor */
+	MH_BUNDLE      HeaderFileType = 0x8 /* dynamically bound bundle file */
+	MH_DYLIB_STUB  HeaderFileType = 0x9 /* shared library stub for static linking only, no section contents */
+	MH_DSYM        HeaderFileType = 0xa /* companion file with only debug sections */
+	MH_KEXT_BUNDLE HeaderFileType = 0xb /* x86_64 kexts */
+	MH_FILESET     HeaderFileType = 0xc /* a file composed of other Mach-Os to be run in the same userspace sharing a single linkedit. */
+	MH_GPU_EXECUTE HeaderFileType = 0xd /* gpu program */
+	MH_GPU_DYLIB   HeaderFileType = 0xe /* gpu support functions */
 )
 
 type HeaderFlag uint32

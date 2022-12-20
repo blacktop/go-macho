@@ -1,5 +1,7 @@
 package swift
 
+import "fmt"
+
 // credit: https://knight.sc/reverse%20engineering/2019/07/17/swift-metadata.html
 
 const (
@@ -74,24 +76,144 @@ const (
 	BUILTIN_TYPE_NAME_WORD = "Builtin.Word"
 )
 
+//go:generate stringer -type SpecialPointerAuthDiscriminators,NecessaryBindingsKind -output swift_string.go
+
+type SpecialPointerAuthDiscriminators uint16
+
+const (
+	// All of these values are the stable string hash of the corresponding
+	// variable name:
+	//   (computeStableStringHash % 65535 + 1)
+
+	/// HeapMetadataHeader::destroy
+	HeapDestructor SpecialPointerAuthDiscriminators = 0xbbbf
+
+	/// Type descriptor data pointers.
+	TypeDescriptor SpecialPointerAuthDiscriminators = 0xae86
+
+	/// Runtime function variables exported by the runtime.
+	RuntimeFunctionEntry SpecialPointerAuthDiscriminators = 0x625b
+
+	/// Protocol conformance descriptors.
+	ProtocolConformanceDescriptor SpecialPointerAuthDiscriminators = 0xc6eb
+
+	/// Pointer to value witness table stored in type metadata.
+	///
+	/// Computed with ptrauth_string_discriminator("value_witness_table_t").
+	ValueWitnessTable SpecialPointerAuthDiscriminators = 0x2e3f
+
+	/// Extended existential type shapes.
+	ExtendedExistentialTypeShape          SpecialPointerAuthDiscriminators = 0x5a3d // SpecialPointerAuthDiscriminators = 23101
+	NonUniqueExtendedExistentialTypeShape SpecialPointerAuthDiscriminators = 0xe798 // SpecialPointerAuthDiscriminators = 59288
+
+	/// Value witness functions.
+	InitializeBufferWithCopyOfBuffer   SpecialPointerAuthDiscriminators = 0xda4a
+	Destroy                            SpecialPointerAuthDiscriminators = 0x04f8
+	InitializeWithCopy                 SpecialPointerAuthDiscriminators = 0xe3ba
+	AssignWithCopy                     SpecialPointerAuthDiscriminators = 0x8751
+	InitializeWithTake                 SpecialPointerAuthDiscriminators = 0x48d8
+	AssignWithTake                     SpecialPointerAuthDiscriminators = 0xefda
+	DestroyArray                       SpecialPointerAuthDiscriminators = 0x2398
+	InitializeArrayWithCopy            SpecialPointerAuthDiscriminators = 0xa05c
+	InitializeArrayWithTakeFrontToBack SpecialPointerAuthDiscriminators = 0x1c3e
+	InitializeArrayWithTakeBackToFront SpecialPointerAuthDiscriminators = 0x8dd3
+	StoreExtraInhabitant               SpecialPointerAuthDiscriminators = 0x79c5
+	GetExtraInhabitantIndex            SpecialPointerAuthDiscriminators = 0x2ca8
+	GetEnumTag                         SpecialPointerAuthDiscriminators = 0xa3b5
+	DestructiveProjectEnumData         SpecialPointerAuthDiscriminators = 0x041d
+	DestructiveInjectEnumTag           SpecialPointerAuthDiscriminators = 0xb2e4
+	GetEnumTagSinglePayload            SpecialPointerAuthDiscriminators = 0x60f0
+	StoreEnumTagSinglePayload          SpecialPointerAuthDiscriminators = 0xa0d1
+
+	/// KeyPath metadata functions.
+	KeyPathDestroy           SpecialPointerAuthDiscriminators = 0x7072
+	KeyPathCopy              SpecialPointerAuthDiscriminators = 0x6f66
+	KeyPathEquals            SpecialPointerAuthDiscriminators = 0x756e
+	KeyPathHash              SpecialPointerAuthDiscriminators = 0x6374
+	KeyPathGetter            SpecialPointerAuthDiscriminators = 0x6f72
+	KeyPathNonmutatingSetter SpecialPointerAuthDiscriminators = 0x6f70
+	KeyPathMutatingSetter    SpecialPointerAuthDiscriminators = 0x7469
+	KeyPathGetLayout         SpecialPointerAuthDiscriminators = 0x6373
+	KeyPathInitializer       SpecialPointerAuthDiscriminators = 0x6275
+	KeyPathMetadataAccessor  SpecialPointerAuthDiscriminators = 0x7474
+
+	/// ObjC bridging entry points.
+	ObjectiveCTypeDiscriminator                    SpecialPointerAuthDiscriminators = 0x31c3 // SpecialPointerAuthDiscriminators = 12739
+	bridgeToObjectiveCDiscriminator                SpecialPointerAuthDiscriminators = 0xbca0 // SpecialPointerAuthDiscriminators = 48288
+	forceBridgeFromObjectiveCDiscriminator         SpecialPointerAuthDiscriminators = 0x22fb // SpecialPointerAuthDiscriminators = 8955
+	conditionallyBridgeFromObjectiveCDiscriminator SpecialPointerAuthDiscriminators = 0x9a9b // SpecialPointerAuthDiscriminators = 39579
+
+	/// Dynamic replacement pointers.
+	DynamicReplacementScope SpecialPointerAuthDiscriminators = 0x48F0 // SpecialPointerAuthDiscriminators = 18672
+	DynamicReplacementKey   SpecialPointerAuthDiscriminators = 0x2C7D // SpecialPointerAuthDiscriminators = 11389
+
+	/// Resume functions for yield-once coroutines that yield a single
+	/// opaque borrowed/inout value.  These aren't actually hard-coded, but
+	/// they're important enough to be worth writing in one place.
+	OpaqueReadResumeFunction   SpecialPointerAuthDiscriminators = 56769
+	OpaqueModifyResumeFunction SpecialPointerAuthDiscriminators = 3909
+
+	/// ObjC class pointers.
+	ObjCISA        SpecialPointerAuthDiscriminators = 0x6AE1
+	ObjCSuperclass SpecialPointerAuthDiscriminators = 0xB5AB
+
+	/// Resilient class stub initializer callback
+	ResilientClassStubInitCallback SpecialPointerAuthDiscriminators = 0xC671
+
+	/// Jobs, tasks, and continuations.
+	JobInvokeFunction                SpecialPointerAuthDiscriminators = 0xcc64 // SpecialPointerAuthDiscriminators = 52324
+	TaskResumeFunction               SpecialPointerAuthDiscriminators = 0x2c42 // SpecialPointerAuthDiscriminators = 11330
+	TaskResumeContext                SpecialPointerAuthDiscriminators = 0x753a // SpecialPointerAuthDiscriminators = 30010
+	AsyncRunAndBlockFunction         SpecialPointerAuthDiscriminators = 0x0f08 // 3848
+	AsyncContextParent               SpecialPointerAuthDiscriminators = 0xbda2 // SpecialPointerAuthDiscriminators = 48546
+	AsyncContextResume               SpecialPointerAuthDiscriminators = 0xd707 // SpecialPointerAuthDiscriminators = 55047
+	AsyncContextYield                SpecialPointerAuthDiscriminators = 0xe207 // SpecialPointerAuthDiscriminators = 57863
+	CancellationNotificationFunction SpecialPointerAuthDiscriminators = 0x1933 // SpecialPointerAuthDiscriminators = 6451
+	EscalationNotificationFunction   SpecialPointerAuthDiscriminators = 0x5be4 // SpecialPointerAuthDiscriminators = 23524
+	AsyncThinNullaryFunction         SpecialPointerAuthDiscriminators = 0x0f08 // SpecialPointerAuthDiscriminators = 3848
+	AsyncFutureFunction              SpecialPointerAuthDiscriminators = 0x720f // SpecialPointerAuthDiscriminators = 29199
+
+	/// Swift async context parameter stored in the extended frame info.
+	SwiftAsyncContextExtendedFrameEntry SpecialPointerAuthDiscriminators = 0xc31a // SpecialPointerAuthDiscriminators = 49946
+
+	// C type TaskContinuationFunction* descriminator.
+	ClangTypeTaskContinuationFunction SpecialPointerAuthDiscriminators = 0x2abe // SpecialPointerAuthDiscriminators = 10942
+
+	/// Dispatch integration.
+	DispatchInvokeFunction SpecialPointerAuthDiscriminators = 0xf493 // SpecialPointerAuthDiscriminators = 62611
+
+	/// Functions accessible at runtime (i.e. distributed method accessors).
+	AccessibleFunctionRecord SpecialPointerAuthDiscriminators = 0x438c // = 17292
+)
+
 // __TEXT.__swift5_assocty
 // This section contains an array of associated type descriptors.
 // An associated type descriptor contains a collection of associated type records for a conformance.
 // An associated type records describe the mapping from an associated type to the type witness of a conformance.
 
 type AssociatedTypeRecord struct {
-	Name                int32
-	SubstitutedTypeName int32
+	Name                string
+	SubstitutedTypeName string
+	SubstitutedTypeAddr uint64
+	ATRecordType
+}
+type ATRecordType struct {
+	NameOffset                int32
+	SubstitutedTypeNameOffset int32
 }
 
-type AssociatedTypeDescriptorHeader struct {
-	ConformingTypeName       int32
-	ProtocolTypeName         int32
+type ATDHeader struct {
+	ConformingTypeNameOffset int32
+	ProtocolTypeNameOffset   int32
 	NumAssociatedTypes       uint32
 	AssociatedTypeRecordSize uint32
 }
 type AssociatedTypeDescriptor struct {
-	AssociatedTypeDescriptorHeader
+	ATDHeader
+	Address               uint64
+	ConformingTypeAddr    uint64
+	ConformingTypeName    string
+	ProtocolTypeName      string
 	AssociatedTypeRecords []AssociatedTypeRecord
 }
 
@@ -99,13 +221,21 @@ type AssociatedTypeDescriptor struct {
 // This section contains an array of builtin type descriptors.
 // A builtin type descriptor describes the basic layout information about any builtin types referenced from other sections.
 
-type BuiltinTypeFlag uint32
+type builtinTypeFlag uint32
 
-func (f BuiltinTypeFlag) IsBitwiseTakable() bool {
-	return (f>>16)&1 != 0
+func (f builtinTypeFlag) IsBitwiseTakable() bool {
+	return ((f >> 16) & 1) != 0
 }
-func (f BuiltinTypeFlag) Alignment() uint16 {
+func (f builtinTypeFlag) Alignment() uint16 {
 	return uint16(f & 0xffff)
+}
+
+type BuiltinTypeDescriptor struct {
+	TypeName            int32
+	Size                uint32
+	AlignmentAndFlags   builtinTypeFlag
+	Stride              uint32
+	NumExtraInhabitants uint32
 }
 
 // BuiltinType builtin swift type
@@ -118,12 +248,15 @@ type BuiltinType struct {
 	NumExtraInhabitants uint32
 }
 
-type BuiltinTypeDescriptor struct {
-	TypeName            int32
-	Size                uint32
-	AlignmentAndFlags   BuiltinTypeFlag
-	Stride              uint32
-	NumExtraInhabitants uint32
+func (b BuiltinType) String() string {
+	return fmt.Sprintf(
+		"Name:             %s\n"+
+			"Size:             %d\n"+
+			"Alignment:        %d\n"+
+			"BitwiseTakable:   %t\n"+
+			"Stride:           %d\n"+
+			"ExtraInhabitants: %d\n",
+		b.Name, b.Size, b.Alignment, b.BitwiseTakable, b.Stride, b.NumExtraInhabitants)
 }
 
 // __TEXT.__swift5_capture
@@ -139,50 +272,42 @@ type MetadataSourceRecord struct {
 	MangledMetadataSource int32
 }
 
+type MetadataSource struct {
+	MangledType           string
+	MangledMetadataSource string
+}
+
+type NecessaryBindingsKind uint32
+
+const (
+	PartialApply NecessaryBindingsKind = iota
+	AsyncFunction
+)
+
+type NecessaryBindings struct {
+	Kind               NecessaryBindingsKind
+	RequirementsSet    int32
+	RequirementsVector int32
+	Conformances       int32
+}
+
 type CaptureDescriptorHeader struct {
-	NumCaptureTypes    uint32
-	NumMetadataSources uint32
-	NumBindings        uint32
+	NumCaptureTypes    uint32 // The number of captures in the closure and the number of typerefs that immediately follow this struct.
+	NumMetadataSources uint32 // The number of sources of metadata available in the MetadataSourceMap directly following the list of capture's typerefs.
+	NumBindings        uint32 // The number of items in the NecessaryBindings structure at the head of the closure.
 }
 
 type CaptureDescriptor struct {
 	CaptureDescriptorHeader
-	CaptureTypeRecords    []CaptureTypeRecord
-	MetadataSourceRecords []MetadataSourceRecord
+	CaptureTypes    []string
+	MetadataSources []MetadataSource
+	Bindings        []NecessaryBindings
 }
 
-// __TEXT.__swift5_replac
-// This section contains dynamic replacement information.
-// This is essentially the Swift equivalent of Objective-C method swizzling.
+// __TEXT.__swift5_typeref
+// This section contains a list of mangled type names that are referenced from other sections.
+// This is essentially all the different types that are used in the application.
+// The Swift docs and code are the best places to find out more information about mangled type names.
 
-type Replacement struct {
-	ReplacedFunctionKey int32
-	NewFunction         int32
-	Replacement         int32
-	Flags               uint32
-}
-
-type ReplacementScope struct {
-	Flags           uint32
-	NumReplacements uint32
-}
-
-type AutomaticReplacements struct {
-	Flags           uint32
-	NumReplacements uint32 // hard coded to 1
-	Replacements    int32
-}
-
-// __TEXT.__swift5_replac2
-// This section contains dynamica replacement information for opaque types.
-
-type Replacement2 struct {
-	Original    int32
-	Replacement int32
-}
-
-type AutomaticReplacementsSome struct {
-	Flags           uint32
-	NumReplacements uint32
-	Replacements    []Replacement
-}
+// __TEXT.__swift5_reflstr
+// This section contains an array of C strings. The strings are field names for the properties of the metadata defined in other sections.

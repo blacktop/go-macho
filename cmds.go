@@ -1077,7 +1077,7 @@ func (s *SplitInfo) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 }
 
 func (s *SplitInfo) String() string {
-	version := "1"
+	version := "format=v1"
 	if s.Version == types.DYLD_CACHE_ADJ_V2_FORMAT {
 		version = "format=v2"
 	} else {
@@ -1452,7 +1452,17 @@ type DataInCode struct {
 }
 
 func (d *DataInCode) String() string {
-	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d entries=%d", d.Offset, d.Offset+d.Size, d.Size, len(d.Entries))
+	var ents string
+	if len(d.Entries) > 0 {
+		ents = "\n"
+	}
+	for _, e := range d.Entries {
+		ents += fmt.Sprintf("\toffset: %#08x length: %d kind: %s\n", e.Offset, e.Length, e.Kind)
+	}
+	ents = strings.TrimSuffix(ents, "\n")
+	return fmt.Sprintf(
+		"offset=0x%08x-0x%08x size=%5d entries=%d%s",
+		d.Offset, d.Offset+d.Size, d.Size, len(d.Entries), ents)
 }
 
 func (l *DataInCode) Write(buf *bytes.Buffer, o binary.ByteOrder) error {

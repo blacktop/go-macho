@@ -23,6 +23,7 @@ type CodeSignature struct {
 	CMSSignature    []byte
 	Entitlements    string
 	EntitlementsDER []byte
+	Errors          []error
 }
 
 type magic uint32
@@ -116,19 +117,23 @@ type SlotType uint32
 
 const (
 	CSSLOT_CODEDIRECTORY                 SlotType = 0
-	CSSLOT_INFOSLOT                      SlotType = 1 // Info.plist
-	CSSLOT_REQUIREMENTS                  SlotType = 2 // internal requirements
-	CSSLOT_RESOURCEDIR                   SlotType = 3 // resource directory
-	CSSLOT_APPLICATION                   SlotType = 4 // Application specific slot/Top-level directory list
-	CSSLOT_ENTITLEMENTS                  SlotType = 5 // embedded entitlement configuration
-	CSSLOT_REP_SPECIFIC                  SlotType = 6 // for use by disk rep
-	CSSLOT_ENTITLEMENTS_DER              SlotType = 7 // DER representation of entitlements
-	CSSLOT_ALTERNATE_CODEDIRECTORIES     SlotType = 0x1000
+	CSSLOT_INFOSLOT                      SlotType = 1      // Info.plist
+	CSSLOT_REQUIREMENTS                  SlotType = 2      // internal requirements
+	CSSLOT_RESOURCEDIR                   SlotType = 3      // resource directory
+	CSSLOT_APPLICATION                   SlotType = 4      // Application specific slot/Top-level directory list
+	CSSLOT_ENTITLEMENTS                  SlotType = 5      // embedded entitlement configuration
+	CSSLOT_REP_SPECIFIC                  SlotType = 6      // for use by disk images
+	CSSLOT_ENTITLEMENTS_DER              SlotType = 7      // DER representation of entitlements plist
+	CSSLOT_ALTERNATE_CODEDIRECTORIES     SlotType = 0x1000 // Used for expressing a code directory using an alternate digest type.
+	CSSLOT_ALTERNATE_CODEDIRECTORIES1    SlotType = 0x1001 // Used for expressing a code directory using an alternate digest type.
+	CSSLOT_ALTERNATE_CODEDIRECTORIES2    SlotType = 0x1002 // Used for expressing a code directory using an alternate digest type.
+	CSSLOT_ALTERNATE_CODEDIRECTORIES3    SlotType = 0x1003 // Used for expressing a code directory using an alternate digest type.
+	CSSLOT_ALTERNATE_CODEDIRECTORIES4    SlotType = 0x1004 // Used for expressing a code directory using an alternate digest type.
 	CSSLOT_ALTERNATE_CODEDIRECTORY_MAX            = 5
 	CSSLOT_ALTERNATE_CODEDIRECTORY_LIMIT          = CSSLOT_ALTERNATE_CODEDIRECTORIES + CSSLOT_ALTERNATE_CODEDIRECTORY_MAX
-	CSSLOT_CMS_SIGNATURE                 SlotType = 0x10000
-	CSSLOT_IDENTIFICATIONSLOT            SlotType = 0x10001
-	CSSLOT_TICKETSLOT                    SlotType = 0x10002
+	CSSLOT_CMS_SIGNATURE                 SlotType = 0x10000 // CMS signature
+	CSSLOT_IDENTIFICATIONSLOT            SlotType = 0x10001 // identification blob; used for detached signature
+	CSSLOT_TICKETSLOT                    SlotType = 0x10002 // Notarization ticket
 )
 
 var slotTypeStrings = []mtypes.IntName{
