@@ -1,6 +1,8 @@
 package types
 
 import (
+	"strings"
+
 	mtypes "github.com/blacktop/go-macho/types"
 )
 
@@ -141,42 +143,51 @@ const (
 	ENTITLEMENT_FLAGS cdFlag = (GET_TASK_ALLOW | INSTALLER | DATAVAULT_CONTROLLER | NVRAM_UNRESTRICTED)
 )
 
-var cdFlagStrings = []mtypes.IntName{ // TODO: what about flag combinations?
-	{uint32(NONE), "None"},
-	{uint32(VALID), "Valid"},
-	{uint32(ADHOC), "Adhoc"},
-	{uint32(GET_TASK_ALLOW), "GetTaskAllow"},
-	{uint32(INSTALLER), "Installer"},
-	{uint32(FORCED_LV), "ForcedLv"},
-	{uint32(INVALID_ALLOWED), "InvalidAllowed"},
-	{uint32(HARD), "Hard"},
-	{uint32(KILL), "Kill"},
-	{uint32(CHECK_EXPIRATION), "CheckExpiration"},
-	{uint32(RESTRICT), "Restrict"},
-	{uint32(ENFORCEMENT), "Enforcement"},
-	{uint32(REQUIRE_LV), "RequireLv"},
-	{uint32(ENTITLEMENTS_VALIDATED), "EntitlementsValidated"},
-	{uint32(NVRAM_UNRESTRICTED), "NvramUnrestricted"},
-	{uint32(RUNTIME), "Runtime"},
-	{uint32(LINKER_SIGNED), "LinkerSigned"},
-	{uint32(ALLOWED_MACHO), "AllowedMacho"},
-	{uint32(EXEC_SET_HARD), "ExecSetHard"},
-	{uint32(EXEC_SET_KILL), "ExecSetKill"},
-	{uint32(EXEC_SET_ENFORCEMENT), "ExecSetEnforcement"},
-	{uint32(EXEC_INHERIT_SIP), "ExecInheritSip"},
-	{uint32(KILLED), "Killed"},
-	{uint32(DYLD_PLATFORM), "DyldPlatform"},
-	{uint32(PLATFORM_BINARY), "PlatformBinary"},
-	{uint32(PLATFORM_PATH), "PlatformPath"},
-	{uint32(DEBUGGED), "Debugged"},
-	{uint32(SIGNED), "Signed"},
-	{uint32(DEV_CODE), "DevCode"},
-	{uint32(DATAVAULT_CONTROLLER), "DatavaultController"},
-	{uint32(ENTITLEMENT_FLAGS), "EntitlementFlags"},
+var cdFlagStrings = []mtypes.IntName{
+	{uint32(NONE), "none"},
+	{uint32(VALID), "valid"},
+	{uint32(ADHOC), "adhoc"},
+	{uint32(GET_TASK_ALLOW), "get-task-allow"},
+	{uint32(INSTALLER), "installer"},
+	{uint32(FORCED_LV), "forced-lv"},
+	{uint32(INVALID_ALLOWED), "invalid-allowed"},
+	{uint32(HARD), "hard"},
+	{uint32(KILL), "kill"},
+	{uint32(CHECK_EXPIRATION), "check-expiration"},
+	{uint32(RESTRICT), "restrict"},
+	{uint32(ENFORCEMENT), "enforcement"},
+	{uint32(REQUIRE_LV), "require-lv"},
+	{uint32(ENTITLEMENTS_VALIDATED), "entitlements-validated"},
+	{uint32(NVRAM_UNRESTRICTED), "nvram-unrestricted"},
+	{uint32(RUNTIME), "runtime"},
+	{uint32(LINKER_SIGNED), "linker-signed"},
+	{uint32(ALLOWED_MACHO), "allowed-macho"},
+	{uint32(EXEC_SET_HARD), "exec-set-hard"},
+	{uint32(EXEC_SET_KILL), "exec-set-kill"},
+	{uint32(EXEC_SET_ENFORCEMENT), "exec-set-enforcement"},
+	{uint32(EXEC_INHERIT_SIP), "exec-inherit-sip"},
+	{uint32(KILLED), "killed"},
+	{uint32(DYLD_PLATFORM), "dyld-platform"},
+	{uint32(PLATFORM_BINARY), "platform-binary"},
+	{uint32(PLATFORM_PATH), "platform-path"},
+	{uint32(DEBUGGED), "debugged"},
+	{uint32(SIGNED), "signed"},
+	{uint32(DEV_CODE), "dev-code"},
+	{uint32(DATAVAULT_CONTROLLER), "datavault-controller"},
+	{uint32(ENTITLEMENT_FLAGS), "entitlement-flags"},
 }
 
 func (f cdFlag) String() string {
-	return mtypes.StringName(uint32(f), cdFlagStrings, false)
+	var out []string
+	for _, v := range cdFlagStrings {
+		if cdFlag(v.I) == ALLOWED_MACHO || cdFlag(v.I) == ENTITLEMENT_FLAGS {
+			continue
+		}
+		if (f & cdFlag(v.I)) != 0 {
+			out = append(out, v.S)
+		}
+	}
+	return strings.Join(out, ", ")
 }
 func (f cdFlag) GoString() string {
 	return mtypes.StringName(uint32(f), cdFlagStrings, true)
