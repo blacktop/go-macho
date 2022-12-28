@@ -2739,9 +2739,9 @@ func (f *File) ImportedLibraries() []string {
 			all = append(all, v.Name)
 		case *ReExportDylib:
 			all = append(all, v.Name)
-		// case *LazyLoadDylib:
-		// 	all = append(all, v.Name)
 		case *UpwardDylib:
+			all = append(all, v.Name)
+		case *LazyLoadDylib:
 			all = append(all, v.Name)
 		}
 	}

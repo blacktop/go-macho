@@ -2,7 +2,6 @@ package types
 
 import (
 	"encoding/binary"
-	"fmt"
 	"strings"
 )
 
@@ -72,6 +71,30 @@ const (
 	N_INDR NType = 0xa /* indirect */
 )
 
+const (
+	/*
+	 * If the type is N_INDR then the symbol is defined to be the same as another
+	 * symbol.  In this case the n_value field is an index into the string table
+	 * of the other symbol's name.  When the other symbol is defined then they both
+	 * take on the defined type and value.
+	 */
+
+	/*
+	 * If the type is N_SECT then the n_sect field contains an ordinal of the
+	 * section the symbol is defined in.  The sections are numbered from 1 and
+	 * refer to sections in order they appear in the load commands for the file
+	 * they are in.  This means the same ordinal may very well refer to different
+	 * sections in different files.
+	 *
+	 * The n_value field for all symbol table entries (including N_STAB's) gets
+	 * updated by the link editor based on the value of it's n_sect field and where
+	 * the section n_sect references gets relocated.  If the value of the n_sect
+	 * field is NO_SECT then it's n_value field is not changed by the link editor.
+	 */
+	NO_SECT  = 0   /* symbol is not in any section */
+	MAX_SECT = 255 /* 1 thru 255 inclusive */
+)
+
 func (t NType) IsDebugSym() bool {
 	return (t & N_STAB) != 0
 }
@@ -101,41 +124,115 @@ func (t NType) IsIndirectSym() bool {
 }
 
 func (t NType) String(secName string) string {
-	var tStr string
+	var out []string
 	if t.IsDebugSym() {
-		tStr += "debug|"
+		switch {
+		case t.IsGlobal():
+			out = append(out, "debug(global)")
+		case t.IsProcedureName():
+			out = append(out, "debug(procedure name)")
+		case t.IsProcedure():
+			out = append(out, "debug(procedure)")
+		case t.IsStatic():
+			out = append(out, "debug(static)")
+		case t.IsLcommSym():
+			out = append(out, "debug(.lcomm)")
+		case t.IsBeginNsectSym():
+			out = append(out, "debug(begin nsect sym)")
+		case t.IsAstFilePath():
+			out = append(out, "debug(ast file path)")
+		case t.IsGccCompiled():
+			out = append(out, "debug(gcc compiled)")
+		case t.IsRegisterSym():
+			out = append(out, "debug(register)")
+		case t.IsSourceLine():
+			out = append(out, "debug(source line)")
+		case t.IsEndNsectSym():
+			out = append(out, "debug(end nsect sym)")
+		case t.IsStructure():
+			out = append(out, "debug(struct_offset)")
+		case t.IsSourceFile():
+			out = append(out, "debug(source file)")
+		case t.IsObjectFile():
+			out = append(out, "debug(object file)")
+		case t.IsLocalSym():
+			out = append(out, "debug(local)")
+		case t.IsIncludeFileBegin():
+			out = append(out, "debug(include file beginning)")
+		case t.IsIncludedFile():
+			out = append(out, "debug(#included file name)")
+		case t.IsCompilerParams():
+			out = append(out, "debug(compiler parameters)")
+		case t.IsCompilerVersion():
+			out = append(out, "debug(compiler version)")
+		case t.IsCompilerOLevel():
+			out = append(out, "debug(compiler -O level)")
+		case t.IsParameter():
+			out = append(out, "debug(parameter)")
+		case t.IsIncludeFileEnd():
+			out = append(out, "debug(include file end)")
+		case t.IsAlternateEntry():
+			out = append(out, "debug(alternate entry)")
+		case t.IsLeftBracket():
+			out = append(out, "debug(left bracket)")
+		case t.IsDeletedIncludeFile():
+			out = append(out, "debug(deleted include file)")
+		case t.IsRightBracket():
+			out = append(out, "debug(right bracket)")
+		case t.IsBeginCommon():
+			out = append(out, "debug(begin common)")
+		case t.IsEndCommon():
+			out = append(out, "debug(end common)")
+		case t.IsEndCommonLocal():
+			out = append(out, "debug(end common - local)")
+		case t.IsSecondStabEntry():
+			out = append(out, "debug(second stab entry)")
+		case t.IsPascalSymbol():
+			out = append(out, "debug(global pascal symbol)")
+		default:
+			out = append(out, "debug")
+		}
 	}
 	if t.IsPrivateExternalSym() {
-		tStr += "priv_ext|"
+		out = append(out, "private")
 	}
 	if t.IsExternalSym() {
-		tStr += "ext|"
+		out = append(out, "external")
 	}
 	if t.IsUndefinedSym() {
-		tStr += "undef|"
+		out = append(out, "undefined")
 	}
 	if t.IsAbsoluteSym() {
-		tStr += "abs|"
+		out = append(out, "absolute")
 	}
 	if t.IsDefinedInSection() {
-		tStr += fmt.Sprintf("%s|", secName)
+		out = append(out, secName)
 	}
 	if t.IsPreboundUndefinedSym() {
-		tStr += "prebound_undef|"
+		out = append(out, "prebound")
 	}
 	if t.IsIndirectSym() {
-		tStr += "indir|"
+		out = append(out, "indirect")
 	}
-	return strings.TrimSuffix(tStr, "|")
+	return strings.Join(out, "|")
 }
 
 type NDescType uint16
 
-func (d NDescType) GetCommAlign() NDescType {
+/*
+ * Common symbols are represented by undefined (N_UNDF) external (N_EXT) types
+ * who's values (n_value) are non-zero.  In which case the value of the n_value
+ * field is the size (in bytes) of the common symbol.  The n_sect field is set
+ * to NO_SECT.  The alignment of a common symbol may be set as a power of 2
+ * between 2^1 and 2^15 as part of the n_desc field using the macros below. If
+ * the alignment is not set (a value of zero) then natural alignment based on
+ * the size is used.
+ */
+func (d NDescType) GetCommAlign() NDescType { // TODO: apply this to common symbol's value
 	return (d >> 8) & 0x0f
 }
 
-const REFERENCE_TYPE NDescType = 0x7
+const REFERENCE_TYPE_MASK NDescType = 0x7
 
 const (
 	/* types of references */
@@ -148,62 +245,43 @@ const (
 )
 
 func (d NDescType) IsUndefinedNonLazy() bool {
-	return (d & REFERENCE_TYPE) == REFERENCE_FLAG_UNDEFINED_NON_LAZY
+	return (d & REFERENCE_TYPE_MASK) == REFERENCE_FLAG_UNDEFINED_NON_LAZY
 }
 func (d NDescType) IsUndefinedLazy() bool {
-	return (d & REFERENCE_TYPE) == REFERENCE_FLAG_UNDEFINED_LAZY
+	return (d & REFERENCE_TYPE_MASK) == REFERENCE_FLAG_UNDEFINED_LAZY
 }
 func (d NDescType) IsDefined() bool {
-	return (d & REFERENCE_TYPE) == REFERENCE_FLAG_DEFINED
+	return (d & REFERENCE_TYPE_MASK) == REFERENCE_FLAG_DEFINED
 }
 func (d NDescType) IsPrivateDefined() bool {
-	return (d & REFERENCE_TYPE) == REFERENCE_FLAG_PRIVATE_DEFINED
+	return (d & REFERENCE_TYPE_MASK) == REFERENCE_FLAG_PRIVATE_DEFINED
 }
 func (d NDescType) IsPrivateUndefinedNonLazy() bool {
-	return (d & REFERENCE_TYPE) == REFERENCE_FLAG_PRIVATE_UNDEFINED_NON_LAZY
+	return (d & REFERENCE_TYPE_MASK) == REFERENCE_FLAG_PRIVATE_UNDEFINED_NON_LAZY
 }
 func (d NDescType) IsPrivateUndefinedLazy() bool {
-	return (d & REFERENCE_TYPE) == REFERENCE_FLAG_PRIVATE_UNDEFINED_LAZY
+	return (d & REFERENCE_TYPE_MASK) == REFERENCE_FLAG_PRIVATE_UNDEFINED_LAZY
 }
 
 const (
-	SELF_LIBRARY_ORDINAL   NDescType = 0x0
-	MAX_LIBRARY_ORDINAL    NDescType = 0xfd
-	DYNAMIC_LOOKUP_ORDINAL NDescType = 0xfe
-	EXECUTABLE_ORDINAL     NDescType = 0xff
+	SELF_LIBRARY_ORDINAL   = 0x0
+	MAX_LIBRARY_ORDINAL    = 0xfd
+	DYNAMIC_LOOKUP_ORDINAL = 0xfe
+	EXECUTABLE_ORDINAL     = 0xff
 )
 
-func (d NDescType) GetLibraryOrdinal() NDescType {
-	return (d >> 8) & 0xff
+func (d NDescType) GetLibraryOrdinal() uint16 {
+	return (uint16(d) >> 8) & 0xff
 }
-
-func (t NDescType) String() string {
-	var tStr string
-	if t.IsUndefinedNonLazy() {
-		tStr += "undef_nonlazy|"
-	}
-	if t.IsUndefinedLazy() {
-		tStr += "undef_lazy|"
-	}
-	if t.IsDefined() {
-		tStr += "def|"
-	}
-	if t.IsPrivateDefined() {
-		tStr += "priv_def|"
-	}
-	if t.IsPrivateUndefinedNonLazy() {
-		tStr += "pri_undef_nonlazy|"
-	}
-	if t.IsPrivateUndefinedLazy() {
-		tStr += "priv_undef_lazy|"
-	}
-	// tStr += fmt.Sprintf("libord=%d", t.GetLibraryOrdinal())
-	return strings.TrimSuffix(tStr, "|")
-}
-
-// TODO: add these flags to the NDescType String output
 
 const (
+	/*
+	 * To simplify stripping of objects that use are used with the dynamic link
+	 * editor, the static link editor marks the symbols defined an object that are
+	 * referenced by a dynamicly bound object (dynamic shared libraries, bundles).
+	 * With this marking strip knows not to strip these symbols.
+	 */
+	REFERENCED_DYNAMICALLY NDescType = 0x0010
 	/*
 	 * The N_NO_DEAD_STRIP bit of the n_desc field only ever appears in a
 	 * relocatable .o file (MH_OBJECT filetype). And is used to indicate to the
@@ -266,45 +344,226 @@ const (
 	N_COLD_FUNC NDescType = 0x0400
 )
 
+func (d NDescType) IsReferencedDynamically() bool {
+	return (d & REFERENCED_DYNAMICALLY) != 0
+}
+func (d NDescType) IsNoDeadStrip() bool {
+	return (d & NO_DEAD_STRIP) != 0
+}
+func (d NDescType) IsDescDiscarded() bool {
+	return (d & DESC_DISCARDED) != 0
+}
+func (d NDescType) IsWeakReferenced() bool {
+	return (d & WEAK_REF) != 0
+}
+func (d NDescType) IsWeakDefintion() bool {
+	return (d & WEAK_DEF) != 0
+}
+func (d NDescType) IsReferenceToWeak() bool {
+	return (d & REF_TO_WEAK) != 0
+}
+func (d NDescType) IsArmThumbDefintion() bool {
+	return (d & ARM_THUMB_DEF) != 0
+}
+func (d NDescType) IsSymbolResolver() bool {
+	return (d & SYMBOL_RESOLVER) != 0
+}
+func (d NDescType) IsAltEntry() bool {
+	return (d & ALT_ENTRY) != 0
+}
+func (d NDescType) IsColdFunc() bool {
+	return (d & N_COLD_FUNC) != 0
+}
+
+func (t NDescType) String() string {
+	var out []string
+	if t.IsUndefinedNonLazy() {
+		out = append(out, "undefined")
+	}
+	if t.IsUndefinedLazy() {
+		out = append(out, "undefined_lazy")
+	}
+	if t.IsDefined() {
+		out = append(out, "def")
+	}
+	if t.IsPrivateDefined() {
+		out = append(out, "priv_def")
+	}
+	if t.IsPrivateUndefinedNonLazy() {
+		out = append(out, "priv_undef_nonlazy")
+	}
+	if t.IsPrivateUndefinedLazy() {
+		out = append(out, "priv_undef_lazy")
+	}
+	// if t.GetLibraryOrdinal() != SELF_LIBRARY_ORDINAL {
+	// 	out = append(out, fmt.Sprintf("libord=%s", libName))
+	// }
+	if t.IsReferencedDynamically() {
+		out = append(out, "referenced_dynamically")
+	}
+	if t.IsNoDeadStrip() {
+		out = append(out, "no_dead_strip")
+	}
+	if t.IsDescDiscarded() {
+		out = append(out, "discarded")
+	}
+	if t.IsWeakReferenced() {
+		out = append(out, "weak_ref")
+	}
+	if t.IsWeakDefintion() {
+		out = append(out, "weak_def")
+	}
+	if t.IsReferenceToWeak() {
+		out = append(out, "ref_to_weak")
+	}
+	if t.IsArmThumbDefintion() {
+		out = append(out, "arm_thumb_def")
+	}
+	if t.IsSymbolResolver() {
+		out = append(out, "symbol_resolver")
+	}
+	if t.IsAltEntry() {
+		out = append(out, "alt_entry")
+	}
+	if t.IsColdFunc() {
+		out = append(out, "cold_func")
+	}
+	return strings.Join(out, "|")
+}
+
 /*
  * Symbolic debugger symbols.
  */
 const (
-	N_GSYM  = 0x20 /* global symbol: name,,NO_SECT,type,0 */
-	N_FNAME = 0x22 /* procedure name (f77 kludge): name,,NO_SECT,0,0 */
-	N_FUN   = 0x24 /* procedure: name,,n_sect,linenumber,address */
-	N_STSYM = 0x26 /* static symbol: name,,n_sect,type,address */
-	N_LCSYM = 0x28 /* .lcomm symbol: name,,n_sect,type,address */
-	N_BNSYM = 0x2e /* begin nsect sym: 0,,n_sect,0,address */
-	N_AST   = 0x32 /* AST file path: name,,NO_SECT,0,0 */
-	N_OPT   = 0x3c /* emitted with gcc2_compiled and in gcc source */
-	N_RSYM  = 0x40 /* register sym: name,,NO_SECT,type,register */
-	N_SLINE = 0x44 /* src line: 0,,n_sect,linenumber,address */
-	N_ENSYM = 0x4e /* end nsect sym: 0,,n_sect,0,address */
-	N_SSYM  = 0x60 /* structure elt: name,,NO_SECT,type,struct_offset */
-	N_SO    = 0x64 /* source file name: name,,n_sect,0,address */
-	N_OSO   = 0x66 /* object file name: name,,(see below),0,st_mtime */
+	N_GSYM  NType = 0x20 /* global symbol: name,,NO_SECT,type,0 */
+	N_FNAME NType = 0x22 /* procedure name (f77 kludge): name,,NO_SECT,0,0 */
+	N_FUN   NType = 0x24 /* procedure: name,,n_sect,linenumber,address */
+	N_STSYM NType = 0x26 /* static symbol: name,,n_sect,type,address */
+	N_LCSYM NType = 0x28 /* .lcomm symbol: name,,n_sect,type,address */
+	N_BNSYM NType = 0x2e /* begin nsect sym: 0,,n_sect,0,address */
+	N_AST   NType = 0x32 /* AST file path: name,,NO_SECT,0,0 */
+	N_OPT   NType = 0x3c /* emitted with gcc2_compiled and in gcc source */
+	N_RSYM  NType = 0x40 /* register sym: name,,NO_SECT,type,register */
+	N_SLINE NType = 0x44 /* src line: 0,,n_sect,linenumber,address */
+	N_ENSYM NType = 0x4e /* end nsect sym: 0,,n_sect,0,address */
+	N_SSYM  NType = 0x60 /* structure elt: name,,NO_SECT,type,struct_offset */
+	N_SO    NType = 0x64 /* source file name: name,,n_sect,0,address */
+	N_OSO   NType = 0x66 /* object file name: name,,(see below),0,st_mtime */
 	/*   historically N_OSO set n_sect to 0. The N_OSO
 	 *   n_sect may instead hold the low byte of the
 	 *   cpusubtype value from the Mach-O header. */
-	N_LSYM    = 0x80 /* local sym: name,,NO_SECT,type,offset */
-	N_BINCL   = 0x82 /* include file beginning: name,,NO_SECT,0,sum */
-	N_SOL     = 0x84 /* #included file name: name,,n_sect,0,address */
-	N_PARAMS  = 0x86 /* compiler parameters: name,,NO_SECT,0,0 */
-	N_VERSION = 0x88 /* compiler version: name,,NO_SECT,0,0 */
-	N_OLEVEL  = 0x8A /* compiler -O level: name,,NO_SECT,0,0 */
-	N_PSYM    = 0xa0 /* parameter: name,,NO_SECT,type,offset */
-	N_EINCL   = 0xa2 /* include file end: name,,NO_SECT,0,0 */
-	N_ENTRY   = 0xa4 /* alternate entry: name,,n_sect,linenumber,address */
-	N_LBRAC   = 0xc0 /* left bracket: 0,,NO_SECT,nesting level,address */
-	N_EXCL    = 0xc2 /* deleted include file: name,,NO_SECT,0,sum */
-	N_RBRAC   = 0xe0 /* right bracket: 0,,NO_SECT,nesting level,address */
-	N_BCOMM   = 0xe2 /* begin common: name,,NO_SECT,0,0 */
-	N_ECOMM   = 0xe4 /* end common: name,,n_sect,0,0 */
-	N_ECOML   = 0xe8 /* end common (local name): 0,,n_sect,0,address */
-	N_LENG    = 0xfe /* second stab entry with length information */
+	N_LSYM    NType = 0x80 /* local sym: name,,NO_SECT,type,offset */
+	N_BINCL   NType = 0x82 /* include file beginning: name,,NO_SECT,0,sum */
+	N_SOL     NType = 0x84 /* #included file name: name,,n_sect,0,address */
+	N_PARAMS  NType = 0x86 /* compiler parameters: name,,NO_SECT,0,0 */
+	N_VERSION NType = 0x88 /* compiler version: name,,NO_SECT,0,0 */
+	N_OLEVEL  NType = 0x8A /* compiler -O level: name,,NO_SECT,0,0 */
+	N_PSYM    NType = 0xa0 /* parameter: name,,NO_SECT,type,offset */
+	N_EINCL   NType = 0xa2 /* include file end: name,,NO_SECT,0,0 */
+	N_ENTRY   NType = 0xa4 /* alternate entry: name,,n_sect,linenumber,address */
+	N_LBRAC   NType = 0xc0 /* left bracket: 0,,NO_SECT,nesting level,address */
+	N_EXCL    NType = 0xc2 /* deleted include file: name,,NO_SECT,0,sum */
+	N_RBRAC   NType = 0xe0 /* right bracket: 0,,NO_SECT,nesting level,address */
+	N_BCOMM   NType = 0xe2 /* begin common: name,,NO_SECT,0,0 */
+	N_ECOMM   NType = 0xe4 /* end common: name,,n_sect,0,0 */
+	N_ECOML   NType = 0xe8 /* end common (local name): 0,,n_sect,0,address */
+	N_LENG    NType = 0xfe /* second stab entry with length information */
 	/*
 	 * for the berkeley pascal compiler, pc(1):
 	 */
-	N_PC = 0x30 /* global pascal symbol: name,,NO_SECT,subtype,line */
+	N_PC NType = 0x30 /* global pascal symbol: name,,NO_SECT,subtype,line */
 )
+
+func (t NType) IsGlobal() bool {
+	return t == N_GSYM
+}
+func (t NType) IsProcedureName() bool {
+	return t == N_FNAME
+}
+func (t NType) IsProcedure() bool {
+	return t == N_FUN
+}
+func (t NType) IsStatic() bool {
+	return t == N_STSYM
+}
+func (t NType) IsLcommSym() bool {
+	return t == N_LCSYM
+}
+func (t NType) IsBeginNsectSym() bool {
+	return t == N_BNSYM
+}
+func (t NType) IsAstFilePath() bool {
+	return t == N_AST
+}
+func (t NType) IsGccCompiled() bool {
+	return t == N_OPT
+}
+func (t NType) IsRegisterSym() bool {
+	return t == N_RSYM
+}
+func (t NType) IsSourceLine() bool {
+	return t == N_SLINE
+}
+func (t NType) IsEndNsectSym() bool {
+	return t == N_ENSYM
+}
+func (t NType) IsStructure() bool {
+	return t == N_SSYM
+}
+func (t NType) IsSourceFile() bool {
+	return t == N_SO
+}
+func (t NType) IsObjectFile() bool {
+	return t == N_OSO
+}
+func (t NType) IsLocalSym() bool {
+	return t == N_LSYM
+}
+func (t NType) IsIncludeFileBegin() bool {
+	return t == N_BINCL
+}
+func (t NType) IsIncludedFile() bool {
+	return t == N_SOL
+}
+func (t NType) IsCompilerParams() bool {
+	return t == N_PARAMS
+}
+func (t NType) IsCompilerVersion() bool {
+	return t == N_VERSION
+}
+func (t NType) IsCompilerOLevel() bool {
+	return t == N_OLEVEL
+}
+func (t NType) IsParameter() bool {
+	return t == N_PSYM
+}
+func (t NType) IsIncludeFileEnd() bool {
+	return t == N_EINCL
+}
+func (t NType) IsAlternateEntry() bool {
+	return t == N_ENTRY
+}
+func (t NType) IsLeftBracket() bool {
+	return t == N_LBRAC
+}
+func (t NType) IsDeletedIncludeFile() bool {
+	return t == N_EXCL
+}
+func (t NType) IsRightBracket() bool {
+	return t == N_RBRAC
+}
+func (t NType) IsBeginCommon() bool {
+	return t == N_BCOMM
+}
+func (t NType) IsEndCommon() bool {
+	return t == N_ECOMM
+}
+func (t NType) IsEndCommonLocal() bool {
+	return t == N_ECOML
+}
+func (t NType) IsSecondStabEntry() bool {
+	return t == N_LENG
+}
+func (t NType) IsPascalSymbol() bool {
+	return t == N_PC
+}

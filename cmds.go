@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"path/filepath"
 	"sort"
 	"strings"
 	"unsafe"
@@ -552,10 +553,17 @@ type Symbol struct {
 
 func (s Symbol) String(m *File) string {
 	var sec string
-	if s.Sect > 0 && int(s.Sect) <= len(m.Sections) {
+	if s.Sect != types.NO_SECT && int(s.Sect) <= len(m.Sections) {
 		sec = fmt.Sprintf("%s.%s", m.Sections[s.Sect-1].Seg, m.Sections[s.Sect-1].Name)
 	}
-	return fmt.Sprintf("0x%016X \t <type:%s,desc:%s> \t %s", s.Value, s.Type.String(sec), s.Desc, s.Name)
+	var lib string
+	if s.Desc.GetLibraryOrdinal() != types.SELF_LIBRARY_ORDINAL && s.Desc.GetLibraryOrdinal() < types.MAX_LIBRARY_ORDINAL {
+		if s.Desc.GetLibraryOrdinal() <= uint16(len(m.ImportedLibraries())) {
+			lib = m.ImportedLibraries()[s.Desc.GetLibraryOrdinal()-1]
+			return fmt.Sprintf("0x%016X\t<type:%s, desc:%s>\t%s\t(from %s)", s.Value, s.Type.String(sec), s.Desc, s.Name, filepath.Base(lib))
+		}
+	}
+	return fmt.Sprintf("0x%016X\t<type:%s, desc:%s>\t%s", s.Value, s.Type.String(sec), s.Desc, s.Name)
 }
 
 /*******************************************************************************

@@ -23,7 +23,7 @@ import (
 type fileTest struct {
 	file        string
 	hdr         types.FileHeader
-	loads       []interface{}
+	loads       []any
 	sections    []*SectionHeader
 	relocations map[string][]Reloc
 }
@@ -32,7 +32,7 @@ var fileTests = []fileTest{
 	{
 		"internal/testdata/gcc-386-darwin-exec.base64",
 		types.FileHeader{Magic: 0xfeedface, CPU: types.CPU386, SubCPU: 0x3, Type: 0x2, NCommands: 0xc, SizeCommands: 0x3c0, Flags: 0x85, Reserved: 0x1},
-		[]interface{}{
+		[]any{
 			&SegmentHeader{types.LC_SEGMENT, 0x38, "__PAGEZERO", 0x0, 0x1000, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
 			&SegmentHeader{types.LC_SEGMENT, 0xc0, "__TEXT", 0x1000, 0x1000, 0x0, 0x1000, 0x7, 0x5, 0x2, 0x0, 0},
 			&SegmentHeader{types.LC_SEGMENT, 0xc0, "__DATA", 0x2000, 0x1000, 0x1000, 0x1000, 0x7, 0x3, 0x2, 0x0, 0x2},
@@ -58,7 +58,7 @@ var fileTests = []fileTest{
 	{
 		"internal/testdata/gcc-amd64-darwin-exec.base64",
 		types.FileHeader{Magic: 0xfeedfacf, CPU: types.CPUAmd64, SubCPU: 0x80000003, Type: 0x2, NCommands: 0xb, SizeCommands: 0x568, Flags: 0x85, Reserved: 0x0},
-		[]interface{}{
+		[]any{
 			&SegmentHeader{types.LC_SEGMENT_64, 0x48, "__PAGEZERO", 0x0, 0x100000000, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
 			&SegmentHeader{types.LC_SEGMENT_64, 0x1d8, "__TEXT", 0x100000000, 0x1000, 0x0, 0x1000, 0x7, 0x5, 0x5, 0x0, 0},
 			&SegmentHeader{LoadCmd: 0x19, Len: 0x138, Name: "__DATA", Addr: 0x100001000, Memsz: 0x1000, Offset: 0x1000, Filesz: 0x1000, Maxprot: 7, Prot: 3, Nsect: 0x3, Flag: 0x0, Firstsect: 0x5},
@@ -85,7 +85,7 @@ var fileTests = []fileTest{
 	{
 		"internal/testdata/gcc-amd64-darwin-exec-debug.base64",
 		types.FileHeader{Magic: 0xfeedfacf, CPU: types.CPUAmd64, SubCPU: 0x80000003, Type: 0xa, NCommands: 0x4, SizeCommands: 0x5a0, Flags: 0, Reserved: 0x0},
-		[]interface{}{
+		[]any{
 			nil, // LC_UUID
 			&SegmentHeader{LoadCmd: 0x19, Len: 0x1d8, Name: "__TEXT", Addr: 0x100000000, Memsz: 0x1000, Offset: 0x0, Filesz: 0x0, Maxprot: 7, Prot: 5, Nsect: 0x5, Flag: 0x0, Firstsect: 0x0},
 			&SegmentHeader{LoadCmd: 0x19, Len: 0x138, Name: "__DATA", Addr: 0x100001000, Memsz: 0x1000, Offset: 0x0, Filesz: 0x0, Maxprot: 7, Prot: 3, Nsect: 0x3, Flag: 0x0, Firstsect: 0x5},
@@ -113,7 +113,7 @@ var fileTests = []fileTest{
 	{
 		"internal/testdata/clang-386-darwin-exec-with-rpath.base64",
 		types.FileHeader{Magic: 0xfeedface, CPU: types.CPU386, SubCPU: 0x3, Type: 0x2, NCommands: 0x10, SizeCommands: 0x42c, Flags: 0x1200085, Reserved: 0x1},
-		[]interface{}{
+		[]any{
 			nil, // LC_SEGMENT
 			nil, // LC_SEGMENT
 			nil, // LC_SEGMENT
@@ -137,7 +137,7 @@ var fileTests = []fileTest{
 	{
 		"internal/testdata/clang-amd64-darwin-exec-with-rpath.base64",
 		types.FileHeader{Magic: 0xfeedfacf, CPU: types.CPUAmd64, SubCPU: 0x80000003, Type: 0x2, NCommands: 0x10, SizeCommands: 0x4c8, Flags: 0x200085, Reserved: 0x0},
-		[]interface{}{
+		[]any{
 			nil, // LC_SEGMENT
 			nil, // LC_SEGMENT
 			nil, // LC_SEGMENT
