@@ -1,8 +1,42 @@
 package types
 
 import (
+	"bytes"
+	"compress/zlib"
+	"encoding/binary"
+	"encoding/json"
+	"fmt"
+	"io"
 	"strings"
 )
+
+/*
+ * A segment is made up of zero or more sections.  Non-MH_OBJECT files have
+ * all of their segments with the proper sections in each, and padded to the
+ * specified segment alignment when produced by the link editor.  The first
+ * segment of a MH_EXECUTE and MH_FVMLIB format file contains the mach_header
+ * and load commands of the object file before its first section.  The zero
+ * fill sections are always last in their segment (in all formats).  This
+ * allows the zeroed segment padding to be mapped into memory where zero fill
+ * sections might be. The gigabyte zero fill sections, those with the section
+ * type S_GB_ZEROFILL, can only be in a segment with sections of this type.
+ * These segments are then placed after all other segments.
+ *
+ * The MH_OBJECT format has all of its sections in one segment for
+ * compactness.  There is no padding to a specified segment boundary and the
+ * mach_header and load commands are not part of the segment.
+ *
+ * Sections with the same section name, sectname, going into the same segment,
+ * segname, are combined by the link editor.  The resulting section is aligned
+ * to the maximum alignment of the combined sections and is the new section's
+ * alignment.  The combined sections are aligned to their original alignment in
+ * the combined section.  Any padded bytes to get the specified alignment are
+ * zeroed.
+ *
+ * The format of the relocation entries referenced by the reloff and nreloc
+ * fields of the section structure for mach object files is described in the
+ * header file <reloc.h>.
+ */
 
 // A Section32 is a 32-bit Mach-O section header.
 type Section32 struct {
@@ -185,7 +219,7 @@ func (t SectionFlag) IsInitFuncOffsets() bool {
 func (f SectionFlag) List() []string {
 	var flags []string
 	// if f.IsRegular() {
-	// 	fStr += "Regular, "
+	// 	flags = append(flags, "Regular")
 	// }
 	if f.IsZerofill() {
 		flags = append(flags, "Zerofill")
@@ -289,39 +323,35 @@ const (
 	LOC_RELOC         SectionFlag = 0x00000100 /* section has local relocation entries */
 )
 
-func (t SectionFlag) GetAttributes() SectionFlag {
-	return (t & SectionAttributes)
-}
-
 func (t SectionFlag) IsPureInstructions() bool {
-	return (t.GetAttributes() & PURE_INSTRUCTIONS) != 0
+	return ((t & SectionAttributes) & PURE_INSTRUCTIONS) != 0
 }
 func (t SectionFlag) IsNoToc() bool {
-	return (t.GetAttributes() & NO_TOC) != 0
+	return ((t & SectionAttributes) & NO_TOC) != 0
 }
 func (t SectionFlag) IsStripStaticSyms() bool {
-	return (t.GetAttributes() & STRIP_STATIC_SYMS) != 0
+	return ((t & SectionAttributes) & STRIP_STATIC_SYMS) != 0
 }
 func (t SectionFlag) IsNoDeadStrip() bool {
-	return (t.GetAttributes() & NoDeadStrip) != 0
+	return ((t & SectionAttributes) & NoDeadStrip) != 0
 }
 func (t SectionFlag) IsLiveSupport() bool {
-	return (t.GetAttributes() & LIVE_SUPPORT) != 0
+	return ((t & SectionAttributes) & LIVE_SUPPORT) != 0
 }
 func (t SectionFlag) IsSelfModifyingCode() bool {
-	return (t.GetAttributes() & SELF_MODIFYING_CODE) != 0
+	return ((t & SectionAttributes) & SELF_MODIFYING_CODE) != 0
 }
 func (t SectionFlag) IsDebug() bool {
-	return (t.GetAttributes() & DEBUG) != 0
+	return ((t & SectionAttributes) & DEBUG) != 0
 }
 func (t SectionFlag) IsSomeInstructions() bool {
-	return (t.GetAttributes() & SOME_INSTRUCTIONS) != 0
+	return ((t & SectionAttributes) & SOME_INSTRUCTIONS) != 0
 }
 func (t SectionFlag) IsExtReloc() bool {
-	return (t.GetAttributes() & EXT_RELOC) != 0
+	return ((t & SectionAttributes) & EXT_RELOC) != 0
 }
 func (t SectionFlag) IsLocReloc() bool {
-	return (t.GetAttributes() & LOC_RELOC) != 0
+	return ((t & SectionAttributes) & LOC_RELOC) != 0
 }
 
 func (f SectionFlag) AttributesList() []string {
@@ -359,24 +389,322 @@ func (f SectionFlag) AttributesList() []string {
 	return attrs
 }
 
-func (f SectionFlag) AttributesString() string {
+func (f SectionFlag) Attributes() string {
 	return strings.Join(f.AttributesList(), "|")
 }
 
-// func (ss sections) Print() {
-// 	var secFlags string
-// 	// var prevSeg string
-// 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
-// 	for _, sec := range ss {
-// 		secFlags = ""
-// 		if !sec.Flags.IsRegular() {
-// 			secFlags = fmt.Sprintf("(%s)", sec.Flags)
-// 		}
-// 		// if !strings.EqualFold(sec.Seg, prevSeg) && len(prevSeg) > 0 {
-// 		// 	fmt.Fprintf(w, "\n")
-// 		// }
-// 		fmt.Fprintf(w, "Mem: %#x-%#x \t %s.%s \t %s \t %s\n", sec.Addr, sec.Addr+sec.Size, sec.Seg, sec.Name, secFlags, sec.Flags.AttributesString())
-// 		// prevSeg = sec.Seg
-// 	}
-// 	w.Flush()
-// }
+/*
+ * Sections of type S_THREAD_LOCAL_VARIABLES contain an array
+ * of tlv_descriptor structures.
+ */
+type TlvDescriptor struct { // TODO: implement this
+	Thunk  uint64
+	Key    uint64
+	Offset uint64
+}
+
+/*******************************************************************************
+ * SECTION
+ *******************************************************************************/
+
+type SectionHeader struct {
+	Name      string
+	Seg       string
+	Addr      uint64
+	Size      uint64
+	Offset    uint32
+	Align     uint32
+	Reloff    uint32
+	Nreloc    uint32
+	Flags     SectionFlag
+	Reserved1 uint32
+	Reserved2 uint32
+	Reserved3 uint32 // only present if original was 64-bit
+	Type      uint8
+}
+
+// A Reloc represents a Mach-O relocation.
+type Reloc struct {
+	Addr  uint32
+	Value uint32
+	// when Scattered == false && Extern == true, Value is the symbol number.
+	// when Scattered == false && Extern == false, Value is the section number.
+	// when Scattered == true, Value is the value that this reloc refers to.
+	Type      uint8
+	Len       uint8 // 0=byte, 1=word, 2=long, 3=quad
+	Pcrel     bool
+	Extern    bool // valid if Scattered == false
+	Scattered bool
+}
+
+func (r *Reloc) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&struct {
+		Addr      uint32 `json:"addr"`
+		Value     uint32 `json:"value"`
+		Type      uint8  `json:"type"`
+		Len       uint8  `json:"len"`
+		Pcrel     bool   `json:"pcrel"`
+		Extern    bool   `json:"extern"`
+		Scattered bool   `json:"scattered"`
+	}{
+		Addr:      r.Addr,
+		Value:     r.Value,
+		Type:      r.Type,
+		Len:       r.Len,
+		Pcrel:     r.Pcrel,
+		Extern:    r.Extern,
+		Scattered: r.Scattered,
+	})
+}
+
+type RelocInfo struct {
+	Addr   uint32
+	Symnum uint32
+}
+
+type Section struct {
+	SectionHeader
+	Relocs []Reloc
+
+	// Embed ReaderAt for ReadAt method.
+	// Do not embed SectionReader directly
+	// to avoid having Read and Seek.
+	// If a client wants Read and Seek it must use
+	// Open() to avoid fighting over the seek offset
+	// with other clients.
+	io.ReaderAt
+	sr *io.SectionReader
+}
+
+func (s *Section) SetReaders(r io.ReaderAt, sr *io.SectionReader) {
+	s.ReaderAt = r
+	s.sr = sr
+}
+
+// Data reads and returns the contents of the Mach-O section.
+func (s *Section) Data() ([]byte, error) {
+	dat := make([]byte, s.Size)
+	n, err := s.ReadAt(dat, int64(s.Offset))
+	if n == len(dat) {
+		err = nil
+	}
+	return dat[0:n], err
+}
+
+// Open returns a new ReadSeeker reading the Mach-O section.
+func (s *Section) Open() io.ReadSeeker { return io.NewSectionReader(s.sr, 0, 1<<63-1) }
+
+func (s *Section) Put32(b []byte, o binary.ByteOrder) int {
+	PutAtMost16Bytes(b[0:], s.Name)
+	PutAtMost16Bytes(b[16:], s.Seg)
+	o.PutUint32(b[8*4:], uint32(s.Addr))
+	o.PutUint32(b[9*4:], uint32(s.Size))
+	o.PutUint32(b[10*4:], s.Offset)
+	o.PutUint32(b[11*4:], s.Align)
+	o.PutUint32(b[12*4:], s.Reloff)
+	o.PutUint32(b[13*4:], s.Nreloc)
+	o.PutUint32(b[14*4:], uint32(s.Flags))
+	o.PutUint32(b[15*4:], s.Reserved1)
+	o.PutUint32(b[16*4:], s.Reserved2)
+	a := 17 * 4
+	return a + s.PutRelocs(b[a:], o)
+}
+
+func (s *Section) Put64(b []byte, o binary.ByteOrder) int {
+	PutAtMost16Bytes(b[0:], s.Name)
+	PutAtMost16Bytes(b[16:], s.Seg)
+	o.PutUint64(b[8*4+0*8:], s.Addr)
+	o.PutUint64(b[8*4+1*8:], s.Size)
+	o.PutUint32(b[8*4+2*8:], s.Offset)
+	o.PutUint32(b[9*4+2*8:], s.Align)
+	o.PutUint32(b[10*4+2*8:], s.Reloff)
+	o.PutUint32(b[11*4+2*8:], s.Nreloc)
+	o.PutUint32(b[12*4+2*8:], uint32(s.Flags))
+	o.PutUint32(b[13*4+2*8:], s.Reserved1)
+	o.PutUint32(b[14*4+2*8:], s.Reserved2)
+	o.PutUint32(b[15*4+2*8:], s.Reserved3)
+	a := 16*4 + 2*8
+	return a + s.PutRelocs(b[a:], o)
+}
+
+func (s *Section) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	var name [16]byte
+	var seg [16]byte
+	copy(name[:], s.Name)
+	copy(seg[:], s.Seg)
+
+	if s.Type == 32 {
+		if err := binary.Write(buf, o, Section32{
+			Name:     name,           // [16]byte
+			Seg:      seg,            // [16]byte
+			Addr:     uint32(s.Addr), // uint32
+			Size:     uint32(s.Size), // uint32
+			Offset:   s.Offset,       // uint32
+			Align:    s.Align,        // uint32
+			Reloff:   s.Reloff,       // uint32
+			Nreloc:   s.Nreloc,       // uint32
+			Flags:    s.Flags,        // SectionFlag
+			Reserve1: s.Reserved1,    // uint32
+			Reserve2: s.Reserved2,    // uint32
+		}); err != nil {
+			return fmt.Errorf("failed to write 32bit Section %s data to buffer: %v", s.Name, err)
+		}
+	} else { // 64
+		if err := binary.Write(buf, o, Section64{
+			Name:     name,        // [16]byte
+			Seg:      seg,         // [16]byte
+			Addr:     s.Addr,      // uint64
+			Size:     s.Size,      // uint64
+			Offset:   s.Offset,    // uint32
+			Align:    s.Align,     // uint32
+			Reloff:   s.Reloff,    // uint32
+			Nreloc:   s.Nreloc,    // uint32
+			Flags:    s.Flags,     // SectionFlag
+			Reserve1: s.Reserved1, // uint32
+			Reserve2: s.Reserved2, // uint32
+			Reserve3: s.Reserved3, // uint32
+		}); err != nil {
+			return fmt.Errorf("failed to write 64bit Section %s data to buffer: %v", s.Name, err)
+		}
+	}
+
+	return nil
+}
+
+func (s *Section) PutRelocs(b []byte, o binary.ByteOrder) int {
+	a := 0
+	for _, r := range s.Relocs {
+		var ri RelocInfo
+		typ := uint32(r.Type) & (1<<4 - 1)
+		len := uint32(r.Len) & (1<<2 - 1)
+		pcrel := uint32(0)
+		if r.Pcrel {
+			pcrel = 1
+		}
+		ext := uint32(0)
+		if r.Extern {
+			ext = 1
+		}
+		switch {
+		case r.Scattered:
+			ri.Addr = r.Addr&(1<<24-1) | typ<<24 | len<<28 | 1<<31 | pcrel<<30
+			ri.Symnum = r.Value
+		case o == binary.LittleEndian:
+			ri.Addr = r.Addr
+			ri.Symnum = r.Value&(1<<24-1) | pcrel<<24 | len<<25 | ext<<27 | typ<<28
+		case o == binary.BigEndian:
+			ri.Addr = r.Addr
+			ri.Symnum = r.Value<<8 | pcrel<<7 | len<<5 | ext<<4 | typ
+		}
+		o.PutUint32(b, ri.Addr)
+		o.PutUint32(b[4:], ri.Symnum)
+		a += 8
+		b = b[8:]
+	}
+	return a
+}
+
+func (s *Section) UncompressedSize() uint64 {
+	if !strings.HasPrefix(s.Name, "__z") {
+		return s.Size
+	}
+	b := make([]byte, 12)
+	n, err := s.sr.ReadAt(b, 0)
+	if err != nil {
+		panic("Malformed object file")
+	}
+	if n != len(b) {
+		return s.Size
+	}
+	if string(b[:4]) == "ZLIB" {
+		return binary.BigEndian.Uint64(b[4:12])
+	}
+	return s.Size
+}
+
+func (s *Section) PutData(b []byte) {
+	bb := b[0:s.Size]
+	n, err := s.sr.ReadAt(bb, 0)
+	if err != nil || uint64(n) != s.Size {
+		panic("Malformed object file (ReadAt error)")
+	}
+}
+
+func (s *Section) PutUncompressedData(b []byte) {
+	if strings.HasPrefix(s.Name, "__z") {
+		bb := make([]byte, 12)
+		n, err := s.sr.ReadAt(bb, 0)
+		if err != nil {
+			panic("Malformed object file")
+		}
+		if n == len(bb) && string(bb[:4]) == "ZLIB" {
+			size := binary.BigEndian.Uint64(bb[4:12])
+			// Decompress starting at b[12:]
+			r, err := zlib.NewReader(io.NewSectionReader(s, 12, int64(size)-12))
+			if err != nil {
+				panic("Malformed object file (zlib.NewReader error)")
+			}
+			n, err := io.ReadFull(r, b[0:size])
+			if err != nil {
+				panic("Malformed object file (ReadFull error)")
+			}
+			if uint64(n) != size {
+				panic(fmt.Sprintf("PutUncompressedData, expected to read %d bytes, instead read %d", size, n))
+			}
+			if err := r.Close(); err != nil {
+				panic("Malformed object file (Close error)")
+			}
+			return
+		}
+	}
+	// Not compressed
+	s.PutData(b)
+}
+
+func (s *Section) Copy() *Section {
+	return &Section{SectionHeader: s.SectionHeader}
+}
+
+func (s *Section) String() string {
+	secFlags := ""
+	if !s.Flags.IsRegular() {
+		secFlags = fmt.Sprintf("(%s)", s.Flags)
+	}
+	return fmt.Sprintf("\tsz=0x%08x off=0x%08x-0x%08x addr=0x%09x-0x%09x%s%s %s\n",
+		s.Size,
+		s.Offset,
+		uint64(s.Offset)+s.Size,
+		s.Addr,
+		s.Addr+s.Size,
+		fmt.Sprintf("%21s.%-18s", s.Seg, s.Name),
+		s.Flags.Attributes(),
+		secFlags)
+}
+
+func (s *Section) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&struct {
+		Name    string   `json:"name"`
+		Segment string   `json:"segment"`
+		Addr    uint64   `json:"addr"`
+		Size    uint64   `json:"size"`
+		Offset  uint32   `json:"offset"`
+		Align   uint32   `json:"align"`
+		Reloff  uint32   `json:"reloff"`
+		Nreloc  uint32   `json:"nreloc"`
+		Flags   []string `json:"flags"`
+		Type    uint8    `json:"type"`
+		Relocs  []Reloc  `json:"relocs,omitempty"`
+	}{
+		Name:    s.Name,
+		Segment: s.Seg,
+		Addr:    s.Addr,
+		Size:    s.Size,
+		Offset:  s.Offset,
+		Align:   s.Align,
+		Reloff:  s.Reloff,
+		Nreloc:  s.Nreloc,
+		Flags:   s.Flags.List(),
+		Type:    s.Type,
+		Relocs:  s.Relocs,
+	})
+}

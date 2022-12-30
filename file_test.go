@@ -24,8 +24,8 @@ type fileTest struct {
 	file        string
 	hdr         types.FileHeader
 	loads       []any
-	sections    []*SectionHeader
-	relocations map[string][]Reloc
+	sections    []*types.SectionHeader
+	relocations map[string][]types.Reloc
 }
 
 var fileTests = []fileTest{
@@ -43,10 +43,10 @@ var fileTests = []fileTest{
 			nil, // LC_LOAD_DYLINKER
 			nil, // LC_UUID
 			nil, // LC_UNIXTHREAD
-			&Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x34, Name: 0x0, Time: 0x0, CurrentVersion: 0x0, CompatVersion: 0x0}, Name: "/usr/lib/libgcc_s.1.dylib", Time: 0x2, CurrentVersion: "1.0", CompatVersion: "1.0"},
-			&Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x34, Name: 0x0, Time: 0x0, CurrentVersion: 0x0, CompatVersion: 0x0}, Name: "/usr/lib/libSystem.B.dylib", Time: 0x2, CurrentVersion: "111.1.4", CompatVersion: "1.0"},
+			&Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x34, NameOffset: 0x0, Time: 0x0, CurrentVersion: 0x0, CompatVersion: 0x0}, Name: "/usr/lib/libgcc_s.1.dylib", Time: 0x2, CurrentVersion: types.Version(0x10000), CompatVersion: types.Version(0x10000)},
+			&Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x34, NameOffset: 0x0, Time: 0x0, CurrentVersion: 0x0, CompatVersion: 0x0}, Name: "/usr/lib/libSystem.B.dylib", Time: 0x2, CurrentVersion: types.Version(0x6f0104), CompatVersion: types.Version(0x10000)},
 		},
-		[]*SectionHeader{
+		[]*types.SectionHeader{
 			{Name: "__text", Seg: "__TEXT", Addr: 0x1f68, Size: 0x88, Offset: 0xf68, Align: 0x2, Reloff: 0x0, Nreloc: 0x0, Flags: 0x80000400, Reserved1: 0x0, Reserved2: 0x0, Reserved3: 0x0, Type: 0x20},
 			{Name: "__cstring", Seg: "__TEXT", Addr: 0x1ff0, Size: 0xd, Offset: 0xff0, Align: 0x0, Reloff: 0x0, Nreloc: 0x0, Flags: 0x2, Reserved1: 0x0, Reserved2: 0x0, Reserved3: 0x0, Type: 0x20},
 			{Name: "__data", Seg: "__DATA", Addr: 0x2000, Size: 0x14, Offset: 0x1000, Align: 0x2, Reloff: 0x0, Nreloc: 0x0, Flags: 0x0, Reserved1: 0x0, Reserved2: 0x0, Reserved3: 0x0, Type: 0x20},
@@ -68,10 +68,10 @@ var fileTests = []fileTest{
 			nil, // LC_LOAD_DYLINKER
 			nil, // LC_UUID
 			nil, // LC_UNIXTHREAD
-			&Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x38, Name: 0x0, Time: 0x0, CurrentVersion: 0x0, CompatVersion: 0x0}, Name: "/usr/lib/libgcc_s.1.dylib", Time: 0x2, CurrentVersion: "1.0", CompatVersion: "1.0"},
-			&Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x38, Name: 0x0, Time: 0x0, CurrentVersion: 0x0, CompatVersion: 0x0}, Name: "/usr/lib/libSystem.B.dylib", Time: 0x2, CurrentVersion: "111.1.4", CompatVersion: "1.0"},
+			&Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x38, NameOffset: 0x0, Time: 0x0, CurrentVersion: 0x0, CompatVersion: 0x0}, Name: "/usr/lib/libgcc_s.1.dylib", Time: 0x2, CurrentVersion: types.Version(0x10000), CompatVersion: types.Version(0x10000)},
+			&Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x38, NameOffset: 0x0, Time: 0x0, CurrentVersion: 0x0, CompatVersion: 0x0}, Name: "/usr/lib/libSystem.B.dylib", Time: 0x2, CurrentVersion: types.Version(0x6f0104), CompatVersion: types.Version(0x10000)},
 		},
-		[]*SectionHeader{
+		[]*types.SectionHeader{
 			{Name: "__text", Seg: "__TEXT", Addr: 0x100000f14, Size: 0x6d, Offset: 0xf14, Align: 0x2, Reloff: 0x0, Nreloc: 0x0, Flags: 0x80000400, Reserved1: 0x0, Reserved2: 0x0, Reserved3: 0x0, Type: 0x40},
 			{Name: "__symbol_stub1", Seg: "__TEXT", Addr: 0x100000f81, Size: 0xc, Offset: 0xf81, Align: 0x0, Reloff: 0x0, Nreloc: 0x0, Flags: 0x80000408, Reserved1: 0x0, Reserved2: 0x6, Reserved3: 0x0, Type: 0x40},
 			{"__stub_helper", "__TEXT", 0x100000f90, 0x18, 0xf90, 0x2, 0x0, 0x0, 0x0, 0, 0, 0, 0x40},
@@ -91,7 +91,7 @@ var fileTests = []fileTest{
 			&SegmentHeader{LoadCmd: 0x19, Len: 0x138, Name: "__DATA", Addr: 0x100001000, Memsz: 0x1000, Offset: 0x0, Filesz: 0x0, Maxprot: 7, Prot: 3, Nsect: 0x3, Flag: 0x0, Firstsect: 0x5},
 			&SegmentHeader{LoadCmd: 0x19, Len: 0x278, Name: "__DWARF", Addr: 0x100002000, Memsz: 0x1000, Offset: 0x1000, Filesz: 0x1bc, Maxprot: 7, Prot: 3, Nsect: 0x7, Flag: 0x0, Firstsect: 0x8},
 		},
-		[]*SectionHeader{
+		[]*types.SectionHeader{
 			{"__text", "__TEXT", 0x100000f14, 0x0, 0x0, 0x2, 0x0, 0x0, 0x80000400, 0, 0, 0, 0x40},
 			{Name: "__symbol_stub1", Seg: "__TEXT", Addr: 0x100000f81, Size: 0x0, Offset: 0x0, Align: 0x0, Reloff: 0x0, Nreloc: 0x0, Flags: 0x80000408, Reserved1: 0x0, Reserved2: 0x6, Reserved3: 0x0, Type: 0x40},
 			{"__stub_helper", "__TEXT", 0x100000f90, 0x0, 0x0, 0x2, 0x0, 0x0, 0x0, 0, 0, 0, 0x40},
@@ -163,7 +163,7 @@ var fileTests = []fileTest{
 		types.FileHeader{Magic: 0xfeedface, CPU: types.CPU386, SubCPU: 0x3, Type: 0x1, NCommands: 0x4, SizeCommands: 0x138, Flags: 0x2000, Reserved: 0x1},
 		nil,
 		nil,
-		map[string][]Reloc{
+		map[string][]types.Reloc{
 			"__text": {
 				{
 					Addr:      0x1d,
@@ -198,7 +198,7 @@ var fileTests = []fileTest{
 		types.FileHeader{Magic: 0xfeedfacf, CPU: types.CPUAmd64, SubCPU: 0x3, Type: 0x1, NCommands: 0x4, SizeCommands: 0x200, Flags: 0x2000, Reserved: 0x0},
 		nil,
 		nil,
-		map[string][]Reloc{
+		map[string][]types.Reloc{
 			"__text": {
 				{
 					Addr:   0x19,
@@ -462,6 +462,8 @@ func TestNewFile(t *testing.T) {
 		return
 	}
 
+	fmt.Println(got.FileTOC.String())
+
 	cs := got.CodeSignature()
 	if cs != nil {
 		fmt.Println(cs.Requirements[0].Detail)
@@ -597,8 +599,6 @@ func TestNewFile(t *testing.T) {
 			}
 		}
 	}
-
-	fmt.Println(got.FileTOC.String())
 }
 
 func TestNewFileWithSwift(t *testing.T) {

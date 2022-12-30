@@ -2,8 +2,8 @@ package macho
 
 import (
 	"bytes"
-	"compress/zlib"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -19,8 +19,9 @@ import (
 type Load interface {
 	Raw() []byte
 	String() string
+	MarshalJSON() ([]byte, error)
 	Command() types.LoadCmd
-	LoadSize(*FileTOC) uint32 // Need the TOC for alignment, sigh.
+	LoadSize() uint32 // Need the TOC for alignment, sigh.
 	Put([]byte, binary.ByteOrder) int
 	Write(buf *bytes.Buffer, o binary.ByteOrder) error
 }
@@ -59,9 +60,18 @@ func (b LoadBytes) String() string {
 	s += "]"
 	return s
 }
-func (b LoadBytes) Raw() []byte                { return b }
-func (b LoadBytes) Copy() LoadBytes            { return LoadBytes(append([]byte{}, b...)) }
-func (b LoadBytes) LoadSize(t *FileTOC) uint32 { return uint32(len(b)) }
+func (b LoadBytes) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&struct {
+		LoadCmd string `json:"load_cmd"`
+		Data    []byte `json:"data,omitempty"`
+	}{
+		LoadCmd: "unknown",
+		Data:    b,
+	})
+}
+func (b LoadBytes) Raw() []byte      { return b }
+func (b LoadBytes) Copy() LoadBytes  { return LoadBytes(append([]byte{}, b...)) }
+func (b LoadBytes) LoadSize() uint32 { return uint32(len(b)) }
 func (b LoadBytes) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	_, err := buf.Write(b)
 	return err
@@ -89,7 +99,7 @@ type SegmentHeader struct {
 
 func (s *SegmentHeader) String() string {
 	return fmt.Sprintf(
-		"Seg %s, len=%#x, addr=%#x, memsz=%#x, offset=%#x, filesz=%#x, maxprot=%#x, prot=%#x, nsect=%d, flag=%#x, firstsect=%d",
+		"[SegmentHeader] %s, len=%#x, addr=%#x, memsz=%#x, offset=%#x, filesz=%#x, maxprot=%#x, prot=%#x, nsect=%d, flag=%#x, firstsect=%d",
 		s.Name, s.Len, s.Addr, s.Memsz, s.Offset, s.Filesz, s.Maxprot, s.Prot, s.Nsect, s.Flag, s.Firstsect)
 }
 
@@ -97,6 +107,9 @@ func (s *SegmentHeader) String() string {
 type Segment struct {
 	SegmentHeader
 	LoadBytes
+
+	sections []*types.Section
+
 	// Embed ReaderAt for ReadAt method.
 	// Do not embed SectionReader directly
 	// to avoid having Read and Seek.
@@ -105,10 +118,6 @@ type Segment struct {
 	// with other clients.
 	io.ReaderAt
 	sr *io.SectionReader
-}
-
-func (s *Segment) String() string {
-	return fmt.Sprintf("LC_SEGMENT: sz=0x%08x off=0x%08x-0x%08x addr=0x%09x-0x%09x %s/%s   %s%s%s", s.Filesz, s.Offset, s.Offset+s.Filesz, s.Addr, s.Addr+s.Memsz, s.Prot, s.Maxprot, s.Name, pad(20-len(s.Name)), s.Flag)
 }
 
 func (s *Segment) Put32(b []byte, o binary.ByteOrder) int {
@@ -228,7 +237,7 @@ func (s *Segment) CopyZeroed() *Segment {
 	return r
 }
 
-func (s *Segment) LoadSize(t *FileTOC) uint32 {
+func (s *Segment) LoadSize() uint32 {
 	if s.Command() == types.LC_SEGMENT_64 {
 		return uint32(unsafe.Sizeof(types.Segment64{})) + uint32(s.Nsect)*uint32(unsafe.Sizeof(types.Section64{}))
 	}
@@ -237,6 +246,47 @@ func (s *Segment) LoadSize(t *FileTOC) uint32 {
 
 // Open returns a new ReadSeeker reading the segment.
 func (s *Segment) Open() io.ReadSeeker { return io.NewSectionReader(s.sr, 0, 1<<63-1) }
+
+func (s *Segment) String() string {
+	return fmt.Sprintf("%s sz=0x%08x off=0x%08x-0x%08x addr=0x%09x-0x%09x %s/%s   %-18s%s",
+		s.Command(),
+		s.Filesz,
+		s.Offset,
+		s.Offset+s.Filesz,
+		s.Addr,
+		s.Addr+s.Memsz,
+		s.Prot,
+		s.Maxprot,
+		s.Name,
+		s.Flag)
+}
+func (s *Segment) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&struct {
+		LoadCmd string   `json:"load_cmd"`
+		Len     uint32   `json:"len,omitempty"`
+		Name    string   `json:"name,omitempty"`
+		Addr    uint64   `json:"addr,omitempty"`
+		Memsz   uint64   `json:"memsz,omitempty"`
+		Offset  uint64   `json:"offset,omitempty"`
+		Filesz  uint64   `json:"filesz,omitempty"`
+		Maxprot string   `json:"maxprot,omitempty"`
+		Prot    string   `json:"prot,omitempty"`
+		Nsect   uint32   `json:"nsect,omitempty"`
+		Flags   []string `json:"flags,omitempty"`
+	}{
+		LoadCmd: s.SegmentHeader.LoadCmd.String(),
+		Len:     s.SegmentHeader.Len,
+		Name:    s.SegmentHeader.Name,
+		Addr:    s.SegmentHeader.Addr,
+		Memsz:   s.SegmentHeader.Memsz,
+		Offset:  s.SegmentHeader.Offset,
+		Filesz:  s.SegmentHeader.Filesz,
+		Maxprot: s.SegmentHeader.Maxprot.String(),
+		Prot:    s.SegmentHeader.Prot.String(),
+		Nsect:   s.SegmentHeader.Nsect,
+		Flags:   s.SegmentHeader.Flag.List(),
+	})
+}
 
 type Segments []*Segment
 
@@ -251,243 +301,6 @@ func (v Segments) Less(i, j int) bool {
 func (v Segments) Swap(i, j int) {
 	v[i], v[j] = v[j], v[i]
 }
-
-/*******************************************************************************
- * SECTION
- *******************************************************************************/
-
-type SectionHeader struct {
-	Name      string
-	Seg       string
-	Addr      uint64
-	Size      uint64
-	Offset    uint32
-	Align     uint32
-	Reloff    uint32
-	Nreloc    uint32
-	Flags     types.SectionFlag
-	Reserved1 uint32
-	Reserved2 uint32
-	Reserved3 uint32 // only present if original was 64-bit
-	Type      uint8
-}
-
-// A Reloc represents a Mach-O relocation.
-type Reloc struct {
-	Addr  uint32
-	Value uint32
-	// when Scattered == false && Extern == true, Value is the symbol number.
-	// when Scattered == false && Extern == false, Value is the section number.
-	// when Scattered == true, Value is the value that this reloc refers to.
-	Type      uint8
-	Len       uint8 // 0=byte, 1=word, 2=long, 3=quad
-	Pcrel     bool
-	Extern    bool // valid if Scattered == false
-	Scattered bool
-}
-
-type relocInfo struct {
-	Addr   uint32
-	Symnum uint32
-}
-
-type Section struct {
-	SectionHeader
-	Relocs []Reloc
-
-	// Embed ReaderAt for ReadAt method.
-	// Do not embed SectionReader directly
-	// to avoid having Read and Seek.
-	// If a client wants Read and Seek it must use
-	// Open() to avoid fighting over the seek offset
-	// with other clients.
-	io.ReaderAt
-	sr *io.SectionReader
-}
-
-// Data reads and returns the contents of the Mach-O section.
-func (s *Section) Data() ([]byte, error) {
-	dat := make([]byte, s.Size)
-	n, err := s.ReadAt(dat, int64(s.Offset))
-	if n == len(dat) {
-		err = nil
-	}
-	return dat[0:n], err
-}
-
-func (s *Section) Put32(b []byte, o binary.ByteOrder) int {
-	types.PutAtMost16Bytes(b[0:], s.Name)
-	types.PutAtMost16Bytes(b[16:], s.Seg)
-	o.PutUint32(b[8*4:], uint32(s.Addr))
-	o.PutUint32(b[9*4:], uint32(s.Size))
-	o.PutUint32(b[10*4:], s.Offset)
-	o.PutUint32(b[11*4:], s.Align)
-	o.PutUint32(b[12*4:], s.Reloff)
-	o.PutUint32(b[13*4:], s.Nreloc)
-	o.PutUint32(b[14*4:], uint32(s.Flags))
-	o.PutUint32(b[15*4:], s.Reserved1)
-	o.PutUint32(b[16*4:], s.Reserved2)
-	a := 17 * 4
-	return a + s.PutRelocs(b[a:], o)
-}
-
-func (s *Section) Put64(b []byte, o binary.ByteOrder) int {
-	types.PutAtMost16Bytes(b[0:], s.Name)
-	types.PutAtMost16Bytes(b[16:], s.Seg)
-	o.PutUint64(b[8*4+0*8:], s.Addr)
-	o.PutUint64(b[8*4+1*8:], s.Size)
-	o.PutUint32(b[8*4+2*8:], s.Offset)
-	o.PutUint32(b[9*4+2*8:], s.Align)
-	o.PutUint32(b[10*4+2*8:], s.Reloff)
-	o.PutUint32(b[11*4+2*8:], s.Nreloc)
-	o.PutUint32(b[12*4+2*8:], uint32(s.Flags))
-	o.PutUint32(b[13*4+2*8:], s.Reserved1)
-	o.PutUint32(b[14*4+2*8:], s.Reserved2)
-	o.PutUint32(b[15*4+2*8:], s.Reserved3)
-	a := 16*4 + 2*8
-	return a + s.PutRelocs(b[a:], o)
-}
-
-func (s *Section) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	var name [16]byte
-	var seg [16]byte
-	copy(name[:], s.Name)
-	copy(seg[:], s.Seg)
-
-	if s.Type == 32 {
-		if err := binary.Write(buf, o, types.Section32{
-			Name:     name,           // [16]byte
-			Seg:      seg,            // [16]byte
-			Addr:     uint32(s.Addr), // uint32
-			Size:     uint32(s.Size), // uint32
-			Offset:   s.Offset,       // uint32
-			Align:    s.Align,        // uint32
-			Reloff:   s.Reloff,       // uint32
-			Nreloc:   s.Nreloc,       // uint32
-			Flags:    s.Flags,        // SectionFlag
-			Reserve1: s.Reserved1,    // uint32
-			Reserve2: s.Reserved2,    // uint32
-		}); err != nil {
-			return fmt.Errorf("failed to write 32bit Section %s data to buffer: %v", s.Name, err)
-		}
-	} else { // 64
-		if err := binary.Write(buf, o, types.Section64{
-			Name:     name,        // [16]byte
-			Seg:      seg,         // [16]byte
-			Addr:     s.Addr,      // uint64
-			Size:     s.Size,      // uint64
-			Offset:   s.Offset,    // uint32
-			Align:    s.Align,     // uint32
-			Reloff:   s.Reloff,    // uint32
-			Nreloc:   s.Nreloc,    // uint32
-			Flags:    s.Flags,     // SectionFlag
-			Reserve1: s.Reserved1, // uint32
-			Reserve2: s.Reserved2, // uint32
-			Reserve3: s.Reserved3, // uint32
-		}); err != nil {
-			return fmt.Errorf("failed to write 64bit Section %s data to buffer: %v", s.Name, err)
-		}
-	}
-
-	return nil
-}
-
-func (s *Section) PutRelocs(b []byte, o binary.ByteOrder) int {
-	a := 0
-	for _, r := range s.Relocs {
-		var ri relocInfo
-		typ := uint32(r.Type) & (1<<4 - 1)
-		len := uint32(r.Len) & (1<<2 - 1)
-		pcrel := uint32(0)
-		if r.Pcrel {
-			pcrel = 1
-		}
-		ext := uint32(0)
-		if r.Extern {
-			ext = 1
-		}
-		switch {
-		case r.Scattered:
-			ri.Addr = r.Addr&(1<<24-1) | typ<<24 | len<<28 | 1<<31 | pcrel<<30
-			ri.Symnum = r.Value
-		case o == binary.LittleEndian:
-			ri.Addr = r.Addr
-			ri.Symnum = r.Value&(1<<24-1) | pcrel<<24 | len<<25 | ext<<27 | typ<<28
-		case o == binary.BigEndian:
-			ri.Addr = r.Addr
-			ri.Symnum = r.Value<<8 | pcrel<<7 | len<<5 | ext<<4 | typ
-		}
-		o.PutUint32(b, ri.Addr)
-		o.PutUint32(b[4:], ri.Symnum)
-		a += 8
-		b = b[8:]
-	}
-	return a
-}
-
-func (s *Section) UncompressedSize() uint64 {
-	if !strings.HasPrefix(s.Name, "__z") {
-		return s.Size
-	}
-	b := make([]byte, 12)
-	n, err := s.sr.ReadAt(b, 0)
-	if err != nil {
-		panic("Malformed object file")
-	}
-	if n != len(b) {
-		return s.Size
-	}
-	if string(b[:4]) == "ZLIB" {
-		return binary.BigEndian.Uint64(b[4:12])
-	}
-	return s.Size
-}
-
-func (s *Section) PutData(b []byte) {
-	bb := b[0:s.Size]
-	n, err := s.sr.ReadAt(bb, 0)
-	if err != nil || uint64(n) != s.Size {
-		panic("Malformed object file (ReadAt error)")
-	}
-}
-
-func (s *Section) PutUncompressedData(b []byte) {
-	if strings.HasPrefix(s.Name, "__z") {
-		bb := make([]byte, 12)
-		n, err := s.sr.ReadAt(bb, 0)
-		if err != nil {
-			panic("Malformed object file")
-		}
-		if n == len(bb) && string(bb[:4]) == "ZLIB" {
-			size := binary.BigEndian.Uint64(bb[4:12])
-			// Decompress starting at b[12:]
-			r, err := zlib.NewReader(io.NewSectionReader(s, 12, int64(size)-12))
-			if err != nil {
-				panic("Malformed object file (zlib.NewReader error)")
-			}
-			n, err := io.ReadFull(r, b[0:size])
-			if err != nil {
-				panic("Malformed object file (ReadFull error)")
-			}
-			if uint64(n) != size {
-				panic(fmt.Sprintf("PutUncompressedData, expected to read %d bytes, instead read %d", size, n))
-			}
-			if err := r.Close(); err != nil {
-				panic("Malformed object file (Close error)")
-			}
-			return
-		}
-	}
-	// Not compressed
-	s.PutData(b)
-}
-
-func (s *Section) Copy() *Section {
-	return &Section{SectionHeader: s.SectionHeader}
-}
-
-// Open returns a new ReadSeeker reading the Mach-O section.
-func (s *Section) Open() io.ReadSeeker { return io.NewSectionReader(s.sr, 0, 1<<63-1) }
 
 /*******************************************************************************
  * LC_SYMTAB
@@ -509,7 +322,7 @@ func (s *Symtab) String() string {
 func (s *Symtab) Copy() *Symtab {
 	return &Symtab{SymtabCmd: s.SymtabCmd, Syms: append([]Symbol{}, s.Syms...)}
 }
-func (s *Symtab) LoadSize(t *FileTOC) uint32 {
+func (s *Symtab) LoadSize() uint32 {
 	return uint32(unsafe.Sizeof(types.SymtabCmd{}))
 }
 func (s *Symtab) Put(b []byte, o binary.ByteOrder) int {
@@ -589,7 +402,7 @@ func (s *SymSeg) String() string {
 // A Thread represents a Mach-O LC_THREAD command.
 type Thread struct {
 	LoadBytes
-	types.Thread
+	types.ThreadCmd
 	Type uint32
 	Data []uint32
 }
@@ -791,8 +604,41 @@ type Dylib struct {
 	types.DylibCmd
 	Name           string
 	Time           uint32
-	CurrentVersion string
-	CompatVersion  string
+	CurrentVersion types.Version
+	CompatVersion  types.Version
+}
+
+func (d *Dylib) Raw() []byte {
+	return d.LoadBytes.Raw()
+}
+
+func (d *Dylib) Command() types.LoadCmd {
+	return d.LoadCmd
+}
+
+func (d *Dylib) LoadSize() uint32 {
+	return uint32(len(d.Raw()))
+}
+
+func (d *Dylib) Put(b []byte, o binary.ByteOrder) int {
+	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
+	o.PutUint32(b[1*4:], d.Len)
+	o.PutUint32(b[2*4:], d.NameOffset)
+	o.PutUint32(b[3*4:], d.Time)
+	o.PutUint32(b[4*4:], uint32(d.CurrentVersion))
+	o.PutUint32(b[5*4:], uint32(d.CompatVersion))
+	return 6 * binary.Size(uint32(0))
+}
+
+func (d *Dylib) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	return binary.Write(buf, o, types.DylibCmd{
+		LoadCmd:        d.LoadCmd,
+		Len:            d.Len,
+		NameOffset:     d.NameOffset,
+		Time:           d.Time,
+		CurrentVersion: d.CurrentVersion,
+		CompatVersion:  d.CompatVersion,
+	})
 }
 
 func (d *Dylib) String() string {
@@ -821,6 +667,33 @@ type LoadDylinker struct {
 	Name string
 }
 
+func (d *LoadDylinker) Raw() []byte {
+	return d.LoadBytes.Raw()
+}
+
+func (d *LoadDylinker) Command() types.LoadCmd {
+	return d.LoadCmd
+}
+
+func (d *LoadDylinker) LoadSize() uint32 {
+	return uint32(len(d.Raw()))
+}
+
+func (d *LoadDylinker) Put(b []byte, o binary.ByteOrder) int {
+	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
+	o.PutUint32(b[1*4:], d.Len)
+	o.PutUint32(b[2*4:], d.NameOffset)
+	return 3 * binary.Size(uint32(0))
+}
+
+func (d *LoadDylinker) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	return binary.Write(buf, o, types.DylinkerCmd{
+		LoadCmd:    d.LoadCmd,
+		Len:        d.Len,
+		NameOffset: d.NameOffset,
+	})
+}
+
 func (d *LoadDylinker) String() string {
 	return d.Name
 }
@@ -835,6 +708,33 @@ type DylinkerID struct {
 	types.DylinkerIDCmd
 	Name string
 }
+
+// func (d *DylinkerID) Raw() []byte {
+// 	return d.LoadBytes.Raw()
+// }
+
+// func (d *DylinkerID) Command() types.LoadCmd {
+// 	return d.LoadCmd
+// }
+
+// func (d *DylinkerID) LoadSize() uint32 {
+// 	return uint32(len(d.Raw()))
+// }
+
+// func (d *DylinkerID) Put(b []byte, o binary.ByteOrder) int {
+// 	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
+// 	o.PutUint32(b[1*4:], d.Len)
+// 	o.PutUint32(b[2*4:], d.NameOffset)
+// 	return 3 * binary.Size(uint32(0))
+// }
+
+// func (d *DylinkerID) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+// 	return binary.Write(buf, o, types.DylinkerIDCmd{
+// 		LoadCmd:    d.LoadCmd,
+// 		Len:        d.Len,
+// 		NameOffset: d.NameOffset,
+// 	})
+// }
 
 func (d *DylinkerID) String() string {
 	return d.Name
@@ -851,6 +751,37 @@ type PreboundDylib struct {
 	Name          string
 	NumModules    uint32
 	LinkedModules string
+}
+
+func (d *PreboundDylib) Raw() []byte {
+	return d.LoadBytes.Raw()
+}
+
+func (d *PreboundDylib) Command() types.LoadCmd {
+	return d.LoadCmd
+}
+
+func (d *PreboundDylib) LoadSize() uint32 {
+	return uint32(len(d.Raw()))
+}
+
+func (d *PreboundDylib) Put(b []byte, o binary.ByteOrder) int {
+	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
+	o.PutUint32(b[1*4:], d.Len)
+	o.PutUint32(b[2*4:], d.NameOffset)
+	o.PutUint32(b[3*4:], d.NumModules)
+	o.PutUint32(b[4*4:], d.LinkedModulesOffset)
+	return 5 * binary.Size(uint32(0))
+}
+
+func (d *PreboundDylib) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	return binary.Write(buf, o, types.PreboundDylibCmd{
+		LoadCmd:             d.LoadCmd,
+		Len:                 d.Len,
+		NameOffset:          d.NameOffset,
+		NumModules:          d.NumModules,
+		LinkedModulesOffset: d.LinkedModulesOffset,
+	})
 }
 
 func (d *PreboundDylib) String() string {
@@ -1002,7 +933,7 @@ func (s *UUID) String() string {
 func (s *UUID) Copy() *UUID {
 	return &UUID{UUIDCmd: s.UUIDCmd}
 }
-func (s *UUID) LoadSize(t *FileTOC) uint32 {
+func (s *UUID) LoadSize() uint32 {
 	return uint32(unsafe.Sizeof(types.UUIDCmd{}))
 }
 func (s *UUID) Put(b []byte, o binary.ByteOrder) int {
@@ -1151,7 +1082,7 @@ func (e *EncryptionInfo) String() string {
 func (e *EncryptionInfo) Copy() *EncryptionInfo {
 	return &EncryptionInfo{EncryptionInfoCmd: e.EncryptionInfoCmd}
 }
-func (e *EncryptionInfo) LoadSize(t *FileTOC) uint32 {
+func (e *EncryptionInfo) LoadSize() uint32 {
 	return uint32(unsafe.Sizeof(types.EncryptionInfoCmd{}))
 }
 func (e *EncryptionInfo) Put(b []byte, o binary.ByteOrder) int {
@@ -1202,8 +1133,8 @@ func (d *DyldInfo) String() string {
 func (d *DyldInfo) Copy() *DyldInfo {
 	return &DyldInfo{DyldInfoCmd: d.DyldInfoCmd}
 }
-func (d *DyldInfo) LoadSize(t *FileTOC) uint32 {
-	return uint32(unsafe.Sizeof(types.UUIDCmd{}))
+func (d *DyldInfo) LoadSize() uint32 {
+	return uint32(unsafe.Sizeof(types.DyldInfoCmd{}))
 }
 func (d *DyldInfo) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
@@ -1278,7 +1209,7 @@ func (d *DyldInfoOnly) String() string {
 func (d *DyldInfoOnly) Copy() *DyldInfoOnly {
 	return &DyldInfoOnly{DyldInfoOnlyCmd: d.DyldInfoOnlyCmd}
 }
-func (d *DyldInfoOnly) LoadSize(t *FileTOC) uint32 {
+func (d *DyldInfoOnly) LoadSize() uint32 {
 	return uint32(unsafe.Sizeof(types.UUIDCmd{}))
 }
 func (d *DyldInfoOnly) Put(b []byte, o binary.ByteOrder) int {
@@ -1424,8 +1355,8 @@ func (e *EntryPoint) String() string {
 func (e *EntryPoint) Copy() *EntryPoint {
 	return &EntryPoint{EntryPointCmd: e.EntryPointCmd}
 }
-func (e *EntryPoint) LoadSize(t *FileTOC) uint32 {
-	return uint32(unsafe.Sizeof(types.UUIDCmd{}))
+func (e *EntryPoint) LoadSize() uint32 {
+	return uint32(unsafe.Sizeof(types.EntryPointCmd{}))
 }
 func (e *EntryPoint) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(e.LoadCmd))
@@ -1549,7 +1480,7 @@ func (e *EncryptionInfo64) String() string {
 func (e *EncryptionInfo64) Copy() *EncryptionInfo64 {
 	return &EncryptionInfo64{EncryptionInfo64Cmd: e.EncryptionInfo64Cmd}
 }
-func (e *EncryptionInfo64) LoadSize(t *FileTOC) uint32 {
+func (e *EncryptionInfo64) LoadSize() uint32 {
 	return uint32(unsafe.Sizeof(types.EncryptionInfo64Cmd{}))
 }
 func (e *EncryptionInfo64) Put(b []byte, o binary.ByteOrder) int {
@@ -1736,20 +1667,36 @@ type DyldChainedFixups struct {
 	Size   uint32
 }
 
-func (s *DyldChainedFixups) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+func (c *DyldChainedFixups) Raw() []byte {
+	return c.LoadBytes.Raw()
+}
+
+func (c *DyldChainedFixups) Command() types.LoadCmd {
+	return c.LoadCmd
+}
+
+func (l *DyldChainedFixups) LoadSize() uint32 {
+	return uint32(binary.Size(l.DyldChainedFixupsCmd))
+}
+
+func (l *DyldChainedFixups) Put(_ []byte, _ binary.ByteOrder) int {
+	panic("not implemented") // TODO: Implement
+}
+
+func (l *DyldChainedFixups) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, types.DyldChainedFixupsCmd{
-		LoadCmd: s.LoadCmd,
-		Len:     s.Len,
-		Offset:  s.Offset,
-		Size:    s.Size,
+		LoadCmd: l.LoadCmd,
+		Len:     l.Len,
+		Offset:  l.Offset,
+		Size:    l.Size,
 	}); err != nil {
 		return fmt.Errorf("failed to write LC_DYLD_CHAINED_FIXUPS to buffer: %v", err)
 	}
 	return nil
 }
 
-func (cf *DyldChainedFixups) String() string {
-	return fmt.Sprintf("offset=0x%09x  size=%#x", cf.Offset, cf.Size)
+func (l *DyldChainedFixups) String() string {
+	return fmt.Sprintf("offset=0x%09x  size=%#x", l.Offset, l.Size)
 }
 
 /*******************************************************************************

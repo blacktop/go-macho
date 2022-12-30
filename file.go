@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"unsafe"
 
 	"github.com/blacktop/go-dwarf"
 
@@ -24,11 +23,6 @@ import (
 	"github.com/blacktop/go-macho/pkg/trie"
 	"github.com/blacktop/go-macho/types"
 )
-
-var ErrMachOSectionNotFound = errors.New("MachO missing required section")
-var ErrMachODyldInfoNotFound = errors.New("LC_DYLD_INFO|LC_DYLD_INFO_ONLY not found")
-
-type sections []*Section
 
 // A File represents an open Mach-O file.
 type File struct {
@@ -43,209 +37,21 @@ type File struct {
 	exptrieData []byte
 	binds       types.Binds
 	objc        map[uint64]any
-	sr          types.MachoReader
-	cr          types.MachoReader
 
 	sharedCacheRelativeSelectorBaseVMAddress uint64 // objc_opt version 16
 
 	mu     sync.Mutex
+	sr     types.MachoReader
+	cr     types.MachoReader
 	closer io.Closer
-}
-
-type FileTOC struct {
-	types.FileHeader
-	ByteOrder binary.ByteOrder
-	Loads     []Load
-	Sections  sections
-	functions []types.Function
-}
-
-func (t *FileTOC) String() string {
-
-	fTocStr := t.FileHeader.String()
-	fTocStr += t.LoadsString()
-
-	// if t.SizeCommands != t.LoadSize() {
-	// 	fTocStr += fmt.Sprintf("ERROR: recorded command size %d does not equal computed command size %d\n", t.SizeCommands, t.LoadSize())
-	// } else {
-	// 	fTocStr += fmt.Sprintf("NOTE: recorded command size %d, computed command size %d\n", t.SizeCommands, t.LoadSize())
-	// }
-	// fTocStr += fmt.Sprintf("NOTE: File size is %d\n", t.FileSize())
-
-	return fTocStr
-}
-
-func pad(length int) string {
-	if length > 0 {
-		return strings.Repeat(" ", length)
-	}
-	return " "
-}
-
-// LoadsString returns a string representation of all the MachO's load commands
-func (t *FileTOC) LoadsString() string {
-	var loadsStr string
-	for i, l := range t.Loads {
-		if s, ok := l.(*Segment); ok {
-			loadsStr += fmt.Sprintf("%03d: %s sz=0x%08x off=0x%08x-0x%08x addr=0x%09x-0x%09x %s/%s   %s%s%s\n", i, s.Command(), s.Filesz, s.Offset, s.Offset+s.Filesz, s.Addr, s.Addr+s.Memsz, s.Prot, s.Maxprot, s.Name, pad(20-len(s.Name)), s.Flag)
-			for j := uint32(0); j < s.Nsect; j++ {
-				c := t.Sections[j+s.Firstsect]
-				secFlags := ""
-				if !c.Flags.IsRegular() {
-					secFlags = fmt.Sprintf("(%s)", c.Flags)
-				}
-				loadsStr += fmt.Sprintf("\tsz=0x%08x off=0x%08x-0x%08x addr=0x%09x-0x%09x\t\t%s.%s%s%s %s\n", c.Size, c.Offset, uint64(c.Offset)+c.Size, c.Addr, c.Addr+c.Size, s.Name, c.Name, pad(32-(len(s.Name)+len(c.Name)+1)), c.Flags.AttributesString(), secFlags)
-			}
-		} else {
-			if l != nil {
-				loadsStr += fmt.Sprintf("%03d: %s%s%v\n", i, l.Command(), pad(28-len(l.Command().String())), l)
-			}
-		}
-	}
-	return loadsStr
-}
-
-func (t *FileTOC) AddLoad(l Load) {
-	t.Loads = append(t.Loads, l)
-	t.NCommands++
-	t.SizeCommands += l.LoadSize(t)
-}
-
-// AddSegment adds segment s to the file table of contents,
-// and also zeroes out the segment information with the expectation
-// that this will be added next.
-func (t *FileTOC) AddSegment(s *Segment) {
-	t.AddLoad(s)
-	s.Nsect = 0
-	s.Firstsect = 0
-}
-
-// AddSection adds section to the most recently added Segment
-func (t *FileTOC) AddSection(s *Section) {
-	g := t.Loads[len(t.Loads)-1].(*Segment)
-	if g.Nsect == 0 {
-		g.Firstsect = uint32(len(t.Sections))
-	}
-	g.Nsect++
-	t.Sections = append(t.Sections, s)
-	sectionsize := uint32(unsafe.Sizeof(types.Section32{}))
-	if g.Command() == types.LC_SEGMENT_64 {
-		sectionsize = uint32(unsafe.Sizeof(types.Section64{}))
-	}
-	t.SizeCommands += sectionsize
-	g.Len += sectionsize
-}
-
-// DerivedCopy returns a modified copy of the TOC, with empty loads and sections,
-// and with the specified header type and flags.
-func (t *FileTOC) DerivedCopy(Type types.HeaderFileType, Flags types.HeaderFlag) *FileTOC {
-	h := t.FileHeader
-	h.NCommands, h.SizeCommands, h.Type, h.Flags = 0, 0, Type, Flags
-
-	return &FileTOC{FileHeader: h, ByteOrder: t.ByteOrder}
-}
-
-// TOCSize returns the size in bytes of the object file representation
-// of the header and Load Commands (including Segments and Sections, but
-// not their contents) at the beginning of a Mach-O file.  This typically
-// overlaps the text segment in the object file.
-func (t *FileTOC) TOCSize() uint32 {
-	return t.HdrSize() + t.LoadSize()
-}
-
-// LoadAlign returns the required alignment of Load commands in a binary.
-// This is used to add padding for necessary alignment.
-func (t *FileTOC) LoadAlign() uint64 {
-	if t.Magic == types.Magic64 {
-		return 8
-	}
-	return 4
-}
-
-// SymbolSize returns the size in bytes of a Symbol (Nlist32 or Nlist64)
-func (t *FileTOC) SymbolSize() uint32 {
-	if t.Magic == types.Magic64 {
-		return uint32(unsafe.Sizeof(types.Nlist64{}))
-	}
-	return uint32(unsafe.Sizeof(types.Nlist32{}))
-}
-
-// HdrSize returns the size in bytes of the Macho header for a given
-// magic number (where the magic number has been appropriately byte-swapped).
-func (t *FileTOC) HdrSize() uint32 {
-	switch t.Magic {
-	case types.Magic32:
-		return types.FileHeaderSize32
-	case types.Magic64:
-		return types.FileHeaderSize64
-	case types.MagicFat:
-		panic("MagicFat not handled yet")
-	default:
-		panic(fmt.Sprintf("Unexpected magic number %#x, expected Mach-O object file", t.Magic))
-	}
-}
-
-// LoadSize returns the size of all the load commands in a file's table-of contents
-// (but not their associated data, e.g., sections and symbol tables)
-func (t *FileTOC) LoadSize() uint32 {
-	cmdsz := uint32(0)
-	for _, l := range t.Loads {
-		s := l.LoadSize(t)
-		cmdsz += s
-	}
-	return cmdsz
-}
-
-// FileSize returns the size in bytes of the header, load commands, and the
-// in-file contents of all the segments and sections included in those
-// load commands, accounting for their offsets within the file.
-func (t *FileTOC) FileSize() uint64 {
-	sz := uint64(t.LoadSize()) // ought to be contained in text segment, but just in case.
-	for _, l := range t.Loads {
-		if s, ok := l.(*Segment); ok {
-			if m := s.Offset + s.Filesz; m > sz {
-				sz = m
-			}
-		}
-	}
-	return sz
-}
-
-// Put writes the header and all load commands to buffer, using
-// the byte ordering specified in FileTOC t.  For sections, this
-// writes the headers that come in-line with the segment Load commands,
-// but does not write the reference data for those sections.
-func (t *FileTOC) Put(buffer []byte) int {
-	next := t.FileHeader.Put(buffer, t.ByteOrder)
-	for _, l := range t.Loads {
-		if s, ok := l.(*Segment); ok {
-			switch t.Magic {
-			case types.Magic64:
-				next += s.Put64(buffer[next:], t.ByteOrder)
-				for i := uint32(0); i < s.Nsect; i++ {
-					c := t.Sections[i+s.Firstsect]
-					next += c.Put64(buffer[next:], t.ByteOrder)
-				}
-			case types.Magic32:
-				next += s.Put32(buffer[next:], t.ByteOrder)
-				for i := uint32(0); i < s.Nsect; i++ {
-					c := t.Sections[i+s.Firstsect]
-					next += c.Put32(buffer[next:], t.ByteOrder)
-				}
-			default:
-				panic(fmt.Sprintf("Unexpected magic number %#x", t.Magic))
-			}
-
-		} else {
-			next += l.Put(buffer[next:], t.ByteOrder)
-		}
-	}
-	return next
 }
 
 /*
  * Mach-O reader
  */
+
+var ErrMachOSectionNotFound = errors.New("MachO missing required section")
+var ErrMachODyldInfoNotFound = errors.New("LC_DYLD_INFO(_ONLY) not found")
 
 // FormatError is returned by some operations if the data does
 // not have the correct format for an object file.
@@ -398,7 +204,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 
 		switch cmd {
 		default:
-			log.Printf("found NEW load command: %s, please let the author know :)", cmd)
+			log.Printf("found NEW load command: %s (please let the author know via https://github.com/blacktop/go-macho/issues)", cmd)
 			f.Loads[i] = LoadCmdBytes{types.LoadCmd(cmd), LoadBytes(cmddat)}
 		case types.LC_SEGMENT:
 			var seg32 types.Segment32
@@ -420,13 +226,12 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			s.Nsect = seg32.Nsect
 			s.Flag = seg32.Flag
 			s.Firstsect = uint32(len(f.Sections))
-			f.Loads[i] = s
 			for i := 0; i < int(s.Nsect); i++ {
 				var sh32 types.Section32
 				if err := binary.Read(b, bo, &sh32); err != nil {
 					return nil, fmt.Errorf("failed to read Section32: %v", err)
 				}
-				sh := new(Section)
+				sh := new(types.Section)
 				sh.Type = 32
 				sh.Name = cstring(sh32.Name[0:])
 				sh.Seg = cstring(sh32.Seg[0:])
@@ -439,10 +244,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				sh.Flags = sh32.Flags
 				sh.Reserved1 = sh32.Reserve1
 				sh.Reserved2 = sh32.Reserve2
+				sh.SetReaders(f.cr, io.NewSectionReader(f.cr, int64(sh32.Offset), int64(sh32.Size)))
 				if err := f.pushSection(sh, f.cr); err != nil {
 					return nil, fmt.Errorf("failed to pushSection32: %v", err)
 				}
+				s.sections = append(s.sections, sh)
 			}
+			f.Loads[i] = s
 		case types.LC_SEGMENT_64:
 			var seg64 types.Segment64
 			b := bytes.NewReader(cmddat)
@@ -463,13 +271,12 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			s.Nsect = seg64.Nsect
 			s.Flag = seg64.Flag
 			s.Firstsect = uint32(len(f.Sections))
-			f.Loads[i] = s
 			for i := 0; i < int(s.Nsect); i++ {
 				var sh64 types.Section64
 				if err := binary.Read(b, bo, &sh64); err != nil {
 					return nil, fmt.Errorf("failed to read Section64: %v", err)
 				}
-				sh := new(Section)
+				sh := new(types.Section)
 				sh.Type = 64
 				sh.Name = cstring(sh64.Name[0:])
 				sh.Seg = cstring(sh64.Seg[0:])
@@ -483,10 +290,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				sh.Reserved1 = sh64.Reserve1
 				sh.Reserved2 = sh64.Reserve2
 				sh.Reserved3 = sh64.Reserve3
+				sh.SetReaders(f.cr, io.NewSectionReader(f.cr, int64(sh64.Offset), int64(sh64.Size)))
 				if err := f.pushSection(sh, f.cr); err != nil {
 					return nil, fmt.Errorf("failed to pushSection64: %v", err)
 				}
+				s.sections = append(s.sections, sh)
 			}
+			f.Loads[i] = s
 		case types.LC_SYMTAB:
 			var hdr types.SymtabCmd
 			b := bytes.NewReader(cmddat)
@@ -534,7 +344,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Size = led.Size
 			f.Loads[i] = l
 		case types.LC_THREAD:
-			var t types.Thread
+			var t types.ThreadCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &t); err != nil {
 				return nil, fmt.Errorf("failed to read LC_THREAD: %v", err)
@@ -680,13 +490,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			if hdr.Name >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid name in dynamic library command", hdr.Name}
+			if hdr.NameOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in dynamic library command", hdr.NameOffset}
 			}
-			l.Name = cstring(cmddat[hdr.Name:])
+			l.Name = cstring(cmddat[hdr.NameOffset:])
 			l.Time = hdr.Time
-			l.CurrentVersion = hdr.CurrentVersion.String()
-			l.CompatVersion = hdr.CompatVersion.String()
+			l.CurrentVersion = hdr.CurrentVersion
+			l.CompatVersion = hdr.CompatVersion
 			f.Loads[i] = l
 		case types.LC_ID_DYLIB:
 			var hdr types.DylibCmd
@@ -698,13 +508,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			if hdr.Name >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid name in dynamic library ident command", hdr.Name}
+			if hdr.NameOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in dynamic library ident command", hdr.NameOffset}
 			}
-			l.Name = cstring(cmddat[hdr.Name:])
+			l.Name = cstring(cmddat[hdr.NameOffset:])
 			l.Time = hdr.Time
-			l.CurrentVersion = hdr.CurrentVersion.String()
-			l.CompatVersion = hdr.CompatVersion.String()
+			l.CurrentVersion = hdr.CurrentVersion
+			l.CompatVersion = hdr.CompatVersion
 			f.Loads[i] = l
 		case types.LC_LOAD_DYLINKER:
 			var hdr types.DylinkerCmd
@@ -716,10 +526,10 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			if hdr.Name >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid name in load dylinker command", hdr.Name}
+			if hdr.NameOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in load dylinker command", hdr.NameOffset}
 			}
-			l.Name = cstring(cmddat[hdr.Name:])
+			l.Name = cstring(cmddat[hdr.NameOffset:])
 			f.Loads[i] = l
 		case types.LC_ID_DYLINKER:
 			var hdr types.DylinkerIDCmd
@@ -731,10 +541,10 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			if hdr.Name >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid name in load dylinker command", hdr.Name}
+			if hdr.NameOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in load dylinker command", hdr.NameOffset}
 			}
-			l.Name = cstring(cmddat[hdr.Name:])
+			l.Name = cstring(cmddat[hdr.NameOffset:])
 			f.Loads[i] = l
 		case types.LC_PREBOUND_DYLIB:
 			var hdr types.PreboundDylibCmd
@@ -746,15 +556,15 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			if hdr.Name >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid name in LC_PREBOUND_DYLIB command", hdr.Name}
+			if hdr.NameOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in LC_PREBOUND_DYLIB command", hdr.NameOffset}
 			}
 			l.NumModules = hdr.NumModules
-			l.Name = cstring(cmddat[hdr.Name:])
-			if hdr.LinkedModules >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid linked modules in LC_PREBOUND_DYLIB command", hdr.Name}
+			l.Name = cstring(cmddat[hdr.NameOffset:])
+			if hdr.LinkedModulesOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid linked modules in LC_PREBOUND_DYLIB command", hdr.NameOffset}
 			}
-			l.LinkedModules = cstring(cmddat[hdr.LinkedModules:])
+			l.LinkedModules = cstring(cmddat[hdr.LinkedModulesOffset:])
 			f.Loads[i] = l
 		case types.LC_ROUTINES:
 			var rt types.RoutinesCmd
@@ -868,13 +678,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			if hdr.Name >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid name in weak dynamic library command", hdr.Name}
+			if hdr.NameOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in weak dynamic library command", hdr.NameOffset}
 			}
-			l.Name = cstring(cmddat[hdr.Name:])
+			l.Name = cstring(cmddat[hdr.NameOffset:])
 			l.Time = hdr.Time
-			l.CurrentVersion = hdr.CurrentVersion.String()
-			l.CompatVersion = hdr.CompatVersion.String()
+			l.CurrentVersion = hdr.CurrentVersion
+			l.CompatVersion = hdr.CompatVersion
 			f.Loads[i] = l
 		case types.LC_ROUTINES_64:
 			var r64 types.Routines64Cmd
@@ -973,13 +783,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			if hdr.Name >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid name in dynamic library command", hdr.Name}
+			if hdr.NameOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in dynamic library command", hdr.NameOffset}
 			}
-			l.Name = cstring(cmddat[hdr.Name:])
+			l.Name = cstring(cmddat[hdr.NameOffset:])
 			l.Time = hdr.Time
-			l.CurrentVersion = hdr.CurrentVersion.String()
-			l.CompatVersion = hdr.CompatVersion.String()
+			l.CurrentVersion = hdr.CurrentVersion
+			l.CompatVersion = hdr.CompatVersion
 			f.Loads[i] = l
 		case types.LC_LAZY_LOAD_DYLIB:
 			var hdr types.LazyLoadDylibCmd
@@ -991,13 +801,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			if hdr.Name >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid name in load upwardl dylib command", hdr.Name}
+			if hdr.NameOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in load upwardl dylib command", hdr.NameOffset}
 			}
-			l.Name = cstring(cmddat[hdr.Name:])
+			l.Name = cstring(cmddat[hdr.NameOffset:])
 			l.Time = hdr.Time
-			l.CurrentVersion = hdr.CurrentVersion.String()
-			l.CompatVersion = hdr.CompatVersion.String()
+			l.CurrentVersion = hdr.CurrentVersion
+			l.CompatVersion = hdr.CompatVersion
 			f.Loads[i] = l
 		case types.LC_ENCRYPTION_INFO:
 			var ei types.EncryptionInfoCmd
@@ -1066,13 +876,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			if hdr.Name >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid name in load upwardl dylib command", hdr.Name}
+			if hdr.NameOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in load upwardl dylib command", hdr.NameOffset}
 			}
-			l.Name = cstring(cmddat[hdr.Name:])
+			l.Name = cstring(cmddat[hdr.NameOffset:])
 			l.Time = hdr.Time
-			l.CurrentVersion = hdr.CurrentVersion.String()
-			l.CompatVersion = hdr.CompatVersion.String()
+			l.CurrentVersion = hdr.CurrentVersion
+			l.CompatVersion = hdr.CompatVersion
 			f.Loads[i] = l
 		case types.LC_VERSION_MIN_MACOSX:
 			var verMin types.VersionMinMacOSCmd
@@ -1124,10 +934,10 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			if hdr.Name >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid name in dyld environment command", hdr.Name}
+			if hdr.NameOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in dyld environment command", hdr.NameOffset}
 			}
-			l.Name = cstring(cmddat[hdr.Name:])
+			l.Name = cstring(cmddat[hdr.NameOffset:])
 			f.Loads[i] = l
 		case types.LC_MAIN:
 			var hdr types.EntryPointCmd
@@ -1400,11 +1210,8 @@ func (f *File) parseSymtab(symdat, strtab, cmddat []byte, hdr *types.SymtabCmd, 
 	return st, nil
 }
 
-func (f *File) pushSection(sh *Section, r io.ReaderAt) error {
+func (f *File) pushSection(sh *types.Section, r io.ReaderAt) error {
 	f.Sections = append(f.Sections, sh)
-	sh.sr = io.NewSectionReader(r, int64(sh.Offset), int64(sh.Size))
-	sh.ReaderAt = f.sr
-	// sh.ReaderAt = f.cr
 
 	if sh.Nreloc > 0 {
 		reldat := make([]byte, int(sh.Nreloc)*8)
@@ -1415,11 +1222,11 @@ func (f *File) pushSection(sh *Section, r io.ReaderAt) error {
 
 		bo := f.ByteOrder
 
-		sh.Relocs = make([]Reloc, sh.Nreloc)
+		sh.Relocs = make([]types.Reloc, sh.Nreloc)
 		for i := range sh.Relocs {
 			rel := &sh.Relocs[i]
 
-			var ri relocInfo
+			var ri types.RelocInfo
 			if err := binary.Read(b, bo, &ri); err != nil {
 				return fmt.Errorf("failed to read relocInfo; %v", err)
 			}
@@ -1714,8 +1521,8 @@ func (f *File) Segments() Segments {
 }
 
 // GetSectionsForSegment returns all the segment's sections or nil if it doesn't have any
-func (f *File) GetSectionsForSegment(name string) []*Section {
-	var secs []*Section
+func (f *File) GetSectionsForSegment(name string) []*types.Section {
+	var secs []*types.Section
 	if seg := f.Segment(name); seg != nil {
 		if seg.Nsect > 0 {
 			for i := uint32(0); i < seg.Nsect; i++ {
@@ -1731,7 +1538,7 @@ func (f *File) GetSectionsForSegment(name string) []*Section {
 
 // Section returns the section with the given name in the given segment,
 // or nil if no such section exists.
-func (f *File) Section(segment, section string) *Section {
+func (f *File) Section(segment, section string) *types.Section {
 	for _, sec := range f.Sections {
 		if sec.Seg == segment && sec.Name == section {
 			return sec
@@ -1751,7 +1558,7 @@ func (f *File) FindSegmentForVMAddr(vmAddr uint64) *Segment {
 }
 
 // FindSectionForVMAddr returns the section containing a given virtual memory ddress.
-func (f *File) FindSectionForVMAddr(vmAddr uint64) *Section {
+func (f *File) FindSectionForVMAddr(vmAddr uint64) *types.Section {
 	for _, sec := range f.Sections {
 		if sec.Addr <= vmAddr && vmAddr < sec.Addr+sec.Size {
 			return sec
@@ -2161,7 +1968,7 @@ func (f *File) ForEachV2SplitSegReference(handler func(fromSectionIndex, fromSec
 
 // DWARF returns the DWARF debug information for the Mach-O file.
 func (f *File) DWARF() (*dwarf.Data, error) {
-	dwarfSuffix := func(s *Section) string {
+	dwarfSuffix := func(s *types.Section) string {
 		switch {
 		case strings.HasPrefix(s.Name, "__debug_"):
 			return s.Name[8:]
@@ -2171,7 +1978,7 @@ func (f *File) DWARF() (*dwarf.Data, error) {
 			return ""
 		}
 	}
-	appleSuffix := func(s *Section) string {
+	appleSuffix := func(s *types.Section) string {
 		switch {
 		case strings.HasPrefix(s.Name, "__apple_"):
 			return s.Name[8:]
@@ -2179,7 +1986,7 @@ func (f *File) DWARF() (*dwarf.Data, error) {
 			return ""
 		}
 	}
-	sectionData := func(s *Section) ([]byte, error) {
+	sectionData := func(s *types.Section) ([]byte, error) {
 		b, err := s.Data()
 		if err != nil && uint64(len(b)) < s.Size {
 			return nil, err

@@ -1,12 +1,36 @@
 package types
 
-//go:generate stringer -type=HeaderFileType,HeaderFlag -trimprefix=MH_ -output header_string.go
+//go:generate stringer -type=HeaderFileType -trimprefix=MH_ -output header_string.go
 
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"strings"
+)
+
+type Magic uint32
+
+const (
+	Magic32  Magic = 0xfeedface
+	Magic64  Magic = 0xfeedfacf
+	MagicFat Magic = 0xcafebabe
+)
+
+var magicStrings = []IntName{
+	{uint32(Magic32), "32-bit MachO"},
+	{uint32(Magic64), "64-bit MachO"},
+	{uint32(MagicFat), "Fat MachO"},
+}
+
+func (i Magic) Int() uint32      { return uint32(i) }
+func (i Magic) String() string   { return StringName(uint32(i), magicStrings, false) }
+func (i Magic) GoString() string { return StringName(uint32(i), magicStrings, true) }
+
+const (
+	FileHeaderSize32 = 7 * 4
+	FileHeaderSize64 = 8 * 4
 )
 
 // A FileHeader represents a Mach-O file header.
@@ -35,36 +59,47 @@ func (h *FileHeader) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[28:], 0)
 	return 32
 }
-
 func (h *FileHeader) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, h); err != nil {
-		return fmt.Errorf("failed to write segment load command data to buffer: %v", err)
+		return fmt.Errorf("failed to write file header: %v", err)
 	}
 	return nil
 }
-
-const (
-	FileHeaderSize32 = 7 * 4
-	FileHeaderSize64 = 8 * 4
-)
-
-type Magic uint32
-
-const (
-	Magic32  Magic = 0xfeedface
-	Magic64  Magic = 0xfeedfacf
-	MagicFat Magic = 0xcafebabe
-)
-
-var magicStrings = []IntName{
-	{uint32(Magic32), "32-bit MachO"},
-	{uint32(Magic64), "64-bit MachO"},
-	{uint32(MagicFat), "Fat MachO"},
+func (h *FileHeader) String() string {
+	return fmt.Sprintf(
+		"Magic         = %s\n"+
+			"Type          = %s\n"+
+			"CPU           = %s, %s %s\n"+
+			"Commands      = %d (Size: %d)\n"+
+			"Flags         = %s",
+		h.Magic,
+		h.Type,
+		h.CPU, h.SubCPU.String(h.CPU), h.SubCPU.Caps(h.CPU),
+		h.NCommands,
+		h.SizeCommands,
+		h.Flags,
+	)
 }
-
-func (i Magic) Int() uint32      { return uint32(i) }
-func (i Magic) String() string   { return StringName(uint32(i), magicStrings, false) }
-func (i Magic) GoString() string { return StringName(uint32(i), magicStrings, true) }
+func (h *FileHeader) Print(printer func(h *FileHeader) string) string {
+	return printer(h)
+}
+func (h *FileHeader) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&struct {
+		Magic        string   `json:"magic"`
+		Type         string   `json:"type"`
+		CPU          string   `json:"cpu"`
+		Commands     int      `json:"commands"`
+		SizeCommands int      `json:"commands_size"`
+		Flags        []string `json:"flags"`
+	}{
+		Magic:        h.Magic.String(),
+		Type:         h.Type.String(),
+		CPU:          fmt.Sprintf("%s, %s %s", h.CPU, h.SubCPU.String(h.CPU), h.SubCPU.Caps(h.CPU)),
+		Commands:     int(h.NCommands),
+		SizeCommands: int(h.SizeCommands),
+		Flags:        h.Flags.Flags(),
+	})
+}
 
 // A HeaderFileType is the Mach-O file type, e.g. an object file, executable, or dynamic library.
 type HeaderFileType uint32
@@ -121,7 +156,6 @@ const (
 	DylibInCache               HeaderFlag = 0x80000000
 )
 
-// GETTERS
 func (f HeaderFlag) None() bool {
 	return f == 0
 }
@@ -213,7 +247,6 @@ func (f HeaderFlag) DylibInCache() bool {
 	return (f & DylibInCache) != 0
 }
 
-// SETTER
 func (f *HeaderFlag) Set(flag HeaderFlag, set bool) {
 	if set {
 		*f = (*f | flag)
@@ -222,119 +255,101 @@ func (f *HeaderFlag) Set(flag HeaderFlag, set bool) {
 	}
 }
 
-// List returns a string array of flag names
-func (f HeaderFlag) List() []string {
+func (f HeaderFlag) Flags() []string {
 	var flags []string
 	if f.None() {
-		flags = append(flags, None.String())
+		flags = append(flags, "None")
 	}
 	if f.NoUndefs() {
-		flags = append(flags, NoUndefs.String())
+		flags = append(flags, "NoUndefs")
 	}
 	if f.IncrLink() {
-		flags = append(flags, IncrLink.String())
+		flags = append(flags, "IncrLink")
 	}
 	if f.DyldLink() {
-		flags = append(flags, DyldLink.String())
+		flags = append(flags, "DyldLink")
 	}
 	if f.BindAtLoad() {
-		flags = append(flags, BindAtLoad.String())
+		flags = append(flags, "BindAtLoad")
 	}
 	if f.Prebound() {
-		flags = append(flags, Prebound.String())
+		flags = append(flags, "Prebound")
 	}
 	if f.SplitSegs() {
-		flags = append(flags, SplitSegs.String())
+		flags = append(flags, "SplitSegs")
 	}
 	if f.LazyInit() {
-		flags = append(flags, LazyInit.String())
+		flags = append(flags, "LazyInit")
 	}
 	if f.TwoLevel() {
-		flags = append(flags, TwoLevel.String())
+		flags = append(flags, "TwoLevel")
 	}
 	if f.ForceFlat() {
-		flags = append(flags, ForceFlat.String())
+		flags = append(flags, "ForceFlat")
 	}
 	if f.NoMultiDefs() {
-		flags = append(flags, NoMultiDefs.String())
+		flags = append(flags, "NoMultiDefs")
 	}
 	if f.NoFixPrebinding() {
-		flags = append(flags, NoFixPrebinding.String())
+		flags = append(flags, "NoFixPrebinding")
 	}
 	if f.Prebindable() {
-		flags = append(flags, Prebindable.String())
+		flags = append(flags, "Prebindable")
 	}
 	if f.AllModsBound() {
-		flags = append(flags, AllModsBound.String())
+		flags = append(flags, "AllModsBound")
 	}
 	if f.SubsectionsViaSymbols() {
-		flags = append(flags, SubsectionsViaSymbols.String())
+		flags = append(flags, "SubsectionsViaSymbols")
 	}
 	if f.Canonical() {
-		flags = append(flags, Canonical.String())
+		flags = append(flags, "Canonical")
 	}
 	if f.WeakDefines() {
-		flags = append(flags, WeakDefines.String())
+		flags = append(flags, "WeakDefines")
 	}
 	if f.BindsToWeak() {
-		flags = append(flags, BindsToWeak.String())
+		flags = append(flags, "BindsToWeak")
 	}
 	if f.AllowStackExecution() {
-		flags = append(flags, AllowStackExecution.String())
+		flags = append(flags, "AllowStackExecution")
 	}
 	if f.RootSafe() {
-		flags = append(flags, RootSafe.String())
+		flags = append(flags, "RootSafe")
 	}
 	if f.SetuidSafe() {
-		flags = append(flags, SetuidSafe.String())
+		flags = append(flags, "SetuidSafe")
 	}
 	if f.NoReexportedDylibs() {
-		flags = append(flags, NoReexportedDylibs.String())
+		flags = append(flags, "NoReexportedDylibs")
 	}
 	if f.PIE() {
-		flags = append(flags, PIE.String())
+		flags = append(flags, "PIE")
 	}
 	if f.DeadStrippableDylib() {
-		flags = append(flags, DeadStrippableDylib.String())
+		flags = append(flags, "DeadStrippableDylib")
 	}
 	if f.HasTLVDescriptors() {
-		flags = append(flags, HasTLVDescriptors.String())
+		flags = append(flags, "HasTLVDescriptors")
 	}
 	if f.NoHeapExecution() {
-		flags = append(flags, NoHeapExecution.String())
+		flags = append(flags, "NoHeapExecution")
 	}
 	if f.AppExtensionSafe() {
-		flags = append(flags, AppExtensionSafe.String())
+		flags = append(flags, "AppExtensionSafe")
 	}
 	if f.NlistOutofsyncWithDyldinfo() {
-		flags = append(flags, NlistOutofsyncWithDyldinfo.String())
+		flags = append(flags, "NlistOutofsyncWithDyldinfo")
 	}
 	if f.SimSupport() {
-		flags = append(flags, SimSupport.String())
+		flags = append(flags, "SimSupport")
 	}
 	if f.DylibInCache() {
-		flags = append(flags, DylibInCache.String())
+		flags = append(flags, "DylibInCache")
 	}
 	return flags
 }
 
-func (f HeaderFlag) Flags() string {
-	return strings.Join(f.List(), ", ")
-}
-
-func (h FileHeader) String() string {
-
-	return fmt.Sprintf(
-		"Magic         = %s\n"+
-			"Type          = %s\n"+
-			"CPU           = %s, %s %s\n"+
-			"Commands      = %d (Size: %d)\n"+
-			"Flags         = %s\n",
-		h.Magic,
-		h.Type,
-		h.CPU, h.SubCPU.String(h.CPU), h.SubCPU.Caps(h.CPU),
-		h.NCommands,
-		h.SizeCommands,
-		h.Flags.Flags(),
-	)
+func (f HeaderFlag) String() string {
+	return strings.Join(f.Flags(), ", ")
 }
