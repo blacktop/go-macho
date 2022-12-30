@@ -17,13 +17,12 @@ import (
 
 // A Load represents any Mach-O load command.
 type Load interface {
-	Raw() []byte
-	String() string
-	MarshalJSON() ([]byte, error)
 	Command() types.LoadCmd
 	LoadSize() uint32 // Need the TOC for alignment, sigh.
-	Put([]byte, binary.ByteOrder) int
+	Raw() []byte
 	Write(buf *bytes.Buffer, o binary.ByteOrder) error
+	String() string
+	MarshalJSON() ([]byte, error)
 }
 
 // LoadCmdBytes is a command-tagged sequence of bytes.
@@ -208,6 +207,9 @@ func (s *Segment) Data() ([]byte, error) {
 	return dat[0:n], err
 }
 
+// Open returns a new ReadSeeker reading the segment.
+func (s *Segment) Open() io.ReadSeeker { return io.NewSectionReader(s.sr, 0, 1<<63-1) }
+
 // UncompressedSize returns the size of the segment with its sections uncompressed, ignoring
 // its offset within the file.  The returned size is rounded up to the power of two in align.
 func (s *Segment) UncompressedSize(t *FileTOC, align uint64) uint64 {
@@ -236,16 +238,12 @@ func (s *Segment) CopyZeroed() *Segment {
 	}
 	return r
 }
-
 func (s *Segment) LoadSize() uint32 {
 	if s.Command() == types.LC_SEGMENT_64 {
 		return uint32(unsafe.Sizeof(types.Segment64{})) + uint32(s.Nsect)*uint32(unsafe.Sizeof(types.Section64{}))
 	}
 	return uint32(unsafe.Sizeof(types.Segment32{})) + uint32(s.Nsect)*uint32(unsafe.Sizeof(types.Section32{}))
 }
-
-// Open returns a new ReadSeeker reading the segment.
-func (s *Segment) Open() io.ReadSeeker { return io.NewSectionReader(s.sr, 0, 1<<63-1) }
 
 func (s *Segment) String() string {
 	return fmt.Sprintf("%s sz=0x%08x off=0x%08x-0x%08x addr=0x%09x-0x%09x %s/%s   %-18s%s",
@@ -260,6 +258,7 @@ func (s *Segment) String() string {
 		s.Name,
 		s.Flag)
 }
+
 func (s *Segment) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
 		LoadCmd string   `json:"load_cmd"`
@@ -313,17 +312,11 @@ type Symtab struct {
 	Syms []Symbol
 }
 
-func (s *Symtab) String() string {
-	if s.Nsyms == 0 && s.Strsize == 0 {
-		return "Symbols stripped"
-	}
-	return fmt.Sprintf("Symbol offset=0x%08X, Num Syms: %d, String offset=0x%08X-0x%08X", s.Symoff, s.Nsyms, s.Stroff, s.Stroff+s.Strsize)
-}
 func (s *Symtab) Copy() *Symtab {
 	return &Symtab{SymtabCmd: s.SymtabCmd, Syms: append([]Symbol{}, s.Syms...)}
 }
 func (s *Symtab) LoadSize() uint32 {
-	return uint32(unsafe.Sizeof(types.SymtabCmd{}))
+	return uint32(binary.Size(s.SymtabCmd))
 }
 func (s *Symtab) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(s.LoadCmd))
@@ -354,6 +347,29 @@ func (s *Symtab) Search(name string) (*Symbol, error) {
 	}
 	return nil, fmt.Errorf("%s not found in symtab", name)
 }
+func (s *Symtab) String() string {
+	if s.Nsyms == 0 && s.Strsize == 0 {
+		return "Symbols stripped"
+	}
+	return fmt.Sprintf("Symbol offset=0x%08X, Num Syms: %d, String offset=0x%08X-0x%08X", s.Symoff, s.Nsyms, s.Stroff, s.Stroff+s.Strsize)
+}
+func (s *Symtab) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&struct {
+		LoadCmd string `json:"load_cmd"`
+		Len     uint32 `json:"len,omitempty"`
+		Symoff  uint32 `json:"symoff,omitempty"`
+		Nsyms   uint32 `json:"nsyms,omitempty"`
+		Stroff  uint32 `json:"stroff,omitempty"`
+		Strsize uint32 `json:"strsize,omitempty"`
+	}{
+		LoadCmd: s.LoadCmd.String(),
+		Len:     s.Len,
+		Symoff:  s.Symoff,
+		Nsyms:   s.Nsyms,
+		Stroff:  s.Stroff,
+		Strsize: s.Strsize,
+	})
+}
 
 // A Symbol is a Mach-O 32-bit or 64-bit symbol table entry.
 type Symbol struct {
@@ -378,6 +394,21 @@ func (s Symbol) String(m *File) string {
 	}
 	return fmt.Sprintf("0x%016X\t<type:%s, desc:%s>\t%s", s.Value, s.Type.String(sec), s.Desc, s.Name)
 }
+func (s *Symbol) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&struct {
+		Name  string `json:"name"`
+		Type  string `json:"type"`
+		Sect  uint8  `json:"sect"`
+		Desc  string `json:"desc"`
+		Value uint64 `json:"value"`
+	}{
+		Name:  s.Name,
+		Type:  s.Type.String(fmt.Sprintf("sect_num=%d", s.Sect)),
+		Sect:  s.Sect,
+		Desc:  s.Desc.String(),
+		Value: s.Value,
+	})
+}
 
 /*******************************************************************************
  * LC_SYMSEG - link-edit gdb symbol table info (obsolete)
@@ -386,13 +417,25 @@ func (s Symbol) String(m *File) string {
 // A SymSeg represents a Mach-O LC_SYMSEG command.
 type SymSeg struct {
 	LoadBytes
-	types.SymsegCommand
+	types.SymsegCmd
 	Offset uint32
 	Size   uint32
 }
 
+func (s *SymSeg) LoadSize() uint32 {
+	return uint32(binary.Size(s.SymsegCmd))
+}
+func (s *SymSeg) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, s.SymsegCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", s.Command(), err)
+	}
+	return nil
+}
 func (s *SymSeg) String() string {
 	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d", s.Offset, s.Offset+s.Size, s.Size)
+}
+func (s *SymSeg) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
@@ -407,8 +450,20 @@ type Thread struct {
 	Data []uint32
 }
 
+func (t *Thread) LoadSize() uint32 {
+	return uint32(binary.Size(t.ThreadCmd))
+}
+func (t *Thread) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, t.ThreadCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", t.Command(), err)
+	}
+	return nil
+}
 func (t *Thread) String() string {
 	return fmt.Sprintf("Type: %d", t.Type)
+}
+func (t *Thread) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
@@ -422,8 +477,20 @@ type UnixThread struct {
 	EntryPoint uint64
 }
 
+func (u *UnixThread) LoadSize() uint32 {
+	return uint32(binary.Size(u.UnixThreadCmd))
+}
+func (u *UnixThread) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, u.UnixThreadCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", u.Command(), err)
+	}
+	return nil
+}
 func (u *UnixThread) String() string {
 	return fmt.Sprintf("Entry Point: 0x%016x", u.EntryPoint)
+}
+func (u *UnixThread) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
@@ -439,8 +506,20 @@ type LoadFvmlib struct {
 	HeaderAddress uint32
 }
 
+func (l *LoadFvmlib) LoadSize() uint32 {
+	return uint32(binary.Size(l.LoadFvmLibCmd))
+}
+func (l *LoadFvmlib) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, l.LoadFvmLibCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	return nil
+}
 func (l *LoadFvmlib) String() string {
 	return fmt.Sprintf("%s (%s), Header Addr: %#08x", l.Name, l.MinorVersion, l.HeaderAddr)
+}
+func (l *LoadFvmlib) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
@@ -448,17 +527,7 @@ func (l *LoadFvmlib) String() string {
  *******************************************************************************/
 
 // A IDFvmlib represents a Mach-O LC_IDFVMLIB command.
-type IDFvmlib struct {
-	LoadBytes
-	types.IDFvmLibCmd
-	Name          string
-	MinorVersion  types.Version
-	HeaderAddress uint32
-}
-
-func (l *IDFvmlib) String() string {
-	return fmt.Sprintf("%s (%s), Header Addr: %#08x", l.Name, l.MinorVersion, l.HeaderAddr)
-}
+type IDFvmlib LoadFvmlib
 
 /*******************************************************************************
  * LC_IDENT - object identification info (obsolete)
@@ -471,8 +540,20 @@ type Ident struct {
 	Length uint32
 }
 
+func (i *Ident) LoadSize() uint32 {
+	return uint32(binary.Size(i.IdentCmd))
+}
+func (i *Ident) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, i.IdentCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", i.Command(), err)
+	}
+	return nil
+}
 func (i *Ident) String() string {
 	return fmt.Sprintf("len=%d", i.Length)
+}
+func (i *Ident) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
@@ -487,8 +568,20 @@ type FvmFile struct {
 	HeaderAddress uint32
 }
 
+func (l *FvmFile) LoadSize() uint32 {
+	return uint32(binary.Size(l.FvmFileCmd))
+}
+func (l *FvmFile) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, l.FvmFileCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	return nil
+}
 func (l *FvmFile) String() string {
 	return fmt.Sprintf("%s, Header Addr: %#08x", l.Name, l.HeaderAddr)
+}
+func (l *FvmFile) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
@@ -499,6 +592,22 @@ func (l *FvmFile) String() string {
 type Prepage struct {
 	LoadBytes
 	types.PrePageCmd
+}
+
+func (c *Prepage) LoadSize() uint32 {
+	return uint32(binary.Size(c.PrePageCmd))
+}
+func (c *Prepage) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, c.PrePageCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", c.Command(), err)
+	}
+	return nil
+}
+func (c *Prepage) String() string {
+	return fmt.Sprintf("size=%d", c.Len)
+}
+func (c *Prepage) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
@@ -512,34 +621,15 @@ type Dysymtab struct {
 	IndirectSyms []uint32 // indices into Symtab.Syms
 }
 
+func (d *Dysymtab) LoadSize() uint32 {
+	return uint32(binary.Size(d.DysymtabCmd))
+}
 func (d *Dysymtab) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, types.DysymtabCmd{
-		LoadCmd:        d.LoadCmd,
-		Len:            d.Len,
-		Ilocalsym:      d.Ilocalsym,
-		Nlocalsym:      d.Nlocalsym,
-		Iextdefsym:     d.Iextdefsym,
-		Nextdefsym:     d.Nextdefsym,
-		Iundefsym:      d.Iundefsym,
-		Nundefsym:      d.Nundefsym,
-		Tocoffset:      d.Tocoffset,
-		Ntoc:           d.Ntoc,
-		Modtaboff:      d.Modtaboff,
-		Nmodtab:        d.Nmodtab,
-		Extrefsymoff:   d.Extrefsymoff,
-		Nextrefsyms:    d.Nextrefsyms,
-		Indirectsymoff: d.Indirectsymoff,
-		Nindirectsyms:  d.Nindirectsyms,
-		Extreloff:      d.Extreloff,
-		Nextrel:        d.Nextrel,
-		Locreloff:      d.Locreloff,
-		Nlocrel:        d.Nlocrel,
-	}); err != nil {
-		return fmt.Errorf("failed to write LC_DYSYMTAB to buffer: %v", err)
+	if err := binary.Write(buf, o, d.DysymtabCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", d.Command(), err)
 	}
 	return nil
 }
-
 func (d *Dysymtab) String() string {
 	var tocStr, modStr, extSymStr, indirSymStr, extRelStr, locRelStr string
 	if d.Ntoc == 0 {
@@ -593,6 +683,9 @@ func (d *Dysymtab) String() string {
 		extRelStr,
 		locRelStr)
 }
+func (d *Dysymtab) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
+}
 
 /*******************************************************************************
  * LC_ID_DYLIB, LC_LOAD_{,WEAK_}DYLIB,LC_REEXPORT_DYLIB
@@ -608,18 +701,9 @@ type Dylib struct {
 	CompatVersion  types.Version
 }
 
-func (d *Dylib) Raw() []byte {
-	return d.LoadBytes.Raw()
-}
-
-func (d *Dylib) Command() types.LoadCmd {
-	return d.LoadCmd
-}
-
 func (d *Dylib) LoadSize() uint32 {
-	return uint32(len(d.Raw()))
+	return uint32(binary.Size(d.DylibCmd))
 }
-
 func (d *Dylib) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
 	o.PutUint32(b[1*4:], d.Len)
@@ -629,32 +713,25 @@ func (d *Dylib) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[5*4:], uint32(d.CompatVersion))
 	return 6 * binary.Size(uint32(0))
 }
-
 func (d *Dylib) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	return binary.Write(buf, o, types.DylibCmd{
-		LoadCmd:        d.LoadCmd,
-		Len:            d.Len,
-		NameOffset:     d.NameOffset,
-		Time:           d.Time,
-		CurrentVersion: d.CurrentVersion,
-		CompatVersion:  d.CompatVersion,
-	})
+	if err := binary.Write(buf, o, d.DylibCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", d.Command(), err)
+	}
+	return nil
 }
-
 func (d *Dylib) String() string {
 	return fmt.Sprintf("%s (%s)", d.Name, d.CurrentVersion)
+}
+func (d *Dylib) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
  * LC_ID_DYLIB
  *******************************************************************************/
 
-// A DylibID represents a Mach-O LC_ID_DYLIB command.
-type DylibID Dylib
-
-func (d *DylibID) String() string {
-	return fmt.Sprintf("%s (%s)", d.Name, d.CurrentVersion)
-}
+// A IDDylib represents a Mach-O LC_ID_DYLIB command.
+type IDDylib Dylib
 
 /*******************************************************************************
  * LC_LOAD_DYLINKER
@@ -667,35 +744,26 @@ type LoadDylinker struct {
 	Name string
 }
 
-func (d *LoadDylinker) Raw() []byte {
-	return d.LoadBytes.Raw()
-}
-
-func (d *LoadDylinker) Command() types.LoadCmd {
-	return d.LoadCmd
-}
-
 func (d *LoadDylinker) LoadSize() uint32 {
-	return uint32(len(d.Raw()))
+	return uint32(binary.Size(d.DylinkerCmd))
 }
-
 func (d *LoadDylinker) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
 	o.PutUint32(b[1*4:], d.Len)
 	o.PutUint32(b[2*4:], d.NameOffset)
 	return 3 * binary.Size(uint32(0))
 }
-
 func (d *LoadDylinker) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	return binary.Write(buf, o, types.DylinkerCmd{
-		LoadCmd:    d.LoadCmd,
-		Len:        d.Len,
-		NameOffset: d.NameOffset,
-	})
+	if err := binary.Write(buf, o, d.DylinkerCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", d.Command(), err)
+	}
+	return nil
 }
-
 func (d *LoadDylinker) String() string {
 	return d.Name
+}
+func (d *LoadDylinker) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
@@ -703,42 +771,7 @@ func (d *LoadDylinker) String() string {
  *******************************************************************************/
 
 // DylinkerID represents a Mach-O LC_ID_DYLINKER command.
-type DylinkerID struct {
-	LoadBytes
-	types.DylinkerIDCmd
-	Name string
-}
-
-// func (d *DylinkerID) Raw() []byte {
-// 	return d.LoadBytes.Raw()
-// }
-
-// func (d *DylinkerID) Command() types.LoadCmd {
-// 	return d.LoadCmd
-// }
-
-// func (d *DylinkerID) LoadSize() uint32 {
-// 	return uint32(len(d.Raw()))
-// }
-
-// func (d *DylinkerID) Put(b []byte, o binary.ByteOrder) int {
-// 	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
-// 	o.PutUint32(b[1*4:], d.Len)
-// 	o.PutUint32(b[2*4:], d.NameOffset)
-// 	return 3 * binary.Size(uint32(0))
-// }
-
-// func (d *DylinkerID) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-// 	return binary.Write(buf, o, types.DylinkerIDCmd{
-// 		LoadCmd:    d.LoadCmd,
-// 		Len:        d.Len,
-// 		NameOffset: d.NameOffset,
-// 	})
-// }
-
-func (d *DylinkerID) String() string {
-	return d.Name
-}
+type DylinkerID LoadDylinker
 
 /*******************************************************************************
  * LC_PREBOUND_DYLIB - modules prebound for a dynamically linked shared library
@@ -753,18 +786,9 @@ type PreboundDylib struct {
 	LinkedModules string
 }
 
-func (d *PreboundDylib) Raw() []byte {
-	return d.LoadBytes.Raw()
-}
-
-func (d *PreboundDylib) Command() types.LoadCmd {
-	return d.LoadCmd
-}
-
 func (d *PreboundDylib) LoadSize() uint32 {
-	return uint32(len(d.Raw()))
+	return uint32(binary.Size(d.PreboundDylibCmd))
 }
-
 func (d *PreboundDylib) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
 	o.PutUint32(b[1*4:], d.Len)
@@ -773,19 +797,17 @@ func (d *PreboundDylib) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[4*4:], d.LinkedModulesOffset)
 	return 5 * binary.Size(uint32(0))
 }
-
 func (d *PreboundDylib) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	return binary.Write(buf, o, types.PreboundDylibCmd{
-		LoadCmd:             d.LoadCmd,
-		Len:                 d.Len,
-		NameOffset:          d.NameOffset,
-		NumModules:          d.NumModules,
-		LinkedModulesOffset: d.LinkedModulesOffset,
-	})
+	if err := binary.Write(buf, o, d.PreboundDylibCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", d.Command(), err)
+	}
+	return nil
 }
-
 func (d *PreboundDylib) String() string {
 	return fmt.Sprintf("%s, NumModules=%d, LinkedModules=%s", d.Name, d.NumModules, d.LinkedModules)
+}
+func (d *PreboundDylib) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
@@ -800,8 +822,20 @@ type Routines struct {
 	InitModule  uint32
 }
 
-func (r *Routines) String() string {
-	return fmt.Sprintf("Address: %#08x, Module: %d", r.InitAddress, r.InitModule)
+func (l *Routines) LoadSize() uint32 {
+	return uint32(binary.Size(l.Routines64Cmd))
+}
+func (l *Routines) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, l.Routines64Cmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	return nil
+}
+func (l *Routines) String() string {
+	return fmt.Sprintf("Address: %#08x, Module: %d", l.InitAddress, l.InitModule)
+}
+func (l *Routines) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
@@ -815,7 +849,19 @@ type SubFramework struct {
 	Framework string
 }
 
-func (s *SubFramework) String() string { return s.Framework }
+func (l *SubFramework) LoadSize() uint32 {
+	return uint32(binary.Size(l.SubFrameworkCmd))
+}
+func (l *SubFramework) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, l.SubFrameworkCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	return nil
+}
+func (l *SubFramework) String() string { return l.Framework }
+func (l *SubFramework) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
+}
 
 /*******************************************************************************
  * LC_SUB_UMBRELLA - sub umbrella
@@ -828,7 +874,19 @@ type SubUmbrella struct {
 	Umbrella string
 }
 
-func (s *SubUmbrella) String() string { return s.Umbrella }
+func (l *SubUmbrella) LoadSize() uint32 {
+	return uint32(binary.Size(l.SubFrameworkCmd))
+}
+func (l *SubUmbrella) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, l.SubFrameworkCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	return nil
+}
+func (l *SubUmbrella) String() string { return l.Umbrella }
+func (l *SubUmbrella) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
+}
 
 /*******************************************************************************
  * LC_SUB_CLIENT
@@ -841,8 +899,20 @@ type SubClient struct {
 	Name string
 }
 
-func (d *SubClient) String() string {
-	return d.Name
+func (l *SubClient) LoadSize() uint32 {
+	return uint32(binary.Size(l.SubClientCmd))
+}
+func (l *SubClient) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, l.SubClientCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	return nil
+}
+func (l *SubClient) String() string {
+	return l.Name
+}
+func (l *SubClient) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
@@ -856,7 +926,19 @@ type SubLibrary struct {
 	Library string
 }
 
-func (s *SubLibrary) String() string { return s.Library }
+func (l *SubLibrary) LoadSize() uint32 {
+	return uint32(binary.Size(l.SubFrameworkCmd))
+}
+func (l *SubLibrary) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, l.SubFrameworkCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	return nil
+}
+func (l *SubLibrary) String() string { return l.Library }
+func (l *SubLibrary) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
+}
 
 /*******************************************************************************
  * LC_TWOLEVEL_HINTS - two-level namespace lookup hints
@@ -870,23 +952,47 @@ type TwolevelHints struct {
 	Hints  []types.TwolevelHint
 }
 
-func (s *TwolevelHints) String() string {
-	return fmt.Sprintf("Offset: %#08x, Num of Hints: %d", s.Offset, len(s.Hints))
+func (l *TwolevelHints) LoadSize() uint32 {
+	return uint32(binary.Size(l.TwolevelHintsCmd))
+}
+func (l *TwolevelHints) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, l.TwolevelHintsCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	return nil
+}
+func (l *TwolevelHints) String() string {
+	return fmt.Sprintf("Offset: %#08x, Num of Hints: %d", l.Offset, len(l.Hints))
+}
+func (l *TwolevelHints) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
  * LC_PREBIND_CKSUM - prebind checksum
  *******************************************************************************/
 
-// A PrebindCksum  is a Mach-O LC_PREBIND_CKSUM command.
-type PrebindCksum struct {
+// A PrebindCheckSum  is a Mach-O LC_PREBIND_CKSUM command.
+type PrebindCheckSum struct {
 	LoadBytes
 	types.PrebindCksumCmd
 	CheckSum uint32
 }
 
-func (p *PrebindCksum) String() string {
-	return fmt.Sprintf("CheckSum: %#08x", p.CheckSum)
+func (l *PrebindCheckSum) LoadSize() uint32 {
+	return uint32(binary.Size(l.PrebindCksumCmd))
+}
+func (l *PrebindCheckSum) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, l.PrebindCksumCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	return nil
+}
+func (l *PrebindCheckSum) String() string {
+	return fmt.Sprintf("CheckSum: %#08x", l.CheckSum)
+}
+func (l *PrebindCheckSum) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
@@ -895,10 +1001,6 @@ func (p *PrebindCksum) String() string {
 
 // A WeakDylib represents a Mach-O LC_LOAD_WEAK_DYLIB command.
 type WeakDylib Dylib
-
-func (d *WeakDylib) String() string {
-	return fmt.Sprintf("%s (%s)", d.Name, d.CurrentVersion)
-}
 
 /*******************************************************************************
  * LC_ROUTINES_64
@@ -912,8 +1014,20 @@ type Routines64 struct {
 	InitModule  uint64
 }
 
-func (r *Routines64) String() string {
-	return fmt.Sprintf("Address: %#016x, Module: %d", r.InitAddress, r.InitModule)
+func (l *Routines64) LoadSize() uint32 {
+	return uint32(binary.Size(l.Routines64Cmd))
+}
+func (l *Routines64) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, l.Routines64Cmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	return nil
+}
+func (l *Routines64) String() string {
+	return fmt.Sprintf("Address: %#016x, Module: %d", l.InitAddress, l.InitModule)
+}
+func (l *Routines64) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
@@ -924,23 +1038,22 @@ func (r *Routines64) String() string {
 type UUID struct {
 	LoadBytes
 	types.UUIDCmd
-	ID string
 }
 
-func (s *UUID) String() string {
-	return s.ID
+func (l *UUID) LoadSize() uint32 {
+	return uint32(binary.Size(l.UUIDCmd))
 }
-func (s *UUID) Copy() *UUID {
-	return &UUID{UUIDCmd: s.UUIDCmd}
+func (l *UUID) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, l.UUIDCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	return nil
 }
-func (s *UUID) LoadSize() uint32 {
-	return uint32(unsafe.Sizeof(types.UUIDCmd{}))
+func (l *UUID) String() string {
+	return l.UUID.String()
 }
-func (s *UUID) Put(b []byte, o binary.ByteOrder) int {
-	o.PutUint32(b[0*4:], uint32(s.LoadCmd))
-	o.PutUint32(b[1*4:], s.Len)
-	copy(b[2*4:], s.UUID[0:])
-	return int(s.Len)
+func (l *UUID) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
@@ -954,8 +1067,20 @@ type Rpath struct {
 	Path string
 }
 
+func (r *Rpath) LoadSize() uint32 {
+	return uint32(binary.Size(r.RpathCmd))
+}
+func (r *Rpath) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, r.RpathCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", r.Command(), err)
+	}
+	return nil
+}
 func (r *Rpath) String() string {
 	return r.Path
+}
+func (r *Rpath) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
@@ -971,22 +1096,20 @@ type CodeSignature struct {
 	ctypes.CodeSignature
 }
 
-func (c *CodeSignature) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, types.CodeSignatureCmd{
-		LoadCmd: c.LoadCmd,
-		Len:     c.Len,
-		Offset:  c.Offset,
-		Size:    c.Size,
-	}); err != nil {
-		return fmt.Errorf("failed to write LC_CODE_SIGNATURE to buffer: %v", err)
+func (l *CodeSignature) LoadSize() uint32 {
+	return uint32(binary.Size(l.CodeSignatureCmd))
+}
+func (l *CodeSignature) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, l.CodeSignatureCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
 	}
 	return nil
 }
-
-func (c *CodeSignature) String() string {
-	// TODO: fix this once codesigs are done
-	// return fmt.Sprintf("offset=0x%08x-0x%08x, size=%d, ID:   %s", c.Offset, c.Offset+c.Size, c.Size, c.ID)
-	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d", c.Offset, c.Offset+c.Size, c.Size)
+func (l *CodeSignature) String() string { // TODO: add more info
+	return fmt.Sprintf("offset=0x%09x  size=%#x", l.Offset, l.Size)
+}
+func (l *CodeSignature) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
@@ -1003,18 +1126,15 @@ type SplitInfo struct {
 	Offsets []uint64
 }
 
-func (s *SplitInfo) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, types.SegmentSplitInfoCmd{
-		LoadCmd: s.LoadCmd,
-		Len:     s.Len,
-		Offset:  s.Offset,
-		Size:    s.Size,
-	}); err != nil {
-		return fmt.Errorf("failed to write LC_SEGMENT_SPLIT_INFO to buffer: %v", err)
+func (l *SplitInfo) LoadSize() uint32 {
+	return uint32(binary.Size(l.SegmentSplitInfoCmd))
+}
+func (l *SplitInfo) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, l.SegmentSplitInfoCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
 	}
 	return nil
 }
-
 func (s *SplitInfo) String() string {
 	version := "format=v1"
 	if s.Version == types.DYLD_CACHE_ADJ_V2_FORMAT {
@@ -1024,6 +1144,9 @@ func (s *SplitInfo) String() string {
 	}
 	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d, %s", s.Offset, s.Offset+s.Size, s.Size, version)
 }
+func (l *SplitInfo) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
+}
 
 /*******************************************************************************
  * LC_REEXPORT_DYLIB
@@ -1032,20 +1155,12 @@ func (s *SplitInfo) String() string {
 // A ReExportDylib represents a Mach-O LC_REEXPORT_DYLIB command.
 type ReExportDylib Dylib
 
-func (d *ReExportDylib) String() string {
-	return fmt.Sprintf("%s (%s)", d.Name, d.CurrentVersion)
-}
-
 /*******************************************************************************
  * LC_LAZY_LOAD_DYLIB - delay load of dylib until first use
  *******************************************************************************/
 
 // A LazyLoadDylib represents a Mach-O LC_LAZY_LOAD_DYLIB command.
 type LazyLoadDylib Dylib
-
-func (d *LazyLoadDylib) String() string {
-	return fmt.Sprintf("%s (%s)", d.Name, d.CurrentVersion)
-}
 
 /*******************************************************************************
  * LC_ENCRYPTION_INFO
@@ -1060,30 +1175,8 @@ type EncryptionInfo struct {
 	CryptID types.EncryptionSystem // which enryption system, 0 means not-encrypted yet
 }
 
-func (l *EncryptionInfo) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, types.EncryptionInfoCmd{
-		LoadCmd: l.LoadCmd,
-		Len:     l.Len,
-		Offset:  l.Offset,
-		Size:    l.Size,
-		CryptID: l.CryptID,
-	}); err != nil {
-		return fmt.Errorf("failed to write LC_ENCRYPTION_INFO to buffer: %v", err)
-	}
-	return nil
-}
-
-func (e *EncryptionInfo) String() string {
-	if e.CryptID == 0 {
-		return fmt.Sprintf("offset=%#x size=%#x (not-encrypted yet)", e.Offset, e.Size)
-	}
-	return fmt.Sprintf("offset=%#x size=%#x CryptID: %#x", e.Offset, e.Size, e.CryptID)
-}
-func (e *EncryptionInfo) Copy() *EncryptionInfo {
-	return &EncryptionInfo{EncryptionInfoCmd: e.EncryptionInfoCmd}
-}
 func (e *EncryptionInfo) LoadSize() uint32 {
-	return uint32(unsafe.Sizeof(types.EncryptionInfoCmd{}))
+	return uint32(binary.Size(e.EncryptionInfoCmd))
 }
 func (e *EncryptionInfo) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(e.LoadCmd))
@@ -1094,6 +1187,21 @@ func (e *EncryptionInfo) Put(b []byte, o binary.ByteOrder) int {
 
 	return int(e.Len)
 }
+func (l *EncryptionInfo) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, l.EncryptionInfoCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	return nil
+}
+func (e *EncryptionInfo) String() string {
+	if e.CryptID == 0 {
+		return fmt.Sprintf("offset=%#x size=%#x (not-encrypted yet)", e.Offset, e.Size)
+	}
+	return fmt.Sprintf("offset=%#x size=%#x CryptID: %#x", e.Offset, e.Size, e.CryptID)
+}
+func (l *EncryptionInfo) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
+}
 
 /*******************************************************************************
  * LC_DYLD_INFO
@@ -1103,38 +1211,10 @@ func (e *EncryptionInfo) Put(b []byte, o binary.ByteOrder) int {
 type DyldInfo struct {
 	LoadBytes
 	types.DyldInfoCmd
-	RebaseOff    uint32 // file offset to rebase info
-	RebaseSize   uint32 //  size of rebase info
-	BindOff      uint32 // file offset to binding info
-	BindSize     uint32 // size of binding info
-	WeakBindOff  uint32 // file offset to weak binding info
-	WeakBindSize uint32 //  size of weak binding info
-	LazyBindOff  uint32 // file offset to lazy binding info
-	LazyBindSize uint32 //  size of lazy binding info
-	ExportOff    uint32 // file offset to export info
-	ExportSize   uint32 //  size of export info
 }
 
-func (d *DyldInfo) String() string {
-	return fmt.Sprintf(
-		"\n"+
-			"\t\tRebase info: %5d bytes at offset:  0x%08X -> 0x%08X\n"+
-			"\t\tBind info:   %5d bytes at offset:  0x%08X -> 0x%08X\n"+
-			"\t\tWeak info:   %5d bytes at offset:  0x%08X -> 0x%08X\n"+
-			"\t\tLazy info:   %5d bytes at offset:  0x%08X -> 0x%08X\n"+
-			"\t\tExport info: %5d bytes at offset:  0x%08X -> 0x%08X",
-		d.RebaseSize, d.RebaseOff, d.RebaseOff+d.RebaseSize,
-		d.BindSize, d.BindOff, d.BindOff+d.BindSize,
-		d.WeakBindSize, d.WeakBindOff, d.WeakBindOff+d.WeakBindSize,
-		d.LazyBindSize, d.LazyBindOff, d.LazyBindOff+d.LazyBindSize,
-		d.ExportSize, d.ExportOff, d.ExportOff+d.ExportSize,
-	)
-}
-func (d *DyldInfo) Copy() *DyldInfo {
-	return &DyldInfo{DyldInfoCmd: d.DyldInfoCmd}
-}
 func (d *DyldInfo) LoadSize() uint32 {
-	return uint32(unsafe.Sizeof(types.DyldInfoCmd{}))
+	return uint32(binary.Size(d.DyldInfoCmd))
 }
 func (d *DyldInfo) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
@@ -1152,46 +1232,13 @@ func (d *DyldInfo) Put(b []byte, o binary.ByteOrder) int {
 	return int(d.Len)
 }
 func (l *DyldInfo) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, types.DyldInfoCmd{
-		LoadCmd:      l.LoadCmd,
-		Len:          l.Len,
-		RebaseOff:    l.RebaseOff,
-		RebaseSize:   l.RebaseSize,
-		BindOff:      l.BindOff,
-		BindSize:     l.BindSize,
-		WeakBindOff:  l.WeakBindOff,
-		WeakBindSize: l.WeakBindSize,
-		LazyBindOff:  l.LazyBindOff,
-		LazyBindSize: l.LazyBindSize,
-		ExportOff:    l.ExportOff,
-		ExportSize:   l.ExportSize,
-	}); err != nil {
-		return fmt.Errorf("failed to write LC_DYLD_INFO to buffer: %v", err)
+	if err := binary.Write(buf, o, l.DyldInfoCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
 	}
 	return nil
 }
 
-/*******************************************************************************
- * LC_DYLD_INFO_ONLY
- *******************************************************************************/
-
-// DyldInfoOnly is compressed dyld information only
-type DyldInfoOnly struct {
-	LoadBytes
-	types.DyldInfoOnlyCmd
-	RebaseOff    uint32 // file offset to rebase info
-	RebaseSize   uint32 //  size of rebase info
-	BindOff      uint32 // file offset to binding info
-	BindSize     uint32 // size of binding info
-	WeakBindOff  uint32 // file offset to weak binding info
-	WeakBindSize uint32 //  size of weak binding info
-	LazyBindOff  uint32 // file offset to lazy binding info
-	LazyBindSize uint32 //  size of lazy binding info
-	ExportOff    uint32 // file offset to export info
-	ExportSize   uint32 //  size of export info
-}
-
-func (d *DyldInfoOnly) String() string {
+func (d *DyldInfo) String() string {
 	return fmt.Sprintf(
 		"\n"+
 			"\t\tRebase info: %5d bytes at offset:  0x%08X -> 0x%08X\n"+
@@ -1206,89 +1253,37 @@ func (d *DyldInfoOnly) String() string {
 		d.ExportSize, d.ExportOff, d.ExportOff+d.ExportSize,
 	)
 }
-func (d *DyldInfoOnly) Copy() *DyldInfoOnly {
-	return &DyldInfoOnly{DyldInfoOnlyCmd: d.DyldInfoOnlyCmd}
+func (l *DyldInfo) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
-func (d *DyldInfoOnly) LoadSize() uint32 {
-	return uint32(unsafe.Sizeof(types.UUIDCmd{}))
-}
-func (d *DyldInfoOnly) Put(b []byte, o binary.ByteOrder) int {
-	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
-	o.PutUint32(b[1*4:], d.Len)
-	o.PutUint32(b[2*4:], d.RebaseOff)
-	o.PutUint32(b[3*4:], d.RebaseSize)
-	o.PutUint32(b[4*4:], d.BindOff)
-	o.PutUint32(b[5*4:], d.BindSize)
-	o.PutUint32(b[6*4:], d.WeakBindOff)
-	o.PutUint32(b[7*4:], d.WeakBindSize)
-	o.PutUint32(b[8*4:], d.LazyBindOff)
-	o.PutUint32(b[9*4:], d.LazyBindSize)
-	o.PutUint32(b[10*4:], d.ExportOff)
-	o.PutUint32(b[11*4:], d.ExportSize)
-	return int(d.Len)
-}
-func (l *DyldInfoOnly) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, types.DyldInfoOnlyCmd{
-		LoadCmd:      l.LoadCmd,
-		Len:          l.Len,
-		RebaseOff:    l.RebaseOff,
-		RebaseSize:   l.RebaseSize,
-		BindOff:      l.BindOff,
-		BindSize:     l.BindSize,
-		WeakBindOff:  l.WeakBindOff,
-		WeakBindSize: l.WeakBindSize,
-		LazyBindOff:  l.LazyBindOff,
-		LazyBindSize: l.LazyBindSize,
-		ExportOff:    l.ExportOff,
-		ExportSize:   l.ExportSize,
-	}); err != nil {
-		return fmt.Errorf("failed to write LC_DYLD_INFO_ONLY to buffer: %v", err)
-	}
-	return nil
-}
+
+/*******************************************************************************
+ * LC_DYLD_INFO_ONLY
+ *******************************************************************************/
+
+// DyldInfoOnly is compressed dyld information only
+type DyldInfoOnly DyldInfo
 
 /*******************************************************************************
  * LC_LOAD_UPWARD_DYLIB
  *******************************************************************************/
 
-// A UpwardDylib represents a Mach-O load upward dylib command.
+// A UpwardDylib represents a Mach-O LC_LOAD_UPWARD_DYLIB load command.
 type UpwardDylib Dylib
-
-func (d *UpwardDylib) String() string {
-	return fmt.Sprintf("%s (%s)", d.Name, d.CurrentVersion)
-}
 
 /*******************************************************************************
  * LC_VERSION_MIN_MACOSX
  *******************************************************************************/
 
 // VersionMinMacOSX build for MacOSX min OS version
-type VersionMinMacOSX struct {
-	LoadBytes
-	types.VersionMinMacOSCmd
-	Version string
-	Sdk     string
-}
-
-func (v *VersionMinMacOSX) String() string {
-	return fmt.Sprintf("Version=%s, SDK=%s", v.Version, v.Sdk)
-}
+type VersionMinMacOSX VersionMin
 
 /*******************************************************************************
  * LC_VERSION_MIN_IPHONEOS
  *******************************************************************************/
 
 // VersionMiniPhoneOS build for iPhoneOS min OS version
-type VersionMiniPhoneOS struct {
-	LoadBytes
-	types.VersionMinIPhoneOSCmd
-	Version string
-	Sdk     string
-}
-
-func (v *VersionMiniPhoneOS) String() string {
-	return fmt.Sprintf("Version=%s, SDK=%s", v.Version, v.Sdk)
-}
+type VersionMiniPhoneOS VersionMin
 
 /*******************************************************************************
  * LC_FUNCTION_STARTS
@@ -1305,37 +1300,29 @@ type FunctionStarts struct {
 	VMAddrs         []uint64
 }
 
+func (l *FunctionStarts) LoadSize() uint32 {
+	return uint32(binary.Size(l.FunctionStartsCmd))
+}
 func (l *FunctionStarts) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, types.FunctionStartsCmd{
-		LoadCmd: l.LoadCmd,
-		Len:     l.Len,
-		Offset:  l.Offset,
-		Size:    l.Size,
-	}); err != nil {
-		return fmt.Errorf("failed to write LC_FUNCTION_STARTS to buffer: %v", err)
+	if err := binary.Write(buf, o, l.FunctionStartsCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
 	}
 	return nil
 }
-
-func (f *FunctionStarts) String() string {
-	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d", f.Offset, f.Offset+f.Size, f.Size)
+func (l *FunctionStarts) String() string {
+	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d", l.Offset, l.Offset+l.Size, l.Size)
 	// return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d count=%d", f.Offset, f.Offset+f.Size, f.Size, len(f.VMAddrs))
+}
+func (l *FunctionStarts) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
  * LC_DYLD_ENVIRONMENT
  *******************************************************************************/
 
-// A DyldEnvironment is a string for dyld to treat like environment variable
-type DyldEnvironment struct {
-	LoadBytes
-	types.DyldEnvironmentCmd
-	Name string
-}
-
-func (d *DyldEnvironment) String() string {
-	return d.Name
-}
+// DyldEnvironment represents a Mach-O LC_DYLD_ENVIRONMENT command.
+type DyldEnvironment LoadDylinker
 
 /*******************************************************************************
  * LC_MAIN
@@ -1349,14 +1336,8 @@ type EntryPoint struct {
 	StackSize   uint64
 }
 
-func (e *EntryPoint) String() string {
-	return fmt.Sprintf("Entry Point: 0x%016x, Stack Size: %#x", e.EntryOffset, e.StackSize)
-}
-func (e *EntryPoint) Copy() *EntryPoint {
-	return &EntryPoint{EntryPointCmd: e.EntryPointCmd}
-}
 func (e *EntryPoint) LoadSize() uint32 {
-	return uint32(unsafe.Sizeof(types.EntryPointCmd{}))
+	return uint32(binary.Size(e.EntryPointCmd))
 }
 func (e *EntryPoint) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(e.LoadCmd))
@@ -1366,15 +1347,16 @@ func (e *EntryPoint) Put(b []byte, o binary.ByteOrder) int {
 	return int(e.Len)
 }
 func (e *EntryPoint) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, types.EntryPointCmd{
-		LoadCmd:   e.LoadCmd,
-		Len:       e.Len,
-		Offset:    e.Offset,
-		StackSize: e.StackSize,
-	}); err != nil {
-		return fmt.Errorf("failed to write LC_MAIN to buffer: %v", err)
+	if err := binary.Write(buf, o, e.EntryPointCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", e.Command(), err)
 	}
 	return nil
+}
+func (e *EntryPoint) String() string {
+	return fmt.Sprintf("Entry Point: 0x%016x, Stack Size: %#x", e.EntryOffset, e.StackSize)
+}
+func (e *EntryPoint) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
@@ -1390,6 +1372,15 @@ type DataInCode struct {
 	Entries []types.DataInCodeEntry
 }
 
+func (l *DataInCode) LoadSize() uint32 {
+	return uint32(binary.Size(l.DataInCodeCmd))
+}
+func (l *DataInCode) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, l.DataInCodeCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	return nil
+}
 func (d *DataInCode) String() string {
 	var ents string
 	if len(d.Entries) > 0 {
@@ -1403,17 +1394,8 @@ func (d *DataInCode) String() string {
 		"offset=0x%08x-0x%08x size=%5d entries=%d%s",
 		d.Offset, d.Offset+d.Size, d.Size, len(d.Entries), ents)
 }
-
-func (l *DataInCode) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, types.DataInCodeCmd{
-		LoadCmd: l.LoadCmd,
-		Len:     l.Len,
-		Offset:  l.Offset,
-		Size:    l.Size,
-	}); err != nil {
-		return fmt.Errorf("failed to write LC_DATA_IN_CODE to buffer: %v", err)
-	}
-	return nil
+func (l *DataInCode) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
@@ -1427,36 +1409,27 @@ type SourceVersion struct {
 	Version string
 }
 
+func (s *SourceVersion) LoadSize() uint32 {
+	return uint32(binary.Size(s.SourceVersionCmd))
+}
+func (s *SourceVersion) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, s.SourceVersionCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", s.Command(), err)
+	}
+	return nil
+}
 func (s *SourceVersion) String() string {
 	return s.Version
+}
+func (s *SourceVersion) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
  * LC_DYLIB_CODE_SIGN_DRS Code signing DRs copied from linked dylibs
  *******************************************************************************/
 
-type DylibCodeSignDrs struct {
-	LoadBytes
-	types.DylibCodeSignDrsCmd
-	Offset uint32
-	Size   uint32
-}
-
-func (d *DylibCodeSignDrs) String() string {
-	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d", d.Offset, d.Offset+d.Size, d.Size)
-}
-
-func (l *DylibCodeSignDrs) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, types.DylibCodeSignDrsCmd{
-		LoadCmd: l.LoadCmd,
-		Len:     l.Len,
-		Offset:  l.Offset,
-		Size:    l.Size,
-	}); err != nil {
-		return fmt.Errorf("failed to write LC_DYLIB_CODE_SIGN_DRS to buffer: %v", err)
-	}
-	return nil
-}
+type DylibCodeSignDrs LinkEditData
 
 /*******************************************************************************
  * LC_ENCRYPTION_INFO_64
@@ -1471,17 +1444,8 @@ type EncryptionInfo64 struct {
 	CryptID types.EncryptionSystem // which enryption system, 0 means not-encrypted yet
 }
 
-func (e *EncryptionInfo64) String() string {
-	if e.CryptID == 0 {
-		return fmt.Sprintf("offset=0x%09x  size=%#x (not-encrypted yet)", e.Offset, e.Size)
-	}
-	return fmt.Sprintf("offset=0x%09x  size=%#x CryptID: %#x", e.Offset, e.Size, e.CryptID)
-}
-func (e *EncryptionInfo64) Copy() *EncryptionInfo64 {
-	return &EncryptionInfo64{EncryptionInfo64Cmd: e.EncryptionInfo64Cmd}
-}
 func (e *EncryptionInfo64) LoadSize() uint32 {
-	return uint32(unsafe.Sizeof(types.EncryptionInfo64Cmd{}))
+	return uint32(binary.Size(e.EncryptionInfo64Cmd))
 }
 func (e *EncryptionInfo64) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(e.LoadCmd))
@@ -1494,17 +1458,19 @@ func (e *EncryptionInfo64) Put(b []byte, o binary.ByteOrder) int {
 	return int(e.Len)
 }
 func (e *EncryptionInfo64) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, types.EncryptionInfo64Cmd{
-		LoadCmd: e.LoadCmd,
-		Len:     e.Len,
-		Offset:  e.Offset,
-		Size:    e.Size,
-		CryptID: e.CryptID,
-		Pad:     e.Pad,
-	}); err != nil {
-		return fmt.Errorf("failed to write LC_ENCRYPTION_INFO_64 to buffer: %v", err)
+	if err := binary.Write(buf, o, e.EncryptionInfo64Cmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", e.Command(), err)
 	}
 	return nil
+}
+func (e *EncryptionInfo64) String() string {
+	if e.CryptID == 0 {
+		return fmt.Sprintf("offset=0x%09x  size=%#x (not-encrypted yet)", e.Offset, e.Size)
+	}
+	return fmt.Sprintf("offset=0x%09x  size=%#x CryptID: %#x", e.Offset, e.Size, e.CryptID)
+}
+func (e *EncryptionInfo64) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
@@ -1518,68 +1484,41 @@ type LinkerOption struct {
 	Options []string
 }
 
-func (o *LinkerOption) String() string {
-	return fmt.Sprintf("Options=%s", strings.Join(o.Options, ","))
+func (l *LinkerOption) LoadSize() uint32 {
+	return uint32(binary.Size(l.LinkerOptionCmd))
+}
+func (l *LinkerOption) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, l.LinkerOptionCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	return nil
+}
+func (l *LinkerOption) String() string {
+	return fmt.Sprintf("Options=%s", strings.Join(l.Options, ","))
+}
+func (l *LinkerOption) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
  * LC_LINKER_OPTIMIZATION_HINT - linker options in MH_OBJECT files
  *******************************************************************************/
 
-type LinkerOptimizationHint struct {
-	LoadBytes
-	types.LinkerOptimizationHintCmd
-	Offset uint32
-	Size   uint32
-}
-
-func (l *LinkerOptimizationHint) String() string {
-	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d", l.Offset, l.Offset+l.Size, l.Size)
-}
-
-func (l *LinkerOptimizationHint) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, types.LinkerOptimizationHintCmd{
-		LoadCmd: l.LoadCmd,
-		Len:     l.Len,
-		Offset:  l.Offset,
-		Size:    l.Size,
-	}); err != nil {
-		return fmt.Errorf("failed to write LC_LINKER_OPTIMIZATION_HINT to buffer: %v", err)
-	}
-	return nil
-}
+type LinkerOptimizationHint LinkEditData
 
 /*******************************************************************************
  * LC_VERSION_MIN_TVOS
  *******************************************************************************/
 
 // VersionMinTvOS build for AppleTV min OS version
-type VersionMinTvOS struct {
-	LoadBytes
-	types.VersionMinIPhoneOSCmd
-	Version string
-	Sdk     string
-}
-
-func (v *VersionMinTvOS) String() string {
-	return fmt.Sprintf("Version=%s, SDK=%s", v.Version, v.Sdk)
-}
+type VersionMinTvOS VersionMin
 
 /*******************************************************************************
  * LC_VERSION_MIN_WATCHOS
  *******************************************************************************/
 
 // VersionMinWatchOS build for Watch min OS version
-type VersionMinWatchOS struct {
-	LoadBytes
-	types.VersionMinIPhoneOSCmd
-	Version string
-	Sdk     string
-}
-
-func (v *VersionMinWatchOS) String() string {
-	return fmt.Sprintf("Version=%s, SDK=%s", v.Version, v.Sdk)
-}
+type VersionMinWatchOS VersionMin
 
 /*******************************************************************************
  * LC_NOTE - arbitrary data included within a Mach-O file
@@ -1594,8 +1533,20 @@ type Note struct {
 	Size      uint64
 }
 
+func (n *Note) LoadSize() uint32 {
+	return uint32(binary.Size(n.NoteCmd))
+}
+func (n *Note) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, n.NoteCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", n.Command(), err)
+	}
+	return nil
+}
 func (n *Note) String() string {
 	return fmt.Sprintf("DataOwner=%s, offset=0x%08x-0x%08x size=%5d", n.DataOwner, n.Offset, n.Offset+n.Size, n.Size)
+}
+func (n *Note) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }
 
 /*******************************************************************************
@@ -1614,6 +1565,15 @@ type BuildVersion struct {
 	ToolVersion string
 }
 
+func (b *BuildVersion) LoadSize() uint32 {
+	return uint32(binary.Size(b.BuildVersionCmd))
+}
+func (b *BuildVersion) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, b.BuildVersionCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", b.Command(), err)
+	}
+	return nil
+}
 func (b *BuildVersion) String() string {
 	if b.NumTools > 0 {
 		return fmt.Sprintf("Platform: %s, SDK: %s, Tool: %s (%s)",
@@ -1626,78 +1586,23 @@ func (b *BuildVersion) String() string {
 		b.Platform,
 		b.Sdk)
 }
+func (b *BuildVersion) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
+}
 
 /*******************************************************************************
  * LC_DYLD_EXPORTS_TRIE
  *******************************************************************************/
 
 // A DyldExportsTrie used with linkedit_data_command, payload is trie
-type DyldExportsTrie struct {
-	LoadBytes
-	types.DyldExportsTrieCmd
-	Offset uint32
-	Size   uint32
-}
-
-func (t *DyldExportsTrie) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, types.DyldExportsTrieCmd{
-		LoadCmd: t.LoadCmd,
-		Len:     t.Len,
-		Offset:  t.Offset,
-		Size:    t.Size,
-	}); err != nil {
-		return fmt.Errorf("failed to write LC_DYLD_EXPORTS_TRIE to buffer: %v", err)
-	}
-	return nil
-}
-
-func (t *DyldExportsTrie) String() string {
-	return fmt.Sprintf("offset=0x%09x  size=%#x", t.Offset, t.Size)
-}
+type DyldExportsTrie LinkEditData
 
 /*******************************************************************************
  * LC_DYLD_CHAINED_FIXUPS
  *******************************************************************************/
 
 // A DyldChainedFixups used with linkedit_data_command
-type DyldChainedFixups struct {
-	LoadBytes
-	types.DyldChainedFixupsCmd
-	Offset uint32
-	Size   uint32
-}
-
-func (c *DyldChainedFixups) Raw() []byte {
-	return c.LoadBytes.Raw()
-}
-
-func (c *DyldChainedFixups) Command() types.LoadCmd {
-	return c.LoadCmd
-}
-
-func (l *DyldChainedFixups) LoadSize() uint32 {
-	return uint32(binary.Size(l.DyldChainedFixupsCmd))
-}
-
-func (l *DyldChainedFixups) Put(_ []byte, _ binary.ByteOrder) int {
-	panic("not implemented") // TODO: Implement
-}
-
-func (l *DyldChainedFixups) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, types.DyldChainedFixupsCmd{
-		LoadCmd: l.LoadCmd,
-		Len:     l.Len,
-		Offset:  l.Offset,
-		Size:    l.Size,
-	}); err != nil {
-		return fmt.Errorf("failed to write LC_DYLD_CHAINED_FIXUPS to buffer: %v", err)
-	}
-	return nil
-}
-
-func (l *DyldChainedFixups) String() string {
-	return fmt.Sprintf("offset=0x%09x  size=%#x", l.Offset, l.Size)
-}
+type DyldChainedFixups LinkEditData
 
 /*******************************************************************************
  * LC_FILESET_ENTRY
@@ -1712,32 +1617,49 @@ type FilesetEntry struct {
 	EntryID string // contained entry id
 }
 
+func (l *FilesetEntry) LoadSize() uint32 {
+	return uint32(binary.Size(l.FilesetEntryCmd))
+}
 func (l *FilesetEntry) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, types.FilesetEntryCmd{
-		LoadCmd:  l.LoadCmd,
-		Len:      l.Len,
-		Addr:     l.Addr,
-		Offset:   l.Offset,
-		EntryID:  32, // it is always 0x20
-		Reserved: l.Reserved,
-	}); err != nil {
-		return fmt.Errorf("failed to write LC_FILESET_ENTRY to buffer: %v", err)
+	if err := binary.Write(buf, o, l.FilesetEntryCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
 	}
 	return nil
 }
-
 func (f *FilesetEntry) String() string {
 	return fmt.Sprintf("offset=0x%09x addr=0x%016x %s", f.Offset, f.Addr, f.EntryID)
 }
+func (l *FilesetEntry) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
+}
 
 /*******************************************************************************
- * LC_CODE_SIGNATURE, LC_SEGMENT_SPLIT_INFO,
- * LC_FUNCTION_STARTS, LC_DATA_IN_CODE,
- * LC_DYLIB_CODE_SIGN_DRS,
- * LC_LINKER_OPTIMIZATION_HINT,
- * LC_DYLD_EXPORTS_TRIE, or
- * LC_DYLD_CHAINED_FIXUPS.
+ * COMMON COMMANDS
  *******************************************************************************/
+
+// A VersionMin represents a Mach-O LC_VERSION_MIN_* command.
+type VersionMin struct {
+	LoadBytes
+	types.VersionMinCmd
+	Version string
+	Sdk     string
+}
+
+func (v *VersionMin) LoadSize() uint32 {
+	return uint32(binary.Size(v.VersionMinCmd))
+}
+func (v *VersionMin) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, v.VersionMinCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", v.Command(), err)
+	}
+	return nil
+}
+func (v *VersionMin) String() string {
+	return fmt.Sprintf("Version=%s, SDK=%s", v.Version, v.Sdk)
+}
+func (v *VersionMin) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
+}
 
 // A LinkEditData represents a Mach-O linkedit data command.
 type LinkEditData struct {
@@ -1747,14 +1669,18 @@ type LinkEditData struct {
 	Size   uint32
 }
 
+func (l *LinkEditData) LoadSize() uint32 {
+	return uint32(binary.Size(l.LinkEditDataCmd))
+}
 func (l *LinkEditData) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, types.LinkEditDataCmd{
-		LoadCmd: l.LoadCmd,
-		Len:     l.Len,
-		Offset:  l.Offset,
-		Size:    l.Size,
-	}); err != nil {
-		return fmt.Errorf("failed to write linkedit_data_command to buffer: %v", err)
+	if err := binary.Write(buf, o, l.LinkEditDataCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
 	}
 	return nil
+}
+func (l *LinkEditData) String() string {
+	return fmt.Sprintf("offset=0x%09x  size=%#x", l.Offset, l.Size)
+}
+func (l *LinkEditData) MarshalJSON() ([]byte, error) {
+	panic("not implemented") // TODO: Implement
 }

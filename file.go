@@ -330,7 +330,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			f.Loads[i] = st
 			f.Symtab = st
 		case types.LC_SYMSEG:
-			var led types.SymsegCommand
+			var led types.SymsegCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &led); err != nil {
 				return nil, fmt.Errorf("failed to read LC_SYMSEG: %v", err)
@@ -504,7 +504,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, fmt.Errorf("failed to read LC_ID_DYLIB: %v", err)
 			}
-			l := new(DylibID)
+			l := new(IDDylib)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
@@ -532,7 +532,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Name = cstring(cmddat[hdr.NameOffset:])
 			f.Loads[i] = l
 		case types.LC_ID_DYLINKER:
-			var hdr types.DylinkerIDCmd
+			var hdr types.IDDylinkerCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, fmt.Errorf("failed to read LC_ID_DYLINKER: %v", err)
@@ -662,7 +662,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &p); err != nil {
 				return nil, fmt.Errorf("failed to read LC_PREBIND_CKSUM: %v", err)
 			}
-			l := new(PrebindCksum)
+			l := new(PrebindCheckSum)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
@@ -709,7 +709,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			l.ID = u.UUID.String()
 			f.Loads[i] = l
 		case types.LC_RPATH:
 			var hdr types.RpathCmd
@@ -867,7 +866,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.ExportSize = info.ExportSize
 			f.Loads[i] = l
 		case types.LC_LOAD_UPWARD_DYLIB:
-			var hdr types.UpwardDylibCmd
+			var hdr types.LoadUpwardDylibCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, fmt.Errorf("failed to read LC_LOAD_UPWARD_DYLIB: %v", err)
@@ -1323,22 +1322,6 @@ func (f *File) preferredLoadAddress() uint64 {
 	return 0
 }
 
-func (f *File) readLeUint32(offset int64) (uint32, error) {
-	u32 := make([]byte, 4)
-	if _, err := f.cr.ReadAt(u32, offset); err != nil {
-		return 0, err
-	}
-	return binary.LittleEndian.Uint32(u32), nil
-}
-
-func (f *File) readLeUint64(offset int64) (uint64, error) {
-	u64 := make([]byte, 8)
-	if _, err := f.cr.ReadAt(u64, offset); err != nil {
-		return 0, err
-	}
-	return binary.LittleEndian.Uint64(u64), nil
-}
-
 // ReadAt reads data at offset within MachO
 func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
 	return f.cr.ReadAt(p, off) // TODO: should this be f.cr  or f.sr?
@@ -1578,9 +1561,9 @@ func (f *File) UUID() *UUID {
 }
 
 // DylibID returns the dylib ID load command, or nil if no dylib ID exists.
-func (f *File) DylibID() *DylibID {
+func (f *File) DylibID() *IDDylib {
 	for _, l := range f.Loads {
-		if s, ok := l.(*DylibID); ok {
+		if s, ok := l.(*IDDylib); ok {
 			return s
 		}
 	}

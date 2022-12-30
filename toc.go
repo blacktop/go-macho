@@ -123,38 +123,6 @@ func (t *FileTOC) FileSize() uint64 {
 	return sz
 }
 
-// Put writes the header and all load commands to buffer, using
-// the byte ordering specified in FileTOC t.  For sections, this
-// writes the headers that come in-line with the segment Load commands,
-// but does not write the reference data for those sections.
-func (t *FileTOC) Put(buffer []byte) int {
-	next := t.FileHeader.Put(buffer, t.ByteOrder)
-	for _, l := range t.Loads {
-		if s, ok := l.(*Segment); ok {
-			switch t.Magic {
-			case types.Magic64:
-				next += s.Put64(buffer[next:], t.ByteOrder)
-				for i := uint32(0); i < s.Nsect; i++ {
-					c := t.Sections[i+s.Firstsect]
-					next += c.Put64(buffer[next:], t.ByteOrder)
-				}
-			case types.Magic32:
-				next += s.Put32(buffer[next:], t.ByteOrder)
-				for i := uint32(0); i < s.Nsect; i++ {
-					c := t.Sections[i+s.Firstsect]
-					next += c.Put32(buffer[next:], t.ByteOrder)
-				}
-			default:
-				panic(fmt.Sprintf("Unexpected magic number %#x", t.Magic))
-			}
-
-		} else {
-			next += l.Put(buffer[next:], t.ByteOrder)
-		}
-	}
-	return next
-}
-
 func (t *FileTOC) String() string {
 	return fmt.Sprintf("%s\n%s\n", t.FileHeader.String(), t.Loads.String())
 }
@@ -182,7 +150,7 @@ func (ls loads) String() string {
 		if sg, ok := l.(*Segment); ok {
 			loadsStr += fmt.Sprintf("%03d: %s\n", i, sg)
 			for _, sc := range sg.sections {
-				loadsStr += sc.String()
+				loadsStr += fmt.Sprintf("%s\n", sc)
 			}
 		} else {
 			if l != nil {

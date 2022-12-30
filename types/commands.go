@@ -3,7 +3,6 @@ package types
 //go:generate stringer -type=LoadCmd -output commands_string.go
 
 import (
-	"encoding/binary"
 	"fmt"
 	"strings"
 )
@@ -12,10 +11,6 @@ import (
 type LoadCmd uint32
 
 func (c LoadCmd) Command() LoadCmd { return c }
-
-func (c LoadCmd) Put(b []byte, o binary.ByteOrder) int {
-	panic(fmt.Sprintf("Put not implemented for %s", c.String()))
-}
 
 const (
 	LC_REQ_DYLD       LoadCmd = 0x80000000
@@ -223,16 +218,16 @@ type DylibCmd struct {
 	CompatVersion  Version
 }
 
-// A IdDylibCmd represents a Mach-O load dynamic library ident command.
-type IdDylibCmd DylibCmd // LC_ID_DYLIB
+// A IDDylibCmd represents a Mach-O load dynamic library ident command.
+type IDDylibCmd DylibCmd // LC_ID_DYLIB
 // A LoadWeakDylibCmd is a Mach-O load a dynamically linked shared library that is allowed to be missing (all symbols are weak imported) command.
 type LoadWeakDylibCmd DylibCmd // LC_LOAD_WEAK_DYLIB
 // A ReExportDylibCmd is a Mach-O load and re-export dylib command.
 type ReExportDylibCmd DylibCmd // LC_REEXPORT_DYLIB
 // A LazyLoadDylibCmd is a Mach-O delay load of dylib until first use command.
 type LazyLoadDylibCmd DylibCmd // LC_LAZY_LOAD_DYLIB
-// A UpwardDylibCmd is a Mach-O load upward dylibcommand.
-type UpwardDylibCmd DylibCmd // LC_LOAD_UPWARD_DYLIB
+// A LoadUpwardDylibCmd is a Mach-O load upward dylibcommand.
+type LoadUpwardDylibCmd DylibCmd // LC_LOAD_UPWARD_DYLIB
 
 /*
  * SubFrameworkCmd a dynamically linked shared library may be a subframework of an umbrella
@@ -336,8 +331,8 @@ type DylinkerCmd struct {
 	NameOffset uint32 // dynamic linker's path name
 }
 
-// A DylinkerIDCmd is a Mach-O dynamic linker identification command.
-type DylinkerIDCmd DylinkerCmd // LC_ID_DYLINKER
+// A IDDylinkerCmd is a Mach-O dynamic linker identification command.
+type IDDylinkerCmd DylinkerCmd // LC_ID_DYLINKER
 // A DyldEnvironmentCmd is a Mach-O string for dyld to treat like environment variable command.
 type DyldEnvironmentCmd DylinkerCmd // LC_DYLD_ENVIRONMENT
 
@@ -588,7 +583,7 @@ const (
 	 * removed.  In which case it has the value INDIRECT_SYMBOL_LOCAL.  If the
 	 * symbol was also absolute INDIRECT_SYMBOL_ABS is or'ed with that.
 	 */
-	INDIRECT_SYMBOL_LOCAL = 0x80000000
+	INDIRECT_SYMBOL_LOCAL = 0x80000000 // TODO: use this ?
 	INDIRECT_SYMBOL_ABS   = 0x40000000
 )
 
@@ -885,7 +880,7 @@ type LinkerOptionCmd struct {
 }
 
 /*
- * SymsegCommand contains the offset and size of the GNU style
+ * SymsegCmd contains the offset and size of the GNU style
  * symbol table information as described in the header file <symseg.h>.
  * The symbol roots of the symbol segments must also be aligned properly
  * in the file.  So the requirement of keeping the offsets aligned to a
@@ -893,7 +888,7 @@ type LinkerOptionCmd struct {
  * roots also being a multiple of a long.  Also the padding must again be
  * zeroed. (THIS IS OBSOLETE and no longer supported).
  */
-type SymsegCommand struct {
+type SymsegCmd struct {
 	LoadCmd        /* LC_SYMSEG */
 	Len     uint32 /* sizeof(struct symseg_command) */
 	Offset  uint32 /* symbol segment offset */

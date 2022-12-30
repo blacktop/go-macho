@@ -670,7 +670,7 @@ func (s *Section) String() string {
 	if !s.Flags.IsRegular() {
 		secFlags = fmt.Sprintf("(%s)", s.Flags)
 	}
-	return fmt.Sprintf("\tsz=0x%08x off=0x%08x-0x%08x addr=0x%09x-0x%09x%s%s %s\n",
+	return fmt.Sprintf("\tsz=0x%08x off=0x%08x-0x%08x addr=0x%09x-0x%09x%s%s %s",
 		s.Size,
 		s.Offset,
 		uint64(s.Offset)+s.Size,
