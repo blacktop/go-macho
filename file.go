@@ -421,7 +421,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			l.Length = hdr.Len
+			// l.StrTable = TODO: read string table
 			f.Loads[i] = l
 		case types.LC_FVMFILE:
 			var hdr types.FvmFileCmd
@@ -486,7 +486,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, fmt.Errorf("failed to read LC_LOAD_DYLIB: %v", err)
 			}
-			l := new(Dylib)
+			l := new(LoadDylib)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
@@ -494,7 +494,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, &FormatError{offset, "invalid name in dynamic library command", hdr.NameOffset}
 			}
 			l.Name = cstring(cmddat[hdr.NameOffset:])
-			l.Time = hdr.Time
+			l.Timestamp = hdr.Timestamp
 			l.CurrentVersion = hdr.CurrentVersion
 			l.CompatVersion = hdr.CompatVersion
 			f.Loads[i] = l
@@ -512,7 +512,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, &FormatError{offset, "invalid name in dynamic library ident command", hdr.NameOffset}
 			}
 			l.Name = cstring(cmddat[hdr.NameOffset:])
-			l.Time = hdr.Time
+			l.Timestamp = hdr.Timestamp
 			l.CurrentVersion = hdr.CurrentVersion
 			l.CompatVersion = hdr.CompatVersion
 			f.Loads[i] = l
@@ -682,7 +682,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, &FormatError{offset, "invalid name in weak dynamic library command", hdr.NameOffset}
 			}
 			l.Name = cstring(cmddat[hdr.NameOffset:])
-			l.Time = hdr.Time
+			l.Timestamp = hdr.Timestamp
 			l.CurrentVersion = hdr.CurrentVersion
 			l.CompatVersion = hdr.CompatVersion
 			f.Loads[i] = l
@@ -709,6 +709,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
+			l.UUID = u.UUID
 			f.Loads[i] = l
 		case types.LC_RPATH:
 			var hdr types.RpathCmd
@@ -786,7 +787,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, &FormatError{offset, "invalid name in dynamic library command", hdr.NameOffset}
 			}
 			l.Name = cstring(cmddat[hdr.NameOffset:])
-			l.Time = hdr.Time
+			l.Timestamp = hdr.Timestamp
 			l.CurrentVersion = hdr.CurrentVersion
 			l.CompatVersion = hdr.CompatVersion
 			f.Loads[i] = l
@@ -804,7 +805,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, &FormatError{offset, "invalid name in load upwardl dylib command", hdr.NameOffset}
 			}
 			l.Name = cstring(cmddat[hdr.NameOffset:])
-			l.Time = hdr.Time
+			l.Timestamp = hdr.Timestamp
 			l.CurrentVersion = hdr.CurrentVersion
 			l.CompatVersion = hdr.CompatVersion
 			f.Loads[i] = l
@@ -879,7 +880,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, &FormatError{offset, "invalid name in load upwardl dylib command", hdr.NameOffset}
 			}
 			l.Name = cstring(cmddat[hdr.NameOffset:])
-			l.Time = hdr.Time
+			l.Timestamp = hdr.Timestamp
 			l.CurrentVersion = hdr.CurrentVersion
 			l.CompatVersion = hdr.CompatVersion
 			f.Loads[i] = l
@@ -1095,17 +1096,18 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			l.Platform = build.Platform.String()
-			l.Minos = build.Minos.String()
-			l.Sdk = build.Sdk.String()
+			l.Platform = build.Platform
+			l.Minos = build.Minos
+			l.Sdk = build.Sdk
 			l.NumTools = build.NumTools
-			// TODO: handle more than one tool case
-			if build.NumTools > 0 {
+			for i := uint32(0); i < build.NumTools; i++ {
 				if err := binary.Read(b, bo, &buildTool); err != nil {
 					return nil, fmt.Errorf("failed to read LC_BUILD_VERSION buildTool: %v", err)
 				}
-				l.Tool = buildTool.Tool.String()
-				l.ToolVersion = buildTool.Version.String()
+				l.Tools = append(l.Tools, types.BuildToolVersion{
+					Tool:    buildTool.Tool,
+					Version: buildTool.Version,
+				})
 			}
 			f.Loads[i] = l
 		case types.LC_DYLD_EXPORTS_TRIE:
@@ -2523,7 +2525,7 @@ func (f *File) ImportedLibraries() []string {
 	var all []string
 	for _, l := range f.Loads {
 		switch v := l.(type) {
-		case *Dylib:
+		case *LoadDylib:
 			all = append(all, v.Name)
 		case *WeakDylib:
 			all = append(all, v.Name)

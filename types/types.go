@@ -4,6 +4,7 @@ package types
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -123,6 +124,16 @@ const (
 type BuildToolVersion struct {
 	Tool    Tool    /* enum for the tool */
 	Version Version /* version number of the tool */
+}
+
+func (b *BuildToolVersion) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Tool    string `json:"tool"`
+		Version string `json:"version"`
+	}{
+		Tool:    b.Tool.String(),
+		Version: b.Version.String(),
+	})
 }
 
 type DataInCodeEntry struct {

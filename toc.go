@@ -154,7 +154,7 @@ func (ls loads) String() string {
 			}
 		} else {
 			if l != nil {
-				loadsStr += fmt.Sprintf("%03d: %-28s%v\n", i, l.Command(), l)
+				loadsStr += fmt.Sprintf("%03d: %-28s%s\n", i, l.Command(), l.String())
 			}
 		}
 	}

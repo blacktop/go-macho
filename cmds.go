@@ -312,9 +312,6 @@ type Symtab struct {
 	Syms []Symbol
 }
 
-func (s *Symtab) Copy() *Symtab {
-	return &Symtab{SymtabCmd: s.SymtabCmd, Syms: append([]Symbol{}, s.Syms...)}
-}
 func (s *Symtab) LoadSize() uint32 {
 	return uint32(binary.Size(s.SymtabCmd))
 }
@@ -418,8 +415,6 @@ func (s *Symbol) MarshalJSON() ([]byte, error) {
 type SymSeg struct {
 	LoadBytes
 	types.SymsegCmd
-	Offset uint32
-	Size   uint32
 }
 
 func (s *SymSeg) LoadSize() uint32 {
@@ -435,7 +430,17 @@ func (s *SymSeg) String() string {
 	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d", s.Offset, s.Offset+s.Size, s.Size)
 }
 func (s *SymSeg) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(&struct {
+		LoadCmd string `json:"load_cmd"`
+		Len     uint32 `json:"len,omitempty"`
+		Offset  uint32 `json:"offset,omitempty"`
+		Size    uint32 `json:"size,omitempty"`
+	}{
+		LoadCmd: s.LoadCmd.String(),
+		Len:     s.Len,
+		Offset:  s.Offset,
+		Size:    s.Size,
+	})
 }
 
 /*******************************************************************************
@@ -446,8 +451,6 @@ func (s *SymSeg) MarshalJSON() ([]byte, error) {
 type Thread struct {
 	LoadBytes
 	types.ThreadCmd
-	Type uint32
-	Data []uint32
 }
 
 func (t *Thread) LoadSize() uint32 {
@@ -462,8 +465,16 @@ func (t *Thread) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 func (t *Thread) String() string {
 	return fmt.Sprintf("Type: %d", t.Type)
 }
-func (t *Thread) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+func (t *Thread) MarshalJSON() ([]byte, error) { // FIXME: data?
+	return json.Marshal(&struct {
+		LoadCmd string `json:"load_cmd"`
+		Len     uint32 `json:"len,omitempty"`
+		Type    uint32 `json:"type,omitempty"`
+	}{
+		LoadCmd: t.LoadCmd.String(),
+		Len:     t.Len,
+		Type:    t.Type,
+	})
 }
 
 /*******************************************************************************
@@ -490,7 +501,19 @@ func (u *UnixThread) String() string {
 	return fmt.Sprintf("Entry Point: 0x%016x", u.EntryPoint)
 }
 func (u *UnixThread) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(&struct {
+		LoadCmd    string `json:"load_cmd"`
+		Len        uint32 `json:"len,omitempty"`
+		Flavor     uint32 `json:"flavor,omitempty"`
+		Count      uint32 `json:"count,omitempty"`
+		EntryPoint uint64 `json:"entry_point,omitempty"`
+	}{
+		LoadCmd:    u.LoadCmd.String(),
+		Len:        u.Len,
+		Flavor:     u.Flavor,
+		Count:      u.Count,
+		EntryPoint: u.EntryPoint,
+	})
 }
 
 /*******************************************************************************
@@ -519,7 +542,19 @@ func (l *LoadFvmlib) String() string {
 	return fmt.Sprintf("%s (%s), Header Addr: %#08x", l.Name, l.MinorVersion, l.HeaderAddr)
 }
 func (l *LoadFvmlib) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(&struct {
+		LoadCmd       string `json:"load_cmd"`
+		Len           uint32 `json:"len,omitempty"`
+		Name          string `json:"name,omitempty"`
+		MinorVersion  string `json:"minor_version,omitempty"`
+		HeaderAddress uint32 `json:"header_addr,omitempty"`
+	}{
+		LoadCmd:       l.LoadCmd.String(),
+		Len:           l.Len,
+		Name:          l.Name,
+		MinorVersion:  l.MinorVersion.String(),
+		HeaderAddress: l.HeaderAddr,
+	})
 }
 
 /*******************************************************************************
@@ -527,7 +562,9 @@ func (l *LoadFvmlib) MarshalJSON() ([]byte, error) {
  *******************************************************************************/
 
 // A IDFvmlib represents a Mach-O LC_IDFVMLIB command.
-type IDFvmlib LoadFvmlib
+type IDFvmlib struct {
+	LoadFvmlib
+}
 
 /*******************************************************************************
  * LC_IDENT - object identification info (obsolete)
@@ -537,7 +574,7 @@ type IDFvmlib LoadFvmlib
 type Ident struct {
 	LoadBytes
 	types.IdentCmd
-	Length uint32
+	StrTable []string
 }
 
 func (i *Ident) LoadSize() uint32 {
@@ -550,10 +587,18 @@ func (i *Ident) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	return nil
 }
 func (i *Ident) String() string {
-	return fmt.Sprintf("len=%d", i.Length)
+	return fmt.Sprintf("str_count=%d", len(i.StrTable))
 }
 func (i *Ident) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(&struct {
+		LoadCmd string   `json:"load_cmd"`
+		Len     uint32   `json:"len,omitempty"`
+		Strings []string `json:"strings,omitempty"`
+	}{
+		LoadCmd: i.LoadCmd.String(),
+		Len:     i.Len,
+		Strings: i.StrTable,
+	})
 }
 
 /*******************************************************************************
@@ -581,7 +626,17 @@ func (l *FvmFile) String() string {
 	return fmt.Sprintf("%s, Header Addr: %#08x", l.Name, l.HeaderAddr)
 }
 func (l *FvmFile) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(&struct {
+		LoadCmd       string `json:"load_cmd"`
+		Len           uint32 `json:"len,omitempty"`
+		Name          string `json:"name,omitempty"`
+		HeaderAddress uint32 `json:"header_addr,omitempty"`
+	}{
+		LoadCmd:       l.LoadCmd.String(),
+		Len:           l.Len,
+		Name:          l.Name,
+		HeaderAddress: l.HeaderAddr,
+	})
 }
 
 /*******************************************************************************
@@ -607,7 +662,13 @@ func (c *Prepage) String() string {
 	return fmt.Sprintf("size=%d", c.Len)
 }
 func (c *Prepage) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(&struct {
+		LoadCmd string `json:"load_cmd"`
+		Len     uint32 `json:"len,omitempty"`
+	}{
+		LoadCmd: c.LoadCmd.String(),
+		Len:     c.Len,
+	})
 }
 
 /*******************************************************************************
@@ -684,46 +745,60 @@ func (d *Dysymtab) String() string {
 		locRelStr)
 }
 func (d *Dysymtab) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd        string   `json:"load_command"`
+		Len            uint32   `json:"length"`
+		Ilocalsym      uint32   `json:"ilocalsym"`
+		Nlocalsym      uint32   `json:"nlocalsym"`
+		Iextdefsym     uint32   `json:"iextdefsym"`
+		Nextdefsym     uint32   `json:"nextdefsym"`
+		Iundefsym      uint32   `json:"iundefsym"`
+		Nundefsym      uint32   `json:"nundefsym"`
+		Tocoffset      uint32   `json:"tocoffset"`
+		Ntoc           uint32   `json:"ntoc"`
+		Modtaboff      uint32   `json:"modtaboff"`
+		Nmodtab        uint32   `json:"nmodtab"`
+		Extrefsymoff   uint32   `json:"extrefsymoff"`
+		Nextrefsyms    uint32   `json:"nextrefsyms"`
+		Indirectsymoff uint32   `json:"indirectsymoff"`
+		Nindirectsyms  uint32   `json:"nindirectsyms"`
+		Extreloff      uint32   `json:"extreloff"`
+		Nextrel        uint32   `json:"nextrel"`
+		Locreloff      uint32   `json:"locreloff"`
+		Nlocrel        uint32   `json:"nlocrel"`
+		IndirectSyms   []uint32 `json:"indirect_symbols"`
+	}{
+		LoadCmd:        d.Command().String(),
+		Len:            d.LoadSize(),
+		Ilocalsym:      d.Ilocalsym,
+		Nlocalsym:      d.Nlocalsym,
+		Iextdefsym:     d.Iextdefsym,
+		Nextdefsym:     d.Nextdefsym,
+		Iundefsym:      d.Iundefsym,
+		Nundefsym:      d.Nundefsym,
+		Tocoffset:      d.Tocoffset,
+		Ntoc:           d.Ntoc,
+		Modtaboff:      d.Modtaboff,
+		Nmodtab:        d.Nmodtab,
+		Extrefsymoff:   d.Extrefsymoff,
+		Nextrefsyms:    d.Nextrefsyms,
+		Indirectsymoff: d.Indirectsymoff,
+		Nindirectsyms:  d.Nindirectsyms,
+		Extreloff:      d.Extreloff,
+		Nextrel:        d.Nextrel,
+		Locreloff:      d.Locreloff,
+		Nlocrel:        d.Nlocrel,
+		IndirectSyms:   d.IndirectSyms,
+	})
 }
 
 /*******************************************************************************
- * LC_ID_DYLIB, LC_LOAD_{,WEAK_}DYLIB,LC_REEXPORT_DYLIB
+ * LC_LOAD_DYLIB
  *******************************************************************************/
 
-// A Dylib represents a Mach-O load dynamic library command.
-type Dylib struct {
-	LoadBytes
-	types.DylibCmd
-	Name           string
-	Time           uint32
-	CurrentVersion types.Version
-	CompatVersion  types.Version
-}
-
-func (d *Dylib) LoadSize() uint32 {
-	return uint32(binary.Size(d.DylibCmd))
-}
-func (d *Dylib) Put(b []byte, o binary.ByteOrder) int {
-	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
-	o.PutUint32(b[1*4:], d.Len)
-	o.PutUint32(b[2*4:], d.NameOffset)
-	o.PutUint32(b[3*4:], d.Time)
-	o.PutUint32(b[4*4:], uint32(d.CurrentVersion))
-	o.PutUint32(b[5*4:], uint32(d.CompatVersion))
-	return 6 * binary.Size(uint32(0))
-}
-func (d *Dylib) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, d.DylibCmd); err != nil {
-		return fmt.Errorf("failed to write %s to buffer: %v", d.Command(), err)
-	}
-	return nil
-}
-func (d *Dylib) String() string {
-	return fmt.Sprintf("%s (%s)", d.Name, d.CurrentVersion)
-}
-func (d *Dylib) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+// A LoadDylib represents a Mach-O LC_LOAD_DYLIB command.
+type LoadDylib struct {
+	Dylib
 }
 
 /*******************************************************************************
@@ -731,7 +806,9 @@ func (d *Dylib) MarshalJSON() ([]byte, error) {
  *******************************************************************************/
 
 // A IDDylib represents a Mach-O LC_ID_DYLIB command.
-type IDDylib Dylib
+type IDDylib struct {
+	Dylib
+}
 
 /*******************************************************************************
  * LC_LOAD_DYLINKER
@@ -739,31 +816,7 @@ type IDDylib Dylib
 
 // A LoadDylinker represents a Mach-O LC_LOAD_DYLINKER command.
 type LoadDylinker struct {
-	LoadBytes
-	types.DylinkerCmd
-	Name string
-}
-
-func (d *LoadDylinker) LoadSize() uint32 {
-	return uint32(binary.Size(d.DylinkerCmd))
-}
-func (d *LoadDylinker) Put(b []byte, o binary.ByteOrder) int {
-	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
-	o.PutUint32(b[1*4:], d.Len)
-	o.PutUint32(b[2*4:], d.NameOffset)
-	return 3 * binary.Size(uint32(0))
-}
-func (d *LoadDylinker) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, d.DylinkerCmd); err != nil {
-		return fmt.Errorf("failed to write %s to buffer: %v", d.Command(), err)
-	}
-	return nil
-}
-func (d *LoadDylinker) String() string {
-	return d.Name
-}
-func (d *LoadDylinker) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	Dylinker
 }
 
 /*******************************************************************************
@@ -771,7 +824,9 @@ func (d *LoadDylinker) MarshalJSON() ([]byte, error) {
  *******************************************************************************/
 
 // DylinkerID represents a Mach-O LC_ID_DYLINKER command.
-type DylinkerID LoadDylinker
+type DylinkerID struct {
+	Dylinker
+}
 
 /*******************************************************************************
  * LC_PREBOUND_DYLIB - modules prebound for a dynamically linked shared library
@@ -807,7 +862,19 @@ func (d *PreboundDylib) String() string {
 	return fmt.Sprintf("%s, NumModules=%d, LinkedModules=%s", d.Name, d.NumModules, d.LinkedModules)
 }
 func (d *PreboundDylib) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd       string `json:"load_command"`
+		Len           uint32 `json:"length"`
+		Name          string `json:"name"`
+		NumModules    uint32 `json:"num_modules"`
+		LinkedModules string `json:"linked_modules"`
+	}{
+		LoadCmd:       d.Command().String(),
+		Len:           d.Len,
+		Name:          d.Name,
+		NumModules:    d.NumModules,
+		LinkedModules: d.LinkedModules,
+	})
 }
 
 /*******************************************************************************
@@ -817,16 +884,14 @@ func (d *PreboundDylib) MarshalJSON() ([]byte, error) {
 // A Routines is a Mach-O LC_ROUTINES command.
 type Routines struct {
 	LoadBytes
-	types.Routines64Cmd
-	InitAddress uint32
-	InitModule  uint32
+	types.RoutinesCmd
 }
 
 func (l *Routines) LoadSize() uint32 {
-	return uint32(binary.Size(l.Routines64Cmd))
+	return uint32(binary.Size(l.RoutinesCmd))
 }
 func (l *Routines) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, l.Routines64Cmd); err != nil {
+	if err := binary.Write(buf, o, l.RoutinesCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
 	}
 	return nil
@@ -835,7 +900,17 @@ func (l *Routines) String() string {
 	return fmt.Sprintf("Address: %#08x, Module: %d", l.InitAddress, l.InitModule)
 }
 func (l *Routines) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd     string `json:"load_command"`
+		Len         uint32 `json:"length"`
+		InitAddress uint32 `json:"init_address"`
+		InitModule  uint32 `json:"init_module"`
+	}{
+		LoadCmd:     l.Command().String(),
+		Len:         l.Len,
+		InitAddress: l.InitAddress,
+		InitModule:  l.InitModule,
+	})
 }
 
 /*******************************************************************************
@@ -860,7 +935,15 @@ func (l *SubFramework) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 }
 func (l *SubFramework) String() string { return l.Framework }
 func (l *SubFramework) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd   string `json:"load_command"`
+		Len       uint32 `json:"length"`
+		Framework string `json:"framework"`
+	}{
+		LoadCmd:   l.Command().String(),
+		Len:       l.Len,
+		Framework: l.Framework,
+	})
 }
 
 /*******************************************************************************
@@ -885,7 +968,15 @@ func (l *SubUmbrella) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 }
 func (l *SubUmbrella) String() string { return l.Umbrella }
 func (l *SubUmbrella) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd  string `json:"load_command"`
+		Len      uint32 `json:"length"`
+		Umbrella string `json:"umbrella"`
+	}{
+		LoadCmd:  l.Command().String(),
+		Len:      l.Len,
+		Umbrella: l.Umbrella,
+	})
 }
 
 /*******************************************************************************
@@ -912,7 +1003,15 @@ func (l *SubClient) String() string {
 	return l.Name
 }
 func (l *SubClient) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd string `json:"load_command"`
+		Len     uint32 `json:"length"`
+		Name    string `json:"name"`
+	}{
+		LoadCmd: l.Command().String(),
+		Len:     l.Len,
+		Name:    l.Name,
+	})
 }
 
 /*******************************************************************************
@@ -937,7 +1036,15 @@ func (l *SubLibrary) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 }
 func (l *SubLibrary) String() string { return l.Library }
 func (l *SubLibrary) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd string `json:"load_command"`
+		Len     uint32 `json:"length"`
+		Library string `json:"library"`
+	}{
+		LoadCmd: l.Command().String(),
+		Len:     l.Len,
+		Library: l.Library,
+	})
 }
 
 /*******************************************************************************
@@ -948,8 +1055,7 @@ func (l *SubLibrary) MarshalJSON() ([]byte, error) {
 type TwolevelHints struct {
 	LoadBytes
 	types.TwolevelHintsCmd
-	Offset uint32
-	Hints  []types.TwolevelHint
+	Hints []types.TwolevelHint
 }
 
 func (l *TwolevelHints) LoadSize() uint32 {
@@ -965,7 +1071,17 @@ func (l *TwolevelHints) String() string {
 	return fmt.Sprintf("Offset: %#08x, Num of Hints: %d", l.Offset, len(l.Hints))
 }
 func (l *TwolevelHints) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd string               `json:"load_command"`
+		Len     uint32               `json:"length"`
+		Offset  uint32               `json:"offset"`
+		Hints   []types.TwolevelHint `json:"hints,omitempty"`
+	}{
+		LoadCmd: l.Command().String(),
+		Len:     l.Len,
+		Offset:  l.Offset,
+		Hints:   l.Hints,
+	})
 }
 
 /*******************************************************************************
@@ -976,7 +1092,6 @@ func (l *TwolevelHints) MarshalJSON() ([]byte, error) {
 type PrebindCheckSum struct {
 	LoadBytes
 	types.PrebindCksumCmd
-	CheckSum uint32
 }
 
 func (l *PrebindCheckSum) LoadSize() uint32 {
@@ -992,7 +1107,15 @@ func (l *PrebindCheckSum) String() string {
 	return fmt.Sprintf("CheckSum: %#08x", l.CheckSum)
 }
 func (l *PrebindCheckSum) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd  string `json:"load_command"`
+		Len      uint32 `json:"length"`
+		CheckSum uint32 `json:"checksum"`
+	}{
+		LoadCmd:  l.Command().String(),
+		Len:      l.Len,
+		CheckSum: l.CheckSum,
+	})
 }
 
 /*******************************************************************************
@@ -1000,7 +1123,9 @@ func (l *PrebindCheckSum) MarshalJSON() ([]byte, error) {
  *******************************************************************************/
 
 // A WeakDylib represents a Mach-O LC_LOAD_WEAK_DYLIB command.
-type WeakDylib Dylib
+type WeakDylib struct {
+	Dylib
+}
 
 /*******************************************************************************
  * LC_ROUTINES_64
@@ -1010,8 +1135,6 @@ type WeakDylib Dylib
 type Routines64 struct {
 	LoadBytes
 	types.Routines64Cmd
-	InitAddress uint64
-	InitModule  uint64
 }
 
 func (l *Routines64) LoadSize() uint32 {
@@ -1027,7 +1150,17 @@ func (l *Routines64) String() string {
 	return fmt.Sprintf("Address: %#016x, Module: %d", l.InitAddress, l.InitModule)
 }
 func (l *Routines64) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd     string `json:"load_command"`
+		Len         uint32 `json:"length"`
+		InitAddress uint64 `json:"init_address"`
+		InitModule  uint64 `json:"init_module"`
+	}{
+		LoadCmd:     l.Command().String(),
+		Len:         l.Len,
+		InitAddress: l.InitAddress,
+		InitModule:  l.InitModule,
+	})
 }
 
 /*******************************************************************************
@@ -1053,7 +1186,15 @@ func (l *UUID) String() string {
 	return l.UUID.String()
 }
 func (l *UUID) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd string `json:"load_command"`
+		Len     uint32 `json:"length"`
+		UUID    string `json:"uuid"`
+	}{
+		LoadCmd: l.Command().String(),
+		Len:     l.Len,
+		UUID:    l.UUID.String(),
+	})
 }
 
 /*******************************************************************************
@@ -1080,7 +1221,15 @@ func (r *Rpath) String() string {
 	return r.Path
 }
 func (r *Rpath) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd string `json:"load_command"`
+		Len     uint32 `json:"length"`
+		Path    string `json:"path"`
+	}{
+		LoadCmd: r.Command().String(),
+		Len:     r.Len,
+		Path:    r.Path,
+	})
 }
 
 /*******************************************************************************
@@ -1109,7 +1258,19 @@ func (l *CodeSignature) String() string { // TODO: add more info
 	return fmt.Sprintf("offset=0x%09x  size=%#x", l.Offset, l.Size)
 }
 func (l *CodeSignature) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd       string               `json:"load_command"`
+		Len           uint32               `json:"length"`
+		Offset        uint32               `json:"offset"`
+		Size          uint32               `json:"size"`
+		CodeSignature ctypes.CodeSignature `json:"code_signature,omitempty"`
+	}{
+		LoadCmd: l.Command().String(),
+		Len:     l.Len,
+		Offset:  l.Offset,
+		Size:    l.Size,
+		// CodeSignature: l.CodeSignature, TODO: add MarshalJSON for CodeSignature
+	})
 }
 
 /*******************************************************************************
@@ -1120,10 +1281,7 @@ func (l *CodeSignature) MarshalJSON() ([]byte, error) {
 type SplitInfo struct {
 	LoadBytes
 	types.SegmentSplitInfoCmd
-	Offset  uint32
-	Size    uint32
 	Version uint8
-	Offsets []uint64
 }
 
 func (l *SplitInfo) LoadSize() uint32 {
@@ -1145,7 +1303,19 @@ func (s *SplitInfo) String() string {
 	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d, %s", s.Offset, s.Offset+s.Size, s.Size, version)
 }
 func (l *SplitInfo) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd string `json:"load_command"`
+		Len     uint32 `json:"length"`
+		Offset  uint32 `json:"offset"`
+		Size    uint32 `json:"size"`
+		Version uint8  `json:"version"`
+	}{
+		LoadCmd: l.Command().String(),
+		Len:     l.Len,
+		Offset:  l.Offset,
+		Size:    l.Size,
+		Version: l.Version,
+	})
 }
 
 /*******************************************************************************
@@ -1153,14 +1323,18 @@ func (l *SplitInfo) MarshalJSON() ([]byte, error) {
  *******************************************************************************/
 
 // A ReExportDylib represents a Mach-O LC_REEXPORT_DYLIB command.
-type ReExportDylib Dylib
+type ReExportDylib struct {
+	Dylib
+}
 
 /*******************************************************************************
  * LC_LAZY_LOAD_DYLIB - delay load of dylib until first use
  *******************************************************************************/
 
 // A LazyLoadDylib represents a Mach-O LC_LAZY_LOAD_DYLIB command.
-type LazyLoadDylib Dylib
+type LazyLoadDylib struct {
+	Dylib
+}
 
 /*******************************************************************************
  * LC_ENCRYPTION_INFO
@@ -1170,8 +1344,6 @@ type LazyLoadDylib Dylib
 type EncryptionInfo struct {
 	LoadBytes
 	types.EncryptionInfoCmd
-	Offset  uint32                 // file offset of encrypted range
-	Size    uint32                 // file size of encrypted range
 	CryptID types.EncryptionSystem // which enryption system, 0 means not-encrypted yet
 }
 
@@ -1200,7 +1372,19 @@ func (e *EncryptionInfo) String() string {
 	return fmt.Sprintf("offset=%#x size=%#x CryptID: %#x", e.Offset, e.Size, e.CryptID)
 }
 func (l *EncryptionInfo) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd string `json:"load_command"`
+		Len     uint32 `json:"length"`
+		Offset  uint32 `json:"offset"`
+		Size    uint32 `json:"size"`
+		CryptID uint32 `json:"crypt_id"`
+	}{
+		LoadCmd: l.Command().String(),
+		Len:     l.Len,
+		Offset:  l.Offset,
+		Size:    l.Size,
+		CryptID: uint32(l.CryptID),
+	})
 }
 
 /*******************************************************************************
@@ -1254,7 +1438,33 @@ func (d *DyldInfo) String() string {
 	)
 }
 func (l *DyldInfo) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd      string `json:"load_command"`
+		Len          uint32 `json:"length"`
+		RebaseOff    uint32 `json:"rebase_offset"`
+		RebaseSize   uint32 `json:"rebase_size"`
+		BindOff      uint32 `json:"bind_offset"`
+		BindSize     uint32 `json:"bind_size"`
+		WeakBindOff  uint32 `json:"weak_bind_offset"`
+		WeakBindSize uint32 `json:"weak_bind_size"`
+		LazyBindOff  uint32 `json:"lazy_bind_offset"`
+		LazyBindSize uint32 `json:"lazy_bind_size"`
+		ExportOff    uint32 `json:"export_offset"`
+		ExportSize   uint32 `json:"export_size"`
+	}{
+		LoadCmd:      l.Command().String(),
+		Len:          l.Len,
+		RebaseOff:    l.RebaseOff,
+		RebaseSize:   l.RebaseSize,
+		BindOff:      l.BindOff,
+		BindSize:     l.BindSize,
+		WeakBindOff:  l.WeakBindOff,
+		WeakBindSize: l.WeakBindSize,
+		LazyBindOff:  l.LazyBindOff,
+		LazyBindSize: l.LazyBindSize,
+		ExportOff:    l.ExportOff,
+		ExportSize:   l.ExportSize,
+	})
 }
 
 /*******************************************************************************
@@ -1262,28 +1472,36 @@ func (l *DyldInfo) MarshalJSON() ([]byte, error) {
  *******************************************************************************/
 
 // DyldInfoOnly is compressed dyld information only
-type DyldInfoOnly DyldInfo
+type DyldInfoOnly struct {
+	DyldInfo
+}
 
 /*******************************************************************************
  * LC_LOAD_UPWARD_DYLIB
  *******************************************************************************/
 
 // A UpwardDylib represents a Mach-O LC_LOAD_UPWARD_DYLIB load command.
-type UpwardDylib Dylib
+type UpwardDylib struct {
+	Dylib
+}
 
 /*******************************************************************************
  * LC_VERSION_MIN_MACOSX
  *******************************************************************************/
 
 // VersionMinMacOSX build for MacOSX min OS version
-type VersionMinMacOSX VersionMin
+type VersionMinMacOSX struct {
+	VersionMin
+}
 
 /*******************************************************************************
  * LC_VERSION_MIN_IPHONEOS
  *******************************************************************************/
 
 // VersionMiniPhoneOS build for iPhoneOS min OS version
-type VersionMiniPhoneOS VersionMin
+type VersionMiniPhoneOS struct {
+	VersionMin
+}
 
 /*******************************************************************************
  * LC_FUNCTION_STARTS
@@ -1291,30 +1509,7 @@ type VersionMiniPhoneOS VersionMin
 
 // A FunctionStarts represents a Mach-O function starts command.
 type FunctionStarts struct {
-	LoadBytes
-	types.FunctionStartsCmd
-	Offset          uint32
-	Size            uint32
-	StartOffset     uint64
-	NextFuncOffsets []uint64
-	VMAddrs         []uint64
-}
-
-func (l *FunctionStarts) LoadSize() uint32 {
-	return uint32(binary.Size(l.FunctionStartsCmd))
-}
-func (l *FunctionStarts) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, l.FunctionStartsCmd); err != nil {
-		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
-	}
-	return nil
-}
-func (l *FunctionStarts) String() string {
-	return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d", l.Offset, l.Offset+l.Size, l.Size)
-	// return fmt.Sprintf("offset=0x%08x-0x%08x size=%5d count=%d", f.Offset, f.Offset+f.Size, f.Size, len(f.VMAddrs))
-}
-func (l *FunctionStarts) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	LinkEditData
 }
 
 /*******************************************************************************
@@ -1322,7 +1517,9 @@ func (l *FunctionStarts) MarshalJSON() ([]byte, error) {
  *******************************************************************************/
 
 // DyldEnvironment represents a Mach-O LC_DYLD_ENVIRONMENT command.
-type DyldEnvironment LoadDylinker
+type DyldEnvironment struct {
+	Dylinker
+}
 
 /*******************************************************************************
  * LC_MAIN
@@ -1356,7 +1553,17 @@ func (e *EntryPoint) String() string {
 	return fmt.Sprintf("Entry Point: 0x%016x, Stack Size: %#x", e.EntryOffset, e.StackSize)
 }
 func (e *EntryPoint) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd string `json:"load_command"`
+		Len     uint32 `json:"length"`
+		Entry   uint64 `json:"entry_offset"`
+		Stack   uint64 `json:"stack_size"`
+	}{
+		LoadCmd: e.Command().String(),
+		Len:     e.Len,
+		Entry:   e.EntryOffset,
+		Stack:   e.StackSize,
+	})
 }
 
 /*******************************************************************************
@@ -1395,7 +1602,39 @@ func (d *DataInCode) String() string {
 		d.Offset, d.Offset+d.Size, d.Size, len(d.Entries), ents)
 }
 func (l *DataInCode) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd string `json:"load_command"`
+		Len     uint32 `json:"length"`
+		Offset  uint32 `json:"offset"`
+		Size    uint32 `json:"size"`
+		Entries []struct {
+			Offset uint32 `json:"offset"`
+			Length uint16 `json:"length"`
+			Kind   string `json:"kind"`
+		} `json:"entries"`
+	}{
+		LoadCmd: l.Command().String(),
+		Len:     l.Len,
+		Offset:  l.Offset,
+		Size:    l.Size,
+		Entries: func() []struct {
+			Offset uint32 `json:"offset"`
+			Length uint16 `json:"length"`
+			Kind   string `json:"kind"`
+		} {
+			ents := make([]struct {
+				Offset uint32 `json:"offset"`
+				Length uint16 `json:"length"`
+				Kind   string `json:"kind"`
+			}, len(l.Entries))
+			for i, e := range l.Entries {
+				ents[i].Offset = e.Offset
+				ents[i].Length = e.Length
+				ents[i].Kind = e.Kind.String()
+			}
+			return ents
+		}(),
+	})
 }
 
 /*******************************************************************************
@@ -1422,14 +1661,24 @@ func (s *SourceVersion) String() string {
 	return s.Version
 }
 func (s *SourceVersion) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd string `json:"load_command"`
+		Len     uint32 `json:"length"`
+		Version string `json:"version"`
+	}{
+		LoadCmd: s.Command().String(),
+		Len:     s.Len,
+		Version: s.Version,
+	})
 }
 
 /*******************************************************************************
  * LC_DYLIB_CODE_SIGN_DRS Code signing DRs copied from linked dylibs
  *******************************************************************************/
 
-type DylibCodeSignDrs LinkEditData
+type DylibCodeSignDrs struct {
+	LinkEditData
+}
 
 /*******************************************************************************
  * LC_ENCRYPTION_INFO_64
@@ -1470,7 +1719,21 @@ func (e *EncryptionInfo64) String() string {
 	return fmt.Sprintf("offset=0x%09x  size=%#x CryptID: %#x", e.Offset, e.Size, e.CryptID)
 }
 func (e *EncryptionInfo64) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd string `json:"load_command"`
+		Len     uint32 `json:"length"`
+		Offset  uint32 `json:"offset"`
+		Size    uint32 `json:"size"`
+		CryptID uint32 `json:"crypt_id"`
+		Pad     uint32 `json:"pad"`
+	}{
+		LoadCmd: e.Command().String(),
+		Len:     e.Len,
+		Offset:  e.Offset,
+		Size:    e.Size,
+		CryptID: uint32(e.CryptID),
+		Pad:     e.Pad,
+	})
 }
 
 /*******************************************************************************
@@ -1497,28 +1760,42 @@ func (l *LinkerOption) String() string {
 	return fmt.Sprintf("Options=%s", strings.Join(l.Options, ","))
 }
 func (l *LinkerOption) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd string   `json:"load_command"`
+		Len     uint32   `json:"length"`
+		Options []string `json:"options"`
+	}{
+		LoadCmd: l.Command().String(),
+		Len:     l.Len,
+		Options: l.Options,
+	})
 }
 
 /*******************************************************************************
  * LC_LINKER_OPTIMIZATION_HINT - linker options in MH_OBJECT files
  *******************************************************************************/
 
-type LinkerOptimizationHint LinkEditData
+type LinkerOptimizationHint struct {
+	LinkEditData
+}
 
 /*******************************************************************************
  * LC_VERSION_MIN_TVOS
  *******************************************************************************/
 
 // VersionMinTvOS build for AppleTV min OS version
-type VersionMinTvOS VersionMin
+type VersionMinTvOS struct {
+	VersionMin
+}
 
 /*******************************************************************************
  * LC_VERSION_MIN_WATCHOS
  *******************************************************************************/
 
 // VersionMinWatchOS build for Watch min OS version
-type VersionMinWatchOS VersionMin
+type VersionMinWatchOS struct {
+	VersionMin
+}
 
 /*******************************************************************************
  * LC_NOTE - arbitrary data included within a Mach-O file
@@ -1546,7 +1823,19 @@ func (n *Note) String() string {
 	return fmt.Sprintf("DataOwner=%s, offset=0x%08x-0x%08x size=%5d", n.DataOwner, n.Offset, n.Offset+n.Size, n.Size)
 }
 func (n *Note) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd   string `json:"load_command"`
+		Len       uint32 `json:"length"`
+		DataOwner string `json:"data_owner"`
+		Offset    uint64 `json:"offset"`
+		Size      uint64 `json:"size"`
+	}{
+		LoadCmd:   n.Command().String(),
+		Len:       n.Len,
+		DataOwner: n.DataOwner,
+		Offset:    n.Offset,
+		Size:      n.Size,
+	})
 }
 
 /*******************************************************************************
@@ -1557,12 +1846,7 @@ func (n *Note) MarshalJSON() ([]byte, error) {
 type BuildVersion struct {
 	LoadBytes
 	types.BuildVersionCmd
-	Platform    string /* platform */
-	Minos       string /* X.Y.Z is encoded in nibbles xxxx.yy.zz */
-	Sdk         string /* X.Y.Z is encoded in nibbles xxxx.yy.zz */
-	NumTools    uint32 /* number of tool entries following this */
-	Tool        string
-	ToolVersion string
+	Tools []types.BuildToolVersion
 }
 
 func (b *BuildVersion) LoadSize() uint32 {
@@ -1576,18 +1860,45 @@ func (b *BuildVersion) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 }
 func (b *BuildVersion) String() string {
 	if b.NumTools > 0 {
-		return fmt.Sprintf("Platform: %s, SDK: %s, Tool: %s (%s)",
-			b.Platform,
-			b.Sdk,
-			b.Tool,
-			b.ToolVersion)
+		if b.NumTools == 1 {
+			return fmt.Sprintf("Platform: %s, SDK: %s, Tool: %s (%s)",
+				b.Platform,
+				b.Sdk,
+				b.Tools[0].Tool,
+				b.Tools[0].Version)
+		} else {
+			var tools []string
+			for _, t := range b.Tools {
+				tools = append(tools, fmt.Sprintf("%s (%s)", t.Tool, t.Version))
+			}
+			return fmt.Sprintf("Platform: %s, SDK: %s, Tools: [%s]",
+				b.Platform,
+				b.Sdk,
+				strings.Join(tools, ", "))
+		}
 	}
 	return fmt.Sprintf("Platform: %s, SDK: %s",
 		b.Platform,
 		b.Sdk)
 }
 func (b *BuildVersion) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd  string                   `json:"load_command"`
+		Len      uint32                   `json:"length"`
+		Platform string                   `json:"platform"`
+		Minos    string                   `json:"min_os"`
+		Sdk      string                   `json:"sdk"`
+		NumTools uint32                   `json:"num_tools"`
+		Tools    []types.BuildToolVersion `json:"tools"`
+	}{
+		LoadCmd:  b.Command().String(),
+		Len:      b.Len,
+		Platform: b.Platform.String(),
+		Minos:    b.Minos.String(),
+		Sdk:      b.Sdk.String(),
+		NumTools: b.NumTools,
+		Tools:    b.Tools,
+	})
 }
 
 /*******************************************************************************
@@ -1595,14 +1906,18 @@ func (b *BuildVersion) MarshalJSON() ([]byte, error) {
  *******************************************************************************/
 
 // A DyldExportsTrie used with linkedit_data_command, payload is trie
-type DyldExportsTrie LinkEditData
+type DyldExportsTrie struct {
+	LinkEditData
+}
 
 /*******************************************************************************
  * LC_DYLD_CHAINED_FIXUPS
  *******************************************************************************/
 
 // A DyldChainedFixups used with linkedit_data_command
-type DyldChainedFixups LinkEditData
+type DyldChainedFixups struct {
+	LinkEditData
+}
 
 /*******************************************************************************
  * LC_FILESET_ENTRY
@@ -1612,8 +1927,6 @@ type DyldChainedFixups LinkEditData
 type FilesetEntry struct {
 	LoadBytes
 	types.FilesetEntryCmd
-	Addr    uint64 // memory address of the entry
-	Offset  uint64 // file offset of the entry
 	EntryID string // contained entry id
 }
 
@@ -1630,12 +1943,110 @@ func (f *FilesetEntry) String() string {
 	return fmt.Sprintf("offset=0x%09x addr=0x%016x %s", f.Offset, f.Addr, f.EntryID)
 }
 func (l *FilesetEntry) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd string `json:"load_command"`
+		Len     uint32 `json:"length"`
+		Offset  uint64 `json:"offset"`
+		Addr    uint64 `json:"address"`
+		EntryID string `json:"entry_id"`
+	}{
+		LoadCmd: l.Command().String(),
+		Len:     l.Len,
+		Offset:  l.Offset,
+		Addr:    l.Addr,
+		EntryID: l.EntryID,
+	})
 }
 
 /*******************************************************************************
  * COMMON COMMANDS
  *******************************************************************************/
+
+// A Dylib represents a Mach-O LC_ID_DYLIB, LC_LOAD_{,WEAK_}DYLIB,LC_REEXPORT_DYLIB load command.
+type Dylib struct {
+	LoadBytes
+	types.DylibCmd
+	Name           string
+	Timestamp      uint32
+	CurrentVersion types.Version
+	CompatVersion  types.Version
+}
+
+func (d *Dylib) LoadSize() uint32 {
+	return uint32(binary.Size(d.DylibCmd))
+}
+func (d *Dylib) Put(b []byte, o binary.ByteOrder) int {
+	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
+	o.PutUint32(b[1*4:], d.Len)
+	o.PutUint32(b[2*4:], d.NameOffset)
+	o.PutUint32(b[3*4:], d.Timestamp)
+	o.PutUint32(b[4*4:], uint32(d.CurrentVersion))
+	o.PutUint32(b[5*4:], uint32(d.CompatVersion))
+	return 6 * binary.Size(uint32(0))
+}
+func (d *Dylib) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, d.DylibCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", d.Command(), err)
+	}
+	return nil
+}
+func (d *Dylib) String() string {
+	return fmt.Sprintf("%s (%s)", d.Name, d.CurrentVersion)
+}
+func (d *Dylib) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		LoadCmd   string `json:"load_command"`
+		Len       uint32 `json:"length"`
+		Name      string `json:"name"`
+		Timestamp uint32 `json:"timestamp"`
+		Current   string `json:"current_version"`
+		Compat    string `json:"compatibility_version"`
+	}{
+		LoadCmd:   d.Command().String(),
+		Len:       d.Len,
+		Name:      d.Name,
+		Timestamp: d.Timestamp,
+		Current:   d.CurrentVersion.String(),
+		Compat:    d.CompatVersion.String(),
+	})
+}
+
+// A Dylinker represents a Mach-O LC_ID_DYLINKER, LC_LOAD_DYLINKER or LC_DYLD_ENVIRONMENT load command.
+type Dylinker struct {
+	LoadBytes
+	types.DylinkerCmd
+	Name string
+}
+
+func (d *Dylinker) LoadSize() uint32 {
+	return uint32(binary.Size(d.DylinkerCmd))
+}
+func (d *Dylinker) Put(b []byte, o binary.ByteOrder) int {
+	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
+	o.PutUint32(b[1*4:], d.Len)
+	o.PutUint32(b[2*4:], d.NameOffset)
+	return 3 * binary.Size(uint32(0))
+}
+func (d *Dylinker) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, d.DylinkerCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", d.Command(), err)
+	}
+	return nil
+}
+func (d *Dylinker) String() string {
+	return d.Name
+}
+func (d *Dylinker) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		LoadCmd string `json:"load_command"`
+		Len     uint32 `json:"length"`
+		Name    string `json:"name"`
+	}{
+		LoadCmd: d.Command().String(),
+		Len:     d.Len,
+		Name:    d.Name,
+	})
+}
 
 // A VersionMin represents a Mach-O LC_VERSION_MIN_* command.
 type VersionMin struct {
@@ -1658,10 +2069,22 @@ func (v *VersionMin) String() string {
 	return fmt.Sprintf("Version=%s, SDK=%s", v.Version, v.Sdk)
 }
 func (v *VersionMin) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd string `json:"load_command"`
+		Len     uint32 `json:"length"`
+		Version string `json:"version"`
+		SDK     string `json:"sdk"`
+	}{
+		LoadCmd: v.Command().String(),
+		Len:     v.Len,
+		Version: v.Version,
+		SDK:     v.Sdk,
+	})
 }
 
 // A LinkEditData represents a Mach-O linkedit data command.
+/* LC_CODE_SIGNATURE, LC_SEGMENT_SPLIT_INFO, LC_FUNCTION_STARTS, LC_DATA_IN_CODE,
+   LC_DYLIB_CODE_SIGN_DRS, LC_LINKER_OPTIMIZATION_HINT, LC_DYLD_EXPORTS_TRIE, or LC_DYLD_CHAINED_FIXUPS. */
 type LinkEditData struct {
 	LoadBytes
 	types.LinkEditDataCmd
@@ -1682,5 +2105,15 @@ func (l *LinkEditData) String() string {
 	return fmt.Sprintf("offset=0x%09x  size=%#x", l.Offset, l.Size)
 }
 func (l *LinkEditData) MarshalJSON() ([]byte, error) {
-	panic("not implemented") // TODO: Implement
+	return json.Marshal(struct {
+		LoadCmd string `json:"load_command"`
+		Len     uint32 `json:"length"`
+		Offset  uint32 `json:"offset"`
+		Size    uint32 `json:"size"`
+	}{
+		LoadCmd: l.Command().String(),
+		Len:     l.Len,
+		Offset:  l.Offset,
+		Size:    l.Size,
+	})
 }

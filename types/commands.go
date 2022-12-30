@@ -3,6 +3,7 @@ package types
 //go:generate stringer -type=LoadCmd -output commands_string.go
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -213,11 +214,13 @@ type DylibCmd struct {
 	 * at runtime is exactly the same as used to built the program.
 	 */
 	NameOffset     uint32
-	Time           uint32
+	Timestamp      uint32
 	CurrentVersion Version
 	CompatVersion  Version
 }
 
+// A LoadDylibCmd load a dynamically linked shared library.
+type LoadDylibCmd DylibCmd // LC_LOAD_DYLIB
 // A IDDylibCmd represents a Mach-O load dynamic library ident command.
 type IDDylibCmd DylibCmd // LC_ID_DYLIB
 // A LoadWeakDylibCmd is a Mach-O load a dynamically linked shared library that is allowed to be missing (all symbols are weak imported) command.
@@ -623,6 +626,16 @@ func (t TwolevelHint) SubImageIndex() uint8 {
 // TableOfContentsIndex index into the table of contents
 func (t TwolevelHint) TableOfContentsIndex() uint32 {
 	return uint32(t >> 8)
+}
+
+func (t TwolevelHint) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		SubImageIndex        uint8  `json:"subimage_index"`
+		TableOfContentsIndex uint32 `json:"toc_index"`
+	}{
+		SubImageIndex:        t.SubImageIndex(),
+		TableOfContentsIndex: t.TableOfContentsIndex(),
+	})
 }
 
 /*
