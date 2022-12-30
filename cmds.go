@@ -261,29 +261,31 @@ func (s *Segment) String() string {
 
 func (s *Segment) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
-		LoadCmd string   `json:"load_cmd"`
-		Len     uint32   `json:"len,omitempty"`
-		Name    string   `json:"name,omitempty"`
-		Addr    uint64   `json:"addr,omitempty"`
-		Memsz   uint64   `json:"memsz,omitempty"`
-		Offset  uint64   `json:"offset,omitempty"`
-		Filesz  uint64   `json:"filesz,omitempty"`
-		Maxprot string   `json:"maxprot,omitempty"`
-		Prot    string   `json:"prot,omitempty"`
-		Nsect   uint32   `json:"nsect,omitempty"`
-		Flags   []string `json:"flags,omitempty"`
+		LoadCmd  string           `json:"load_cmd"`
+		Len      uint32           `json:"len,omitempty"`
+		Name     string           `json:"name,omitempty"`
+		Addr     uint64           `json:"addr,omitempty"`
+		Memsz    uint64           `json:"memsz,omitempty"`
+		Offset   uint64           `json:"offset,omitempty"`
+		Filesz   uint64           `json:"filesz,omitempty"`
+		Maxprot  string           `json:"maxprot,omitempty"`
+		Prot     string           `json:"prot,omitempty"`
+		Nsect    uint32           `json:"nsect,omitempty"`
+		Flags    []string         `json:"flags,omitempty"`
+		Sections []*types.Section `json:"sections,omitempty"`
 	}{
-		LoadCmd: s.SegmentHeader.LoadCmd.String(),
-		Len:     s.SegmentHeader.Len,
-		Name:    s.SegmentHeader.Name,
-		Addr:    s.SegmentHeader.Addr,
-		Memsz:   s.SegmentHeader.Memsz,
-		Offset:  s.SegmentHeader.Offset,
-		Filesz:  s.SegmentHeader.Filesz,
-		Maxprot: s.SegmentHeader.Maxprot.String(),
-		Prot:    s.SegmentHeader.Prot.String(),
-		Nsect:   s.SegmentHeader.Nsect,
-		Flags:   s.SegmentHeader.Flag.List(),
+		LoadCmd:  s.SegmentHeader.LoadCmd.String(),
+		Len:      s.SegmentHeader.Len,
+		Name:     s.SegmentHeader.Name,
+		Addr:     s.SegmentHeader.Addr,
+		Memsz:    s.SegmentHeader.Memsz,
+		Offset:   s.SegmentHeader.Offset,
+		Filesz:   s.SegmentHeader.Filesz,
+		Maxprot:  s.SegmentHeader.Maxprot.String(),
+		Prot:     s.SegmentHeader.Prot.String(),
+		Nsect:    s.SegmentHeader.Nsect,
+		Flags:    s.SegmentHeader.Flag.List(),
+		Sections: s.sections,
 	})
 }
 
@@ -358,6 +360,7 @@ func (s *Symtab) MarshalJSON() ([]byte, error) {
 		Nsyms   uint32 `json:"nsyms,omitempty"`
 		Stroff  uint32 `json:"stroff,omitempty"`
 		Strsize uint32 `json:"strsize,omitempty"`
+		Count   int    `json:"count,omitempty"`
 	}{
 		LoadCmd: s.LoadCmd.String(),
 		Len:     s.Len,
@@ -365,6 +368,7 @@ func (s *Symtab) MarshalJSON() ([]byte, error) {
 		Nsyms:   s.Nsyms,
 		Stroff:  s.Stroff,
 		Strsize: s.Strsize,
+		Count:   len(s.Syms),
 	})
 }
 
@@ -746,27 +750,26 @@ func (d *Dysymtab) String() string {
 }
 func (d *Dysymtab) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd        string   `json:"load_command"`
-		Len            uint32   `json:"length"`
-		Ilocalsym      uint32   `json:"ilocalsym"`
-		Nlocalsym      uint32   `json:"nlocalsym"`
-		Iextdefsym     uint32   `json:"iextdefsym"`
-		Nextdefsym     uint32   `json:"nextdefsym"`
-		Iundefsym      uint32   `json:"iundefsym"`
-		Nundefsym      uint32   `json:"nundefsym"`
-		Tocoffset      uint32   `json:"tocoffset"`
-		Ntoc           uint32   `json:"ntoc"`
-		Modtaboff      uint32   `json:"modtaboff"`
-		Nmodtab        uint32   `json:"nmodtab"`
-		Extrefsymoff   uint32   `json:"extrefsymoff"`
-		Nextrefsyms    uint32   `json:"nextrefsyms"`
-		Indirectsymoff uint32   `json:"indirectsymoff"`
-		Nindirectsyms  uint32   `json:"nindirectsyms"`
-		Extreloff      uint32   `json:"extreloff"`
-		Nextrel        uint32   `json:"nextrel"`
-		Locreloff      uint32   `json:"locreloff"`
-		Nlocrel        uint32   `json:"nlocrel"`
-		IndirectSyms   []uint32 `json:"indirect_symbols"`
+		LoadCmd        string `json:"load_command"`
+		Len            uint32 `json:"length"`
+		Ilocalsym      uint32 `json:"ilocalsym"`
+		Nlocalsym      uint32 `json:"nlocalsym"`
+		Iextdefsym     uint32 `json:"iextdefsym"`
+		Nextdefsym     uint32 `json:"nextdefsym"`
+		Iundefsym      uint32 `json:"iundefsym"`
+		Nundefsym      uint32 `json:"nundefsym"`
+		Tocoffset      uint32 `json:"tocoffset"`
+		Ntoc           uint32 `json:"ntoc"`
+		Modtaboff      uint32 `json:"modtaboff"`
+		Nmodtab        uint32 `json:"nmodtab"`
+		Extrefsymoff   uint32 `json:"extrefsymoff"`
+		Nextrefsyms    uint32 `json:"nextrefsyms"`
+		Indirectsymoff uint32 `json:"indirectsymoff"`
+		Nindirectsyms  uint32 `json:"nindirectsyms"`
+		Extreloff      uint32 `json:"extreloff"`
+		Nextrel        uint32 `json:"nextrel"`
+		Locreloff      uint32 `json:"locreloff"`
+		Nlocrel        uint32 `json:"nlocrel"`
 	}{
 		LoadCmd:        d.Command().String(),
 		Len:            d.LoadSize(),
@@ -788,7 +791,6 @@ func (d *Dysymtab) MarshalJSON() ([]byte, error) {
 		Nextrel:        d.Nextrel,
 		Locreloff:      d.Locreloff,
 		Nlocrel:        d.Nlocrel,
-		IndirectSyms:   d.IndirectSyms,
 	})
 }
 
@@ -1259,17 +1261,17 @@ func (l *CodeSignature) String() string { // TODO: add more info
 }
 func (l *CodeSignature) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd       string               `json:"load_command"`
-		Len           uint32               `json:"length"`
-		Offset        uint32               `json:"offset"`
-		Size          uint32               `json:"size"`
-		CodeSignature ctypes.CodeSignature `json:"code_signature,omitempty"`
+		LoadCmd       string                `json:"load_command"`
+		Len           uint32                `json:"length"`
+		Offset        uint32                `json:"offset"`
+		Size          uint32                `json:"size"`
+		CodeSignature *ctypes.CodeSignature `json:"code_signature,omitempty"`
 	}{
-		LoadCmd: l.Command().String(),
-		Len:     l.Len,
-		Offset:  l.Offset,
-		Size:    l.Size,
-		// CodeSignature: l.CodeSignature, TODO: add MarshalJSON for CodeSignature
+		LoadCmd:       l.Command().String(),
+		Len:           l.Len,
+		Offset:        l.Offset,
+		Size:          l.Size,
+		CodeSignature: nil, // TODO: add MarshalJSON for CodeSignature
 	})
 }
 

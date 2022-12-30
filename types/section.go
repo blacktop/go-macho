@@ -691,7 +691,7 @@ func (s *Section) MarshalJSON() ([]byte, error) {
 		Align   uint32   `json:"align"`
 		Reloff  uint32   `json:"reloff"`
 		Nreloc  uint32   `json:"nreloc"`
-		Flags   []string `json:"flags"`
+		Flags   []string `json:"flags,omitempty"`
 		Type    uint8    `json:"type"`
 		Relocs  []Reloc  `json:"relocs,omitempty"`
 	}{
