@@ -104,6 +104,8 @@ func (dcf *DyldChainedFixups) ParseStarts() error {
 		if err := binary.Read(dcf.r, dcf.bo, &dcf.Starts[segIdx].PageStarts); err != nil {
 			return err
 		}
+
+		dcf.PointerFormat = dcf.Starts[segIdx].DyldChainedStartsInSegment.PointerFormat
 	}
 
 	return nil
@@ -387,4 +389,101 @@ func (dcf *DyldChainedFixups) parseImports() error {
 	}
 
 	return nil
+}
+
+func (dcf *DyldChainedFixups) IsRebase(addr, preferredLoadAddress uint64) (uint64, bool) {
+	var targetRuntimeOffset uint64
+	switch dcf.PointerFormat {
+	case DYLD_CHAINED_PTR_ARM64E:
+		fallthrough
+	case DYLD_CHAINED_PTR_ARM64E_USERLAND:
+		fallthrough
+	case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
+		fallthrough
+	case DYLD_CHAINED_PTR_ARM64E_KERNEL:
+		fallthrough
+	case DYLD_CHAINED_PTR_ARM64E_FIRMWARE:
+		if DcpArm64eIsBind(addr) {
+			return 0, false
+		}
+		if DcpArm64eIsAuth(addr) {
+			return DyldChainedPtrArm64eAuthRebase{Pointer: addr}.Target(), true
+		}
+		if DcpArm64eIsRebase(addr) {
+			targetRuntimeOffset = DyldChainedPtrArm64eRebase{Pointer: addr}.UnpackTarget()
+			if (dcf.PointerFormat == DYLD_CHAINED_PTR_ARM64E) || (dcf.PointerFormat == DYLD_CHAINED_PTR_ARM64E_FIRMWARE) {
+				targetRuntimeOffset -= preferredLoadAddress
+			}
+			return targetRuntimeOffset, true
+		}
+		return 0, false
+	case DYLD_CHAINED_PTR_64, DYLD_CHAINED_PTR_64_OFFSET:
+		if Generic64IsBind(addr) {
+			return targetRuntimeOffset, false
+		}
+		targetRuntimeOffset = DyldChainedPtr64Rebase{Pointer: addr}.UnpackedTarget()
+		if dcf.PointerFormat == DYLD_CHAINED_PTR_64 {
+			targetRuntimeOffset -= preferredLoadAddress
+		}
+		return targetRuntimeOffset, true
+	case DYLD_CHAINED_PTR_64_KERNEL_CACHE, DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE:
+		targetRuntimeOffset = DyldChainedPtr64KernelCacheRebase{Pointer: addr}.Target()
+		return targetRuntimeOffset, true
+	case DYLD_CHAINED_PTR_32:
+		if Generic32IsBind(uint32(addr)) {
+			return targetRuntimeOffset, false
+		}
+		targetRuntimeOffset = uint64(DyldChainedPtr32Rebase{Pointer: uint32(addr)}.Target()) - preferredLoadAddress
+		return targetRuntimeOffset, true
+	case DYLD_CHAINED_PTR_32_FIRMWARE:
+		targetRuntimeOffset = uint64(DyldChainedPtr32FirmwareRebase{Pointer: uint32(addr)}.Target()) - preferredLoadAddress
+		return targetRuntimeOffset, true
+	default:
+		return 0, false
+	}
+}
+
+func (dcf *DyldChainedFixups) IsBind(addr uint64) (*DcfImport, int64, bool) {
+	if len(dcf.Imports) == 0 {
+		return nil, 0, false
+	}
+
+	switch dcf.PointerFormat {
+	case DYLD_CHAINED_PTR_ARM64E:
+		fallthrough
+	case DYLD_CHAINED_PTR_ARM64E_USERLAND:
+		fallthrough
+	case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
+		fallthrough
+	case DYLD_CHAINED_PTR_ARM64E_KERNEL:
+		fallthrough
+	case DYLD_CHAINED_PTR_ARM64E_FIRMWARE:
+		if !DcpArm64eIsBind(addr) {
+			return nil, 0, false
+		}
+		if DcpArm64eIsAuth(addr) { // is auth-bind
+			if dcf.PointerFormat == DYLD_CHAINED_PTR_ARM64E_USERLAND24 {
+				return &dcf.Imports[DyldChainedPtrArm64eAuthBind24{Pointer: addr}.Ordinal()], 0, true
+			}
+			return &dcf.Imports[DyldChainedPtrArm64eAuthBind{Pointer: addr}.Ordinal()], 0, true
+		}
+		if dcf.PointerFormat == DYLD_CHAINED_PTR_ARM64E_USERLAND24 {
+			return &dcf.Imports[DyldChainedPtrArm64eAuthBind24{Pointer: addr}.Ordinal()], DyldChainedPtrArm64eBind{Pointer: addr}.SignExtendedAddend(), true
+		}
+		return &dcf.Imports[DyldChainedPtrArm64eAuthBind{Pointer: addr}.Ordinal()], DyldChainedPtrArm64eBind{Pointer: addr}.SignExtendedAddend(), true
+	case DYLD_CHAINED_PTR_64, DYLD_CHAINED_PTR_64_OFFSET:
+		if !Generic64IsBind(addr) {
+			return nil, 0, false
+		}
+		return &dcf.Imports[DyldChainedPtr64Bind{Pointer: addr}.Ordinal()], int64(DyldChainedPtr64Bind{Pointer: addr}.Addend()), true
+	case DYLD_CHAINED_PTR_32:
+		if !Generic32IsBind(uint32(addr)) {
+			return nil, 0, false
+		}
+		return &dcf.Imports[DyldChainedPtr32Bind{Pointer: uint32(addr)}.Ordinal()], int64(DyldChainedPtr32Bind{Pointer: uint32(addr)}.Addend()), true
+	case DYLD_CHAINED_PTR_64_KERNEL_CACHE, DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE:
+		return nil, 0, false
+	default:
+		return nil, 0, false
+	}
 }

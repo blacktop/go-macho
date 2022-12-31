@@ -70,7 +70,7 @@ func (d DyldChainedImportAddend) Addend() uint64 {
 }
 
 func (i DyldChainedImportAddend) String() string {
-	return fmt.Sprintf("lib ordinal: %2d, is_weak: %t, addend: 0x%08x", i.LibOrdinal(), i.WeakImport(), i.Addend)
+	return fmt.Sprintf("lib ordinal: %2d, is_weak: %t, addend: %#x", i.LibOrdinal(), i.WeakImport(), i.Addend())
 }
 
 type DyldChainedImport64 uint64
@@ -113,5 +113,5 @@ func (d DyldChainedImportAddend64) Addend() uint64 {
 	return d.AddendVal
 }
 func (i DyldChainedImportAddend64) String() string {
-	return fmt.Sprintf("lib ordinal: %2d, is_weak: %t, addend: 0x%016x", i.LibOrdinal(), i.WeakImport(), i.Addend)
+	return fmt.Sprintf("lib ordinal: %2d, is_weak: %t, addend: %#x", i.LibOrdinal(), i.WeakImport(), i.Addend())
 }

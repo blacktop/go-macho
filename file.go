@@ -1316,10 +1316,8 @@ func (f *File) has16KPages() bool {
 }
 
 func (f *File) preferredLoadAddress() uint64 {
-	for _, s := range f.Segments() {
-		if strings.EqualFold(s.Name, "__TEXT") {
-			return s.Addr
-		}
+	if text := f.Segment("__TEXT"); text != nil {
+		return text.Addr
 	}
 	return 0
 }
@@ -1392,16 +1390,30 @@ func (f *File) convertToVMAddr(value uint64) uint64 {
 	if value == 0 {
 		return 0
 	}
+
 	if f.HasFixups() {
-		if fixupchains.DcpArm64eIsRebase(value) {
-			if fixupchains.DcpArm64eIsAuth(value) {
-				dcp := fixupchains.DyldChainedPtrArm64eAuthRebase{Pointer: value}
-				return dcp.Target() + f.preferredLoadAddress()
-			}
-			dcp := fixupchains.DyldChainedPtrArm64eRebase{Pointer: value}
-			return dcp.UnpackTarget() + f.preferredLoadAddress()
+		dcf, err := f.DyldChainedFixups()
+		if err != nil {
+			return value
 		}
+		if target, ok := dcf.IsRebase(value, f.GetBaseAddress()); ok {
+			if target <= f.preferredLoadAddress() { // gross hack to avoid re-rebasing
+				return target + f.preferredLoadAddress()
+			}
+			return value
+		}
+		// if bind, addend, ok := dcf.IsBind(value); ok {
+		// 	if bind.Import.LibOrdinal() == types.BIND_SPECIAL_DYLIB_SELF {
+		// 		symAddr, err := f.FindSymbolAddress(bind.Name)
+		// 		if err != nil {
+		// 			return 0
+		// 		}
+		// 		return uint64(int64(symAddr) + addend)
+		// 	}
+		// 	return 0
+		// }
 	}
+
 	return value
 }
 
@@ -1839,6 +1851,10 @@ func (f *File) HasFixups() bool {
 
 // DyldChainedFixups returns the dyld chained fixups.
 func (f *File) DyldChainedFixups() (*fixupchains.DyldChainedFixups, error) {
+	if f.dcf != nil { // is cached
+		return f.dcf, nil
+	}
+
 	for _, l := range f.Loads {
 		if dcfLC, ok := l.(*DyldChainedFixups); ok {
 			data := make([]byte, dcfLC.Size)
@@ -1860,7 +1876,15 @@ func (f *File) DyldChainedFixups() (*fixupchains.DyldChainedFixups, error) {
 					dcf.Starts[idx].SegmentOffset = segs[idx].Offset
 				}
 			}
-			return dcf.Parse()
+
+			dcf, err := dcf.Parse()
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse dyld chained fixups: %v", err)
+			}
+
+			f.dcf = dcf // cache
+
+			return dcf, nil
 		}
 	}
 	return nil, fmt.Errorf("macho does not contain LC_DYLD_CHAINED_FIXUPS")

@@ -10,11 +10,12 @@ import (
 
 type DyldChainedFixups struct {
 	DyldChainedFixupsHeader
-	Starts  []DyldChainedStarts
-	Imports []DcfImport
-	r       *bytes.Reader
-	sr      types.MachoReader
-	bo      binary.ByteOrder
+	PointerFormat DCPtrKind
+	Starts        []DyldChainedStarts
+	Imports       []DcfImport
+	r             *bytes.Reader
+	sr            types.MachoReader
+	bo            binary.ByteOrder
 }
 
 type Fixup interface {
@@ -440,8 +441,8 @@ func (d DyldChainedPtr64Rebase) Target() uint64 {
 func (d DyldChainedPtr64Rebase) High8() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 36, 8) // after slide added
 }
-func (d DyldChainedPtr64Rebase) UnpackedTarget() uint {
-	return uint(d.High8()<<56 | d.Target())
+func (d DyldChainedPtr64Rebase) UnpackedTarget() uint64 {
+	return d.High8()<<56 | d.Target()
 }
 func (d DyldChainedPtr64Rebase) Reserved() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 44, 7) // all zeros
@@ -487,8 +488,8 @@ func (d DyldChainedPtr64RebaseOffset) Target() uint64 {
 func (d DyldChainedPtr64RebaseOffset) High8() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 36, 8) // before slide added)
 }
-func (d DyldChainedPtr64RebaseOffset) UnpackedTarget() uint {
-	return uint(d.High8()<<56 | d.Target())
+func (d DyldChainedPtr64RebaseOffset) UnpackedTarget() uint64 {
+	return d.High8()<<56 | d.Target()
 }
 func (d DyldChainedPtr64RebaseOffset) Reserved() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 44, 7) // all zeros
