@@ -1988,7 +1988,10 @@ func (d *Dylib) Put(b []byte, o binary.ByteOrder) int {
 }
 func (d *Dylib) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, d.DylibCmd); err != nil {
-		return fmt.Errorf("failed to write %s to buffer: %v", d.Command(), err)
+		return fmt.Errorf("failed to write %s to Dylib buffer: %v", d.Command(), err)
+	}
+	if _, err := buf.WriteString(d.Name + "\x00"); err != nil {
+		return fmt.Errorf("failed to write %s to Dylib buffer: %v", d.Name, err)
 	}
 	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"unicode"
 )
 
@@ -90,6 +91,29 @@ func (v Version) String() string {
 		return fmt.Sprintf("%d.%d", binary.BigEndian.Uint16(s[:2]), s[2])
 	}
 	return fmt.Sprintf("%d.%d.%d", binary.BigEndian.Uint16(s[:2]), s[2], s[3])
+}
+func (v *Version) Set(version string) error {
+	parts := strings.Split(version, ".")
+	if len(parts) < 2 || len(parts) > 3 {
+		return errors.New("invalid version")
+	}
+	major, err := strconv.ParseUint(parts[0], 10, 32)
+	if err != nil {
+		return err
+	}
+	minor, err := strconv.ParseUint(parts[1], 10, 16)
+	if err != nil {
+		return err
+	}
+	*v = Version((major << 16) | (minor << 8))
+	if len(parts) > 2 {
+		patch, err := strconv.ParseUint(parts[2], 10, 16)
+		if err != nil {
+			return err
+		}
+		*v = Version((major << 16) | (minor << 8) | patch)
+	}
+	return nil
 }
 
 type SrcVersion uint64

@@ -23,6 +23,21 @@ func (t *FileTOC) AddLoad(l Load) {
 	t.SizeCommands += l.LoadSize()
 }
 
+func (t *FileTOC) RemoveLoad(l Load) error {
+	if len(t.Loads) == 0 {
+		return fmt.Errorf("no loads to remove")
+	}
+	for i, load := range t.Loads {
+		if load == l {
+			t.Loads = append(t.Loads[:i], t.Loads[i+1:]...)
+			t.NCommands--
+			t.SizeCommands -= l.LoadSize()
+			break
+		}
+	}
+	return nil
+}
+
 // AddSegment adds segment s to the file table of contents,
 // and also zeroes out the segment information with the expectation
 // that this will be added next.

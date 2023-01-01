@@ -1495,6 +1495,16 @@ func (f *File) IsCString(addr uint64) (string, bool) {
 	return "", false
 }
 
+func (f *File) GetLoadsByName(name string) []Load {
+	var loads []Load
+	for _, l := range f.Loads {
+		if l.Command().Command().String() == name {
+			loads = append(loads, l)
+		}
+	}
+	return loads
+}
+
 // Segment returns the first Segment with the given name, or nil if no such segment exists.
 func (f *File) Segment(name string) *Segment {
 	for _, l := range f.Loads {
