@@ -18,9 +18,14 @@ type FileTOC struct {
 }
 
 func (t *FileTOC) AddLoad(l Load) {
+	loadsz := t.LoadSize()
 	t.Loads = append(t.Loads, l)
 	t.NCommands++
 	t.SizeCommands += l.LoadSize()
+	delta := t.LoadSize() - loadsz
+	if delta > 0 {
+		fmt.Printf("delta: %d\n", delta)
+	}
 }
 
 func (t *FileTOC) RemoveLoad(l Load) error {

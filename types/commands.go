@@ -945,10 +945,10 @@ type PrePageCmd struct {
  * field will contain the stack size need for the main thread.
  */
 type EntryPointCmd struct {
-	LoadCmd          // LC_MAIN only used in MH_EXECUTE filetypes
-	Len       uint32 // 24
-	Offset    uint64 // file (__TEXT) offset of main()
-	StackSize uint64 // if not zero, initial stack size
+	LoadCmd            // LC_MAIN only used in MH_EXECUTE filetypes
+	Len         uint32 // 24
+	EntryOffset uint64 // file (__TEXT) offset of main()
+	StackSize   uint64 // if not zero, initial stack size
 }
 
 /*

@@ -1242,8 +1242,6 @@ func (r *Rpath) MarshalJSON() ([]byte, error) {
 type CodeSignature struct {
 	LoadBytes
 	types.CodeSignatureCmd
-	Offset uint32
-	Size   uint32
 	ctypes.CodeSignature
 }
 
@@ -1531,8 +1529,6 @@ type DyldEnvironment struct {
 type EntryPoint struct {
 	LoadBytes
 	types.EntryPointCmd
-	EntryOffset uint64
-	StackSize   uint64
 }
 
 func (e *EntryPoint) LoadSize() uint32 {
@@ -1576,8 +1572,6 @@ func (e *EntryPoint) MarshalJSON() ([]byte, error) {
 type DataInCode struct {
 	LoadBytes
 	types.DataInCodeCmd
-	Offset  uint32
-	Size    uint32
 	Entries []types.DataInCodeEntry
 }
 
@@ -1647,7 +1641,6 @@ func (l *DataInCode) MarshalJSON() ([]byte, error) {
 type SourceVersion struct {
 	LoadBytes
 	types.SourceVersionCmd
-	Version string
 }
 
 func (s *SourceVersion) LoadSize() uint32 {
@@ -1660,7 +1653,7 @@ func (s *SourceVersion) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	return nil
 }
 func (s *SourceVersion) String() string {
-	return s.Version
+	return s.Version.String()
 }
 func (s *SourceVersion) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
@@ -1670,7 +1663,7 @@ func (s *SourceVersion) MarshalJSON() ([]byte, error) {
 	}{
 		LoadCmd: s.Command().String(),
 		Len:     s.Len,
-		Version: s.Version,
+		Version: s.Version.String(),
 	})
 }
 
@@ -1858,6 +1851,9 @@ func (b *BuildVersion) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, b.BuildVersionCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", b.Command(), err)
 	}
+	if err := binary.Write(buf, o, b.Tools); err != nil {
+		return fmt.Errorf("failed to write build tools to buffer: %v", err)
+	}
 	return nil
 }
 func (b *BuildVersion) String() string {
@@ -1968,14 +1964,15 @@ func (l *FilesetEntry) MarshalJSON() ([]byte, error) {
 type Dylib struct {
 	LoadBytes
 	types.DylibCmd
-	Name           string
-	Timestamp      uint32
-	CurrentVersion types.Version
-	CompatVersion  types.Version
+	Name string
 }
 
 func (d *Dylib) LoadSize() uint32 {
-	return uint32(binary.Size(d.DylibCmd))
+	sz := uint32(binary.Size(d.DylibCmd)) + uint32(len(d.Name)) + 1
+	if (sz % 8) != 0 {
+		sz += 8 - (sz % 8)
+	}
+	return sz
 }
 func (d *Dylib) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
@@ -1992,6 +1989,12 @@ func (d *Dylib) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	}
 	if _, err := buf.WriteString(d.Name + "\x00"); err != nil {
 		return fmt.Errorf("failed to write %s to Dylib buffer: %v", d.Name, err)
+	}
+	if (buf.Len() % 8) != 0 {
+		pad := 8 - (buf.Len() % 8)
+		if _, err := buf.Write(make([]byte, pad)); err != nil {
+			return fmt.Errorf("failed to write %s padding: %v", d.Command(), err)
+		}
 	}
 	return nil
 }
@@ -2035,6 +2038,15 @@ func (d *Dylinker) Put(b []byte, o binary.ByteOrder) int {
 func (d *Dylinker) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, d.DylinkerCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", d.Command(), err)
+	}
+	if _, err := buf.WriteString(d.Name + "\x00"); err != nil {
+		return fmt.Errorf("failed to write %s to Dylib buffer: %v", d.Name, err)
+	}
+	if (buf.Len() % 8) != 0 {
+		pad := 8 - (buf.Len() % 8)
+		if _, err := buf.Write(make([]byte, pad)); err != nil {
+			return fmt.Errorf("failed to write %s padding: %v", d.Command(), err)
+		}
 	}
 	return nil
 }
@@ -2093,8 +2105,6 @@ func (v *VersionMin) MarshalJSON() ([]byte, error) {
 type LinkEditData struct {
 	LoadBytes
 	types.LinkEditDataCmd
-	Offset uint32
-	Size   uint32
 }
 
 func (l *LinkEditData) LoadSize() uint32 {

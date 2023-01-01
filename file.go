@@ -490,6 +490,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
+			l.NameOffset = hdr.NameOffset
 			if hdr.NameOffset >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid name in dynamic library command", hdr.NameOffset}
 			}
@@ -508,6 +509,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
+			l.NameOffset = hdr.NameOffset
 			if hdr.NameOffset >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid name in dynamic library ident command", hdr.NameOffset}
 			}
@@ -526,6 +528,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
+			l.NameOffset = hdr.NameOffset
 			if hdr.NameOffset >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid name in load dylinker command", hdr.NameOffset}
 			}
@@ -541,6 +544,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
+			l.NameOffset = hdr.NameOffset
 			if hdr.NameOffset >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid name in load dylinker command", hdr.NameOffset}
 			}
@@ -556,6 +560,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
+			l.NameOffset = hdr.NameOffset
 			if hdr.NameOffset >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid name in LC_PREBOUND_DYLIB command", hdr.NameOffset}
 			}
@@ -678,6 +683,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
+			l.NameOffset = hdr.NameOffset
 			if hdr.NameOffset >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid name in weak dynamic library command", hdr.NameOffset}
 			}
@@ -783,6 +789,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
+			l.NameOffset = hdr.NameOffset
 			if hdr.NameOffset >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid name in dynamic library command", hdr.NameOffset}
 			}
@@ -801,6 +808,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
+			l.NameOffset = hdr.NameOffset
 			if hdr.NameOffset >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid name in load upwardl dylib command", hdr.NameOffset}
 			}
@@ -876,6 +884,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
+			l.NameOffset = hdr.NameOffset
 			if hdr.NameOffset >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid name in load upwardl dylib command", hdr.NameOffset}
 			}
@@ -934,6 +943,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
+			l.NameOffset = hdr.NameOffset
 			if hdr.NameOffset >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid name in dyld environment command", hdr.NameOffset}
 			}
@@ -949,7 +959,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			l.EntryOffset = hdr.Offset
+			l.EntryOffset = hdr.EntryOffset
 			l.StackSize = hdr.StackSize
 			f.Loads[i] = l
 		case types.LC_DATA_IN_CODE:
@@ -983,7 +993,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			l.Version = sv.Version.String()
+			l.Version = sv.Version
 			f.Loads[i] = l
 		case types.LC_DYLIB_CODE_SIGN_DRS:
 			var led types.LinkEditDataCmd
