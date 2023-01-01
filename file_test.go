@@ -43,8 +43,8 @@ var fileTests = []fileTest{
 			nil, // LC_LOAD_DYLINKER
 			nil, // LC_UUID
 			nil, // LC_UNIXTHREAD
-			&LoadDylib{Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x34, NameOffset: 0x0, Timestamp: 0x0, CurrentVersion: 0x0, CompatVersion: 0x0}, Name: "/usr/lib/libgcc_s.1.dylib", Timestamp: 0x2, CurrentVersion: types.Version(0x10000), CompatVersion: types.Version(0x10000)}},
-			&LoadDylib{Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x34, NameOffset: 0x0, Timestamp: 0x0, CurrentVersion: 0x0, CompatVersion: 0x0}, Name: "/usr/lib/libSystem.B.dylib", Timestamp: 0x2, CurrentVersion: types.Version(0x6f0104), CompatVersion: types.Version(0x10000)}},
+			&LoadDylib{Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x34, NameOffset: 0x18, Timestamp: 0x2, CurrentVersion: types.Version(0x10000), CompatVersion: types.Version(0x10000)}, Name: "/usr/lib/libgcc_s.1.dylib"}},
+			&LoadDylib{Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x34, NameOffset: 0x18, Timestamp: 0x2, CurrentVersion: types.Version(0x6f0104), CompatVersion: types.Version(0x10000)}, Name: "/usr/lib/libSystem.B.dylib"}},
 		},
 		[]*types.SectionHeader{
 			{Name: "__text", Seg: "__TEXT", Addr: 0x1f68, Size: 0x88, Offset: 0xf68, Align: 0x2, Reloff: 0x0, Nreloc: 0x0, Flags: 0x80000400, Reserved1: 0x0, Reserved2: 0x0, Reserved3: 0x0, Type: 0x20},
@@ -68,8 +68,8 @@ var fileTests = []fileTest{
 			nil, // LC_LOAD_DYLINKER
 			nil, // LC_UUID
 			nil, // LC_UNIXTHREAD
-			&LoadDylib{Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x38, NameOffset: 0x0, Timestamp: 0x0, CurrentVersion: 0x0, CompatVersion: 0x0}, Name: "/usr/lib/libgcc_s.1.dylib", Timestamp: 0x2, CurrentVersion: types.Version(0x10000), CompatVersion: types.Version(0x10000)}},
-			&LoadDylib{Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x38, NameOffset: 0x0, Timestamp: 0x0, CurrentVersion: 0x0, CompatVersion: 0x0}, Name: "/usr/lib/libSystem.B.dylib", Timestamp: 0x2, CurrentVersion: types.Version(0x6f0104), CompatVersion: types.Version(0x10000)}},
+			&LoadDylib{Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x38, NameOffset: 0x18, Timestamp: 0x2, CurrentVersion: types.Version(0x10000), CompatVersion: types.Version(0x10000)}, Name: "/usr/lib/libgcc_s.1.dylib"}},
+			&LoadDylib{Dylib{LoadBytes: LoadBytes(nil), DylibCmd: types.DylibCmd{LoadCmd: 0xc, Len: 0x38, NameOffset: 0x18, Timestamp: 0x2, CurrentVersion: types.Version(0x6f0104), CompatVersion: types.Version(0x10000)}, Name: "/usr/lib/libSystem.B.dylib"}},
 		},
 		[]*types.SectionHeader{
 			{Name: "__text", Seg: "__TEXT", Addr: 0x100000f14, Size: 0x6d, Offset: 0xf14, Align: 0x2, Reloff: 0x0, Nreloc: 0x0, Flags: 0x80000400, Reserved1: 0x0, Reserved2: 0x0, Reserved3: 0x0, Type: 0x40},
@@ -127,7 +127,7 @@ var fileTests = []fileTest{
 			nil, // LC_SOURCE_VERSION
 			nil, // LC_MAIN
 			nil, // LC_LOAD_DYLIB
-			&Rpath{LoadBytes: LoadBytes(nil), RpathCmd: types.RpathCmd{LoadCmd: 0x8000001c, Len: 0x18, Path: 0x0}, Path: "/my/rpath"},
+			&Rpath{LoadBytes: LoadBytes(nil), RpathCmd: types.RpathCmd{LoadCmd: 0x8000001c, Len: 0x18, PathOffset: 0xc}, Path: "/my/rpath"},
 			nil, // LC_FUNCTION_STARTS
 			nil, // LC_DATA_IN_CODE
 		},
@@ -151,7 +151,7 @@ var fileTests = []fileTest{
 			nil, // LC_SOURCE_VERSION
 			nil, // LC_MAIN
 			nil, // LC_LOAD_DYLIB
-			&Rpath{LoadBytes: LoadBytes(nil), RpathCmd: types.RpathCmd{LoadCmd: 0x8000001c, Len: 0x18, Path: 0x0}, Path: "/my/rpath"},
+			&Rpath{LoadBytes: LoadBytes(nil), RpathCmd: types.RpathCmd{LoadCmd: 0x8000001c, Len: 0x18, PathOffset: 0xc}, Path: "/my/rpath"},
 			nil, // LC_FUNCTION_STARTS
 			nil, // LC_DATA_IN_CODE
 		},
