@@ -1211,11 +1211,24 @@ type Rpath struct {
 }
 
 func (r *Rpath) LoadSize() uint32 {
-	return uint32(binary.Size(r.RpathCmd))
+	sz := uint32(binary.Size(r.RpathCmd)) + uint32(len(r.Path)) + 1
+	if (sz % 8) != 0 {
+		sz += 8 - (sz % 8)
+	}
+	return sz
 }
 func (r *Rpath) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, r.RpathCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", r.Command(), err)
+	}
+	if _, err := buf.WriteString(r.Path + "\x00"); err != nil {
+		return fmt.Errorf("failed to write %s to Dylib buffer: %v", r.Path, err)
+	}
+	if (buf.Len() % 8) != 0 {
+		pad := 8 - (buf.Len() % 8)
+		if _, err := buf.Write(make([]byte, pad)); err != nil {
+			return fmt.Errorf("failed to write %s padding: %v", r.Command(), err)
+		}
 	}
 	return nil
 }
@@ -1841,11 +1854,11 @@ func (n *Note) MarshalJSON() ([]byte, error) {
 type BuildVersion struct {
 	LoadBytes
 	types.BuildVersionCmd
-	Tools []types.BuildToolVersion
+	Tools []types.BuildVersionTool
 }
 
 func (b *BuildVersion) LoadSize() uint32 {
-	return uint32(binary.Size(b.BuildVersionCmd))
+	return uint32(binary.Size(b.BuildVersionCmd) + binary.Size(b.Tools))
 }
 func (b *BuildVersion) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, b.BuildVersionCmd); err != nil {
@@ -1875,9 +1888,7 @@ func (b *BuildVersion) String() string {
 				strings.Join(tools, ", "))
 		}
 	}
-	return fmt.Sprintf("Platform: %s, SDK: %s",
-		b.Platform,
-		b.Sdk)
+	return fmt.Sprintf("Platform: %s, SDK: %s", b.Platform, b.Sdk)
 }
 func (b *BuildVersion) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
@@ -1887,7 +1898,7 @@ func (b *BuildVersion) MarshalJSON() ([]byte, error) {
 		Minos    string                   `json:"min_os"`
 		Sdk      string                   `json:"sdk"`
 		NumTools uint32                   `json:"num_tools"`
-		Tools    []types.BuildToolVersion `json:"tools"`
+		Tools    []types.BuildVersionTool `json:"tools"`
 	}{
 		LoadCmd:  b.Command().String(),
 		Len:      b.Len,

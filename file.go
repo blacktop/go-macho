@@ -724,16 +724,17 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to read LC_RPATH: %v", err)
 			}
 			l := new(Rpath)
-			if hdr.Path >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid path in rpath command", hdr.Path}
+			if hdr.PathOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid path in rpath command", hdr.PathOffset}
 			}
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			if hdr.Path >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid path in rpath command", hdr.Path}
+			l.PathOffset = hdr.PathOffset
+			if hdr.PathOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid path in rpath command", hdr.PathOffset}
 			}
-			l.Path = cstring(cmddat[hdr.Path:])
+			l.Path = cstring(cmddat[hdr.PathOffset:])
 			f.Loads[i] = l
 		case types.LC_CODE_SIGNATURE:
 			var hdr types.CodeSignatureCmd
@@ -1097,7 +1098,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			f.Loads[i] = l
 		case types.LC_BUILD_VERSION:
 			var build types.BuildVersionCmd
-			var buildTool types.BuildToolVersion
+			var buildTool types.BuildVersionTool
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &build); err != nil {
 				return nil, fmt.Errorf("failed to read LC_BUILD_VERSION: %v", err)
@@ -1114,7 +1115,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				if err := binary.Read(b, bo, &buildTool); err != nil {
 					return nil, fmt.Errorf("failed to read LC_BUILD_VERSION buildTool: %v", err)
 				}
-				l.Tools = append(l.Tools, types.BuildToolVersion{
+				l.Tools = append(l.Tools, types.BuildVersionTool{
 					Tool:    buildTool.Tool,
 					Version: buildTool.Version,
 				})

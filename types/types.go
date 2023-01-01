@@ -145,12 +145,12 @@ const (
 	MetalFramework Tool = 1032
 )
 
-type BuildToolVersion struct {
+type BuildVersionTool struct {
 	Tool    Tool    /* enum for the tool */
 	Version Version /* version number of the tool */
 }
 
-func (b *BuildToolVersion) MarshalJSON() ([]byte, error) {
+func (b *BuildVersionTool) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Tool    string `json:"tool"`
 		Version string `json:"version"`

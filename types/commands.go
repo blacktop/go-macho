@@ -669,9 +669,9 @@ type UUIDCmd struct {
  * the current run path used to find @rpath prefixed dylibs.
  */
 type RpathCmd struct {
-	LoadCmd        // LC_RPATH
-	Len     uint32 // includes string
-	Path    uint32 // path to add to run path
+	LoadCmd           // LC_RPATH
+	Len        uint32 // includes string
+	PathOffset uint32 // path to add to run path
 }
 
 /*
