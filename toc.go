@@ -96,14 +96,6 @@ func (t *FileTOC) LoadAlign() uint64 {
 	return 4
 }
 
-// SymbolSize returns the size in bytes of a Symbol (Nlist32 or Nlist64)
-func (t *FileTOC) SymbolSize() uint32 {
-	if t.Magic == types.Magic64 {
-		return uint32(unsafe.Sizeof(types.Nlist64{}))
-	}
-	return uint32(unsafe.Sizeof(types.Nlist32{}))
-}
-
 // HdrSize returns the size in bytes of the Macho header for a given
 // magic number (where the magic number has been appropriately byte-swapped).
 func (t *FileTOC) HdrSize() uint32 {

@@ -186,9 +186,9 @@ type LoadFvmLibCmd struct {
 	 * minor version number.  The address of where the headers are loaded is in
 	 * header_addr. (THIS IS OBSOLETE and no longer supported).
 	 */
-	Name         uint32 // library's target pathname
-	MinorVersion uint32 /* library's minor version number */
-	HeaderAddr   uint32 /* library's header address */
+	NameOffset   uint32  // library's target pathname
+	MinorVersion Version /* library's minor version number */
+	HeaderAddr   uint32  /* library's header address */
 }
 
 // A IDFvmLibCmd is a Mach-O fixed VM shared library identification command.
@@ -243,9 +243,9 @@ type LoadUpwardDylibCmd DylibCmd // LC_LOAD_UPWARD_DYLIB
  * following structure.
  */
 type SubFrameworkCmd struct {
-	LoadCmd          // LC_SUB_FRAMEWORK
-	Len       uint32 /* includes umbrella string */
-	Framework uint32 /* the umbrella framework name */
+	LoadCmd                // LC_SUB_FRAMEWORK
+	Len             uint32 /* includes umbrella string */
+	FrameworkOffset uint32 /* the umbrella framework name */
 }
 
 /*
@@ -258,9 +258,9 @@ type SubFrameworkCmd struct {
  * where the bundle is built with "-client_name client_name".
  */
 type SubClientCmd struct {
-	LoadCmd        // LC_SUB_CLIENT
-	Len     uint32 /* includes client string */
-	Client  uint32 /* the client name */
+	LoadCmd             // LC_SUB_CLIENT
+	Len          uint32 /* includes client string */
+	ClientOffset uint32 /* the client name */
 }
 
 /*
@@ -277,9 +277,9 @@ type SubClientCmd struct {
  * The name of a sub_umbrella framework is recorded in the following structure.
  */
 type SubUmbrellaCmd struct {
-	LoadCmd         // LC_SUB_UMBRELLA
-	Len      uint32 /* includes sub_umbrella string */
-	Umbrella uint32 /* the sub_umbrella framework name */
+	LoadCmd               // LC_SUB_UMBRELLA
+	Len            uint32 /* includes sub_umbrella string */
+	UmbrellaOffset uint32 /* the sub_umbrella framework name */
 }
 
 /*
@@ -298,9 +298,9 @@ type SubUmbrellaCmd struct {
  * For example /usr/lib/libobjc_profile.A.dylib would be recorded as "libobjc".
  */
 type SubLibraryCmd struct {
-	LoadCmd        // LC_SUB_LIBRARY
-	Len     uint32 /* includes sub_library string */
-	Library uint32 /* the sub_library name */
+	LoadCmd              // LC_SUB_LIBRARY
+	Len           uint32 /* includes sub_library string */
+	LibraryOffset uint32 /* the sub_library name */
 }
 
 /*
@@ -339,6 +339,67 @@ type IDDylinkerCmd DylinkerCmd // LC_ID_DYLINKER
 // A DyldEnvironmentCmd is a Mach-O string for dyld to treat like environment variable command.
 type DyldEnvironmentCmd DylinkerCmd // LC_DYLD_ENVIRONMENT
 
+type ThreadFlavor uint32
+
+const (
+	//
+	// x86 flavors
+	//
+	x86_THREAD_STATE32    ThreadFlavor = 1
+	x86_FLOAT_STATE32     ThreadFlavor = 2
+	x86_EXCEPTION_STATE32 ThreadFlavor = 3
+	x86_THREAD_STATE64    ThreadFlavor = 4
+	x86_FLOAT_STATE64     ThreadFlavor = 5
+	x86_EXCEPTION_STATE64 ThreadFlavor = 6
+	x86_THREAD_STATE      ThreadFlavor = 7
+	x86_FLOAT_STATE       ThreadFlavor = 8
+	x86_EXCEPTION_STATE   ThreadFlavor = 9
+	x86_DEBUG_STATE32     ThreadFlavor = 10
+	x86_DEBUG_STATE64     ThreadFlavor = 11
+	x86_DEBUG_STATE       ThreadFlavor = 12
+	x86_THREAD_STATE_NONE ThreadFlavor = 13
+	/* 14 and 15 are used for the internal x86_SAVED_STATE flavours */
+	/* Arrange for flavors to take sequential values, 32-bit, 64-bit, non-specific */
+	x86_AVX_STATE32         ThreadFlavor = 16
+	x86_AVX_STATE64         ThreadFlavor = (x86_AVX_STATE32 + 1)
+	x86_AVX_STATE           ThreadFlavor = (x86_AVX_STATE32 + 2)
+	x86_AVX512_STATE32      ThreadFlavor = 19
+	x86_AVX512_STATE64      ThreadFlavor = (x86_AVX512_STATE32 + 1)
+	x86_AVX512_STATE        ThreadFlavor = (x86_AVX512_STATE32 + 2)
+	x86_PAGEIN_STATE        ThreadFlavor = 22
+	x86_THREAD_FULL_STATE64 ThreadFlavor = 23
+	x86_INSTRUCTION_STATE   ThreadFlavor = 24
+	x86_LAST_BRANCH_STATE   ThreadFlavor = 25
+	//
+	// arm flavors
+	//
+	ARM_THREAD_STATE         ThreadFlavor = 1
+	ARM_UNIFIED_THREAD_STATE ThreadFlavor = ARM_THREAD_STATE
+	ARM_VFP_STATE            ThreadFlavor = 2
+	ARM_EXCEPTION_STATE      ThreadFlavor = 3
+	ARM_DEBUG_STATE          ThreadFlavor = 4 /* pre-armv8 */
+	ARM_THREAD_STATE_NONE    ThreadFlavor = 5
+	ARM_THREAD_STATE64       ThreadFlavor = 6
+	ARM_EXCEPTION_STATE64    ThreadFlavor = 7
+	//      ARM_THREAD_STATE_LAST    8 /* legacy */
+	ARM_THREAD_STATE32 ThreadFlavor = 9
+
+	/* API */
+	ARM_DEBUG_STATE32 ThreadFlavor = 14
+	ARM_DEBUG_STATE64 ThreadFlavor = 15
+	ARM_NEON_STATE    ThreadFlavor = 16
+	ARM_NEON_STATE64  ThreadFlavor = 17
+	ARM_CPMU_STATE64  ThreadFlavor = 18
+
+	ARM_PAGEIN_STATE ThreadFlavor = 27
+)
+
+type ThreadState struct {
+	Flavor ThreadFlavor // flavor of thread state
+	Count  uint32       // count of uint32_t's in thread state
+	Data   []byte       // thread state for this flavor
+}
+
 /*
  * ThreadCmd contain machine-specific data structures suitable for
  * use in the thread state primitives.  The machine specific data structures
@@ -363,8 +424,6 @@ type DyldEnvironmentCmd DylinkerCmd // LC_DYLD_ENVIRONMENT
 type ThreadCmd struct { // FIXME: handle all flavors ?
 	LoadCmd        // LC_THREAD or  LC_UNIXTHREAD
 	Len     uint32 // total size of this command
-	Type    uint32
-	Data    []uint32
 	/* uint32_t flavor		   flavor of thread state */
 	/* uint32_t count		   count of uint32_t's in thread state */
 	/* struct XXX_thread_state state   thread state for this flavor */
@@ -372,14 +431,7 @@ type ThreadCmd struct { // FIXME: handle all flavors ?
 }
 
 // A UnixThreadCmd is a Mach-O unix thread command.
-type UnixThreadCmd struct { // FIXME: handle all flavors ?
-	LoadCmd        // LC_UNIXTHREAD
-	Len     uint32 // total size of this command
-	Flavor  uint32 // flavor of thread state
-	Count   uint32 // count of uint32_t's in thread state
-	/* struct XXX_thread_state state   thread state for this flavor */
-	/* ... */
-}
+type UnixThreadCmd ThreadCmd
 
 /*
  * RoutinesCmd contains the address of the dynamic shared library
@@ -928,7 +980,7 @@ type IdentCmd struct {
 type FvmFileCmd struct {
 	LoadCmd           // LC_FVMFILE
 	Len        uint32 // includes pathname string
-	Name       uint32 // files pathname
+	NameOffset uint32 // files pathname
 	HeaderAddr uint32 // files virtual address
 }
 

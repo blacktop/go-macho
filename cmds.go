@@ -76,6 +76,13 @@ func (b LoadBytes) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	return err
 }
 
+func pointerAlign(sz uint32) uint32 {
+	if (sz % 8) != 0 {
+		sz += 8 - (sz % 8)
+	}
+	return sz
+}
+
 /*******************************************************************************
  * SEGMENT
  *******************************************************************************/
@@ -327,15 +334,8 @@ func (s *Symtab) Put(b []byte, o binary.ByteOrder) int {
 	return 6 * 4
 }
 func (s *Symtab) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, types.SymtabCmd{
-		LoadCmd: s.LoadCmd,
-		Len:     s.Len,
-		Symoff:  s.Symoff,
-		Nsyms:   s.Nsyms,
-		Stroff:  s.Stroff,
-		Strsize: s.Strsize,
-	}); err != nil {
-		return fmt.Errorf("failed to write LC_SYMTAB to buffer: %v", err)
+	if err := binary.Write(buf, o, s.SymtabCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", s.Command(), err)
 	}
 	return nil
 }
@@ -455,6 +455,8 @@ func (s *SymSeg) MarshalJSON() ([]byte, error) {
 type Thread struct {
 	LoadBytes
 	types.ThreadCmd
+	bo      binary.ByteOrder
+	Threads []types.ThreadState
 }
 
 func (t *Thread) LoadSize() uint32 {
@@ -464,20 +466,38 @@ func (t *Thread) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, t.ThreadCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", t.Command(), err)
 	}
+	for _, thread := range t.Threads {
+		if err := binary.Write(buf, o, thread.Flavor); err != nil {
+			return fmt.Errorf("failed to write thread_state flavor to %s buffer: %v", t.Command(), err)
+		}
+		if err := binary.Write(buf, o, thread.Count); err != nil {
+			return fmt.Errorf("failed to write thread_state count to %s buffer: %v", t.Command(), err)
+		}
+		if err := binary.Write(buf, o, thread.Data[:]); err != nil {
+			return fmt.Errorf("failed to write thread_state data to %s buffer: %v", t.Command(), err)
+		}
+	}
 	return nil
 }
 func (t *Thread) String() string {
-	return fmt.Sprintf("Type: %d", t.Type)
+	for _, thread := range t.Threads {
+		if thread.Flavor == types.ARM_THREAD_STATE64 {
+			regs := make([]uint64, thread.Count/2)
+			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)
+			return fmt.Sprintf("Threads: %d, ARM64 EntryPoint: %#016x", len(t.Threads), regs[len(regs)-2])
+		}
+	}
+	return fmt.Sprintf("Threads: %d", len(t.Threads))
 }
-func (t *Thread) MarshalJSON() ([]byte, error) { // FIXME: data?
+func (t *Thread) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
-		LoadCmd string `json:"load_cmd"`
-		Len     uint32 `json:"len,omitempty"`
-		Type    uint32 `json:"type,omitempty"`
+		LoadCmd string              `json:"load_cmd"`
+		Len     uint32              `json:"len,omitempty"`
+		Threads []types.ThreadState `json:"threads,omitempty"`
 	}{
 		LoadCmd: t.LoadCmd.String(),
 		Len:     t.Len,
-		Type:    t.Type,
+		Threads: t.Threads,
 	})
 }
 
@@ -487,37 +507,7 @@ func (t *Thread) MarshalJSON() ([]byte, error) { // FIXME: data?
 
 // A UnixThread represents a Mach-O LC_UNIXTHREAD command.
 type UnixThread struct {
-	LoadBytes
-	types.UnixThreadCmd
-	EntryPoint uint64
-}
-
-func (u *UnixThread) LoadSize() uint32 {
-	return uint32(binary.Size(u.UnixThreadCmd))
-}
-func (u *UnixThread) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, u.UnixThreadCmd); err != nil {
-		return fmt.Errorf("failed to write %s to buffer: %v", u.Command(), err)
-	}
-	return nil
-}
-func (u *UnixThread) String() string {
-	return fmt.Sprintf("Entry Point: 0x%016x", u.EntryPoint)
-}
-func (u *UnixThread) MarshalJSON() ([]byte, error) {
-	return json.Marshal(&struct {
-		LoadCmd    string `json:"load_cmd"`
-		Len        uint32 `json:"len,omitempty"`
-		Flavor     uint32 `json:"flavor,omitempty"`
-		Count      uint32 `json:"count,omitempty"`
-		EntryPoint uint64 `json:"entry_point,omitempty"`
-	}{
-		LoadCmd:    u.LoadCmd.String(),
-		Len:        u.Len,
-		Flavor:     u.Flavor,
-		Count:      u.Count,
-		EntryPoint: u.EntryPoint,
-	})
+	Thread
 }
 
 /*******************************************************************************
@@ -528,17 +518,24 @@ func (u *UnixThread) MarshalJSON() ([]byte, error) {
 type LoadFvmlib struct {
 	LoadBytes
 	types.LoadFvmLibCmd
-	Name          string
-	MinorVersion  types.Version
-	HeaderAddress uint32
+	Name string
 }
 
 func (l *LoadFvmlib) LoadSize() uint32 {
-	return uint32(binary.Size(l.LoadFvmLibCmd))
+	return pointerAlign(uint32(binary.Size(l.LoadFvmLibCmd) + len(l.Name) + 1))
 }
 func (l *LoadFvmlib) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, l.LoadFvmLibCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	if _, err := buf.WriteString(l.Name + "\x00"); err != nil {
+		return fmt.Errorf("failed to write %s to %s buffer: %v", l.Name, l.Command(), err)
+	}
+	if (buf.Len() % 8) != 0 {
+		pad := 8 - (buf.Len() % 8)
+		if _, err := buf.Write(make([]byte, pad)); err != nil {
+			return fmt.Errorf("failed to write %s padding: %v", l.Command(), err)
+		}
 	}
 	return nil
 }
@@ -582,11 +579,29 @@ type Ident struct {
 }
 
 func (i *Ident) LoadSize() uint32 {
-	return uint32(binary.Size(i.IdentCmd))
+	sz := uint32(binary.Size(i.IdentCmd))
+	for _, str := range i.StrTable {
+		sz += uint32(len(str) + 1)
+	}
+	if (sz % 4) != 0 {
+		sz = 4 - (sz % 4)
+	}
+	return sz
 }
 func (i *Ident) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, i.IdentCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", i.Command(), err)
+	}
+	for _, str := range i.StrTable {
+		if _, err := buf.WriteString(str + "\x00"); err != nil {
+			return fmt.Errorf("failed to write %s to %s buffer: %v", str, i.Command(), err)
+		}
+	}
+	if (buf.Len() % 4) != 0 {
+		pad := 4 - (buf.Len() % 4)
+		if _, err := buf.Write(make([]byte, pad)); err != nil {
+			return fmt.Errorf("failed to write %s padding: %v", i.Command(), err)
+		}
 	}
 	return nil
 }
@@ -613,16 +628,24 @@ func (i *Ident) MarshalJSON() ([]byte, error) {
 type FvmFile struct {
 	LoadBytes
 	types.FvmFileCmd
-	Name          string
-	HeaderAddress uint32
+	Name string
 }
 
 func (l *FvmFile) LoadSize() uint32 {
-	return uint32(binary.Size(l.FvmFileCmd))
+	return pointerAlign(uint32(binary.Size(l.FvmFileCmd) + len(l.Name) + 1))
 }
 func (l *FvmFile) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, l.FvmFileCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	if _, err := buf.WriteString(l.Name + "\x00"); err != nil {
+		return fmt.Errorf("failed to write %s to %s buffer: %v", l.Name, l.Command(), err)
+	}
+	if (buf.Len() % 8) != 0 {
+		pad := 8 - (buf.Len() % 8)
+		if _, err := buf.Write(make([]byte, pad)); err != nil {
+			return fmt.Errorf("failed to write %s padding: %v", l.Command(), err)
+		}
 	}
 	return nil
 }
@@ -838,13 +861,12 @@ type DylinkerID struct {
 type PreboundDylib struct {
 	LoadBytes
 	types.PreboundDylibCmd
-	Name          string
-	NumModules    uint32
-	LinkedModules string
+	Name                   string
+	LinkedModulesBitVector string
 }
 
 func (d *PreboundDylib) LoadSize() uint32 {
-	return uint32(binary.Size(d.PreboundDylibCmd))
+	return pointerAlign(uint32(binary.Size(d.PreboundDylibCmd) + len(d.Name) + 1 + len(d.LinkedModulesBitVector) + 1))
 }
 func (d *PreboundDylib) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
@@ -858,24 +880,36 @@ func (d *PreboundDylib) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, d.PreboundDylibCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", d.Command(), err)
 	}
+	if _, err := buf.WriteString(d.Name + "\x00"); err != nil {
+		return fmt.Errorf("failed to write %s to %s buffer: %v", d.Name, d.Command(), err)
+	}
+	if _, err := buf.WriteString(d.LinkedModulesBitVector + "\x00"); err != nil {
+		return fmt.Errorf("failed to write %s to %s buffer: %v", d.LinkedModulesBitVector, d.Command(), err)
+	}
+	if (buf.Len() % 8) != 0 {
+		pad := 8 - (buf.Len() % 8)
+		if _, err := buf.Write(make([]byte, pad)); err != nil {
+			return fmt.Errorf("failed to write %s padding: %v", d.Command(), err)
+		}
+	}
 	return nil
 }
 func (d *PreboundDylib) String() string {
-	return fmt.Sprintf("%s, NumModules=%d, LinkedModules=%s", d.Name, d.NumModules, d.LinkedModules)
+	return fmt.Sprintf("%s, NumModules=%d, LinkedModulesBitVector=%v", d.Name, d.NumModules, []byte(d.LinkedModulesBitVector))
 }
 func (d *PreboundDylib) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd       string `json:"load_command"`
-		Len           uint32 `json:"length"`
-		Name          string `json:"name"`
-		NumModules    uint32 `json:"num_modules"`
-		LinkedModules string `json:"linked_modules"`
+		LoadCmd                string `json:"load_command"`
+		Len                    uint32 `json:"length"`
+		Name                   string `json:"name"`
+		NumModules             uint32 `json:"num_modules"`
+		LinkedModulesBitVector string `json:"linked_modules"`
 	}{
-		LoadCmd:       d.Command().String(),
-		Len:           d.Len,
-		Name:          d.Name,
-		NumModules:    d.NumModules,
-		LinkedModules: d.LinkedModules,
+		LoadCmd:                d.Command().String(),
+		Len:                    d.Len,
+		Name:                   d.Name,
+		NumModules:             d.NumModules,
+		LinkedModulesBitVector: d.LinkedModulesBitVector,
 	})
 }
 
@@ -927,11 +961,20 @@ type SubFramework struct {
 }
 
 func (l *SubFramework) LoadSize() uint32 {
-	return uint32(binary.Size(l.SubFrameworkCmd))
+	return pointerAlign(uint32(binary.Size(l.SubFrameworkCmd) + len(l.Framework) + 1))
 }
 func (l *SubFramework) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, l.SubFrameworkCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	if _, err := buf.WriteString(l.Framework + "\x00"); err != nil {
+		return fmt.Errorf("failed to write %s to %s buffer: %v", l.Framework, l.Command(), err)
+	}
+	if (buf.Len() % 8) != 0 {
+		pad := 8 - (buf.Len() % 8)
+		if _, err := buf.Write(make([]byte, pad)); err != nil {
+			return fmt.Errorf("failed to write %s padding: %v", l.Command(), err)
+		}
 	}
 	return nil
 }
@@ -955,16 +998,25 @@ func (l *SubFramework) MarshalJSON() ([]byte, error) {
 // A SubUmbrella is a Mach-O LC_SUB_UMBRELLA command.
 type SubUmbrella struct {
 	LoadBytes
-	types.SubFrameworkCmd
+	types.SubUmbrellaCmd
 	Umbrella string
 }
 
 func (l *SubUmbrella) LoadSize() uint32 {
-	return uint32(binary.Size(l.SubFrameworkCmd))
+	return pointerAlign(uint32(binary.Size(l.SubUmbrellaCmd)) + uint32(len(l.Umbrella)) + 1)
 }
 func (l *SubUmbrella) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, l.SubFrameworkCmd); err != nil {
+	if err := binary.Write(buf, o, l.SubUmbrellaCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	if _, err := buf.WriteString(l.Umbrella + "\x00"); err != nil {
+		return fmt.Errorf("failed to write %s to %s buffer: %v", l.Umbrella, l.Command(), err)
+	}
+	if (buf.Len() % 8) != 0 {
+		pad := 8 - (buf.Len() % 8)
+		if _, err := buf.Write(make([]byte, pad)); err != nil {
+			return fmt.Errorf("failed to write %s padding: %v", l.Command(), err)
+		}
 	}
 	return nil
 }
@@ -993,11 +1045,20 @@ type SubClient struct {
 }
 
 func (l *SubClient) LoadSize() uint32 {
-	return uint32(binary.Size(l.SubClientCmd))
+	return pointerAlign(uint32(binary.Size(l.SubClientCmd)) + uint32(len(l.Name)) + 1)
 }
 func (l *SubClient) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, l.SubClientCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	if _, err := buf.WriteString(l.Name + "\x00"); err != nil {
+		return fmt.Errorf("failed to write %s to %s buffer: %v", l.Name, l.Command(), err)
+	}
+	if (buf.Len() % 8) != 0 {
+		pad := 8 - (buf.Len() % 8)
+		if _, err := buf.Write(make([]byte, pad)); err != nil {
+			return fmt.Errorf("failed to write %s padding: %v", l.Command(), err)
+		}
 	}
 	return nil
 }
@@ -1023,16 +1084,25 @@ func (l *SubClient) MarshalJSON() ([]byte, error) {
 // A SubLibrary is a Mach-O LC_SUB_LIBRARY command.
 type SubLibrary struct {
 	LoadBytes
-	types.SubFrameworkCmd
+	types.SubLibraryCmd
 	Library string
 }
 
 func (l *SubLibrary) LoadSize() uint32 {
-	return uint32(binary.Size(l.SubFrameworkCmd))
+	return pointerAlign(uint32(binary.Size(l.SubLibraryCmd)) + uint32(len(l.Library)) + 1)
 }
 func (l *SubLibrary) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, l.SubFrameworkCmd); err != nil {
+	if err := binary.Write(buf, o, l.SubLibraryCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	if _, err := buf.WriteString(l.Library + "\x00"); err != nil {
+		return fmt.Errorf("failed to write %s to %s buffer: %v", l.Library, l.Command(), err)
+	}
+	if (buf.Len() % 8) != 0 {
+		pad := 8 - (buf.Len() % 8)
+		if _, err := buf.Write(make([]byte, pad)); err != nil {
+			return fmt.Errorf("failed to write %s padding: %v", l.Command(), err)
+		}
 	}
 	return nil
 }
@@ -1061,11 +1131,14 @@ type TwolevelHints struct {
 }
 
 func (l *TwolevelHints) LoadSize() uint32 {
-	return uint32(binary.Size(l.TwolevelHintsCmd))
+	return uint32(binary.Size(l.TwolevelHintsCmd) + binary.Size(l.Hints))
 }
 func (l *TwolevelHints) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, l.TwolevelHintsCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	if err := binary.Write(buf, o, l.Hints); err != nil {
+		return fmt.Errorf("failed to write hints to %s buffer: %v", l.Command(), err)
 	}
 	return nil
 }
@@ -1211,11 +1284,7 @@ type Rpath struct {
 }
 
 func (r *Rpath) LoadSize() uint32 {
-	sz := uint32(binary.Size(r.RpathCmd)) + uint32(len(r.Path)) + 1
-	if (sz % 8) != 0 {
-		sz += 8 - (sz % 8)
-	}
-	return sz
+	return pointerAlign(uint32(binary.Size(r.RpathCmd)) + uint32(len(r.Path)) + 1)
 }
 func (r *Rpath) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, r.RpathCmd); err != nil {
@@ -1357,7 +1426,6 @@ type LazyLoadDylib struct {
 type EncryptionInfo struct {
 	LoadBytes
 	types.EncryptionInfoCmd
-	CryptID types.EncryptionSystem // which enryption system, 0 means not-encrypted yet
 }
 
 func (e *EncryptionInfo) LoadSize() uint32 {
@@ -1696,9 +1764,6 @@ type DylibCodeSignDrs struct {
 type EncryptionInfo64 struct {
 	LoadBytes
 	types.EncryptionInfo64Cmd
-	Offset  uint32                 // file offset of encrypted range
-	Size    uint32                 // file size of encrypted range
-	CryptID types.EncryptionSystem // which enryption system, 0 means not-encrypted yet
 }
 
 func (e *EncryptionInfo64) LoadSize() uint32 {
@@ -1756,11 +1821,20 @@ type LinkerOption struct {
 }
 
 func (l *LinkerOption) LoadSize() uint32 {
-	return uint32(binary.Size(l.LinkerOptionCmd))
+	var totalStrLen uint32
+	for _, opt := range l.Options {
+		totalStrLen += uint32(len(opt) + 1)
+	}
+	return uint32(binary.Size(l.LinkerOptionCmd)) + totalStrLen
 }
 func (l *LinkerOption) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, l.LinkerOptionCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	for _, opt := range l.Options {
+		if _, err := buf.WriteString(opt + "\x00"); err != nil {
+			return fmt.Errorf("failed to write %s to %s buffer: %v", opt, l.Command(), err)
+		}
 	}
 	return nil
 }
@@ -1937,11 +2011,7 @@ type FilesetEntry struct {
 }
 
 func (l *FilesetEntry) LoadSize() uint32 {
-	sz := uint32(binary.Size(l.FilesetEntryCmd)) + uint32(len(l.EntryID)) + 1
-	if (sz % 8) != 0 {
-		sz += 8 - (sz % 8)
-	}
-	return sz
+	return pointerAlign(uint32(binary.Size(l.FilesetEntryCmd)) + uint32(len(l.EntryID)) + 1)
 }
 func (l *FilesetEntry) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, l.FilesetEntryCmd); err != nil {
@@ -1989,11 +2059,7 @@ type Dylib struct {
 }
 
 func (d *Dylib) LoadSize() uint32 {
-	sz := uint32(binary.Size(d.DylibCmd)) + uint32(len(d.Name)) + 1
-	if (sz % 8) != 0 {
-		sz += 8 - (sz % 8)
-	}
-	return sz
+	return pointerAlign(uint32(binary.Size(d.DylibCmd)) + uint32(len(d.Name)) + 1)
 }
 func (d *Dylib) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
@@ -2048,11 +2114,7 @@ type Dylinker struct {
 }
 
 func (d *Dylinker) LoadSize() uint32 {
-	sz := uint32(binary.Size(d.DylinkerCmd)) + uint32(len(d.Name)) + 1
-	if (sz % 8) != 0 {
-		sz += 8 - (sz % 8)
-	}
-	return sz
+	return pointerAlign(uint32(binary.Size(d.DylinkerCmd)) + uint32(len(d.Name)) + 1)
 }
 func (d *Dylinker) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(d.LoadCmd))

@@ -303,23 +303,14 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, fmt.Errorf("failed to read LC_SYMTAB: %v", err)
 			}
-
+			symdat := make([]byte, int(hdr.Nsyms)*f.symbolSize())
+			if _, err := f.cr.ReadAt(symdat, int64(hdr.Symoff)); err != nil {
+				return nil, fmt.Errorf("failed to read data at Symoff=%#x; %v", int64(hdr.Symoff), err)
+			}
 			strtab := make([]byte, hdr.Strsize)
 			if _, err := f.cr.ReadAt(strtab, int64(hdr.Stroff)); err != nil {
 				return nil, fmt.Errorf("failed to read data at Stroff=%#x; %v", int64(hdr.Stroff), err)
 			}
-
-			var symsz int
-			if f.Magic == types.Magic64 {
-				symsz = 16
-			} else {
-				symsz = 12
-			}
-			symdat := make([]byte, int(hdr.Nsyms)*symsz)
-			if _, err := f.cr.ReadAt(symdat, int64(hdr.Symoff)); err != nil {
-				return nil, fmt.Errorf("failed to read data at Symoff=%#x; %v", int64(hdr.Symoff), err)
-			}
-
 			st, err := f.parseSymtab(symdat, strtab, cmddat, &hdr, offset)
 			if err != nil {
 				return nil, fmt.Errorf("failed to read parseSymtab: %v", err)
@@ -353,10 +344,23 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			l.Type = t.Type
-			l.Data = make([]uint32, t.Len-3*uint32(binary.Size(uint32(0)))/uint32(binary.Size(uint32(0))))
-			if err := binary.Read(b, bo, &l.Data); err != nil {
-				return nil, fmt.Errorf("failed to read Thread data: %v", err)
+			for {
+				var thread types.ThreadState
+				err := binary.Read(b, bo, &thread.Flavor)
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					return nil, fmt.Errorf("failed to read LC_THREAD flavor: %v", err)
+				}
+				if err := binary.Read(b, bo, &thread.Count); err != nil {
+					return nil, fmt.Errorf("failed to read LC_THREAD count: %v", err)
+				}
+				thread.Data = make([]byte, thread.Count*uint32(binary.Size(uint32(0))))
+				if err := binary.Read(b, bo, &thread.Data); err != nil {
+					return nil, fmt.Errorf("failed to read LC_THREAD state struct data: %v", err)
+				}
+				l.Threads = append(l.Threads, thread)
 			}
 			f.Loads[i] = l
 		case types.LC_UNIXTHREAD:
@@ -369,14 +373,24 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			// TODO: handle all flavors
-			if ut.Flavor == 6 {
-				regs := make([]uint64, ut.Count/2)
-				if err := binary.Read(b, bo, &regs); err != nil {
-					return nil, fmt.Errorf("failed to read UnixThread registers: %v", err)
+			l.bo = bo
+			for {
+				var thread types.ThreadState
+				err := binary.Read(b, bo, &thread.Flavor)
+				if err == io.EOF {
+					break
 				}
-				// this is to get the program counter register
-				l.EntryPoint = regs[len(regs)-2]
+				if err != nil {
+					return nil, fmt.Errorf("failed to read LC_UNIXTHREAD flavor: %v", err)
+				}
+				if err := binary.Read(b, bo, &thread.Count); err != nil {
+					return nil, fmt.Errorf("failed to read LC_UNIXTHREAD count: %v", err)
+				}
+				thread.Data = make([]byte, thread.Count*uint32(binary.Size(uint32(0))))
+				if err := binary.Read(b, bo, &thread.Data); err != nil {
+					return nil, fmt.Errorf("failed to read LC_UNIXTHREAD state struct data: %v", err)
+				}
+				l.Threads = append(l.Threads, thread)
 			}
 			f.Loads[i] = l
 		case types.LC_LOADFVMLIB:
@@ -389,11 +403,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			if hdr.Name >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid name in LC_LOADFVMLIB command", hdr.Name}
-			}
-			l.MinorVersion = types.Version(hdr.MinorVersion)
+			l.NameOffset = hdr.NameOffset
+			l.MinorVersion = hdr.MinorVersion
 			l.HeaderAddr = hdr.HeaderAddr
+			if hdr.NameOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in LC_LOADFVMLIB command", hdr.NameOffset}
+			}
+			l.Name = cstring(cmddat[hdr.NameOffset:])
 			f.Loads[i] = l
 		case types.LC_IDFVMLIB:
 			var hdr types.IDFvmLibCmd
@@ -405,11 +421,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			if hdr.Name >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid name in LC_IDFVMLIB command", hdr.Name}
-			}
-			l.MinorVersion = types.Version(hdr.MinorVersion)
+			l.NameOffset = hdr.NameOffset
+			l.MinorVersion = hdr.MinorVersion
 			l.HeaderAddr = hdr.HeaderAddr
+			if hdr.NameOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in LC_IDFVMLIB command", hdr.NameOffset}
+			}
+			l.Name = cstring(cmddat[hdr.NameOffset:])
 			f.Loads[i] = l
 		case types.LC_IDENT:
 			var hdr types.IdentCmd
@@ -421,7 +439,17 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			// l.StrTable = TODO: read string table
+			br := bufio.NewReader(b)
+			for {
+				o, err := br.ReadString('\x00')
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					return nil, fmt.Errorf("failed to read LC_IDENT options: %v", err)
+				}
+				l.StrTable = append(l.StrTable, o)
+			}
 			f.Loads[i] = l
 		case types.LC_FVMFILE:
 			var hdr types.FvmFileCmd
@@ -433,10 +461,12 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			if hdr.Name >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid name in LC_FVMFILE command", hdr.Name}
-			}
+			l.NameOffset = hdr.NameOffset
 			l.HeaderAddr = hdr.HeaderAddr
+			if hdr.NameOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in LC_FVMFILE command", hdr.NameOffset}
+			}
+			l.Name = cstring(cmddat[hdr.NameOffset:])
 			f.Loads[i] = l
 		case types.LC_PREPAGE:
 			var hdr types.PrePageCmd
@@ -569,7 +599,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if hdr.LinkedModulesOffset >= uint32(len(cmddat)) {
 				return nil, &FormatError{offset, "invalid linked modules in LC_PREBOUND_DYLIB command", hdr.NameOffset}
 			}
-			l.LinkedModules = cstring(cmddat[hdr.LinkedModulesOffset:])
+			l.LinkedModulesBitVector = cstring(cmddat[hdr.LinkedModulesOffset:])
 			f.Loads[i] = l
 		case types.LC_ROUTINES:
 			var rt types.RoutinesCmd
@@ -594,10 +624,11 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			if sf.Framework >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid framework in sub-framework command", sf.Framework}
+			l.FrameworkOffset = sf.FrameworkOffset
+			if sf.FrameworkOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid framework in sub-framework command", sf.FrameworkOffset}
 			}
-			l.Framework = cstring(cmddat[sf.Framework:])
+			l.Framework = cstring(cmddat[sf.FrameworkOffset:])
 			f.Loads[i] = l
 		case types.LC_SUB_UMBRELLA:
 			var su types.SubUmbrellaCmd
@@ -609,10 +640,11 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			if su.Umbrella >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid framework in sub-umbrella command", su.Umbrella}
+			l.UmbrellaOffset = su.UmbrellaOffset
+			if su.UmbrellaOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid framework in sub-umbrella command", su.UmbrellaOffset}
 			}
-			l.Umbrella = cstring(cmddat[su.Umbrella:])
+			l.Umbrella = cstring(cmddat[su.UmbrellaOffset:])
 			f.Loads[i] = l
 		case types.LC_SUB_CLIENT:
 			var sc types.SubClientCmd
@@ -624,10 +656,11 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			if sc.Client >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid path in sub client command", sc.Client}
+			l.ClientOffset = sc.ClientOffset
+			if sc.ClientOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid path in sub client command", sc.ClientOffset}
 			}
-			l.Name = cstring(cmddat[sc.Client:])
+			l.Name = cstring(cmddat[sc.ClientOffset:])
 			f.Loads[i] = l
 		case types.LC_SUB_LIBRARY:
 			var s types.SubLibraryCmd
@@ -639,10 +672,11 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			if s.Library >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid framework in sub-library command", s.Library}
+			l.LibraryOffset = s.LibraryOffset
+			if s.LibraryOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid framework in sub-library command", s.LibraryOffset}
 			}
-			l.Library = cstring(cmddat[s.Library:])
+			l.Library = cstring(cmddat[s.LibraryOffset:])
 			f.Loads[i] = l
 		case types.LC_TWOLEVEL_HINTS:
 			var t types.TwolevelHintsCmd
@@ -1311,6 +1345,13 @@ func (f *File) pointerSize() uint64 {
 		return 8
 	}
 	return 4
+}
+
+func (f *File) symbolSize() int {
+	if f.is64bit() {
+		return binary.Size(types.Nlist64{})
+	}
+	return binary.Size(types.Nlist32{})
 }
 
 func (f *File) has16KPages() bool {
