@@ -345,31 +345,31 @@ const (
 	//
 	// x86 flavors
 	//
-	x86_THREAD_STATE32    ThreadFlavor = 1
-	x86_FLOAT_STATE32     ThreadFlavor = 2
-	x86_EXCEPTION_STATE32 ThreadFlavor = 3
-	x86_THREAD_STATE64    ThreadFlavor = 4
-	x86_FLOAT_STATE64     ThreadFlavor = 5
-	x86_EXCEPTION_STATE64 ThreadFlavor = 6
-	x86_THREAD_STATE      ThreadFlavor = 7
-	x86_FLOAT_STATE       ThreadFlavor = 8
-	x86_EXCEPTION_STATE   ThreadFlavor = 9
-	x86_DEBUG_STATE32     ThreadFlavor = 10
-	x86_DEBUG_STATE64     ThreadFlavor = 11
-	x86_DEBUG_STATE       ThreadFlavor = 12
-	x86_THREAD_STATE_NONE ThreadFlavor = 13
-	/* 14 and 15 are used for the internal x86_SAVED_STATE flavours */
+	X86_THREAD_STATE32    ThreadFlavor = 1
+	X86_FLOAT_STATE32     ThreadFlavor = 2
+	X86_EXCEPTION_STATE32 ThreadFlavor = 3
+	X86_THREAD_STATE64    ThreadFlavor = 4
+	X86_FLOAT_STATE64     ThreadFlavor = 5
+	X86_EXCEPTION_STATE64 ThreadFlavor = 6
+	X86_THREAD_STATE      ThreadFlavor = 7
+	X86_FLOAT_STATE       ThreadFlavor = 8
+	X86_EXCEPTION_STATE   ThreadFlavor = 9
+	X86_DEBUG_STATE32     ThreadFlavor = 10
+	X86_DEBUG_STATE64     ThreadFlavor = 11
+	X86_DEBUG_STATE       ThreadFlavor = 12
+	X86_THREAD_STATE_NONE ThreadFlavor = 13
+	/* 14 and 15 are used for the internal X86_SAVED_STATE flavours */
 	/* Arrange for flavors to take sequential values, 32-bit, 64-bit, non-specific */
-	x86_AVX_STATE32         ThreadFlavor = 16
-	x86_AVX_STATE64         ThreadFlavor = (x86_AVX_STATE32 + 1)
-	x86_AVX_STATE           ThreadFlavor = (x86_AVX_STATE32 + 2)
-	x86_AVX512_STATE32      ThreadFlavor = 19
-	x86_AVX512_STATE64      ThreadFlavor = (x86_AVX512_STATE32 + 1)
-	x86_AVX512_STATE        ThreadFlavor = (x86_AVX512_STATE32 + 2)
-	x86_PAGEIN_STATE        ThreadFlavor = 22
-	x86_THREAD_FULL_STATE64 ThreadFlavor = 23
-	x86_INSTRUCTION_STATE   ThreadFlavor = 24
-	x86_LAST_BRANCH_STATE   ThreadFlavor = 25
+	X86_AVX_STATE32         ThreadFlavor = 16
+	X86_AVX_STATE64         ThreadFlavor = (X86_AVX_STATE32 + 1)
+	X86_AVX_STATE           ThreadFlavor = (X86_AVX_STATE32 + 2)
+	X86_AVX512_STATE32      ThreadFlavor = 19
+	X86_AVX512_STATE64      ThreadFlavor = (X86_AVX512_STATE32 + 1)
+	X86_AVX512_STATE        ThreadFlavor = (X86_AVX512_STATE32 + 2)
+	X86_PAGEIN_STATE        ThreadFlavor = 22
+	X86_THREAD_FULL_STATE64 ThreadFlavor = 23
+	X86_INSTRUCTION_STATE   ThreadFlavor = 24
+	X86_LAST_BRANCH_STATE   ThreadFlavor = 25
 	//
 	// arm flavors
 	//
@@ -383,20 +383,18 @@ const (
 	ARM_EXCEPTION_STATE64    ThreadFlavor = 7
 	//      ARM_THREAD_STATE_LAST    8 /* legacy */
 	ARM_THREAD_STATE32 ThreadFlavor = 9
-
 	/* API */
 	ARM_DEBUG_STATE32 ThreadFlavor = 14
 	ARM_DEBUG_STATE64 ThreadFlavor = 15
 	ARM_NEON_STATE    ThreadFlavor = 16
 	ARM_NEON_STATE64  ThreadFlavor = 17
 	ARM_CPMU_STATE64  ThreadFlavor = 18
-
-	ARM_PAGEIN_STATE ThreadFlavor = 27
+	ARM_PAGEIN_STATE  ThreadFlavor = 27
 )
 
 type ThreadState struct {
 	Flavor ThreadFlavor // flavor of thread state
-	Count  uint32       // count of uint32_t's in thread state
+	Count  uint32       // count of 's in thread state
 	Data   []byte       // thread state for this flavor
 }
 
@@ -404,9 +402,9 @@ type ThreadState struct {
  * ThreadCmd contain machine-specific data structures suitable for
  * use in the thread state primitives.  The machine specific data structures
  * follow the struct thread_command as follows.
- * Each flavor of machine specific data structure is preceded by an uint32_t
- * constant for the flavor of that data structure, an uint32_t that is the
- * count of uint32_t's of the size of the state data structure and then
+ * Each flavor of machine specific data structure is preceded by an
+ * constant for the flavor of that data structure, an  that is the
+ * count of 's of the size of the state data structure and then
  * the state data structure follows.  This triple may be repeated for many
  * flavors.  The constants for the flavors, counts and state data structure
  * definitions are expected to be in the header file <machine/thread_status.h>.
@@ -424,8 +422,8 @@ type ThreadState struct {
 type ThreadCmd struct { // FIXME: handle all flavors ?
 	LoadCmd        // LC_THREAD or  LC_UNIXTHREAD
 	Len     uint32 // total size of this command
-	/* uint32_t flavor		   flavor of thread state */
-	/* uint32_t count		   count of uint32_t's in thread state */
+	/*  flavor		   flavor of thread state */
+	/*  count		   count of 's in thread state */
 	/* struct XXX_thread_state state   thread state for this flavor */
 	/* ... */
 }
@@ -641,6 +639,83 @@ const (
 	INDIRECT_SYMBOL_LOCAL = 0x80000000 // TODO: use this ?
 	INDIRECT_SYMBOL_ABS   = 0x40000000
 )
+
+/* a table of contents entry */
+type DylibTableOfContents struct {
+	SymbolIndex uint32 /* the defined external symbol (index into the symbol table) */
+	ModuleIndex uint32 /* index into the module table this symbol is defined in */
+}
+
+/* a module table entry */
+type DylibModule struct {
+	ModuleName uint32 /* the module name (index into string table) */
+
+	Iextdefsym uint32 /* index into externally defined symbols */
+	Nextdefsym uint32 /* number of externally defined symbols */
+	Irefsym    uint32 /* index into reference symbol table */
+	Nrefsym    uint32 /* number of reference symbol table entries */
+	Ilocalsym  uint32 /* index into symbols for local symbols */
+	Nlocalsym  uint32 /* number of local symbols */
+
+	Iextrel uint32 /* index into external relocation entries */
+	Nextrel uint32 /* number of external relocation entries */
+
+	IinitIterm uint32 /* low 16 bits are the index into the init
+		   section, high 16 bits are the index into
+	           the term section */
+	NinitNterm uint32 /* low 16 bits are the number of init section
+	   entries, high 16 bits are the number of
+	   term section entries */
+
+	/* for this module address of the start of */
+	ObjcModuleInfoAddr uint32 /*  the (__OBJC,__module_info) section */
+	/* for this module size of */
+	ObjcModuleInfoSize uint32 /*  the (__OBJC,__module_info) section */
+}
+
+/* a 64-bit module table entry */
+type DylibModule64 struct {
+	ModuleName uint32 /* the module name (index into string table) */
+
+	Iextdefsym uint32 /* index into externally defined symbols */
+	Nextdefsym uint32 /* number of externally defined symbols */
+	Irefsym    uint32 /* index into reference symbol table */
+	Nrefsym    uint32 /* number of reference symbol table entries */
+	Ilocalsym  uint32 /* index into symbols for local symbols */
+	Nlocalsym  uint32 /* number of local symbols */
+
+	Iextrel uint32 /* index into external relocation entries */
+	Nextrel uint32 /* number of external relocation entries */
+
+	IinitIterm uint32 /* low 16 bits are the index into the init
+	   section, high 16 bits are the index into the term section */
+	NinitNterm uint32 /* low 16 bits are the number of init section
+	entries, high 16 bits are the number of term section entries */
+
+	/* for this module size of */
+	ObjcModuleInfoSize uint32 /*  the (__OBJC,__module_info) section */
+	/* for this module address of the start of */
+	ObjcModuleInfoAddr uint64 /*  the (__OBJC,__module_info) section */
+}
+
+/*
+ * The entries in the reference symbol table are used when loading the module
+ * (both by the static and dynamic link editors) and if the module is unloaded
+ * or replaced.  Therefore all external symbols (defined and undefined) are
+ * listed in the module's reference table.  The flags describe the type of
+ * reference that is being made.  The constants for the flags are defined in
+ * <mach-o/nlist.h> as they are also used for symbol table entries.
+ */
+// isym:24, /* index into the symbol table */
+// flags:8; /* flags to indicate the type of reference */
+type DylibReference uint32
+
+func (d DylibReference) SymIndex() uint32 {
+	return uint32(d >> 8)
+}
+func (d DylibReference) Flags() uint8 {
+	return uint8(d & 0xff)
+}
 
 /*
  * TwolevelHintsCmd contains the offset and number of hints in the

@@ -502,6 +502,10 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(bytes.NewReader(dat), bo, x); err != nil {
 				return nil, fmt.Errorf("failed to read Nindirectsyms: %v", err)
 			}
+			// TODO: parse DylibTableOfContents if Ntoc > 0
+			// TODO: parse DylibModule if Nmodtab > 0
+			// TODO: parse DylibReference if Nextrefsyms > 0
+			// TODO: parse RelocInfo if Nlocrel > 0
 			st := new(Dysymtab)
 			st.LoadBytes = cmddat
 			st.LoadCmd = cmd
