@@ -509,11 +509,11 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 			}
 			l.(*DyldChainedFixups).Offset = uint32(off)
 		case types.LC_FILESET_ENTRY:
-			off, err := segMap.Remap(l.(*FilesetEntry).Offset)
+			off, err := segMap.Remap(l.(*FilesetEntry).FileOffset)
 			if err != nil {
 				return fmt.Errorf("failed to remap offset in %s: %v", l.Command(), err)
 			}
-			l.(*FilesetEntry).Offset = off
+			l.(*FilesetEntry).FileOffset = off
 		case types.LC_LOAD_DYLIB:
 			fallthrough
 		case types.LC_LOAD_WEAK_DYLIB:

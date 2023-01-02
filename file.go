@@ -904,8 +904,8 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			l.Version = verMin.Version.String()
-			l.Sdk = verMin.Sdk.String()
+			l.Version = verMin.Version
+			l.Sdk = verMin.Sdk
 			f.Loads[i] = l
 		case types.LC_VERSION_MIN_IPHONEOS:
 			var verMin types.VersionMinIPhoneOSCmd
@@ -917,8 +917,8 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			l.Version = verMin.Version.String()
-			l.Sdk = verMin.Sdk.String()
+			l.Version = verMin.Version
+			l.Sdk = verMin.Sdk
 			f.Loads[i] = l
 		case types.LC_FUNCTION_STARTS:
 			var led types.LinkEditDataCmd
@@ -1066,8 +1066,8 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			l.Version = verMin.Version.String()
-			l.Sdk = verMin.Sdk.String()
+			l.Version = verMin.Version
+			l.Sdk = verMin.Sdk
 			f.Loads[i] = l
 		case types.LC_VERSION_MIN_WATCHOS:
 			var verMin types.VersionMinWatchOSCmd
@@ -1079,8 +1079,8 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			l.Version = verMin.Version.String()
-			l.Sdk = verMin.Sdk.String()
+			l.Version = verMin.Version
+			l.Sdk = verMin.Sdk
 			f.Loads[i] = l
 		case types.LC_NOTE:
 			var n types.NoteCmd
@@ -1159,12 +1159,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			if hdr.EntryID >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid name in load fileset entry command", hdr.EntryID}
-			}
-			l.EntryID = cstring(cmddat[hdr.EntryID:])
-			l.Offset = hdr.Offset
 			l.Addr = hdr.Addr
+			l.FileOffset = hdr.FileOffset
+			l.EntryIdOffset = hdr.EntryIdOffset
+			if hdr.EntryIdOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid name in load fileset entry command", hdr.EntryIdOffset}
+			}
+			l.EntryID = cstring(cmddat[hdr.EntryIdOffset:])
 			f.Loads[i] = l
 		}
 		if s != nil {
@@ -1661,8 +1662,8 @@ func (f *File) GetFileSetFileByName(name string) (*File, error) {
 	for _, l := range f.Loads {
 		if fs, ok := l.(*FilesetEntry); ok {
 			if strings.Contains(strings.ToLower(fs.EntryID), strings.ToLower(name)) {
-				return NewFile(io.NewSectionReader(f.sr, int64(fs.Offset), 1<<63-1), FileConfig{
-					Offset:        int64(fs.Offset),
+				return NewFile(io.NewSectionReader(f.sr, int64(fs.FileOffset), 1<<63-1), FileConfig{
+					Offset:        int64(fs.FileOffset),
 					SectionReader: f.sr,
 					CacheReader:   f.cr,
 					VMAddrConverter: types.VMAddrConverter{

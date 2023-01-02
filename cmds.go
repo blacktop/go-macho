@@ -1949,7 +1949,7 @@ func (l *FilesetEntry) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	return nil
 }
 func (f *FilesetEntry) String() string {
-	return fmt.Sprintf("offset=0x%09x addr=0x%016x %s", f.Offset, f.Addr, f.EntryID)
+	return fmt.Sprintf("offset=0x%09x addr=0x%016x %s", f.FileOffset, f.Addr, f.EntryID)
 }
 func (l *FilesetEntry) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
@@ -1961,7 +1961,7 @@ func (l *FilesetEntry) MarshalJSON() ([]byte, error) {
 	}{
 		LoadCmd: l.Command().String(),
 		Len:     l.Len,
-		Offset:  l.Offset,
+		Offset:  l.FileOffset,
 		Addr:    l.Addr,
 		EntryID: l.EntryID,
 	})
@@ -1996,10 +1996,10 @@ func (d *Dylib) Put(b []byte, o binary.ByteOrder) int {
 }
 func (d *Dylib) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, d.DylibCmd); err != nil {
-		return fmt.Errorf("failed to write %s to Dylib buffer: %v", d.Command(), err)
+		return fmt.Errorf("failed to write %s to buffer: %v", d.Command(), err)
 	}
 	if _, err := buf.WriteString(d.Name + "\x00"); err != nil {
-		return fmt.Errorf("failed to write %s to Dylib buffer: %v", d.Name, err)
+		return fmt.Errorf("failed to write %s to %s buffer: %v", d.Name, d.Command(), err)
 	}
 	if (buf.Len() % 8) != 0 {
 		pad := 8 - (buf.Len() % 8)
@@ -2038,7 +2038,11 @@ type Dylinker struct {
 }
 
 func (d *Dylinker) LoadSize() uint32 {
-	return uint32(binary.Size(d.DylinkerCmd))
+	sz := uint32(binary.Size(d.DylinkerCmd)) + uint32(len(d.Name)) + 1
+	if (sz % 8) != 0 {
+		sz += 8 - (sz % 8)
+	}
+	return sz
 }
 func (d *Dylinker) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
@@ -2051,7 +2055,7 @@ func (d *Dylinker) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 		return fmt.Errorf("failed to write %s to buffer: %v", d.Command(), err)
 	}
 	if _, err := buf.WriteString(d.Name + "\x00"); err != nil {
-		return fmt.Errorf("failed to write %s to Dylib buffer: %v", d.Name, err)
+		return fmt.Errorf("failed to write %s to %s buffer: %v", d.Name, d.Command(), err)
 	}
 	if (buf.Len() % 8) != 0 {
 		pad := 8 - (buf.Len() % 8)
@@ -2080,8 +2084,6 @@ func (d *Dylinker) MarshalJSON() ([]byte, error) {
 type VersionMin struct {
 	LoadBytes
 	types.VersionMinCmd
-	Version string
-	Sdk     string
 }
 
 func (v *VersionMin) LoadSize() uint32 {
@@ -2105,8 +2107,8 @@ func (v *VersionMin) MarshalJSON() ([]byte, error) {
 	}{
 		LoadCmd: v.Command().String(),
 		Len:     v.Len,
-		Version: v.Version,
-		SDK:     v.Sdk,
+		Version: v.Version.String(),
+		SDK:     v.Sdk.String(),
 	})
 }
 

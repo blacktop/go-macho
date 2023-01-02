@@ -978,10 +978,10 @@ type NoteCmd struct {
 // mach headers and repositionable text and data segments. Each entry is
 // further described by its own mach header.
 type FilesetEntryCmd struct {
-	LoadCmd  // LC_FILESET_ENTRY
-	Len      uint32
-	Addr     uint64 // memory address of the entry
-	Offset   uint64 // file offset of the entry
-	EntryID  uint32 // contained entry id
-	Reserved uint32 // reserved
+	LoadCmd       // LC_FILESET_ENTRY
+	Len           uint32
+	Addr          uint64 // memory address of the entry
+	FileOffset    uint64 // file offset of the entry
+	EntryIdOffset uint32 // contained entry id
+	Reserved      uint32 // reserved
 }
