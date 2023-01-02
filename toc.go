@@ -25,6 +25,11 @@ func (t *FileTOC) AddLoad(l Load) uint32 {
 	return t.LoadSize() - loadsz // delta
 }
 
+func (t *FileTOC) ModifySizeCommands(prev, curr int32) int32 {
+	t.SizeCommands = uint32(int32(t.SizeCommands) + (curr - prev))
+	return curr - prev
+}
+
 func (t *FileTOC) RemoveLoad(l Load) error {
 	if len(t.Loads) == 0 {
 		return fmt.Errorf("no loads to remove")

@@ -1813,9 +1813,6 @@ type VersionMinWatchOS struct {
 type Note struct {
 	LoadBytes
 	types.NoteCmd
-	DataOwner string
-	Offset    uint64
-	Size      uint64
 }
 
 func (n *Note) LoadSize() uint32 {
@@ -1828,7 +1825,7 @@ func (n *Note) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	return nil
 }
 func (n *Note) String() string {
-	return fmt.Sprintf("DataOwner=%s, offset=0x%08x-0x%08x size=%5d", n.DataOwner, n.Offset, n.Offset+n.Size, n.Size)
+	return fmt.Sprintf("DataOwner=%s, offset=0x%08x-0x%08x size=%5d", string(n.DataOwner[:]), n.Offset, n.Offset+n.Size, n.Size)
 }
 func (n *Note) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
@@ -1840,7 +1837,7 @@ func (n *Note) MarshalJSON() ([]byte, error) {
 	}{
 		LoadCmd:   n.Command().String(),
 		Len:       n.Len,
-		DataOwner: n.DataOwner,
+		DataOwner: string(n.DataOwner[:]),
 		Offset:    n.Offset,
 		Size:      n.Size,
 	})
@@ -1940,11 +1937,24 @@ type FilesetEntry struct {
 }
 
 func (l *FilesetEntry) LoadSize() uint32 {
-	return uint32(binary.Size(l.FilesetEntryCmd))
+	sz := uint32(binary.Size(l.FilesetEntryCmd)) + uint32(len(l.EntryID)) + 1
+	if (sz % 8) != 0 {
+		sz += 8 - (sz % 8)
+	}
+	return sz
 }
 func (l *FilesetEntry) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, l.FilesetEntryCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	if _, err := buf.WriteString(l.EntryID + "\x00"); err != nil {
+		return fmt.Errorf("failed to write %s to %s buffer: %v", l.EntryID, l.Command(), err)
+	}
+	if (buf.Len() % 8) != 0 {
+		pad := 8 - (buf.Len() % 8)
+		if _, err := buf.Write(make([]byte, pad)); err != nil {
+			return fmt.Errorf("failed to write %s padding: %v", l.Command(), err)
+		}
 	}
 	return nil
 }

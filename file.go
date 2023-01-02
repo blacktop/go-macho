@@ -1092,7 +1092,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			l.DataOwner = string(n.DataOwner[:])
+			l.DataOwner = n.DataOwner
 			l.Offset = n.Offset
 			l.Size = n.Size
 			f.Loads[i] = l
