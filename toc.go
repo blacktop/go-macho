@@ -17,15 +17,12 @@ type FileTOC struct {
 	functions []types.Function
 }
 
-func (t *FileTOC) AddLoad(l Load) {
+func (t *FileTOC) AddLoad(l Load) uint32 {
 	loadsz := t.LoadSize()
 	t.Loads = append(t.Loads, l)
 	t.NCommands++
 	t.SizeCommands += l.LoadSize()
-	delta := t.LoadSize() - loadsz
-	if delta > 0 {
-		fmt.Printf("delta: %d\n", delta)
-	}
+	return t.LoadSize() - loadsz // delta
 }
 
 func (t *FileTOC) RemoveLoad(l Load) error {

@@ -82,6 +82,41 @@ const (
 	any                Platform = 0xFFFFFFFF // PLATFORM_ANY
 )
 
+func GetPlatformByName(name string) (Platform, error) {
+	switch strings.ToLower(name) {
+	case "macos":
+		return macOS, nil
+	case "ios":
+		return iOS, nil
+	case "tvos":
+		return tvOS, nil
+	case "watchos":
+		return watchOS, nil
+	case "bridgeos":
+		return bridgeOS, nil
+	case "maccatalyst":
+		return macCatalyst, nil
+	case "iossimulator":
+		return iOSSimulator, nil
+	case "tvossimulator":
+		return tvOSSimulator, nil
+	case "watchossimulator":
+		return watchOSSimulator, nil
+	case "driverkit":
+		return driverKit, nil
+	case "realityos":
+		return realityOS, nil
+	case "realityossimulator":
+		return realityOSSimulator, nil
+	case "firmware":
+		return firmware, nil
+	case "sepos":
+		return sepOS, nil
+	default:
+		return unknown, errors.New("unknown platform")
+	}
+}
+
 type Version uint32
 
 func (v Version) String() string {
@@ -144,6 +179,35 @@ const (
 	GpuArchiver    Tool = 1031
 	MetalFramework Tool = 1032
 )
+
+func GetToolByName(name string) (Tool, error) {
+	switch strings.ToLower(name) {
+	case "clang":
+		return clang, nil
+	case "swift":
+		return swift, nil
+	case "ld":
+		return ld, nil
+	case "lld":
+		return lld, nil
+	case "metal":
+		return Metal, nil
+	case "airld":
+		return AirLld, nil
+	case "airnt":
+		return AirNt, nil
+	case "airntplugin":
+		return AirNtPlugin, nil
+	case "airpack":
+		return AirPack, nil
+	case "gpuarchiver":
+		return GpuArchiver, nil
+	case "metalframework":
+		return MetalFramework, nil
+	default:
+		return none, fmt.Errorf("unknown tool")
+	}
+}
 
 type BuildVersionTool struct {
 	Tool    Tool    /* enum for the tool */
