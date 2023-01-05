@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/blacktop/go-macho/pkg/codesign"
+	ctypes "github.com/blacktop/go-macho/pkg/codesign/types"
 	"github.com/blacktop/go-macho/pkg/fixupchains"
 	"github.com/blacktop/go-macho/pkg/trie"
 	"github.com/blacktop/go-macho/types"
@@ -62,8 +64,11 @@ func (m exportSegMap) RemapSeg(name string, offset uint64) (uint64, uint64, erro
 	return 0, 0, fmt.Errorf("failed to remap offset %#x", offset)
 }
 
-func pageAlign(offset uint64) uint64 {
-	return offset + (0x1000 - (offset % 0x1000))
+func pageAlign(off uint64) uint64 {
+	if (off % 0x1000) != 0 {
+		off += 0x1000 - (off % 0x1000)
+	}
+	return off
 }
 
 // Export exports an in-memory or cached dylib|kext MachO to a file
@@ -225,6 +230,79 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 	return nil
 }
 
+func (f *File) CodeSign(id string, flags ctypes.CDFlag, entitlements []byte) error {
+	if text := f.Segment("__TEXT"); text != nil {
+		var cs *CodeSignature
+
+		linkedit := f.Segment("__LINKEDIT")
+		if linkedit == nil {
+			return fmt.Errorf("failed to find segment __LINKEDIT")
+		}
+
+		ledata := make([]byte, linkedit.Filesz)
+		if _, err := f.cr.ReadAtAddr(ledata, linkedit.Addr); err != nil {
+			return fmt.Errorf("failed to read __LINKEDIT data: %v", err)
+		}
+
+		if cs = f.CodeSignature(); cs == nil {
+			cs = &CodeSignature{
+				CodeSignatureCmd: types.CodeSignatureCmd{
+					LoadCmd: types.LC_CODE_SIGNATURE,
+					Len:     uint32(binary.Size(types.CodeSignatureCmd{})),
+				},
+			}
+			cs.Offset = pointerAlign(uint32(linkedit.Offset + linkedit.Filesz))
+			// add NEW codesignature load command
+			f.AddLoad(cs)
+			// refresh
+			cs = f.CodeSignature()
+		}
+
+		f.ledata = bytes.NewBuffer(ledata[:(uint64(cs.Offset) - linkedit.Offset)])
+
+		data := make([]byte, cs.Offset)
+		if _, err := f.ReadAt(data, 0); err != nil {
+			return fmt.Errorf("failed to read codesign data: %v", err)
+		}
+
+		csdata, err := codesign.Sign(bytes.NewReader(data), &codesign.SignConfig{
+			ID:           id,
+			IsMain:       f.Type == types.MH_EXECUTE,
+			Flags:        flags,
+			CodeSize:     uint64(cs.Offset),
+			TextOffset:   uint64(text.Offset),
+			TextSize:     uint64(text.Filesz),
+			Entitlements: entitlements,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create codesignature: %v", err)
+		}
+
+		cs.Size = uint32(len(csdata))
+
+		if _, err := f.ledata.Write(csdata); err != nil {
+			return fmt.Errorf("failed to write codesign data to linkedit segment data: %v", err)
+		}
+
+		// clear data for GC
+		data = nil
+		csdata = nil
+
+		linkedit.Filesz = pageAlign(uint64(f.ledata.Len()))
+		linkedit.Memsz = linkedit.Filesz
+
+		if linkedit.Filesz > uint64(f.ledata.Len()) { // pad with zeros
+			if _, err := f.ledata.Write(make([]byte, linkedit.Filesz-uint64(f.ledata.Len()))); err != nil {
+				return fmt.Errorf("failed to write linkedit segment padding: %v", err)
+			}
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("failed to find section __TEXT,__text")
+}
+
 func (f *File) Save(outpath string) error {
 	var buf bytes.Buffer
 
@@ -251,12 +329,18 @@ func (f *File) Save(outpath string) error {
 					return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
 				}
 			case "__LINKEDIT":
-				dat := make([]byte, seg.Filesz)
-				if _, err := f.cr.ReadAtAddr(dat, seg.Addr); err != nil {
-					return fmt.Errorf("failed to read segment %s data: %v", seg.Name, err)
-				}
-				if _, err := buf.Write(dat); err != nil {
-					return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
+				if f.ledata.Len() > 0 && f.CodeSignature() != nil {
+					if _, err := buf.Write(f.ledata.Bytes()); err != nil {
+						return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
+					}
+				} else {
+					dat := make([]byte, seg.Filesz)
+					if _, err := f.cr.ReadAtAddr(dat, seg.Addr); err != nil {
+						return fmt.Errorf("failed to read segment %s data: %v", seg.Name, err)
+					}
+					if _, err := buf.Write(dat); err != nil {
+						return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
+					}
 				}
 			default:
 				dat := make([]byte, seg.Filesz)

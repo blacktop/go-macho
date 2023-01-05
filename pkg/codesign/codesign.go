@@ -8,19 +8,33 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"math"
 	"strings"
 
 	"github.com/blacktop/go-macho/pkg/codesign/types"
 )
 
+var (
+	emptySha256Hash = bytes.Repeat([]byte{0}, sha256.New().Size())
+	emptyReqSlot    = []byte{76, 177, 245, 82, 95, 31, 168, 159, 172, 227, 30, 104, 99, 95, 54, 203, 251, 212, 6, 193, 79, 216, 177, 221, 217, 113, 216, 221, 57, 45, 199, 194}
+)
+
+// CodeSignature object
+type CodeSignature struct {
+	CodeDirectories []types.CodeDirectory `json:"code_directories,omitempty"`
+	Requirements    []types.Requirement   `json:"requirements,omitempty"`
+	CMSSignature    []byte                `json:"cms_signature,omitempty"`
+	Entitlements    string                `json:"entitlements,omitempty"`
+	EntitlementsDER []byte                `json:"entitlements_der,omitempty"`
+	Errors          []error               `json:"errors,omitempty"`
+}
+
 // ParseCodeSignature parses the LC_CODE_SIGNATURE data
-func ParseCodeSignature(cmddat []byte) (*types.CodeSignature, error) {
+func ParseCodeSignature(cmddat []byte) (*CodeSignature, error) {
 	r := bytes.NewReader(cmddat)
-	cs := &types.CodeSignature{}
+	cs := &CodeSignature{}
 
 	csBlob := types.SuperBlob{}
-	if err := binary.Read(r, binary.BigEndian, &csBlob); err != nil {
+	if err := binary.Read(r, binary.BigEndian, &csBlob.SbHeader); err != nil {
 		return nil, err
 	}
 
@@ -67,9 +81,12 @@ func ParseCodeSignature(cmddat []byte) (*types.CodeSignature, error) {
 			}
 			cs.Requirements = append(cs.Requirements, req)
 		case types.CSSLOT_ENTITLEMENTS:
-			entBlob := types.Blob{}
+			entBlob := types.BlobHeader{}
 			if err := binary.Read(r, binary.BigEndian, &entBlob); err != nil {
 				return nil, err
+			}
+			if entBlob.Magic != types.MAGIC_EMBEDDED_ENTITLEMENTS {
+				return nil, fmt.Errorf("invalid CSSLOT_ENTITLEMENTS blob magic: %#x", entBlob.Magic)
 			}
 			plistData := make([]byte, int(entBlob.Length)-binary.Size(entBlob))
 			if err := binary.Read(r, binary.BigEndian, &plistData); err != nil {
@@ -77,9 +94,12 @@ func ParseCodeSignature(cmddat []byte) (*types.CodeSignature, error) {
 			}
 			cs.Entitlements = string(plistData)
 		case types.CSSLOT_CMS_SIGNATURE:
-			cmsBlob := types.Blob{}
+			cmsBlob := types.BlobHeader{}
 			if err := binary.Read(r, binary.BigEndian, &cmsBlob); err != nil {
 				return nil, err
+			}
+			if cmsBlob.Magic != types.MAGIC_BLOBWRAPPER {
+				return nil, fmt.Errorf("invalid CSSLOT_CMS_SIGNATURE blob magic: %#x", cmsBlob.Magic)
 			}
 			cmsData := make([]byte, int(cmsBlob.Length)-binary.Size(cmsBlob))
 			if err := binary.Read(r, binary.BigEndian, &cmsData); err != nil {
@@ -88,9 +108,12 @@ func ParseCodeSignature(cmddat []byte) (*types.CodeSignature, error) {
 			// NOTE: openssl pkcs7 -inform DER -in <cmsData> -print_certs -text -noout
 			cs.CMSSignature = cmsData
 		case types.CSSLOT_ENTITLEMENTS_DER:
-			entDerBlob := types.Blob{}
+			entDerBlob := types.BlobHeader{}
 			if err := binary.Read(r, binary.BigEndian, &entDerBlob); err != nil {
 				return nil, err
+			}
+			if entDerBlob.Magic != types.MAGIC_EMBEDDED_ENTITLEMENTS_DER {
+				return nil, fmt.Errorf("invalid CSSLOT_ENTITLEMENTS_DER blob magic: %#x", entDerBlob.Magic)
 			}
 			entDerData := make([]byte, int(entDerBlob.Length)-binary.Size(entDerBlob))
 			if err := binary.Read(r, binary.BigEndian, &entDerData); err != nil {
@@ -118,12 +141,18 @@ func ParseCodeSignature(cmddat []byte) (*types.CodeSignature, error) {
 
 func parseCodeDirectory(r *bytes.Reader, offset uint32) (*types.CodeDirectory, error) {
 	var cd types.CodeDirectory
+	if err := binary.Read(r, binary.BigEndian, &cd.BlobHeader); err != nil {
+		return nil, err
+	}
+	if cd.BlobHeader.Magic != types.MAGIC_CODEDIRECTORY {
+		return nil, fmt.Errorf("invalid CSSLOT_(ALTERNATE_)CODEDIRECTORY blob magic: %#x", cd.BlobHeader.Magic)
+	}
 	if err := binary.Read(r, binary.BigEndian, &cd.Header); err != nil {
 		return nil, err
 	}
 	// Calculate the cdhashs
 	r.Seek(int64(offset), io.SeekStart)
-	cdData := make([]byte, cd.Header.Length)
+	cdData := make([]byte, cd.BlobHeader.Length)
 	if err := binary.Read(r, binary.LittleEndian, &cdData); err != nil {
 		return nil, err
 	}
@@ -228,15 +257,17 @@ func parseCodeDirectory(r *bytes.Reader, offset uint32) (*types.CodeDirectory, e
 			Index: slot,
 			Hash:  hash,
 		}
-		if !bytes.Equal(hash, make([]byte, cd.Header.HashSize)) {
-			sslot.Desc = fmt.Sprintf("Special Slot   %d %-22v %x", slot, types.SlotType(slot).String()+":", hash)
-		} else {
+		if bytes.Equal(hash, make([]byte, cd.Header.HashSize)) { // empty hash
 			sslot.Desc = fmt.Sprintf("Special Slot   %d %-22v Not Bound", slot, types.SlotType(slot).String()+":")
+		} else if bytes.Equal(hash, emptyReqSlot) && sslot.Index == 2 {
+			sslot.Desc = fmt.Sprintf("Special Slot   %d %-22v Empty Requirement Set", slot, types.SlotType(slot).String()+":")
+		} else {
+			sslot.Desc = fmt.Sprintf("Special Slot   %d %-22v %x", slot, types.SlotType(slot).String()+":", hash)
 		}
 		cd.SpecialSlots = append(cd.SpecialSlots, sslot)
 	}
 	// Parse Slots
-	pageSize := uint32(math.Pow(2, float64(cd.Header.PageSize)))
+	pageSize := uint32(1 << cd.Header.PageSize)
 	for slot := uint32(0); slot < cd.Header.NCodeSlots; slot++ {
 		hash := make([]byte, cd.Header.HashSize)
 		if err := binary.Read(r, binary.BigEndian, &hash); err != nil {
@@ -258,14 +289,158 @@ func parseCodeDirectory(r *bytes.Reader, offset uint32) (*types.CodeDirectory, e
 	return &cd, nil
 }
 
-// AdHocSign generates an ad-hoc code signature and writes it to out.
-// out must have length at least Size(codeSize, id).
-// data is the file content without the signature, of size codeSize.
-// textOff and textSize is the file offset and size of the text segment.
-// isMain is true if this is a main executable.
-// id is the identifier used for signing (a field in CodeDirectory blob, which
-// has no significance in ad-hoc signing).
-// Similar to: `codesign --force --deep -s - MyApp.app`
-func AdHocSign(out []byte, data io.Reader, id string, codeSize, textOff, textSize int64, isMain bool) {
-	types.Sign(out, data, id, codeSize, textOff, textSize, isMain, uint32(types.ADHOC))
+type SignConfig struct {
+	ID           string
+	IsMain       bool
+	Flags        types.CDFlag
+	CodeSize     uint64
+	TextOffset   uint64
+	TextSize     uint64
+	Entitlements []byte
+}
+
+func Sign(r io.Reader, config *SignConfig) ([]byte, error) {
+	var err error
+	var buf bytes.Buffer
+
+	// var boundBlob types.Blob
+	var reqBlob types.Blob
+	// var rscDirBlob types.Blob
+	// var appBlob types.Blob
+	var entBlob types.Blob
+	// var dmgBlob types.Blob
+	var entDerBlob types.Blob
+
+	sb := types.NewSuperBlob(types.MAGIC_EMBEDDED_SIGNATURE)
+
+	if (config.Flags & types.ADHOC) != 0 {
+		reqBlob = types.CreateEmptyRequirements()
+	} else { // TODO: add support for non-adhoc
+		// reqBlob, err = types.CreateRequirements(config.ID)
+		// if err != nil {
+		// 	return nil, fmt.Errorf("failed to create Requirements: %v", err)
+		// }
+		// reqHash, err := reqBlob.Sha256Hash()
+		// if err != nil {
+		// 	return nil, fmt.Errorf("failed to hash Requirements: %v", err)
+		// }
+	}
+	reqHash, err := reqBlob.Sha256Hash()
+	if err != nil {
+		return nil, fmt.Errorf("failed to add Requirements to SuperBlob: %v", err)
+	}
+
+	entHash := emptySha256Hash
+	entDerHash := emptySha256Hash
+	if len(config.Entitlements) > 0 {
+		entBlob = types.NewBlob(types.MAGIC_EMBEDDED_ENTITLEMENTS, config.Entitlements)
+		entHash, err = entBlob.Sha256Hash()
+		if err != nil {
+			return nil, fmt.Errorf("failed to hash entitlements plist blob: %v", err)
+		}
+		entDerData, err := types.DerEncodeEntitlements(string(config.Entitlements))
+		if err != nil {
+			return nil, fmt.Errorf("failed to ASN1/DER encode entitlements: %v", err)
+		}
+		entDerBlob = types.NewBlob(types.MAGIC_EMBEDDED_ENTITLEMENTS_DER, entDerData)
+		entDerHash, err = entDerBlob.Sha256Hash()
+		if err != nil {
+			return nil, fmt.Errorf("failed to hash entitlements asn1/der blob: %v", err)
+		}
+	}
+
+	var cdbuf bytes.Buffer
+	cdHeader := types.CodeDirectoryType{
+		Version:       types.SUPPORTS_EXECSEG, // TODO: support other versions (e.g.SUPPORTS_RUNTIME)
+		Flags:         config.Flags,
+		HashOffset:    uint32(binary.Size(types.BlobHeader{}) + binary.Size(types.CodeDirectoryType{}) + len(config.ID) + 1 + len(emptySha256Hash)*7),
+		IdentOffset:   uint32(binary.Size(types.BlobHeader{}) + binary.Size(types.CodeDirectoryType{})),
+		NSpecialSlots: 7,
+		NCodeSlots:    uint32((int(config.CodeSize) + types.PAGE_SIZE - 1) / types.PAGE_SIZE),
+		CodeLimit:     uint32(config.CodeSize),
+		HashSize:      sha256.Size,
+		HashType:      types.HASHTYPE_SHA256,
+		PageSize:      uint8(types.PAGE_SIZE_BITS),
+		ExecSegBase:   uint64(config.TextOffset),
+		ExecSegLimit:  uint64(config.TextSize),
+	}
+
+	if config.IsMain {
+		cdHeader.ExecSegFlags = types.EXECSEG_MAIN_BINARY
+	}
+
+	// write CodeDirectory header
+	if err := binary.Write(&cdbuf, binary.BigEndian, &cdHeader); err != nil {
+		return nil, fmt.Errorf("failed to write CodeDirectory: %v", err)
+	}
+	// write CodeDirectory identifier
+	if _, err := cdbuf.WriteString(config.ID + "\x00"); err != nil {
+		return nil, fmt.Errorf("failed to write identifier %s: %v", config.ID, err)
+	}
+	// write CodeDirectory Entitlements ASN1/DER slot hash
+	if _, err := cdbuf.Write(entDerHash); err != nil {
+		return nil, fmt.Errorf("failed to write entitlements asn1/der hash: %v", err)
+	}
+	// write CodeDirectory DMG Specific slot hash
+	if _, err := cdbuf.Write(emptySha256Hash); err != nil {
+		return nil, fmt.Errorf("failed to write dmg specific hash: %v", err)
+	}
+	// write CodeDirectory Entitlements Plist slot hash
+	if _, err := cdbuf.Write(entHash); err != nil {
+		return nil, fmt.Errorf("failed to write entitlements plist hash: %v", err)
+	}
+	// write CodeDirectory Application Specific slot hash
+	if _, err := cdbuf.Write(emptySha256Hash); err != nil {
+		return nil, fmt.Errorf("failed to write app specific hash: %v", err)
+	}
+	// write CodeDirectory Resource Directory slot hash
+	if _, err := cdbuf.Write(emptySha256Hash); err != nil {
+		return nil, fmt.Errorf("failed to write rsc dir hash: %v", err)
+	}
+	// write CodeDirectory Requirements Blob slot hash
+	if _, err := cdbuf.Write(reqHash); err != nil {
+		return nil, fmt.Errorf("failed to write requirements hash: %v", err)
+	}
+	// write CodeDirectory Bound Info.plist slot hash
+	if _, err := cdbuf.Write(emptySha256Hash); err != nil {
+		return nil, fmt.Errorf("failed to write info.plist hash: %v", err)
+	}
+	// write page hashes
+	var hashCount int
+	var hashes [types.PAGE_SIZE]byte
+	h := sha256.New()
+	p := 0
+	for p < int(config.CodeSize) {
+		n, err := io.ReadFull(r, hashes[:])
+		if err == io.EOF {
+			break
+		}
+		if err != nil && err != io.ErrUnexpectedEOF {
+			return nil, fmt.Errorf("failed to read file content without the signature: %v", err)
+		}
+		if p+n > int(config.CodeSize) {
+			n = int(config.CodeSize) - p
+		}
+		p += n
+		h.Reset()
+		h.Write(hashes[:n])
+		b := h.Sum(nil)
+		if _, err := cdbuf.Write(b[:]); err != nil {
+			return nil, fmt.Errorf("failed to write page %d hash: %v", hashCount, err)
+		}
+		hashCount++
+	}
+
+	sb.AddBlob(types.CSSLOT_CODEDIRECTORY, types.NewBlob(types.MAGIC_CODEDIRECTORY, cdbuf.Bytes()))
+	sb.AddBlob(types.CSSLOT_REQUIREMENTS, reqBlob)
+	if len(config.Entitlements) > 0 {
+		sb.AddBlob(types.CSSLOT_ENTITLEMENTS, entBlob)
+		sb.AddBlob(types.CSSLOT_ENTITLEMENTS_DER, entDerBlob)
+	}
+
+	if err := sb.Write(&buf, binary.BigEndian); err != nil {
+		return nil, fmt.Errorf("failed to write SuperBlob: %v", err)
+	}
+
+	return buf.Bytes(), nil
 }

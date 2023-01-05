@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unsafe"
 
-	ctypes "github.com/blacktop/go-macho/pkg/codesign/types"
+	"github.com/blacktop/go-macho/pkg/codesign"
 	"github.com/blacktop/go-macho/types"
 )
 
@@ -1324,7 +1324,7 @@ func (r *Rpath) MarshalJSON() ([]byte, error) {
 type CodeSignature struct {
 	LoadBytes
 	types.CodeSignatureCmd
-	ctypes.CodeSignature
+	codesign.CodeSignature
 }
 
 func (l *CodeSignature) LoadSize() uint32 {
@@ -1341,11 +1341,11 @@ func (l *CodeSignature) String() string { // TODO: add more info
 }
 func (l *CodeSignature) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd       string                `json:"load_command"`
-		Len           uint32                `json:"length"`
-		Offset        uint32                `json:"offset"`
-		Size          uint32                `json:"size"`
-		CodeSignature *ctypes.CodeSignature `json:"code_signature,omitempty"`
+		LoadCmd       string                  `json:"load_command"`
+		Len           uint32                  `json:"length"`
+		Offset        uint32                  `json:"offset"`
+		Size          uint32                  `json:"size"`
+		CodeSignature *codesign.CodeSignature `json:"code_signature,omitempty"`
 	}{
 		LoadCmd:       l.Command().String(),
 		Len:           l.Len,

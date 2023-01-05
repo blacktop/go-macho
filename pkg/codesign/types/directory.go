@@ -1,6 +1,7 @@
 package types
 
 import (
+	"fmt"
 	"strings"
 
 	mtypes "github.com/blacktop/go-macho/types"
@@ -8,6 +9,7 @@ import (
 
 // CodeDirectory object
 type CodeDirectory struct {
+	BlobHeader
 	ID             string
 	TeamID         string
 	Scatter        Scatter
@@ -38,7 +40,8 @@ type CodeSlot struct {
 type hashType uint8
 
 const (
-	PAGE_SIZE = 4096
+	PAGE_SIZE_BITS = 12
+	PAGE_SIZE      = 1 << PAGE_SIZE_BITS
 
 	HASHTYPE_NOHASH           hashType = 0
 	HASHTYPE_SHA1             hashType = 1
@@ -55,17 +58,24 @@ const (
 	HASH_MAX_SIZE = 48 /* max size of the hash we'll support */
 )
 
-var csHashTypeStrings = []mtypes.IntName{
-	{uint32(HASHTYPE_NOHASH), "No Hash"},
-	{uint32(HASHTYPE_SHA1), "Sha1"},
-	{uint32(HASHTYPE_SHA256), "Sha256"},
-	{uint32(HASHTYPE_SHA256_TRUNCATED), "Sha256 (Truncated)"},
-	{uint32(HASHTYPE_SHA384), "Sha384"},
-	{uint32(HASHTYPE_SHA512), "Sha512"},
+func (c hashType) String() string {
+	switch c {
+	case HASHTYPE_NOHASH:
+		return "No Hash"
+	case HASHTYPE_SHA1:
+		return "Sha1"
+	case HASHTYPE_SHA256:
+		return "Sha256"
+	case HASHTYPE_SHA256_TRUNCATED:
+		return "Sha256 (Truncated)"
+	case HASHTYPE_SHA384:
+		return "Sha384"
+	case HASHTYPE_SHA512:
+		return "Sha512"
+	default:
+		return fmt.Sprintf("hashType(%d)", c)
+	}
 }
-
-func (c hashType) String() string   { return mtypes.StringName(uint32(c), csHashTypeStrings, false) }
-func (c hashType) GoString() string { return mtypes.StringName(uint32(c), csHashTypeStrings, true) }
 
 type cdVersion uint32
 
@@ -80,125 +90,171 @@ const (
 	COMPATIBILITY_LIMIT  cdVersion = 0x2F000 // "version 3 with wiggle room"
 )
 
-var csVersionypeStrings = []mtypes.IntName{
-	{uint32(SUPPORTS_SCATTER), "Scatter"},
-	{uint32(SUPPORTS_TEAMID), "TeamID"},
-	{uint32(SUPPORTS_CODELIMIT64), "Codelimit64"},
-	{uint32(SUPPORTS_EXECSEG), "ExecSeg"},
-	{uint32(SUPPORTS_RUNTIME), "Runtime"},
-	{uint32(SUPPORTS_LINKAGE), "Linkage"},
-}
-
 func (v cdVersion) String() string {
-	return mtypes.StringName(uint32(v), csVersionypeStrings, false)
-}
-func (v cdVersion) GoString() string {
-	return mtypes.StringName(uint32(v), csVersionypeStrings, true)
+	switch v {
+	case SUPPORTS_SCATTER:
+		return "Scatter"
+	case SUPPORTS_TEAMID:
+		return "TeamID"
+	case SUPPORTS_CODELIMIT64:
+		return "Codelimit64"
+	case SUPPORTS_EXECSEG:
+		return "ExecSeg"
+	case SUPPORTS_RUNTIME:
+		return "Runtime"
+	case SUPPORTS_LINKAGE:
+		return "Linkage"
+	default:
+		return fmt.Sprintf("cdVersion(%d)", v)
+	}
 }
 
-type cdFlag uint32
+type CDFlag uint32
 
 const (
 	/* code signing attributes of a process */
-	NONE           cdFlag = 0x00000000 /* no flags */
-	VALID          cdFlag = 0x00000001 /* dynamically valid */
-	ADHOC          cdFlag = 0x00000002 /* ad hoc signed */
-	GET_TASK_ALLOW cdFlag = 0x00000004 /* has get-task-allow entitlement */
-	INSTALLER      cdFlag = 0x00000008 /* has installer entitlement */
+	NONE           CDFlag = 0x00000000 /* no flags */
+	VALID          CDFlag = 0x00000001 /* dynamically valid */
+	ADHOC          CDFlag = 0x00000002 /* ad hoc signed */
+	GET_TASK_ALLOW CDFlag = 0x00000004 /* has get-task-allow entitlement */
+	INSTALLER      CDFlag = 0x00000008 /* has installer entitlement */
 
-	FORCED_LV       cdFlag = 0x00000010 /* Library Validation required by Hardened System Policy */
-	INVALID_ALLOWED cdFlag = 0x00000020 /* (macOS Only) Page invalidation allowed by task port policy */
+	FORCED_LV       CDFlag = 0x00000010 /* Library Validation required by Hardened System Policy */
+	INVALID_ALLOWED CDFlag = 0x00000020 /* (macOS Only) Page invalidation allowed by task port policy */
 
-	HARD             cdFlag = 0x00000100 /* don't load invalid pages */
-	KILL             cdFlag = 0x00000200 /* kill process if it becomes invalid */
-	CHECK_EXPIRATION cdFlag = 0x00000400 /* force expiration checking */
-	RESTRICT         cdFlag = 0x00000800 /* tell dyld to treat restricted */
+	HARD             CDFlag = 0x00000100 /* don't load invalid pages */
+	KILL             CDFlag = 0x00000200 /* kill process if it becomes invalid */
+	CHECK_EXPIRATION CDFlag = 0x00000400 /* force expiration checking */
+	RESTRICT         CDFlag = 0x00000800 /* tell dyld to treat restricted */
 
-	ENFORCEMENT            cdFlag = 0x00001000 /* require enforcement */
-	REQUIRE_LV             cdFlag = 0x00002000 /* require library validation */
-	ENTITLEMENTS_VALIDATED cdFlag = 0x00004000 /* code signature permits restricted entitlements */
-	NVRAM_UNRESTRICTED     cdFlag = 0x00008000 /* has com.apple.rootless.restricted-nvram-variables.heritable entitlement */
+	ENFORCEMENT            CDFlag = 0x00001000 /* require enforcement */
+	REQUIRE_LV             CDFlag = 0x00002000 /* require library validation */
+	ENTITLEMENTS_VALIDATED CDFlag = 0x00004000 /* code signature permits restricted entitlements */
+	NVRAM_UNRESTRICTED     CDFlag = 0x00008000 /* has com.apple.rootless.restricted-nvram-variables.heritable entitlement */
 
-	RUNTIME cdFlag = 0x00010000 /* Apply hardened runtime policies */
+	RUNTIME CDFlag = 0x00010000 /* Apply hardened runtime policies */
 
-	LINKER_SIGNED cdFlag = 0x20000 // type property
+	LINKER_SIGNED CDFlag = 0x20000 // type property
 
-	ALLOWED_MACHO cdFlag = (ADHOC | HARD | KILL | CHECK_EXPIRATION | RESTRICT | ENFORCEMENT | REQUIRE_LV | RUNTIME)
+	ALLOWED_MACHO CDFlag = (ADHOC | HARD | KILL | CHECK_EXPIRATION | RESTRICT | ENFORCEMENT | REQUIRE_LV | RUNTIME)
 
-	EXEC_SET_HARD        cdFlag = 0x00100000 /* set HARD on any exec'ed process */
-	EXEC_SET_KILL        cdFlag = 0x00200000 /* set KILL on any exec'ed process */
-	EXEC_SET_ENFORCEMENT cdFlag = 0x00400000 /* set ENFORCEMENT on any exec'ed process */
-	EXEC_INHERIT_SIP     cdFlag = 0x00800000 /* set INSTALLER on any exec'ed process */
+	EXEC_SET_HARD        CDFlag = 0x00100000 /* set HARD on any exec'ed process */
+	EXEC_SET_KILL        CDFlag = 0x00200000 /* set KILL on any exec'ed process */
+	EXEC_SET_ENFORCEMENT CDFlag = 0x00400000 /* set ENFORCEMENT on any exec'ed process */
+	EXEC_INHERIT_SIP     CDFlag = 0x00800000 /* set INSTALLER on any exec'ed process */
 
-	KILLED          cdFlag = 0x01000000 /* was killed by kernel for invalidity */
-	DYLD_PLATFORM   cdFlag = 0x02000000 /* dyld used to load this is a platform binary */
-	PLATFORM_BINARY cdFlag = 0x04000000 /* this is a platform binary */
-	PLATFORM_PATH   cdFlag = 0x08000000 /* platform binary by the fact of path (osx only) */
+	KILLED          CDFlag = 0x01000000 /* was killed by kernel for invalidity */
+	DYLD_PLATFORM   CDFlag = 0x02000000 /* dyld used to load this is a platform binary */
+	PLATFORM_BINARY CDFlag = 0x04000000 /* this is a platform binary */
+	PLATFORM_PATH   CDFlag = 0x08000000 /* platform binary by the fact of path (osx only) */
 
-	DEBUGGED             cdFlag = 0x10000000 /* process is currently or has previously been debugged and allowed to run with invalid pages */
-	SIGNED               cdFlag = 0x20000000 /* process has a signature (may have gone invalid) */
-	DEV_CODE             cdFlag = 0x40000000 /* code is dev signed, cannot be loaded into prod signed code (will go away with rdar://problem/28322552) */
-	DATAVAULT_CONTROLLER cdFlag = 0x80000000 /* has Data Vault controller entitlement */
+	DEBUGGED             CDFlag = 0x10000000 /* process is currently or has previously been debugged and allowed to run with invalid pages */
+	SIGNED               CDFlag = 0x20000000 /* process has a signature (may have gone invalid) */
+	DEV_CODE             CDFlag = 0x40000000 /* code is dev signed, cannot be loaded into prod signed code (will go away with rdar://problem/28322552) */
+	DATAVAULT_CONTROLLER CDFlag = 0x80000000 /* has Data Vault controller entitlement */
 
-	ENTITLEMENT_FLAGS cdFlag = (GET_TASK_ALLOW | INSTALLER | DATAVAULT_CONTROLLER | NVRAM_UNRESTRICTED)
+	ENTITLEMENT_FLAGS CDFlag = (GET_TASK_ALLOW | INSTALLER | DATAVAULT_CONTROLLER | NVRAM_UNRESTRICTED)
 )
 
-var cdFlagStrings = []mtypes.IntName{
-	{uint32(NONE), "none"},
-	{uint32(VALID), "valid"},
-	{uint32(ADHOC), "adhoc"},
-	{uint32(GET_TASK_ALLOW), "get-task-allow"},
-	{uint32(INSTALLER), "installer"},
-	{uint32(FORCED_LV), "forced-lv"},
-	{uint32(INVALID_ALLOWED), "invalid-allowed"},
-	{uint32(HARD), "hard"},
-	{uint32(KILL), "kill"},
-	{uint32(CHECK_EXPIRATION), "check-expiration"},
-	{uint32(RESTRICT), "restrict"},
-	{uint32(ENFORCEMENT), "enforcement"},
-	{uint32(REQUIRE_LV), "require-lv"},
-	{uint32(ENTITLEMENTS_VALIDATED), "entitlements-validated"},
-	{uint32(NVRAM_UNRESTRICTED), "nvram-unrestricted"},
-	{uint32(RUNTIME), "runtime"},
-	{uint32(LINKER_SIGNED), "linker-signed"},
-	{uint32(ALLOWED_MACHO), "allowed-macho"},
-	{uint32(EXEC_SET_HARD), "exec-set-hard"},
-	{uint32(EXEC_SET_KILL), "exec-set-kill"},
-	{uint32(EXEC_SET_ENFORCEMENT), "exec-set-enforcement"},
-	{uint32(EXEC_INHERIT_SIP), "exec-inherit-sip"},
-	{uint32(KILLED), "killed"},
-	{uint32(DYLD_PLATFORM), "dyld-platform"},
-	{uint32(PLATFORM_BINARY), "platform-binary"},
-	{uint32(PLATFORM_PATH), "platform-path"},
-	{uint32(DEBUGGED), "debugged"},
-	{uint32(SIGNED), "signed"},
-	{uint32(DEV_CODE), "dev-code"},
-	{uint32(DATAVAULT_CONTROLLER), "datavault-controller"},
-	{uint32(ENTITLEMENT_FLAGS), "entitlement-flags"},
-}
-
-func (f cdFlag) String() string {
+func (f CDFlag) String() string {
 	var out []string
-	for _, v := range cdFlagStrings {
-		if cdFlag(v.I) == ALLOWED_MACHO || cdFlag(v.I) == ENTITLEMENT_FLAGS {
-			continue
-		}
-		if (f & cdFlag(v.I)) != 0 {
-			out = append(out, v.S)
-		}
+	if (f & NONE) != 0 {
+		out = append(out, "none")
+	}
+	if (f & VALID) != 0 {
+		out = append(out, "valid")
+	}
+	if (f & ADHOC) != 0 {
+		out = append(out, "adhoc")
+	}
+	if (f & GET_TASK_ALLOW) != 0 {
+		out = append(out, "get-task-allow")
+	}
+	if (f & INSTALLER) != 0 {
+		out = append(out, "installer")
+	}
+	if (f & FORCED_LV) != 0 {
+		out = append(out, "forced-lv")
+	}
+	if (f & INVALID_ALLOWED) != 0 {
+		out = append(out, "invalid-allowed")
+	}
+	if (f & HARD) != 0 {
+		out = append(out, "hard")
+	}
+	if (f & KILL) != 0 {
+		out = append(out, "kill")
+	}
+	if (f & CHECK_EXPIRATION) != 0 {
+		out = append(out, "check-expiration")
+	}
+	if (f & RESTRICT) != 0 {
+		out = append(out, "restrict")
+	}
+	if (f & ENFORCEMENT) != 0 {
+		out = append(out, "enforcement")
+	}
+	if (f & REQUIRE_LV) != 0 {
+		out = append(out, "require-lv")
+	}
+	if (f & ENTITLEMENTS_VALIDATED) != 0 {
+		out = append(out, "entitlements-validated")
+	}
+	if (f & NVRAM_UNRESTRICTED) != 0 {
+		out = append(out, "nvram-unrestricted")
+	}
+	if (f & RUNTIME) != 0 {
+		out = append(out, "runtime")
+	}
+	if (f & LINKER_SIGNED) != 0 {
+		out = append(out, "linker-signed")
+	}
+	// if (f & ALLOWED_MACHO) != 0 {
+	// 	out = append(out, "allowed-macho")
+	// }
+	if (f & EXEC_SET_HARD) != 0 {
+		out = append(out, "exec-set-hard")
+	}
+	if (f & EXEC_SET_KILL) != 0 {
+		out = append(out, "exec-set-kill")
+	}
+	if (f & EXEC_SET_ENFORCEMENT) != 0 {
+		out = append(out, "exec-set-enforcement")
+	}
+	if (f & EXEC_INHERIT_SIP) != 0 {
+		out = append(out, "exec-inherit-sip")
+	}
+	if (f & KILLED) != 0 {
+		out = append(out, "killed")
+	}
+	if (f & DYLD_PLATFORM) != 0 {
+		out = append(out, "dyld-platform")
+	}
+	if (f & PLATFORM_BINARY) != 0 {
+		out = append(out, "platform-binary")
+	}
+	if (f & PLATFORM_PATH) != 0 {
+		out = append(out, "platform-path")
+	}
+	if (f & DEBUGGED) != 0 {
+		out = append(out, "debugged")
+	}
+	if (f & SIGNED) != 0 {
+		out = append(out, "signed")
+	}
+	if (f & DEV_CODE) != 0 {
+		out = append(out, "dev-code")
+	}
+	if (f & DATAVAULT_CONTROLLER) != 0 {
+		out = append(out, "datavault-controller")
 	}
 	return strings.Join(out, ", ")
-}
-func (f cdFlag) GoString() string {
-	return mtypes.StringName(uint32(f), cdFlagStrings, true)
 }
 
 // CodeDirectoryType header
 type CodeDirectoryType struct {
-	Magic         magic     // magic number (CSMAGIC_CODEDIRECTORY) */
-	Length        uint32    // total length of CodeDirectory blob
 	Version       cdVersion // compatibility version
-	Flags         cdFlag    // setup and mode flags
+	Flags         CDFlag    // setup and mode flags
 	HashOffset    uint32    // offset of hash slot element at index zero
 	IdentOffset   uint32    // offset of identifier string
 	NSpecialSlots uint32    // number of special hash slots
@@ -247,31 +303,6 @@ type CodeDirectoryType struct {
 	/* followed by dynamic content as located by offset fields above */
 }
 
-func (c *CodeDirectoryType) put(out []byte) []byte {
-	out = put32be(out, uint32(c.Magic))
-	out = put32be(out, c.Length)
-	out = put32be(out, uint32(c.Version))
-	out = put32be(out, uint32(c.Flags))
-	out = put32be(out, c.HashOffset)
-	out = put32be(out, c.IdentOffset)
-	out = put32be(out, c.NSpecialSlots)
-	out = put32be(out, c.NCodeSlots)
-	out = put32be(out, c.CodeLimit)
-	out = put8(out, c.HashSize)
-	out = put8(out, uint8(c.HashType))
-	out = put8(out, c.Platform)
-	out = put8(out, c.PageSize)
-	out = put32be(out, c.Spare2)
-	out = put32be(out, c.ScatterOffset)
-	out = put32be(out, c.TeamOffset)
-	out = put32be(out, c.Spare3)
-	out = put64be(out, c.CodeLimit64)
-	out = put64be(out, c.ExecSegBase)
-	out = put64be(out, c.ExecSegLimit)
-	out = put64be(out, uint64(c.ExecSegFlags))
-	return out
-}
-
 // Scatter object
 type Scatter struct {
 	Count        uint32 // number of pages zero for sentinel (only)
@@ -293,19 +324,23 @@ const (
 	EXECSEG_CAN_EXEC_CDHASH execSegFlag = 0x200 /* can execute blessed cdhash */
 )
 
-var execSegFlagStrings = []mtypes.Int64Name{
-	{I: uint64(EXECSEG_MAIN_BINARY), S: "Main Binary"},
-	{I: uint64(EXECSEG_ALLOW_UNSIGNED), S: "Allow Unsigned"},
-	{I: uint64(EXECSEG_DEBUGGER), S: "Debugger"},
-	{I: uint64(EXECSEG_JIT), S: "JIT"},
-	{I: uint64(EXECSEG_SKIP_LV), S: "Skip LV"},
-	{I: uint64(EXECSEG_CAN_LOAD_CDHASH), S: "Can Load CDHash"},
-	{I: uint64(EXECSEG_CAN_EXEC_CDHASH), S: "Can Exec CDHash"},
-}
-
 func (f execSegFlag) String() string {
-	return mtypes.StringName64(uint64(f), execSegFlagStrings, false)
-}
-func (f execSegFlag) GoString() string {
-	return mtypes.StringName64(uint64(f), execSegFlagStrings, true)
+	switch f {
+	case EXECSEG_MAIN_BINARY:
+		return "Main Binary"
+	case EXECSEG_ALLOW_UNSIGNED:
+		return "Allow Unsigned"
+	case EXECSEG_DEBUGGER:
+		return "Debugger"
+	case EXECSEG_JIT:
+		return "JIT"
+	case EXECSEG_SKIP_LV:
+		return "Skip LV"
+	case EXECSEG_CAN_LOAD_CDHASH:
+		return "Can Load CDHash"
+	case EXECSEG_CAN_EXEC_CDHASH:
+		return "Can Exec CDHash"
+	default:
+		return fmt.Sprintf("execSegFlag(%#x)", uint64(f))
+	}
 }

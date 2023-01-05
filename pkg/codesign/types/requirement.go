@@ -13,47 +13,49 @@ import (
 
 // Requirement object
 type Requirement struct {
-	Detail string
 	RequirementsBlob
 	Requirements
+	Detail string
 }
 
 // RequirementsBlob object
 type RequirementsBlob struct {
-	Magic  magic  // magic number
+	Magic  Magic  // magic number
 	Length uint32 // total length of blob
 	Data   uint32 // zero for dyld shared cache
-}
-
-// Requirements object
-type Requirements struct {
-	Type   RequirementType // type of entry
-	Offset uint32          // offset of entry
 }
 
 type RequirementType uint32
 
 const (
 	HostRequirementType       RequirementType = 1 /* what hosts may run us */
-	GuestRequirementType                      = 2 /* what guests we may run */
-	DesignatedRequirementType                 = 3 /* designated requirement */
-	LibraryRequirementType                    = 4 /* what libraries we may link against */
-	PluginRequirementType                     = 5 /* what plug-ins we may load */
+	GuestRequirementType      RequirementType = 2 /* what guests we may run */
+	DesignatedRequirementType RequirementType = 3 /* designated requirement */
+	LibraryRequirementType    RequirementType = 4 /* what libraries we may link against */
+	PluginRequirementType     RequirementType = 5 /* what plug-ins we may load */
 )
 
-var requirementTypeStrings = []mtypes.IntName{
-	{uint32(HostRequirementType), "Host Requirement"},
-	{uint32(GuestRequirementType), "Guest Requirement"},
-	{uint32(DesignatedRequirementType), "Designated Requirement"},
-	{uint32(LibraryRequirementType), "Library Requirement"},
-	{uint32(PluginRequirementType), "Plugin Requirement"},
+func (cm RequirementType) String() string {
+	switch cm {
+	case HostRequirementType:
+		return "Host Requirement"
+	case GuestRequirementType:
+		return "Guest Requirement"
+	case DesignatedRequirementType:
+		return "Designated Requirement"
+	case LibraryRequirementType:
+		return "Library Requirement"
+	case PluginRequirementType:
+		return "Plugin Requirement"
+	default:
+		return fmt.Sprintf("RequirementType(%d)", cm)
+	}
 }
 
-func (cm RequirementType) String() string {
-	return mtypes.StringName(uint32(cm), requirementTypeStrings, false)
-}
-func (cm RequirementType) GoString() string {
-	return mtypes.StringName(uint32(cm), requirementTypeStrings, true)
+// Requirements object
+type Requirements struct {
+	Type   RequirementType // type of entry
+	Offset uint32          // offset of entry
 }
 
 // NOTE: https://opensource.apple.com/source/libsecurity_codesigning/libsecurity_codesigning-36591/lib/requirement.h.auto.html
@@ -548,4 +550,13 @@ func ParseRequirements(r *bytes.Reader, reqs Requirements) (string, error) {
 	default:
 		return "", fmt.Errorf("failed to dump requirements set; found unsupported codesign requirement type '%s', please notify author", reqs.Type)
 	}
+}
+
+// CreateRequirements creates a requirements set cs blob
+func CreateRequirements(id string) (Blob, error) {
+	panic("not implemented")
+}
+
+func CreateEmptyRequirements() Blob {
+	return NewBlob(MAGIC_REQUIREMENT, make([]byte, 4))
 }

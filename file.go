@@ -37,6 +37,7 @@ type File struct {
 	exptrieData []byte
 	binds       types.Binds
 	objc        map[uint64]any
+	ledata      *bytes.Buffer // tmp storage of linkedit data
 
 	sharedCacheRelativeSelectorBaseVMAddress uint64 // objc_opt version 16
 
