@@ -102,7 +102,7 @@ func (s *SuperBlob) AddBlob(typ SlotType, blob Blob) {
 	s.Index = append(s.Index, idx)
 	s.Blobs = append(s.Blobs, blob)
 	s.Count++
-	s.Length += blob.Length + uint32(binary.Size(idx))
+	s.Length += blob.Length + uint32(binary.Size(idx)) + 4 // FIXME: WTF is this 4 for ???
 }
 
 func (s *SuperBlob) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
@@ -227,5 +227,4 @@ func (b Blob) Sha256Hash() ([]byte, error) {
 		return nil, fmt.Errorf("failed to hash blob header: %v", err)
 	}
 	return h.Sum(nil), nil
-
 }

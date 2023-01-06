@@ -64,9 +64,9 @@ func (m exportSegMap) RemapSeg(name string, offset uint64) (uint64, uint64, erro
 	return 0, 0, fmt.Errorf("failed to remap offset %#x", offset)
 }
 
-func pageAlign(off uint64) uint64 {
-	if (off % 0x1000) != 0 {
-		off += 0x1000 - (off % 0x1000)
+func pageAlign(off, align uint64) uint64 {
+	if (off % align) != 0 {
+		off += align - (off % align)
 	}
 	return off
 }
@@ -90,10 +90,10 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 			},
 			New: segInfo{
 				Start: newSegOffset,
-				End:   newSegOffset + pageAlign(seg.Filesz),
+				End:   newSegOffset + pageAlign(seg.Filesz, 0x1000),
 			},
 		})
-		newSegOffset += pageAlign(seg.Filesz)
+		newSegOffset += pageAlign(seg.Filesz, 0x1000)
 	}
 
 	sort.Sort(segMap)
@@ -234,17 +234,53 @@ func (f *File) CodeSign(id string, flags ctypes.CDFlag, entitlements []byte) err
 	if text := f.Segment("__TEXT"); text != nil {
 		var cs *CodeSignature
 
+		// create initial code signature config
+		config := &codesign.SignConfig{
+			ID:           id,
+			IsMain:       f.Type == types.MH_EXECUTE,
+			Flags:        flags,
+			TextOffset:   uint64(text.Offset),
+			TextSize:     uint64(text.Filesz),
+			Entitlements: entitlements,
+		}
+
+		// check if there is an embedded Info.plist
+		if infoPlist, err := f.GetEmbeddedInfoPlist(); err == nil {
+			config.InfoPlist = []byte(infoPlist)
+		}
+
 		linkedit := f.Segment("__LINKEDIT")
 		if linkedit == nil {
 			return fmt.Errorf("failed to find segment __LINKEDIT")
 		}
 
-		ledata := make([]byte, linkedit.Filesz)
-		if _, err := f.cr.ReadAtAddr(ledata, linkedit.Addr); err != nil {
-			return fmt.Errorf("failed to read __LINKEDIT data: %v", err)
-		}
-
-		if cs = f.CodeSignature(); cs == nil {
+		if cs = f.CodeSignature(); cs != nil { // existing code signature
+			// import settings from existing code signature
+			if len(cs.CodeDirectories) > 0 {
+				if config.ID == "" {
+					config.ID = cs.CodeDirectories[0].ID
+				}
+				if config.TeamID == "" {
+					config.TeamID = cs.CodeDirectories[0].TeamID
+				}
+				if config.Flags == ctypes.NONE {
+					config.Flags = cs.CodeDirectories[0].Header.Flags
+					config.Flags -= ctypes.LINKER_SIGNED // remove linker signed flag TODO: should I do this?
+				}
+				if config.Entitlements == nil {
+					config.Entitlements = []byte(cs.Entitlements)
+				}
+				if config.EntitlementsDER == nil {
+					config.EntitlementsDER = []byte(cs.EntitlementsDER)
+				}
+				if config.SpecialSlots == nil {
+					config.SpecialSlots = cs.CodeDirectories[0].SpecialSlots
+				}
+			}
+		} else { // create NEW code signature
+			if config.ID == "" {
+				return fmt.Errorf("you must supply an ID")
+			}
 			cs = &CodeSignature{
 				CodeSignatureCmd: types.CodeSignatureCmd{
 					LoadCmd: types.LC_CODE_SIGNATURE,
@@ -258,44 +294,42 @@ func (f *File) CodeSign(id string, flags ctypes.CDFlag, entitlements []byte) err
 			cs = f.CodeSignature()
 		}
 
+		config.CodeSize = uint64(cs.Offset)
+
+		// cache __LINKEDIT data for later use
+		ledata := make([]byte, linkedit.Filesz)
+		if _, err := f.cr.ReadAtAddr(ledata, linkedit.Addr); err != nil {
+			return fmt.Errorf("failed to read __LINKEDIT data: %v", err)
+		}
 		f.ledata = bytes.NewBuffer(ledata[:(uint64(cs.Offset) - linkedit.Offset)])
 
+		// read data to be signed
 		data := make([]byte, cs.Offset)
 		if _, err := f.ReadAt(data, 0); err != nil {
 			return fmt.Errorf("failed to read codesign data: %v", err)
 		}
-
-		csdata, err := codesign.Sign(bytes.NewReader(data), &codesign.SignConfig{
-			ID:           id,
-			IsMain:       f.Type == types.MH_EXECUTE,
-			Flags:        flags,
-			CodeSize:     uint64(cs.Offset),
-			TextOffset:   uint64(text.Offset),
-			TextSize:     uint64(text.Filesz),
-			Entitlements: entitlements,
-		})
+		// sign data
+		csdata, err := codesign.Sign(bytes.NewReader(data), config)
 		if err != nil {
 			return fmt.Errorf("failed to create codesignature: %v", err)
 		}
-
-		cs.Size = uint32(len(csdata))
-
 		if _, err := f.ledata.Write(csdata); err != nil {
 			return fmt.Errorf("failed to write codesign data to linkedit segment data: %v", err)
 		}
-
 		// clear data for GC
 		data = nil
 		csdata = nil
 
-		linkedit.Filesz = pageAlign(uint64(f.ledata.Len()))
-		linkedit.Memsz = linkedit.Filesz
-
+		// update __LINKEDIT segment sizes
+		linkedit.Filesz = pageAlign(uint64(f.ledata.Len()), 0x4000)
+		linkedit.Memsz = pageAlign(linkedit.Filesz, 0x8000)
 		if linkedit.Filesz > uint64(f.ledata.Len()) { // pad with zeros
 			if _, err := f.ledata.Write(make([]byte, linkedit.Filesz-uint64(f.ledata.Len()))); err != nil {
 				return fmt.Errorf("failed to write linkedit segment padding: %v", err)
 			}
 		}
+
+		cs.Size = uint32((linkedit.Offset + linkedit.Filesz) - uint64(cs.Offset))
 
 		return nil
 	}
@@ -939,9 +973,8 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	// f.Dysymtab.Nlocrel = 0
 	f.Dysymtab.Indirectsymoff = uint32(linkedit.Offset + newIndSymTabOffset)
 
-	linkedit.Filesz = pageAlign(uint64(f.Symtab.Stroff + f.Symtab.Strsize))
-	linkedit.Memsz = linkedit.Filesz
-
+	linkedit.Filesz = pageAlign(uint64(f.Symtab.Stroff+f.Symtab.Strsize), 0x4000)
+	linkedit.Memsz = pageAlign(linkedit.Filesz, 0x8000)
 	if linkedit.Filesz > uint64(lebuf.Len()) {
 		pad = linkedit.Filesz - uint64(lebuf.Len())
 		if _, err := lebuf.Write(make([]byte, pad)); err != nil {

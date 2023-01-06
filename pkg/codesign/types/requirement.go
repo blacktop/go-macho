@@ -558,5 +558,5 @@ func CreateRequirements(id string) (Blob, error) {
 }
 
 func CreateEmptyRequirements() Blob {
-	return NewBlob(MAGIC_REQUIREMENT, make([]byte, 4))
+	return NewBlob(MAGIC_REQUIREMENTS, make([]byte, 4))
 }

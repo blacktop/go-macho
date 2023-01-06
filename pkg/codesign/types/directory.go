@@ -1,10 +1,22 @@
 package types
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"strings"
 
 	mtypes "github.com/blacktop/go-macho/types"
+)
+
+var (
+	EmptySha256Slot    = bytes.Repeat([]byte{0}, sha256.New().Size())
+	EmptySha256ReqSlot = []byte{
+		0x98, 0x79, 0x20, 0x90, 0x4E, 0xAB, 0x65, 0x0E,
+		0x75, 0x78, 0x8C, 0x05, 0x4A, 0xA0, 0xB0, 0x52,
+		0x4E, 0x6A, 0x80, 0xBF, 0xC7, 0x1A, 0xA3, 0x2D,
+		0xF8, 0xD2, 0x37, 0xA6, 0x17, 0x43, 0xF9, 0x86,
+	}
 )
 
 // CodeDirectory object
@@ -253,6 +265,17 @@ func (f CDFlag) String() string {
 
 // CodeDirectoryType header
 type CodeDirectoryType struct {
+	CdEarliest
+	CdScatter
+	CdTeamID
+	CdCodeLimit64
+	CdExecSeg
+	CdRuntime
+	CdLinkage
+	/* followed by dynamic content as located by offset fields above */
+}
+
+type CdEarliest struct {
 	Version       cdVersion // compatibility version
 	Flags         CDFlag    // setup and mode flags
 	HashOffset    uint32    // offset of hash slot element at index zero
@@ -264,43 +287,45 @@ type CodeDirectoryType struct {
 	HashType      hashType  // type of hash (cdHashType* constants)
 	Platform      uint8     // platform identifier zero if not platform binary
 	PageSize      uint8     // log2(page size in bytes) 0 => infinite
-	Spare2        uint32    // unused (must be zero)
+	_             uint32    // unused (must be zero)
+}
 
-	EndEarliest [0]uint8
-
+type CdScatter struct {
 	/* Version 0x20100 */
-	ScatterOffset  uint32 /* offset of optional scatter vector */
-	EndWithScatter [0]uint8
+	ScatterOffset uint32 /* offset of optional scatter vector */
+}
 
+type CdTeamID struct {
 	/* Version 0x20200 */
-	TeamOffset  uint32 /* offset of optional team identifier */
-	EndWithTeam [0]uint8
+	TeamOffset uint32 /* offset of optional team identifier */
+}
 
+type CdCodeLimit64 struct {
 	/* Version 0x20300 */
-	Spare3             uint32 /* unused (must be zero) */
-	CodeLimit64        uint64 /* limit to main image signature range, 64 bits */
-	EndWithCodeLimit64 [0]uint8
+	_           uint32 /* unused (must be zero) */
+	CodeLimit64 uint64 /* limit to main image signature range, 64 bits */
+}
 
+type CdExecSeg struct {
 	/* Version 0x20400 */
-	ExecSegBase    uint64      /* offset of executable segment */
-	ExecSegLimit   uint64      /* limit of executable segment */
-	ExecSegFlags   execSegFlag /* exec segment flags */
-	EndWithExecSeg [0]uint8
+	ExecSegBase  uint64      /* offset of executable segment */
+	ExecSegLimit uint64      /* limit of executable segment */
+	ExecSegFlags execSegFlag /* exec segment flags */
+}
 
+type CdRuntime struct {
 	/* Version 0x20500 */
-	Runtime                 mtypes.Version // Runtime version
-	PreEncryptOffset        uint32         // offset of pre-encrypt hash slots
-	EndWithPreEncryptOffset [0]uint8
+	Runtime          mtypes.Version // Runtime version
+	PreEncryptOffset uint32         // offset of pre-encrypt hash slots
+}
 
+type CdLinkage struct {
 	/* Version 0x20600 */
 	LinkageHashType  uint8
 	LinkageTruncated uint8
-	Spare4           uint16
+	_                uint16
 	LinkageOffset    uint32
 	LinkageSize      uint32
-	EndWithLinkage   [0]uint8
-
-	/* followed by dynamic content as located by offset fields above */
 }
 
 // Scatter object
@@ -308,14 +333,14 @@ type Scatter struct {
 	Count        uint32 // number of pages zero for sentinel (only)
 	Base         uint32 // first page number
 	TargetOffset uint64 // byte offset in target
-	Spare        uint64 // reserved (must be zero)
+	_            uint64 // reserved (must be zero)
 }
 
 type execSegFlag uint64
 
 /* executable segment flags */
 const (
-	EXECSEG_MAIN_BINARY     execSegFlag = 0x1   /* executable segment denotes main binary */
+	EXECSEG_MAIN_BINARY     execSegFlag = 0x01  /* executable segment denotes main binary */
 	EXECSEG_ALLOW_UNSIGNED  execSegFlag = 0x10  /* allow unsigned pages (for debugging) */
 	EXECSEG_DEBUGGER        execSegFlag = 0x20  /* main binary is debugger */
 	EXECSEG_JIT             execSegFlag = 0x40  /* JIT enabled */
