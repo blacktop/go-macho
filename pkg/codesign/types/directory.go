@@ -22,31 +22,31 @@ var (
 // CodeDirectory object
 type CodeDirectory struct {
 	BlobHeader
-	ID             string
-	TeamID         string
-	Scatter        Scatter
-	CDHash         string
-	SpecialSlots   []SpecialSlot
-	CodeSlots      []CodeSlot
-	Header         CodeDirectoryType
-	RuntimeVersion string
-	CodeLimit      uint64
+	ID             string            `json:"id,omitempty"`
+	TeamID         string            `json:"team_id,omitempty"`
+	Scatter        Scatter           `json:"scatter,omitempty"`
+	CDHash         string            `json:"cd_hash,omitempty"`
+	SpecialSlots   []SpecialSlot     `json:"special_slots,omitempty"`
+	CodeSlots      []CodeSlot        `json:"code_slots,omitempty"`
+	Header         CodeDirectoryType `json:"header,omitempty"`
+	RuntimeVersion string            `json:"runtime_version,omitempty"`
+	CodeLimit      uint64            `json:"code_limit,omitempty"`
 
-	PreEncryptSlots [][]byte
-	LinkageData     []byte
+	PreEncryptSlots [][]byte `json:"pre_encrypt_slots,omitempty"`
+	LinkageData     []byte   `json:"linkage_data,omitempty"`
 }
 
 type SpecialSlot struct {
-	Index uint32
-	Hash  []byte
-	Desc  string
+	Index uint32 `json:"index,omitempty"`
+	Hash  []byte `json:"hash,omitempty"`
+	Desc  string `json:"desc,omitempty"`
 }
 
 type CodeSlot struct {
-	Index uint32
-	Page  uint32
-	Hash  []byte
-	Desc  string
+	Index uint32 `json:"index,omitempty"`
+	Page  uint32 `json:"page,omitempty"`
+	Hash  []byte `json:"hash,omitempty"`
+	Desc  string `json:"desc,omitempty"`
 }
 
 type hashType uint8
@@ -293,63 +293,63 @@ type CodeDirectoryType struct {
 }
 
 type CdEarliest struct {
-	Version       cdVersion  // compatibility version
-	Flags         CDFlag     // setup and mode flags
-	HashOffset    uint32     // offset of hash slot element at index zero
-	IdentOffset   uint32     // offset of identifier string
-	NSpecialSlots uint32     // number of special hash slots
-	NCodeSlots    uint32     // number of ordinary (code) hash slots
-	CodeLimit     uint32     // limit to main image signature range
-	HashSize      uint8      // size of each hash in bytes
-	HashType      hashType   // type of hash (cdHashType* constants)
-	Platform      cdPlatform // platform identifier zero if not platform binary
-	PageSize      uint8      // log2(page size in bytes) 0 => infinite
+	Version       cdVersion  `json:"version,omitempty"`         // compatibility version
+	Flags         CDFlag     `json:"flags,omitempty"`           // setup and mode flags
+	HashOffset    uint32     `json:"hash_offset,omitempty"`     // offset of hash slot element at index zero
+	IdentOffset   uint32     `json:"ident_offset,omitempty"`    // offset of identifier string
+	NSpecialSlots uint32     `json:"n_special_slots,omitempty"` // number of special hash slots
+	NCodeSlots    uint32     `json:"n_code_slots,omitempty"`    // number of ordinary (code) hash slots
+	CodeLimit     uint32     `json:"code_limit,omitempty"`      // limit to main image signature range
+	HashSize      uint8      `json:"hash_size,omitempty"`       // size of each hash in bytes
+	HashType      hashType   `json:"hash_type,omitempty"`       // type of hash (cdHashType* constants)
+	Platform      cdPlatform `json:"platform,omitempty"`        // platform identifier zero if not platform binary
+	PageSize      uint8      `json:"page_size,omitempty"`       // log2(page size in bytes) 0 => infinite
 	_             uint32     // unused (must be zero)
 }
 
 type CdScatter struct {
 	/* Version 0x20100 */
-	ScatterOffset uint32 /* offset of optional scatter vector */
+	ScatterOffset uint32 `json:"scatter_offset,omitempty"` /* offset of optional scatter vector */
 }
 
 type CdTeamID struct {
 	/* Version 0x20200 */
-	TeamOffset uint32 /* offset of optional team identifier */
+	TeamOffset uint32 `json:"team_offset,omitempty"` /* offset of optional team identifier */
 }
 
 type CdCodeLimit64 struct {
 	/* Version 0x20300 */
 	_           uint32 /* unused (must be zero) */
-	CodeLimit64 uint64 /* limit to main image signature range, 64 bits */
+	CodeLimit64 uint64 `json:"code_limit_64,omitempty"` /* limit to main image signature range, 64 bits */
 }
 
 type CdExecSeg struct {
 	/* Version 0x20400 */
-	ExecSegBase  uint64      /* offset of executable segment */
-	ExecSegLimit uint64      /* limit of executable segment */
-	ExecSegFlags execSegFlag /* exec segment flags */
+	ExecSegBase  uint64      `json:"exec_seg_base,omitempty"`  /* offset of executable segment */
+	ExecSegLimit uint64      `json:"exec_seg_limit,omitempty"` /* limit of executable segment */
+	ExecSegFlags execSegFlag `json:"exec_seg_flags,omitempty"` /* exec segment flags */
 }
 
 type CdRuntime struct {
 	/* Version 0x20500 */
-	Runtime          mtypes.Version // Runtime version
-	PreEncryptOffset uint32         // offset of pre-encrypt hash slots
+	Runtime          mtypes.Version `json:"runtime,omitempty"`            // Runtime version
+	PreEncryptOffset uint32         `json:"pre_encrypt_offset,omitempty"` // offset of pre-encrypt hash slots
 }
 
 type CdLinkage struct {
 	/* Version 0x20600 */
-	LinkageHashType  uint8
-	LinkageTruncated uint8
+	LinkageHashType  uint8 `json:"linkage_hash_type,omitempty"`
+	LinkageTruncated uint8 `json:"linkage_truncated,omitempty"`
 	_                uint16
-	LinkageOffset    uint32
-	LinkageSize      uint32
+	LinkageOffset    uint32 `json:"linkage_offset,omitempty"`
+	LinkageSize      uint32 `json:"linkage_size,omitempty"`
 }
 
 // Scatter object
 type Scatter struct {
-	Count        uint32 // number of pages zero for sentinel (only)
-	Base         uint32 // first page number
-	TargetOffset uint64 // byte offset in target
+	Count        uint32 `json:"count,omitempty"`         // number of pages zero for sentinel (only)
+	Base         uint32 `json:"base,omitempty"`          // first page number
+	TargetOffset uint64 `json:"target_offset,omitempty"` // byte offset in target
 	_            uint64 // reserved (must be zero)
 }
 

@@ -15,14 +15,14 @@ import (
 type Requirement struct {
 	RequirementsBlob
 	Requirements
-	Detail string
+	Detail string `json:"detail,omitempty"`
 }
 
 // RequirementsBlob object
 type RequirementsBlob struct {
-	Magic  Magic  // magic number
-	Length uint32 // total length of blob
-	Data   uint32 // zero for dyld shared cache
+	Magic  Magic  `json:"magic,omitempty"`  // magic number
+	Length uint32 `json:"length,omitempty"` // total length of blob
+	Data   uint32 `json:"data,omitempty"`   // zero for dyld shared cache
 }
 
 type RequirementType uint32
@@ -54,8 +54,8 @@ func (cm RequirementType) String() string {
 
 // Requirements object
 type Requirements struct {
-	Type   RequirementType // type of entry
-	Offset uint32          // offset of entry
+	Type   RequirementType `json:"type,omitempty"`   // type of entry
+	Offset uint32          `json:"offset,omitempty"` // offset of entry
 }
 
 // NOTE: https://opensource.apple.com/source/libsecurity_codesigning/libsecurity_codesigning-36591/lib/requirement.h.auto.html

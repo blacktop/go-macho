@@ -75,9 +75,9 @@ func (cm Magic) String() string {
 }
 
 type SbHeader struct {
-	Magic  Magic  // magic number
-	Length uint32 // total length of SuperBlob
-	Count  uint32 // number of index entries following
+	Magic  Magic  `json:"magic,omitempty"`  // magic number
+	Length uint32 `json:"length,omitempty"` // total length of SuperBlob
+	Count  uint32 `json:"count,omitempty"`  // number of index entries following
 }
 
 // SuperBlob object
@@ -201,13 +201,13 @@ func (c SlotType) String() string {
 
 // BlobIndex object
 type BlobIndex struct {
-	Type   SlotType // type of entry
-	Offset uint32   // offset of entry
+	Type   SlotType `json:"type,omitempty"`   // type of entry
+	Offset uint32   `json:"offset,omitempty"` // offset of entry
 }
 
 type BlobHeader struct {
-	Magic  Magic  // magic number
-	Length uint32 // total length of blob
+	Magic  Magic  `json:"magic,omitempty"`  // magic number
+	Length uint32 `json:"length,omitempty"` // total length of blob
 }
 
 // Blob object
