@@ -170,7 +170,7 @@ const (
 
 func (f CDFlag) String() string {
 	var out []string
-	if (f & NONE) != 0 {
+	if f == NONE {
 		out = append(out, "none")
 	}
 	if (f & VALID) != 0 {
@@ -263,6 +263,23 @@ func (f CDFlag) String() string {
 	return strings.Join(out, ", ")
 }
 
+type cdPlatform uint8
+
+const (
+	// A signature with a nonzero platform identifier value, when endorsed as originated by Apple,
+	// identifies code as belonging to a particular operating system deliverable set. Some system
+	// components restrict functionality to platform binaries. The actual values are arbitrary.
+	NON_PLATFORM_BINARY cdPlatform = 0
+	// PLATFORM_PLATFORM_BINARY cdPlatform = 0xE // TODO: this is what /bin/ls's platform is, but are there other values?
+)
+
+func (p cdPlatform) String() string {
+	if p == NON_PLATFORM_BINARY {
+		return "non-platform-binary"
+	}
+	return "platform-binary"
+}
+
 // CodeDirectoryType header
 type CodeDirectoryType struct {
 	CdEarliest
@@ -276,18 +293,18 @@ type CodeDirectoryType struct {
 }
 
 type CdEarliest struct {
-	Version       cdVersion // compatibility version
-	Flags         CDFlag    // setup and mode flags
-	HashOffset    uint32    // offset of hash slot element at index zero
-	IdentOffset   uint32    // offset of identifier string
-	NSpecialSlots uint32    // number of special hash slots
-	NCodeSlots    uint32    // number of ordinary (code) hash slots
-	CodeLimit     uint32    // limit to main image signature range
-	HashSize      uint8     // size of each hash in bytes
-	HashType      hashType  // type of hash (cdHashType* constants)
-	Platform      uint8     // platform identifier zero if not platform binary
-	PageSize      uint8     // log2(page size in bytes) 0 => infinite
-	_             uint32    // unused (must be zero)
+	Version       cdVersion  // compatibility version
+	Flags         CDFlag     // setup and mode flags
+	HashOffset    uint32     // offset of hash slot element at index zero
+	IdentOffset   uint32     // offset of identifier string
+	NSpecialSlots uint32     // number of special hash slots
+	NCodeSlots    uint32     // number of ordinary (code) hash slots
+	CodeLimit     uint32     // limit to main image signature range
+	HashSize      uint8      // size of each hash in bytes
+	HashType      hashType   // type of hash (cdHashType* constants)
+	Platform      cdPlatform // platform identifier zero if not platform binary
+	PageSize      uint8      // log2(page size in bytes) 0 => infinite
+	_             uint32     // unused (must be zero)
 }
 
 type CdScatter struct {

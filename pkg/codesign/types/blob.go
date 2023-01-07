@@ -102,7 +102,16 @@ func (s *SuperBlob) AddBlob(typ SlotType, blob Blob) {
 	s.Index = append(s.Index, idx)
 	s.Blobs = append(s.Blobs, blob)
 	s.Count++
-	s.Length += blob.Length + uint32(binary.Size(idx)) + 4 // FIXME: WTF is this 4 for ???
+	s.Length += uint32(binary.Size(BlobHeader{}.Magic)) + blob.Length + uint32(binary.Size(idx))
+}
+
+func (s *SuperBlob) Size() int {
+	sz := binary.Size(s.SbHeader) + binary.Size(BlobHeader{}) + binary.Size(s.Index)
+	for _, blob := range s.Blobs {
+		sz += binary.Size(blob.BlobHeader)
+		sz += len(blob.Data)
+	}
+	return sz
 }
 
 func (s *SuperBlob) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
@@ -125,7 +134,6 @@ func (s *SuperBlob) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 			return fmt.Errorf("failed to write blob data to superblob buffer: %v", err)
 		}
 	}
-	// TODO: padding ?
 	return nil
 }
 
@@ -205,10 +213,10 @@ type BlobHeader struct {
 // Blob object
 type Blob struct {
 	BlobHeader
-	Data any // (length - sizeof(blob_header)) bytes
+	Data []byte // (length - sizeof(blob_header)) bytes
 }
 
-func NewBlob(magic Magic, data any) Blob {
+func NewBlob(magic Magic, data []byte) Blob {
 	return Blob{
 		BlobHeader: BlobHeader{
 			Magic:  magic,

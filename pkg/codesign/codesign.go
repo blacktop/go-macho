@@ -554,6 +554,10 @@ func Sign(r io.Reader, config *SignConfig) ([]byte, error) {
 	}
 	sb.AddBlob(types.CSSLOT_CMS_SIGNATURE, types.NewBlob(types.MAGIC_BLOBWRAPPER, config.Certificate))
 
+	if uint32(sb.Size()) < sb.Length { // TODO: should I remove this check?
+		return nil, fmt.Errorf("SuperBlob size mismatch: calculated Size %d != Length %d", sb.Size(), sb.Length)
+	}
+
 	// write SuperBlob
 	if err := sb.Write(&buf, binary.BigEndian); err != nil {
 		return nil, fmt.Errorf("failed to write SuperBlob: %v", err)
