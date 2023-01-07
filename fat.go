@@ -5,6 +5,7 @@
 package macho
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -13,11 +14,21 @@ import (
 	"github.com/blacktop/go-macho/types"
 )
 
+const (
+	alignBits = 14
+	align     = 1 << alignBits
+)
+
 // A FatFile is a Mach-O universal binary that contains at least one architecture.
 type FatFile struct {
-	Magic  types.Magic
-	Arches []FatArch
+	FatHeader
 	closer io.Closer
+}
+
+type FatHeader struct {
+	Magic  types.Magic
+	Count  uint32
+	Arches []FatArch
 }
 
 // A FatArchHeader represents a fat header for a specific image architecture.
@@ -35,6 +46,7 @@ const fatArchHeaderSize = 5 * 4
 type FatArch struct {
 	FatArchHeader
 	*File
+	data []byte
 }
 
 // ErrNotFat is returned from NewFatFile or OpenFat when the file is not a
@@ -137,6 +149,86 @@ func OpenFat(name string) (*FatFile, error) {
 	ff.closer = f
 	return ff, nil
 }
+
+func CreateFat(name string, files ...string) (*FatFile, error) {
+
+	fat := &FatFile{
+		FatHeader: FatHeader{
+			Magic: types.MagicFat,
+		},
+	}
+
+	offset := int64(align)
+
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read binary %s: %w", f, err)
+		}
+
+		m, err := NewFile(bytes.NewReader(data))
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse MachO %s: %w", f, err)
+		}
+
+		fat.Count++
+
+		fat.Arches = append(fat.Arches, FatArch{
+			FatArchHeader: FatArchHeader{
+				CPU:    m.CPU,
+				SubCPU: m.SubCPU,
+				Offset: uint32(offset),
+				Size:   uint32(len(data)),
+				Align:  alignBits,
+			},
+			File: m,
+			data: data,
+		})
+
+		offset += int64(len(data))
+		offset = (offset + align - 1) / align * align
+	}
+
+	out, err := os.Create(name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create file %s: %w", name, err)
+	}
+	fat.closer = out
+
+	if err := binary.Write(out, binary.BigEndian, fat.FatHeader.Magic); err != nil {
+		return nil, fmt.Errorf("failed to write fat header magic to file: %w", err)
+	}
+	if err := binary.Write(out, binary.BigEndian, fat.FatHeader.Count); err != nil {
+		return nil, fmt.Errorf("failed to write fat header count to file: %w", err)
+	}
+	for _, farch := range fat.Arches {
+		if err := binary.Write(out, binary.BigEndian, farch.FatArchHeader); err != nil {
+			return nil, fmt.Errorf("failed to write fat header arch %s header to file: %w", farch.CPU, err)
+		}
+	}
+
+	offset, _ = out.Seek(0, io.SeekCurrent)
+
+	// Write each contained file.
+	for _, farch := range fat.Arches {
+		if offset < int64(farch.Offset) {
+			if _, err := out.Write(make([]byte, int64(farch.Offset)-offset)); err != nil {
+				return nil, fmt.Errorf("failed to write to file: %w", err)
+			}
+			offset = int64(farch.Offset)
+		}
+		if _, err := out.Write(farch.data); err != nil {
+			return nil, fmt.Errorf("failed to write to file: %w", err)
+		}
+		offset += int64(len(farch.data))
+	}
+
+	return fat, nil
+}
+
+// func (ff *FatFile) Save(name string) error {
+// 	return nil
+// }
 
 // Close with close the Mach-O Fat file.
 func (ff *FatFile) Close() error {
