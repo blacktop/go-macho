@@ -379,7 +379,7 @@ func (f *File) Save(outpath string) error {
 					return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
 				}
 			case "__LINKEDIT":
-				if f.ledata.Len() > 0 && f.CodeSignature() != nil {
+				if f.ledata != nil && f.ledata.Len() > 0 && f.CodeSignature() != nil {
 					if _, err := buf.Write(f.ledata.Bytes()); err != nil {
 						return fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
 					}
