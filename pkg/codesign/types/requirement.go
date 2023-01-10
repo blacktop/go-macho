@@ -3,15 +3,15 @@ package types
 import (
 	"bytes"
 	"crypto/x509"
+	"encoding/asn1"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"math"
-	"os"
 	"strings"
 
+	"github.com/blacktop/go-macho/pkg/trie"
 	mtypes "github.com/blacktop/go-macho/types"
-	"golang.org/x/crypto/pkcs12"
 )
 
 // Requirement object
@@ -162,6 +162,12 @@ func (o matchOp) String() string {
 		"GreaterEqual",
 	}[0]
 }
+
+const (
+	// certificate positions (within a standard certificate chain)
+	leafCertIndex   uint32 = 0          // index for leaf (first in chain)
+	anchorCertIndex        = ^uint32(0) // index for anchor (last in chain), equiv to -1
+)
 
 func getData(r *bytes.Reader) ([]byte, error) {
 	var idLength uint32
@@ -556,45 +562,120 @@ func ParseRequirements(r *bytes.Reader, reqs Requirements) (string, error) {
 }
 
 // CreateRequirements creates a requirements set cs blob
-func CreateRequirements(id, certPath, password string) (Blob, error) {
-	if len(certPath) == 0 {
+func CreateRequirements(id string, certs []*x509.Certificate) (Blob, error) {
+
+	if len(id) == 0 { // empty requirements set
 		return NewBlob(MAGIC_REQUIREMENTS, make([]byte, 4)), nil
 	}
 
-	certData, err := os.ReadFile(certPath)
-	if err != nil {
+	var ops []uint32
+	var statements [][]uint32
+
+	// add identifier
+	ops = append(ops, uint32(opIdent))
+	ops = append(ops, encodeBytes([]byte(id))...)
+	statements = append(statements, ops)
+
+	// add on "anchor apple generic"
+	for _, cert := range certs {
+		if len(cert.Subject.Organization) > 0 && cert.Subject.Organization[0] == "Apple Inc." {
+			statements = append(statements, []uint32{uint32(opAppleGenericAnchor)})
+			break
+		}
+	}
+
+	// add appleCertificateExtensions cert extension check
+	appleCertificateExtensionsOID := asn1.ObjectIdentifier{1, 2, 840, 113635, 100, 6, 2, 6}
+	for idx, cert := range certs {
+		for _, ext := range cert.Extensions {
+			if ext.Id.Equal(appleCertificateExtensionsOID) {
+				if cert.IsCA {
+					slotIndex := uint32(idx)
+					if idx == 0 {
+						slotIndex = anchorCertIndex
+					}
+					var ops []uint32
+					ops = append(ops, uint32(opCertGeneric))
+					ops = append(ops, slotIndex)
+					ops = append(ops, encodeBytes(encodeOID(appleCertificateExtensionsOID))...)
+					ops = append(ops, uint32(matchExists))
+					statements = append(statements, ops)
+				}
+			}
+		}
+	}
+
+	// add on subject OU check
+	if !certs[len(certs)-1].IsCA {
+		leafCert := certs[len(certs)-1]
+		if leafCert != nil && len(leafCert.Subject.OrganizationalUnit) > 0 {
+			var ops []uint32
+			ops = append(ops, uint32(opCertField))
+			ops = append(ops, leafCertIndex)
+			ops = append(ops, encodeBytes([]byte("subject.OU"))...)
+			ops = append(ops, uint32(matchEqual))
+			ops = append(ops, encodeBytes([]byte(leafCert.Subject.OrganizationalUnit[0]))...)
+			statements = append(statements, ops)
+		}
+	}
+
+	// and-conjoin all statements
+	var finalOps []uint32
+	for i := 0; i < len(statements); i++ {
+		if i < len(statements)-1 {
+			finalOps = append(finalOps, uint32(opAnd))
+		}
+		finalOps = append(finalOps, statements[i]...)
+	}
+
+	var buf bytes.Buffer
+	if err := binary.Write(&buf, binary.BigEndian, uint32(1)); err != nil {
+		return Blob{}, err
+	}
+	if err := binary.Write(&buf, binary.BigEndian, Requirements{
+		Type:   DesignatedRequirementType,
+		Offset: uint32(binary.Size(RequirementsBlob{}) + binary.Size(Requirements{})),
+	}); err != nil {
+		return Blob{}, err
+	}
+	if err := binary.Write(&buf, binary.BigEndian, RequirementsBlob{
+		Magic:  MAGIC_REQUIREMENT,
+		Length: uint32(binary.Size(RequirementsBlob{}) + binary.Size(finalOps)),
+		Data:   1,
+	}); err != nil {
+		return Blob{}, err
+	}
+	if err := binary.Write(&buf, binary.BigEndian, finalOps); err != nil {
 		return Blob{}, err
 	}
 
-	blocks, err := pkcs12.ToPEM(certData, password)
-	if err != nil {
-		return Blob{}, fmt.Errorf("failed to parse pkcs12 file %s: %w", certPath, err)
+	return Blob{
+		BlobHeader: BlobHeader{
+			Magic:  MAGIC_REQUIREMENTS,
+			Length: uint32(binary.Size(BlobHeader{}) + buf.Len()),
+		},
+		Data: buf.Bytes(),
+	}, nil
+}
+
+func encodeOID(oid asn1.ObjectIdentifier) []byte {
+	var res bytes.Buffer
+	trie.EncodeUleb128(&res, uint64(oid[0])*40+uint64(oid[1]))
+	for _, v := range oid[2:] {
+		trie.EncodeUleb128(&res, uint64(v))
 	}
+	return res.Bytes()
+}
 
-	var privateKey any
-	var certs []*x509.Certificate
-
-	for _, b := range blocks {
-		switch b.Type {
-		case "CERTIFICATE":
-			cert, err := x509.ParseCertificate(b.Bytes)
-			if err != nil {
-				return Blob{}, err
-			}
-			certs = append(certs, cert)
-		case "PRIVATE KEY":
-			if privateKey, err = x509.ParsePKCS1PrivateKey(b.Bytes); err != nil {
-				outterErr := err
-				if privateKey, err = x509.ParseECPrivateKey(b.Bytes); err != nil {
-					return Blob{}, fmt.Errorf("failed to parse private key: %w: %w", outterErr, err)
-				}
-			}
-		default:
-			return Blob{}, fmt.Errorf("unknown block type: %s", b.Type)
-		}
+func encodeBytes(in []byte) []uint32 {
+	var ops []uint32
+	ops = append(ops, uint32(len(in)))
+	if (len(in) % 4) != 0 {
+		pad := make([]byte, 4-(len(in)%4))
+		in = append(in, pad...)
 	}
-	_ = privateKey
-
-	// return NewBlob(MAGIC_REQUIREMENTS, []byte{0, 0, 0, 1}), nil
-	return NewBlob(MAGIC_REQUIREMENTS, make([]byte, 4)), nil
+	data := make([]uint32, len(in)/binary.Size(uint32(0)))
+	binary.Read(bytes.NewReader(in), binary.BigEndian, &data)
+	ops = append(ops, data...)
+	return ops
 }

@@ -220,7 +220,7 @@ func NewBlob(magic Magic, data []byte) Blob {
 	return Blob{
 		BlobHeader: BlobHeader{
 			Magic:  magic,
-			Length: uint32(binary.Size(BlobHeader{}) + binary.Size(data)),
+			Length: uint32(binary.Size(BlobHeader{}) + len(data)),
 		},
 		Data: data,
 	}

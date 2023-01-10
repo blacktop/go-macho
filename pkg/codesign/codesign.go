@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -336,8 +337,7 @@ type Config struct {
 	RequirementsSlotHash    []byte
 	EntitlementsSlotHash    []byte
 	EntitlementsDERSlotHash []byte
-	CertPath                string
-	CertPassword            string
+	CertChain               []*x509.Certificate
 	SignerFunction          func([]byte) ([]byte, error)
 }
 
@@ -355,7 +355,7 @@ func Sign(r io.Reader, config *Config) ([]byte, error) {
 	sb := types.NewSuperBlob(types.MAGIC_EMBEDDED_SIGNATURE)
 
 	// Requirements /////////////////////////////////////////////
-	reqBlob, err = types.CreateRequirements(config.ID, config.CertPath, config.CertPassword)
+	reqBlob, err = types.CreateRequirements(config.ID, config.CertChain)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Requirements: %v", err)
 	}
