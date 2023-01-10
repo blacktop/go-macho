@@ -2,13 +2,16 @@ package types
 
 import (
 	"bytes"
+	"crypto/x509"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"strings"
 
 	mtypes "github.com/blacktop/go-macho/types"
+	"golang.org/x/crypto/pkcs12"
 )
 
 // Requirement object
@@ -553,10 +556,45 @@ func ParseRequirements(r *bytes.Reader, reqs Requirements) (string, error) {
 }
 
 // CreateRequirements creates a requirements set cs blob
-func CreateRequirements(id string) (Blob, error) {
-	panic("not implemented")
-}
+func CreateRequirements(id, certPath, password string) (Blob, error) {
+	if len(certPath) == 0 {
+		return NewBlob(MAGIC_REQUIREMENTS, make([]byte, 4)), nil
+	}
 
-func CreateEmptyRequirements() Blob {
-	return NewBlob(MAGIC_REQUIREMENTS, make([]byte, 4))
+	certData, err := os.ReadFile(certPath)
+	if err != nil {
+		return Blob{}, err
+	}
+
+	blocks, err := pkcs12.ToPEM(certData, password)
+	if err != nil {
+		return Blob{}, fmt.Errorf("failed to parse pkcs12 file %s: %w", certPath, err)
+	}
+
+	var privateKey any
+	var certs []*x509.Certificate
+
+	for _, b := range blocks {
+		switch b.Type {
+		case "CERTIFICATE":
+			cert, err := x509.ParseCertificate(b.Bytes)
+			if err != nil {
+				return Blob{}, err
+			}
+			certs = append(certs, cert)
+		case "PRIVATE KEY":
+			if privateKey, err = x509.ParsePKCS1PrivateKey(b.Bytes); err != nil {
+				outterErr := err
+				if privateKey, err = x509.ParseECPrivateKey(b.Bytes); err != nil {
+					return Blob{}, fmt.Errorf("failed to parse private key: %w: %w", outterErr, err)
+				}
+			}
+		default:
+			return Blob{}, fmt.Errorf("unknown block type: %s", b.Type)
+		}
+	}
+	_ = privateKey
+
+	// return NewBlob(MAGIC_REQUIREMENTS, []byte{0, 0, 0, 1}), nil
+	return NewBlob(MAGIC_REQUIREMENTS, make([]byte, 4)), nil
 }

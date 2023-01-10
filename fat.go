@@ -170,6 +170,7 @@ func CreateFat(name string, files ...string) (*FatFile, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse MachO %s: %w", f, err)
 		}
+		defer m.Close()
 
 		fat.Count++
 
@@ -209,7 +210,6 @@ func CreateFat(name string, files ...string) (*FatFile, error) {
 
 	offset, _ = out.Seek(0, io.SeekCurrent)
 
-	// Write each contained file.
 	for _, farch := range fat.Arches {
 		if offset < int64(farch.Offset) {
 			if _, err := out.Write(make([]byte, int64(farch.Offset)-offset)); err != nil {

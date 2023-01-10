@@ -230,29 +230,21 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 	return nil
 }
 
-func (f *File) CodeSign(id string, flags ctypes.CDFlag, entitlements, entitlementsDer []byte, signer func([]byte) ([]byte, error)) error {
+func (f *File) CodeSign(config *codesign.Config) error {
 	var cs *CodeSignature
+
+	config.IsMain = f.Type == types.MH_EXECUTE
 
 	text := f.Segment("__TEXT")
 	if text == nil {
 		return fmt.Errorf("failed to find __TEXT segment")
 	}
-
-	// create initial code signature config
-	config := &codesign.Config{
-		ID:              id,
-		IsMain:          f.Type == types.MH_EXECUTE,
-		Flags:           flags,
-		TextOffset:      uint64(text.Offset),
-		TextSize:        uint64(text.Filesz),
-		Entitlements:    entitlements,
-		EntitlementsDER: entitlementsDer,
-		SignerFunction:  signer,
-	}
+	config.TextOffset = uint64(text.Offset)
+	config.TextSize = uint64(text.Filesz)
 
 	// check if there is an embedded Info.plist
 	if infoPlist, err := f.GetEmbeddedInfoPlist(); err == nil {
-		config.InfoPlist = []byte(infoPlist)
+		config.InfoPlist = infoPlist
 	}
 
 	linkedit := f.Segment("__LINKEDIT")
@@ -269,9 +261,8 @@ func (f *File) CodeSign(id string, flags ctypes.CDFlag, entitlements, entitlemen
 			if config.TeamID == "" {
 				config.TeamID = cs.CodeDirectories[0].TeamID
 			}
-			if config.Flags == ctypes.NONE {
-				config.Flags = cs.CodeDirectories[0].Header.Flags
-				config.Flags -= ctypes.LINKER_SIGNED // remove linker signed flag TODO: should I do this?
+			if config.Flags == ctypes.ADHOC {
+				config.Flags &= ^ctypes.LINKER_SIGNED // remove linker signed flag TODO: should I do this?
 			}
 			if config.Entitlements == nil {
 				config.Entitlements = []byte(cs.Entitlements)

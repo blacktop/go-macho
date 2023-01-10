@@ -333,8 +333,11 @@ type Config struct {
 	InfoPlist               []byte
 	Entitlements            []byte
 	EntitlementsDER         []byte
+	RequirementsSlotHash    []byte
 	EntitlementsSlotHash    []byte
 	EntitlementsDERSlotHash []byte
+	CertPath                string
+	CertPassword            string
 	SignerFunction          func([]byte) ([]byte, error)
 }
 
@@ -345,23 +348,20 @@ func Sign(r io.Reader, config *Config) ([]byte, error) {
 	var entBlob types.Blob
 	var entDerBlob types.Blob
 
+	config.RequirementsSlotHash = types.EmptySha256ReqSlot
 	config.EntitlementsSlotHash = types.EmptySha256Slot
 	config.EntitlementsDERSlotHash = types.EmptySha256Slot
 
 	sb := types.NewSuperBlob(types.MAGIC_EMBEDDED_SIGNATURE)
 
 	// Requirements /////////////////////////////////////////////
-	if (config.Flags & types.ADHOC) != 0 {
-		reqBlob = types.CreateEmptyRequirements()
-	} else { // TODO: add support for non-adhoc
-		// reqBlob, err = types.CreateRequirements(config.ID)
-		// if err != nil {
-		// 	return nil, fmt.Errorf("failed to create Requirements: %v", err)
-		// }
-		// reqHash, err := reqBlob.Sha256Hash()
-		// if err != nil {
-		// 	return nil, fmt.Errorf("failed to hash Requirements: %v", err)
-		// }
+	reqBlob, err = types.CreateRequirements(config.ID, config.CertPath, config.CertPassword)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Requirements: %v", err)
+	}
+	config.RequirementsSlotHash, err = reqBlob.Sha256Hash()
+	if err != nil {
+		return nil, fmt.Errorf("failed to hash Requirements: %v", err)
 	}
 
 	config.NSpecialSlots = uint32(2)
@@ -382,27 +382,18 @@ func Sign(r io.Reader, config *Config) ([]byte, error) {
 		}
 		// if we have previous entitlements plist hash, verify it against the new one
 		if len(config.SpecialSlots[2].Hash) > 0 && !bytes.Equal(config.SpecialSlots[2].Hash, config.EntitlementsSlotHash) {
-			return nil, fmt.Errorf("current and calulated entitlements plist hashes do not match")
+			return nil, fmt.Errorf("previous and calulated entitlements plist hashes do not match")
 		}
-		if len(config.EntitlementsDER) > 0 { // if we have previous DER encoded entitlements, use that instead
-			entDerBlob = types.NewBlob(types.MAGIC_EMBEDDED_ENTITLEMENTS_DER, config.EntitlementsDER)
-			config.EntitlementsDERSlotHash, err = entDerBlob.Sha256Hash()
-			if err != nil {
-				return nil, fmt.Errorf("failed to hash entitlements asn1/der blob: %v", err)
-			}
-			if !bytes.Equal(config.SpecialSlots[0].Hash, config.EntitlementsDERSlotHash) {
-				return nil, fmt.Errorf("current and calulated entitlements asn1/der hashes do not match")
-			}
-		} else { // otherwise, encode the entitlements plist and use that
-			entDerData, err := types.DerEncodeEntitlements(string(config.Entitlements))
-			if err != nil {
-				return nil, fmt.Errorf("failed to ASN1/DER encode entitlements: %v", err)
-			}
-			entDerBlob = types.NewBlob(types.MAGIC_EMBEDDED_ENTITLEMENTS_DER, entDerData)
-			config.EntitlementsDERSlotHash, err = entDerBlob.Sha256Hash()
-			if err != nil {
-				return nil, fmt.Errorf("failed to hash entitlements asn1/der blob: %v", err)
-			}
+		if len(config.EntitlementsDER) == 0 {
+			return nil, fmt.Errorf("entitlements asn1/der data is empty (must be supplied by caller)")
+		}
+		entDerBlob = types.NewBlob(types.MAGIC_EMBEDDED_ENTITLEMENTS_DER, config.EntitlementsDER)
+		config.EntitlementsDERSlotHash, err = entDerBlob.Sha256Hash()
+		if err != nil {
+			return nil, fmt.Errorf("failed to hash entitlements asn1/der blob: %v", err)
+		}
+		if len(config.SpecialSlots[2].Hash) > 0 && !bytes.Equal(config.SpecialSlots[0].Hash, config.EntitlementsDERSlotHash) {
+			return nil, fmt.Errorf("previous and calulated entitlements asn1/der hashes do not match")
 		}
 	}
 
@@ -445,7 +436,6 @@ func createCodeDirectory(r io.Reader, config *Config) (*bytes.Buffer, error) {
 	var cdbuf bytes.Buffer
 
 	infoHash := types.EmptySha256Slot
-	reqHash := types.EmptySha256ReqSlot
 	rscDirHash := types.EmptySha256Slot
 	appHash := types.EmptySha256Slot
 	dmgHash := types.EmptySha256Slot
@@ -549,7 +539,7 @@ func createCodeDirectory(r io.Reader, config *Config) (*bytes.Buffer, error) {
 		}
 	}
 	// write CodeDirectory Requirements Blob slot hash
-	if _, err := cdbuf.Write(reqHash); err != nil {
+	if _, err := cdbuf.Write(config.RequirementsSlotHash); err != nil {
 		return nil, fmt.Errorf("failed to write requirements hash: %v", err)
 	}
 	// write CodeDirectory Bound Info.plist slot hash

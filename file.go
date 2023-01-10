@@ -2043,16 +2043,16 @@ func (f *File) ForEachV2SplitSegReference(handler func(fromSectionIndex, fromSec
 	return nil
 }
 
-func (f *File) GetEmbeddedInfoPlist() (string, error) {
+func (f *File) GetEmbeddedInfoPlist() ([]byte, error) {
 	infoSec := f.Section("__TEXT", "__info_plist")
 	if infoSec == nil {
-		return "", fmt.Errorf("no __TEXT.__info_plist section")
+		return nil, fmt.Errorf("no __TEXT.__info_plist section")
 	}
 	data, err := infoSec.Data()
 	if err != nil {
-		return "", fmt.Errorf("failed to read __TEXT.__info_plist section data: %v", err)
+		return nil, fmt.Errorf("failed to read __TEXT.__info_plist section data: %v", err)
 	}
-	return string(data), nil
+	return data, nil
 }
 
 // DWARF returns the DWARF debug information for the Mach-O file.
