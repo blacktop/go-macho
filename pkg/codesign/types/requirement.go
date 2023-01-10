@@ -605,17 +605,19 @@ func CreateRequirements(id string, certs []*x509.Certificate) (Blob, error) {
 		}
 	}
 
-	// add on subject OU check
-	if !certs[len(certs)-1].IsCA {
-		leafCert := certs[len(certs)-1]
-		if leafCert != nil && len(leafCert.Subject.OrganizationalUnit) > 0 {
-			var ops []uint32
-			ops = append(ops, uint32(opCertField))
-			ops = append(ops, leafCertIndex)
-			ops = append(ops, encodeBytes([]byte("subject.OU"))...)
-			ops = append(ops, uint32(matchEqual))
-			ops = append(ops, encodeBytes([]byte(leafCert.Subject.OrganizationalUnit[0]))...)
-			statements = append(statements, ops)
+	if len(certs) > 1 {
+		// add on subject OU check
+		if !certs[len(certs)-1].IsCA {
+			leafCert := certs[len(certs)-1]
+			if leafCert != nil && len(leafCert.Subject.OrganizationalUnit) > 0 {
+				var ops []uint32
+				ops = append(ops, uint32(opCertField))
+				ops = append(ops, leafCertIndex)
+				ops = append(ops, encodeBytes([]byte("subject.OU"))...)
+				ops = append(ops, uint32(matchEqual))
+				ops = append(ops, encodeBytes([]byte(leafCert.Subject.OrganizationalUnit[0]))...)
+				statements = append(statements, ops)
+			}
 		}
 	}
 
