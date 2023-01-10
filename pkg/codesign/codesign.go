@@ -410,9 +410,17 @@ func Sign(r io.Reader, config *Config) ([]byte, error) {
 		sb.AddBlob(types.CSSLOT_ENTITLEMENTS_DER, entDerBlob)
 	}
 	if config.SignerFunction != nil {
-		cert, err := config.SignerFunction(cdbuf.Bytes())
+		cdblob, err := sb.GetBlob(types.CSSLOT_CODEDIRECTORY)
 		if err != nil {
-			return nil, fmt.Errorf("failed to sign CodeDirectory: %v", err)
+			return nil, fmt.Errorf("failed to get CodeDirectory blob: %v", err)
+		}
+		cddata, err := cdblob.Bytes()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get CodeDirectory blob data: %v", err)
+		}
+		cert, err := config.SignerFunction(cddata)
+		if err != nil {
+			return nil, fmt.Errorf("failed to sign CodeDirectory blob: %v", err)
 		}
 		sb.AddBlob(types.CSSLOT_CMS_SIGNATURE, types.NewBlob(types.MAGIC_BLOBWRAPPER, cert))
 	} else {

@@ -105,6 +105,15 @@ func (s *SuperBlob) AddBlob(typ SlotType, blob Blob) {
 	s.Length += uint32(binary.Size(BlobHeader{}.Magic)) + blob.Length + uint32(binary.Size(idx))
 }
 
+func (s *SuperBlob) GetBlob(typ SlotType) (Blob, error) {
+	for i, idx := range s.Index {
+		if idx.Type == typ {
+			return s.Blobs[i], nil
+		}
+	}
+	return Blob{}, fmt.Errorf("blob not found")
+}
+
 func (s *SuperBlob) Size() int {
 	sz := binary.Size(s.SbHeader) + binary.Size(BlobHeader{}) + binary.Size(s.Index)
 	for _, blob := range s.Blobs {
@@ -235,4 +244,15 @@ func (b Blob) Sha256Hash() ([]byte, error) {
 		return nil, fmt.Errorf("failed to hash blob header: %v", err)
 	}
 	return h.Sum(nil), nil
+}
+
+func (b Blob) Bytes() ([]byte, error) {
+	buf := new(bytes.Buffer)
+	if err := binary.Write(buf, binary.BigEndian, b.BlobHeader); err != nil {
+		return nil, fmt.Errorf("failed to write blob header to buffer: %v", err)
+	}
+	if err := binary.Write(buf, binary.BigEndian, b.Data); err != nil {
+		return nil, fmt.Errorf("failed to write blob data to buffer: %v", err)
+	}
+	return buf.Bytes(), nil
 }
