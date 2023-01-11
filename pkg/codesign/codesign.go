@@ -321,24 +321,44 @@ func parseCodeDirectory(r *bytes.Reader, offset uint32) (*types.CodeDirectory, e
 	return &cd, nil
 }
 
+type slotHashes struct {
+	InfoPlist       []byte
+	Requirements    []byte
+	ResourceDir     []byte
+	Entitlements    []byte
+	AppSpecific     []byte
+	DmgSpecific     []byte
+	EntitlementsDER []byte
+}
+
 type Config struct {
-	ID                      string
-	TeamID                  string
-	IsMain                  bool
-	Flags                   types.CDFlag
-	CodeSize                uint64
-	TextOffset              uint64
-	TextSize                uint64
-	NSpecialSlots           uint32
-	SpecialSlots            []types.SpecialSlot
-	InfoPlist               []byte
-	Entitlements            []byte
-	EntitlementsDER         []byte
-	RequirementsSlotHash    []byte
-	EntitlementsSlotHash    []byte
-	EntitlementsDERSlotHash []byte
-	CertChain               []*x509.Certificate
-	SignerFunction          func([]byte) ([]byte, error)
+	ID              string
+	TeamID          string
+	IsMain          bool
+	Flags           types.CDFlag
+	CodeSize        uint64
+	TextOffset      uint64
+	TextSize        uint64
+	NSpecialSlots   uint32
+	SpecialSlots    []types.SpecialSlot
+	InfoPlist       []byte
+	Entitlements    []byte
+	EntitlementsDER []byte
+	SlotHashes      slotHashes
+	CertChain       []*x509.Certificate
+	SignerFunction  func([]byte) ([]byte, error)
+}
+
+func (c *Config) InitSlotHashes() {
+	c.SlotHashes = slotHashes{
+		InfoPlist:       types.EmptySha256Slot,
+		Requirements:    types.EmptySha256ReqSlot,
+		ResourceDir:     types.EmptySha256Slot,
+		Entitlements:    types.EmptySha256Slot,
+		AppSpecific:     types.EmptySha256Slot,
+		DmgSpecific:     types.EmptySha256Slot,
+		EntitlementsDER: types.EmptySha256Slot,
+	}
 }
 
 func Sign(r io.Reader, config *Config) ([]byte, error) {
@@ -348,10 +368,6 @@ func Sign(r io.Reader, config *Config) ([]byte, error) {
 	var entBlob types.Blob
 	var entDerBlob types.Blob
 
-	config.RequirementsSlotHash = types.EmptySha256ReqSlot
-	config.EntitlementsSlotHash = types.EmptySha256Slot
-	config.EntitlementsDERSlotHash = types.EmptySha256Slot
-
 	sb := types.NewSuperBlob(types.MAGIC_EMBEDDED_SIGNATURE)
 
 	// Requirements /////////////////////////////////////////////
@@ -359,7 +375,7 @@ func Sign(r io.Reader, config *Config) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Requirements: %v", err)
 	}
-	config.RequirementsSlotHash, err = reqBlob.Sha256Hash()
+	config.SlotHashes.Requirements, err = reqBlob.Sha256Hash()
 	if err != nil {
 		return nil, fmt.Errorf("failed to hash Requirements: %v", err)
 	}
@@ -376,23 +392,23 @@ func Sign(r io.Reader, config *Config) ([]byte, error) {
 			return nil, fmt.Errorf("invalid number of special slots in config")
 		}
 		entBlob = types.NewBlob(types.MAGIC_EMBEDDED_ENTITLEMENTS, config.Entitlements)
-		config.EntitlementsSlotHash, err = entBlob.Sha256Hash()
+		config.SlotHashes.Entitlements, err = entBlob.Sha256Hash()
 		if err != nil {
 			return nil, fmt.Errorf("failed to hash entitlements plist blob: %v", err)
 		}
 		// if we have previous entitlements plist hash, verify it against the new one
-		if len(config.SpecialSlots[2].Hash) > 0 && !bytes.Equal(config.SpecialSlots[2].Hash, config.EntitlementsSlotHash) {
+		if len(config.SpecialSlots[2].Hash) > 0 && !bytes.Equal(config.SpecialSlots[2].Hash, config.SlotHashes.Entitlements) {
 			return nil, fmt.Errorf("previous and calulated entitlements plist hashes do not match")
 		}
 		if len(config.EntitlementsDER) == 0 {
 			return nil, fmt.Errorf("entitlements asn1/der data is empty (must be supplied by caller)")
 		}
 		entDerBlob = types.NewBlob(types.MAGIC_EMBEDDED_ENTITLEMENTS_DER, config.EntitlementsDER)
-		config.EntitlementsDERSlotHash, err = entDerBlob.Sha256Hash()
+		config.SlotHashes.EntitlementsDER, err = entDerBlob.Sha256Hash()
 		if err != nil {
 			return nil, fmt.Errorf("failed to hash entitlements asn1/der blob: %v", err)
 		}
-		if len(config.SpecialSlots[2].Hash) > 0 && !bytes.Equal(config.SpecialSlots[0].Hash, config.EntitlementsDERSlotHash) {
+		if len(config.SpecialSlots[2].Hash) > 0 && !bytes.Equal(config.SpecialSlots[0].Hash, config.SlotHashes.EntitlementsDER) {
 			return nil, fmt.Errorf("previous and calulated entitlements asn1/der hashes do not match")
 		}
 	}
@@ -443,22 +459,33 @@ func createCodeDirectory(r io.Reader, config *Config) (*bytes.Buffer, error) {
 	var cddelta int
 	var cdbuf bytes.Buffer
 
-	infoHash := types.EmptySha256Slot
-	rscDirHash := types.EmptySha256Slot
-	appHash := types.EmptySha256Slot
-	dmgHash := types.EmptySha256Slot
-
 	// Info.plist ///////////////////////////////////////////////
 	if config.InfoPlist != nil {
 		if len(config.SpecialSlots) > 0 {
-			infoHash = config.SpecialSlots[len(config.SpecialSlots)-1].Hash
+			config.SlotHashes.InfoPlist = config.SpecialSlots[len(config.SpecialSlots)-1].Hash
 		} else {
 			h := sha256.New()
 			if err := binary.Write(h, binary.BigEndian, config.InfoPlist); err != nil {
 				return nil, fmt.Errorf("failed to hash Info.plist: %v", err)
 			}
-			infoHash = h.Sum(nil)
+			config.SlotHashes.InfoPlist = h.Sum(nil)
 		}
+	}
+
+	// Resource Directory ///////////////////////////////////////
+	if len(config.SpecialSlots) >= 3 {
+		// NOTE: this is sha256sum Some.app/Contents/_CodeSignature/CodeResources (which is a XML representation of the Resources directory)
+		config.SlotHashes.ResourceDir = config.SpecialSlots[len(config.SpecialSlots)-3].Hash
+	}
+
+	// Application Specific /////////////////////////////////////
+	if len(config.SpecialSlots) >= 4 {
+		config.SlotHashes.AppSpecific = config.SpecialSlots[len(config.SpecialSlots)-4].Hash
+	}
+
+	// DMG Specific /////////////////////////////////////////////
+	if len(config.SpecialSlots) >= 6 {
+		config.SlotHashes.DmgSpecific = config.SpecialSlots[len(config.SpecialSlots)-6].Hash
 	}
 
 	// calculate the CodeDirectory offsets
@@ -526,32 +553,32 @@ func createCodeDirectory(r io.Reader, config *Config) (*bytes.Buffer, error) {
 	}
 	if len(config.Entitlements) > 0 {
 		// write CodeDirectory Entitlements ASN1/DER slot hash
-		if _, err := cdbuf.Write(config.EntitlementsDERSlotHash); err != nil {
+		if _, err := cdbuf.Write(config.SlotHashes.EntitlementsDER); err != nil {
 			return nil, fmt.Errorf("failed to write entitlements asn1/der hash: %v", err)
 		}
 		// write CodeDirectory DMG Specific slot hash
-		if _, err := cdbuf.Write(dmgHash); err != nil {
+		if _, err := cdbuf.Write(config.SlotHashes.DmgSpecific); err != nil {
 			return nil, fmt.Errorf("failed to write dmg specific hash: %v", err)
 		}
 		// write CodeDirectory Entitlements Plist slot hash
-		if _, err := cdbuf.Write(config.EntitlementsSlotHash); err != nil {
+		if _, err := cdbuf.Write(config.SlotHashes.Entitlements); err != nil {
 			return nil, fmt.Errorf("failed to write entitlements plist hash: %v", err)
 		}
 		// write CodeDirectory Application Specific slot hash
-		if _, err := cdbuf.Write(appHash); err != nil {
+		if _, err := cdbuf.Write(config.SlotHashes.AppSpecific); err != nil {
 			return nil, fmt.Errorf("failed to write app specific hash: %v", err)
 		}
 		// write CodeDirectory Resource Directory slot hash
-		if _, err := cdbuf.Write(rscDirHash); err != nil {
+		if _, err := cdbuf.Write(config.SlotHashes.ResourceDir); err != nil {
 			return nil, fmt.Errorf("failed to write rsc dir hash: %v", err)
 		}
 	}
 	// write CodeDirectory Requirements Blob slot hash
-	if _, err := cdbuf.Write(config.RequirementsSlotHash); err != nil {
+	if _, err := cdbuf.Write(config.SlotHashes.Requirements); err != nil {
 		return nil, fmt.Errorf("failed to write requirements hash: %v", err)
 	}
 	// write CodeDirectory Bound Info.plist slot hash
-	if _, err := cdbuf.Write(infoHash); err != nil {
+	if _, err := cdbuf.Write(config.SlotHashes.InfoPlist); err != nil {
 		return nil, fmt.Errorf("failed to write info.plist hash: %v", err)
 	}
 	// write page hashes

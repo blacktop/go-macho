@@ -233,6 +233,8 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 func (f *File) CodeSign(config *codesign.Config) error {
 	var cs *CodeSignature
 
+	config.InitSlotHashes() // initialize slot hashes with default empty slot hashes
+
 	config.IsMain = f.Type == types.MH_EXECUTE
 
 	text := f.Segment("__TEXT")
