@@ -388,17 +388,16 @@ func Sign(r io.Reader, config *Config) ([]byte, error) {
 	// Entitlements /////////////////////////////////////////////
 	if len(config.Entitlements) > 0 {
 		config.NSpecialSlots = 7
-		if len(config.SpecialSlots) != 7 {
-			return nil, fmt.Errorf("invalid number of special slots in config")
-		}
 		entBlob = types.NewBlob(types.MAGIC_EMBEDDED_ENTITLEMENTS, config.Entitlements)
 		config.SlotHashes.Entitlements, err = entBlob.Sha256Hash()
 		if err != nil {
 			return nil, fmt.Errorf("failed to hash entitlements plist blob: %v", err)
 		}
 		// if we have previous entitlements plist hash, verify it against the new one
-		if len(config.SpecialSlots[2].Hash) > 0 && !bytes.Equal(config.SpecialSlots[2].Hash, config.SlotHashes.Entitlements) {
-			return nil, fmt.Errorf("previous and calulated entitlements plist hashes do not match")
+		if len(config.SpecialSlots) == 7 {
+			if len(config.SpecialSlots[2].Hash) > 0 && !bytes.Equal(config.SpecialSlots[2].Hash, config.SlotHashes.Entitlements) {
+				return nil, fmt.Errorf("previous and calulated entitlements plist hashes do not match")
+			}
 		}
 		if len(config.EntitlementsDER) == 0 {
 			return nil, fmt.Errorf("entitlements asn1/der data is empty (must be supplied by caller)")
@@ -408,8 +407,10 @@ func Sign(r io.Reader, config *Config) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to hash entitlements asn1/der blob: %v", err)
 		}
-		if len(config.SpecialSlots[2].Hash) > 0 && !bytes.Equal(config.SpecialSlots[0].Hash, config.SlotHashes.EntitlementsDER) {
-			return nil, fmt.Errorf("previous and calulated entitlements asn1/der hashes do not match")
+		if len(config.SpecialSlots) == 7 {
+			if len(config.SpecialSlots[2].Hash) > 0 && !bytes.Equal(config.SpecialSlots[0].Hash, config.SlotHashes.EntitlementsDER) {
+				return nil, fmt.Errorf("previous and calulated entitlements asn1/der hashes do not match")
+			}
 		}
 	}
 
