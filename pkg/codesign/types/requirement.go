@@ -562,6 +562,7 @@ func ParseRequirements(r *bytes.Reader, reqs Requirements) (string, error) {
 }
 
 // CreateRequirements creates a requirements set cs blob
+// NOTE: /usr/bin/csreq -r="identifier com.foo.test" -t (to test it out)
 func CreateRequirements(id string, certs []*x509.Certificate) (Blob, error) {
 
 	if len(id) == 0 { // empty requirements set
