@@ -332,21 +332,22 @@ type slotHashes struct {
 }
 
 type Config struct {
-	ID              string
-	TeamID          string
-	IsMain          bool
-	Flags           types.CDFlag
-	CodeSize        uint64
-	TextOffset      uint64
-	TextSize        uint64
-	NSpecialSlots   uint32
-	SpecialSlots    []types.SpecialSlot
-	InfoPlist       []byte
-	Entitlements    []byte
-	EntitlementsDER []byte
-	SlotHashes      slotHashes
-	CertChain       []*x509.Certificate
-	SignerFunction  func([]byte) ([]byte, error)
+	ID                  string
+	TeamID              string
+	IsMain              bool
+	Flags               types.CDFlag
+	CodeSize            uint64
+	TextOffset          uint64
+	TextSize            uint64
+	NSpecialSlots       uint32
+	SpecialSlots        []types.SpecialSlot
+	InfoPlist           []byte
+	Entitlements        []byte
+	EntitlementsDER     []byte
+	ResourceDirSlotHash []byte
+	SlotHashes          slotHashes
+	CertChain           []*x509.Certificate
+	SignerFunction      func([]byte) ([]byte, error)
 }
 
 func (c *Config) InitSlotHashes() {
@@ -393,23 +394,23 @@ func Sign(r io.Reader, config *Config) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to hash entitlements plist blob: %v", err)
 		}
-		// if we have previous entitlements plist hash, verify it against the new one
-		if len(config.SpecialSlots) == 7 {
+		if len(config.SpecialSlots) >= 5 { // if we have previous entitlements plist hash, verify it against the new one
 			if len(config.SpecialSlots[2].Hash) > 0 && !bytes.Equal(config.SpecialSlots[2].Hash, config.SlotHashes.Entitlements) {
 				return nil, fmt.Errorf("previous and calulated entitlements plist hashes do not match")
 			}
 		}
-		if len(config.EntitlementsDER) == 0 {
-			return nil, fmt.Errorf("entitlements asn1/der data is empty (must be supplied by caller)")
-		}
-		entDerBlob = types.NewBlob(types.MAGIC_EMBEDDED_ENTITLEMENTS_DER, config.EntitlementsDER)
-		config.SlotHashes.EntitlementsDER, err = entDerBlob.Sha256Hash()
-		if err != nil {
-			return nil, fmt.Errorf("failed to hash entitlements asn1/der blob: %v", err)
-		}
-		if len(config.SpecialSlots) == 7 {
-			if len(config.SpecialSlots[2].Hash) > 0 && !bytes.Equal(config.SpecialSlots[0].Hash, config.SlotHashes.EntitlementsDER) {
-				return nil, fmt.Errorf("previous and calulated entitlements asn1/der hashes do not match")
+		if len(config.EntitlementsDER) == 0 && bytes.Equal(config.SpecialSlots[0].Hash, types.EmptySha256Slot) {
+			config.NSpecialSlots = 5
+		} else {
+			entDerBlob = types.NewBlob(types.MAGIC_EMBEDDED_ENTITLEMENTS_DER, config.EntitlementsDER)
+			config.SlotHashes.EntitlementsDER, err = entDerBlob.Sha256Hash()
+			if err != nil {
+				return nil, fmt.Errorf("failed to hash entitlements asn1/der blob: %v", err)
+			}
+			if len(config.SpecialSlots) >= 7 { // if we have previous entitlements asn1/der hash, verify it against the new one
+				if len(config.SpecialSlots[0].Hash) > 0 && !bytes.Equal(config.SpecialSlots[0].Hash, config.SlotHashes.EntitlementsDER) {
+					return nil, fmt.Errorf("previous and calulated entitlements asn1/der hashes do not match")
+				}
 			}
 		}
 	}
@@ -424,6 +425,8 @@ func Sign(r io.Reader, config *Config) ([]byte, error) {
 	sb.AddBlob(types.CSSLOT_REQUIREMENTS, reqBlob)
 	if len(config.Entitlements) > 0 {
 		sb.AddBlob(types.CSSLOT_ENTITLEMENTS, entBlob)
+	}
+	if len(config.EntitlementsDER) > 0 {
 		sb.AddBlob(types.CSSLOT_ENTITLEMENTS_DER, entDerBlob)
 	}
 	if config.SignerFunction != nil {
@@ -462,31 +465,42 @@ func createCodeDirectory(r io.Reader, config *Config) (*bytes.Buffer, error) {
 
 	// Info.plist ///////////////////////////////////////////////
 	if config.InfoPlist != nil {
-		if len(config.SpecialSlots) > 0 {
-			config.SlotHashes.InfoPlist = config.SpecialSlots[len(config.SpecialSlots)-1].Hash
-		} else {
-			h := sha256.New()
-			if err := binary.Write(h, binary.BigEndian, config.InfoPlist); err != nil {
-				return nil, fmt.Errorf("failed to hash Info.plist: %v", err)
+		h := sha256.New()
+		if _, err := h.Write(config.InfoPlist); err != nil {
+			return nil, fmt.Errorf("failed to hash Info.plist: %v", err)
+		}
+		config.SlotHashes.InfoPlist = h.Sum(nil)
+		if len(config.SpecialSlots) >= 1 {
+			if len(config.SpecialSlots[len(config.SpecialSlots)-1].Hash) > 0 && !bytes.Equal(config.SpecialSlots[len(config.SpecialSlots)-1].Hash, config.SlotHashes.InfoPlist) {
+				return nil, fmt.Errorf("previous and calulated Info.plist hashes do not match")
 			}
-			config.SlotHashes.InfoPlist = h.Sum(nil)
 		}
 	}
 
 	// Resource Directory ///////////////////////////////////////
 	if len(config.SpecialSlots) >= 3 {
 		// NOTE: this is sha256sum Some.app/Contents/_CodeSignature/CodeResources (which is a XML representation of the Resources directory)
-		config.SlotHashes.ResourceDir = config.SpecialSlots[len(config.SpecialSlots)-3].Hash
+		if bytes.Equal(config.SlotHashes.ResourceDir, types.EmptySha256Slot) {
+			// if the slot is empty it was NOT set by the caller (try and reuse previous value)
+			config.SlotHashes.ResourceDir = config.SpecialSlots[len(config.SpecialSlots)-3].Hash
+		}
+		// if the slot is NOT empty it was set by the caller (and was calculated from the created CodeResources file)
 	}
 
 	// Application Specific /////////////////////////////////////
 	if len(config.SpecialSlots) >= 4 {
-		config.SlotHashes.AppSpecific = config.SpecialSlots[len(config.SpecialSlots)-4].Hash
+		if bytes.Equal(config.SlotHashes.AppSpecific, types.EmptySha256Slot) {
+			// if the slot is empty it was NOT set by the caller (try and reuse previous value)
+			config.SlotHashes.AppSpecific = config.SpecialSlots[len(config.SpecialSlots)-4].Hash
+		}
 	}
 
 	// DMG Specific /////////////////////////////////////////////
 	if len(config.SpecialSlots) >= 6 {
-		config.SlotHashes.DmgSpecific = config.SpecialSlots[len(config.SpecialSlots)-6].Hash
+		if bytes.Equal(config.SlotHashes.DmgSpecific, types.EmptySha256Slot) {
+			// if the slot is empty it was NOT set by the caller (try and reuse previous value)
+			config.SlotHashes.DmgSpecific = config.SpecialSlots[len(config.SpecialSlots)-6].Hash
+		}
 	}
 
 	// calculate the CodeDirectory offsets

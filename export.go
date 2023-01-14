@@ -272,6 +272,9 @@ func (f *File) CodeSign(config *codesign.Config) error {
 			if config.EntitlementsDER == nil {
 				config.EntitlementsDER = []byte(cs.EntitlementsDER)
 			}
+			if config.ResourceDirSlotHash != nil {
+				config.SlotHashes.ResourceDir = config.ResourceDirSlotHash
+			}
 			if config.SpecialSlots == nil {
 				config.SpecialSlots = cs.CodeDirectories[0].SpecialSlots
 			}
