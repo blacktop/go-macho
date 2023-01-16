@@ -14,6 +14,7 @@ import (
 )
 
 var ErrObjcSectionNotFound = errors.New("missing required ObjC section")
+var ErrObjcSectionNEmpty = errors.New("required ObjC section is empty")
 
 // TODO refactor into a pkg
 

@@ -21,6 +21,7 @@ import (
 	"github.com/blacktop/go-macho/pkg/codesign"
 	"github.com/blacktop/go-macho/pkg/fixupchains"
 	"github.com/blacktop/go-macho/pkg/trie"
+	"github.com/blacktop/go-macho/pkg/xar"
 	"github.com/blacktop/go-macho/types"
 )
 
@@ -1478,7 +1479,6 @@ func (f *File) convertToVMAddr(value uint64) uint64 {
 // GetBindName returns the import name for a given dyld chained pointer
 func (f *File) GetBindName(pointer uint64) (string, error) {
 	var err error
-
 	if f.HasFixups() {
 		if f.dcf == nil {
 			f.dcf, err = f.DyldChainedFixups()
@@ -1487,17 +1487,13 @@ func (f *File) GetBindName(pointer uint64) (string, error) {
 			}
 		}
 		if len(f.dcf.Imports) > 0 {
-			if !fixupchains.DcpArm64eIsRebase(pointer) {
-				if fixupchains.DcpArm64eIsAuth(pointer) {
-					authBind := fixupchains.DyldChainedPtrArm64eAuthBind{Pointer: pointer}
-					return f.dcf.Imports[authBind.Ordinal()].Name, nil
-				}
-				bind := fixupchains.DyldChainedPtrArm64eBind{Pointer: pointer}
-				return f.dcf.Imports[bind.Ordinal()].Name, nil
+			if bind, _, ok := f.dcf.IsBind(pointer); ok {
+				return bind.Name, nil
 			}
+			return "", fmt.Errorf("pointer %#x is not a bind", pointer)
 		}
+		return "", fmt.Errorf("MachO does not contain dyld chained fixups importts")
 	}
-
 	return "", fmt.Errorf("MachO does not contain dyld chained fixups")
 }
 
@@ -2053,6 +2049,57 @@ func (f *File) GetEmbeddedInfoPlist() ([]byte, error) {
 		return nil, fmt.Errorf("failed to read __TEXT.__info_plist section data: %v", err)
 	}
 	return data, nil
+}
+
+const (
+	BitcodeWrapperMagic = 0x0b17c0de
+	RawBitcodeMagic     = 0xdec04342 // 'BC' 0xc0de
+)
+
+type BitstreamWrapperHeader struct {
+	Magic   uint32
+	Version uint32
+	Offset  uint32
+	Size    uint32
+	CPUType uint32
+}
+
+func (f *File) GetEmbeddedLLVMBitcode() (*xar.Reader, error) {
+	llvmBundle := f.Section("__LLVM", "__bundle")
+	if llvmBundle == nil {
+		return nil, fmt.Errorf("no %s.%s section", llvmBundle.Seg, llvmBundle.Name)
+	}
+	data, err := llvmBundle.Data()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read %s.%s section data: %v", llvmBundle.Seg, llvmBundle.Name, err)
+	}
+	return xar.NewReader(bytes.NewReader(data), int64(len(data)))
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to create xar reader: %v", err)
+	// }
+
+	// if xr.HasSignature() {
+	// 	fmt.Println(xr.Certificates)
+	// }
+
+	// for _, xf := range xr.File {
+	// 	fmt.Printf("name: %s, type: %v, info: %v, valid_checksum: %t\n", xf.Name, xf.Type, xf.Info, xf.VerifyChecksum())
+	// 	f, err := xf.Open()
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("failed to open xar file: %v", err)
+	// 	}
+	// 	data, err := io.ReadAll(f)
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("failed to read xar file: %v", err)
+	// 	}
+	// 	var header BitstreamWrapperHeader
+	// 	if err := binary.Read(bytes.NewReader(data), binary.LittleEndian, &header); err != nil {
+	// 		return nil, fmt.Errorf("failed to read bitstream wrapper header: %v", err)
+	// 	}
+	// 	_ = header
+	// 	os.WriteFile(xf.Name, data, 0644)
+	// 	f.Close()
+	// }
 }
 
 // DWARF returns the DWARF debug information for the Mach-O file.
