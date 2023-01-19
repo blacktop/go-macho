@@ -887,6 +887,9 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	// for _, sym := range f.Symtab.Syms[f.Dysymtab.Iextdefsym:] {
 	if f.Symtab != nil {
 		for _, sym := range f.Symtab.Syms {
+			if sym.Name == "<redacted>" {
+				continue
+			}
 			if err := binary.Write(&lebuf, binary.LittleEndian, types.Nlist64{
 				Nlist: types.Nlist{
 					Name: uint32(newSymNames.Len()),
