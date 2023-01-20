@@ -241,7 +241,7 @@ func (d DyldChainedPtrArm64eRebase) String(baseAddr ...uint64) string {
 	if len(baseAddr) > 0 {
 		d.Fixup += baseAddr[0]
 	}
-	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: 0x%011x, high8: 0x%02x)",
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: %#x, high8: 0x%02x)",
 		d.Fixup,
 		d.Pointer,
 		d.Kind(),
@@ -349,7 +349,7 @@ func (d DyldChainedPtrArm64eAuthRebase) String(baseAddr ...uint64) string {
 	if len(baseAddr) > 0 {
 		d.Fixup += baseAddr[0]
 	}
-	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: 0x%011x, key: %s, addrDiv: %d, diversity: 0x%04x)",
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: %#x, key: %s, addrDiv: %d, diversity: 0x%04x)",
 		d.Fixup,
 		d.Pointer,
 		d.Kind(),
@@ -460,7 +460,7 @@ func (d DyldChainedPtr64Rebase) String(baseAddr ...uint64) string {
 	if len(baseAddr) > 0 {
 		d.Fixup += baseAddr[0]
 	}
-	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: 0x%011x, high8: 0x%02x)",
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: %#x, high8: 0x%02x)",
 		d.Fixup,
 		d.Pointer,
 		d.Kind(),
@@ -507,7 +507,7 @@ func (d DyldChainedPtr64RebaseOffset) String(baseAddr ...uint64) string {
 	if len(baseAddr) > 0 {
 		d.Fixup += baseAddr[0]
 	}
-	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: 0x%011x, high8: 0x%02x)",
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: %#x, high8: 0x%02x)",
 		d.Fixup,
 		d.Pointer,
 		d.Kind(),
@@ -555,7 +555,7 @@ func (d DyldChainedPtrArm64eRebase24) String(baseAddr ...uint64) string {
 	if len(baseAddr) > 0 {
 		baddr = baseAddr[0]
 	}
-	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: 0x%011x, high8: 0x%02x)",
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: %#x, high8: 0x%02x)",
 		d.Fixup+baddr,
 		d.Pointer,
 		d.Kind(),
@@ -606,7 +606,7 @@ func (d DyldChainedPtrArm64eAuthRebase24) String(baseAddr ...uint64) string {
 	if len(baseAddr) > 0 {
 		baddr = baseAddr[0]
 	}
-	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: 0x%011x, key: %s, addrDiv: %d, diversity: 0x%04x)",
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: %#x, key: %s, addrDiv: %d, diversity: 0x%04x)",
 		d.Fixup+baddr,
 		d.Pointer,
 		d.Kind(),

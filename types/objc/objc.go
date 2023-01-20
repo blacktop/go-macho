@@ -339,16 +339,16 @@ func (c *Category) dump(verbose bool) string {
 	var cMethods string
 	var iMethods string
 
-	cat := fmt.Sprintf("0x%011x %s", c.VMAddr, c.Name)
+	cat := fmt.Sprintf("%#x %s", c.VMAddr, c.Name)
 
 	if len(c.ClassMethods) > 0 {
 		cMethods = "  // class methods\n"
 		for _, meth := range c.ClassMethods {
 			if verbose {
 				rtype, args := decodeMethodTypes(meth.Types)
-				cMethods += fmt.Sprintf("  0x%011x +(%s)[%s %s] %s\n", meth.ImpVMAddr, rtype, c.Name, meth.Name, args)
+				cMethods += fmt.Sprintf("  %#x +(%s)[%s %s] %s\n", meth.ImpVMAddr, rtype, c.Name, meth.Name, args)
 			} else {
-				cMethods += fmt.Sprintf("  0x%011x +[%s %s]\n", meth.ImpVMAddr, c.Name, meth.Name)
+				cMethods += fmt.Sprintf("  %#x +[%s %s]\n", meth.ImpVMAddr, c.Name, meth.Name)
 			}
 		}
 		cMethods += "\n"
@@ -358,9 +358,9 @@ func (c *Category) dump(verbose bool) string {
 		for _, meth := range c.InstanceMethods {
 			if verbose {
 				rtype, args := decodeMethodTypes(meth.Types)
-				iMethods += fmt.Sprintf("  0x%011x -(%s)[%s %s] %s\n", meth.ImpVMAddr, rtype, c.Name, meth.Name, args)
+				iMethods += fmt.Sprintf("  %#x -(%s)[%s %s] %s\n", meth.ImpVMAddr, rtype, c.Name, meth.Name, args)
 			} else {
-				iMethods += fmt.Sprintf("  0x%011x -[%s %s]\n", meth.ImpVMAddr, c.Name, meth.Name)
+				iMethods += fmt.Sprintf("  %#x -[%s %s]\n", meth.ImpVMAddr, c.Name, meth.Name)
 			}
 		}
 		iMethods += "\n"
@@ -569,7 +569,7 @@ func (c *Class) dump(verbose bool) string {
 		subClass = c.SuperClass
 	}
 
-	class := fmt.Sprintf("0x%011x %s : %s", c.ClassPtr, c.Name, subClass)
+	class := fmt.Sprintf("%#x %s : %s", c.ClassPtr, c.Name, subClass)
 
 	if len(c.Prots) > 0 {
 		var subProts []string
@@ -604,9 +604,9 @@ func (c *Class) dump(verbose bool) string {
 		for _, meth := range c.ClassMethods {
 			if verbose {
 				rtype, args := decodeMethodTypes(meth.Types)
-				cMethods += fmt.Sprintf("  0x%011x +(%s)%s %s\n", meth.ImpVMAddr, rtype, meth.Name, args)
+				cMethods += fmt.Sprintf("  %#x +(%s)%s %s\n", meth.ImpVMAddr, rtype, meth.Name, args)
 			} else {
-				cMethods += fmt.Sprintf("  0x%011x +[%s %s]\n", meth.ImpVMAddr, c.Name, meth.Name)
+				cMethods += fmt.Sprintf("  %#x +[%s %s]\n", meth.ImpVMAddr, c.Name, meth.Name)
 			}
 		}
 		cMethods += "\n"
@@ -616,9 +616,9 @@ func (c *Class) dump(verbose bool) string {
 		for _, meth := range c.InstanceMethods {
 			if verbose {
 				rtype, args := decodeMethodTypes(meth.Types)
-				iMethods += fmt.Sprintf("  0x%011x -(%s)%s %s\n", meth.ImpVMAddr, rtype, meth.Name, args)
+				iMethods += fmt.Sprintf("  %#x -(%s)%s %s\n", meth.ImpVMAddr, rtype, meth.Name, args)
 			} else {
-				iMethods += fmt.Sprintf("  0x%011x -[%s %s]\n", meth.ImpVMAddr, c.Name, meth.Name)
+				iMethods += fmt.Sprintf("  %#x -[%s %s]\n", meth.ImpVMAddr, c.Name, meth.Name)
 			}
 		}
 		iMethods += "\n"

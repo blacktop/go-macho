@@ -721,7 +721,7 @@ func TestNewFileWithObjC(t *testing.T) {
 			fmt.Println("_OBJC_INSTANCE_METHODS")
 			fmt.Println("----------------------")
 			for _, m := range meths {
-				fmt.Printf("0x%011x: (%s) %s [%d]\n", m.ImpVMAddr, m.ReturnType(), m.Name, m.NumberOfArguments())
+				fmt.Printf("%#x: (%s) %s [%d]\n", m.ImpVMAddr, m.ReturnType(), m.Name, m.NumberOfArguments())
 			}
 		} else {
 			t.Errorf(err.Error())
@@ -770,7 +770,7 @@ func TestNewFileWithObjC(t *testing.T) {
 		if selRefs, err := got.GetObjCProtoReferences(); err == nil {
 			fmt.Println("@proto refs")
 			for off, prot := range selRefs {
-				fmt.Printf("0x%011x -> 0x%011x: %s\n", off, prot.Ptr, prot.Name)
+				fmt.Printf("%#x -> %#x: %s\n", off, prot.Ptr, prot.Name)
 			}
 		} else {
 			t.Errorf(err.Error())
@@ -778,7 +778,7 @@ func TestNewFileWithObjC(t *testing.T) {
 		if selRefs, err := got.GetObjCClassReferences(); err == nil {
 			fmt.Println("@class refs")
 			for off, sel := range selRefs {
-				fmt.Printf("0x%011x -> 0x%011x: %s\n", off, sel.ClassPtr, sel.Name)
+				fmt.Printf("%#x -> %#x: %s\n", off, sel.ClassPtr, sel.Name)
 			}
 		} else {
 			t.Errorf(err.Error())
@@ -786,7 +786,7 @@ func TestNewFileWithObjC(t *testing.T) {
 		if selRefs, err := got.GetObjCSuperReferences(); err == nil {
 			fmt.Println("@super refs")
 			for off, sel := range selRefs {
-				fmt.Printf("0x%011x -> 0x%011x: %s\n", off, sel.ClassPtr, sel.SuperClass)
+				fmt.Printf("%#x -> %#x: %s\n", off, sel.ClassPtr, sel.SuperClass)
 			}
 		} else {
 			t.Errorf(err.Error())
@@ -794,7 +794,7 @@ func TestNewFileWithObjC(t *testing.T) {
 		if selRefs, err := got.GetObjCSelectorReferences(); err == nil {
 			fmt.Println("@selectors refs")
 			for off, sel := range selRefs {
-				fmt.Printf("0x%011x -> 0x%011x: %s\n", off, sel.VMAddr, sel.Name)
+				fmt.Printf("%#x -> %#x: %s\n", off, sel.VMAddr, sel.Name)
 			}
 		} else {
 			t.Errorf(err.Error())
@@ -802,7 +802,7 @@ func TestNewFileWithObjC(t *testing.T) {
 		if methods, err := got.GetObjCMethodNames(); err == nil {
 			fmt.Printf("\n@methods\n")
 			for vmaddr, method := range methods {
-				fmt.Printf("0x%011x: %s\n", vmaddr, method)
+				fmt.Printf("%#x: %s\n", vmaddr, method)
 			}
 		} else {
 			t.Errorf(err.Error())
