@@ -1456,21 +1456,16 @@ func (f *File) convertToVMAddr(value uint64) uint64 {
 			return value
 		}
 		if target, ok := dcf.IsRebase(value, f.GetBaseAddress()); ok {
-			if target <= f.preferredLoadAddress() { // gross hack to avoid re-rebasing
-				return target + f.preferredLoadAddress()
+			return target + f.preferredLoadAddress()
+		} else if bind, addend, ok := dcf.IsBind(value); ok {
+			if bind.Import.LibOrdinal() == types.BIND_SPECIAL_DYLIB_SELF {
+				symAddr, err := f.FindSymbolAddress(bind.Name)
+				if err != nil {
+					return 0
+				}
+				return uint64(int64(symAddr) + addend)
 			}
-			return value
 		}
-		// if bind, addend, ok := dcf.IsBind(value); ok {
-		// 	if bind.Import.LibOrdinal() == types.BIND_SPECIAL_DYLIB_SELF {
-		// 		symAddr, err := f.FindSymbolAddress(bind.Name)
-		// 		if err != nil {
-		// 			return 0
-		// 		}
-		// 		return uint64(int64(symAddr) + addend)
-		// 	}
-		// 	return 0
-		// }
 	}
 
 	return value
