@@ -1698,7 +1698,7 @@ func (f *File) FileSets() []*FilesetEntry {
 func (f *File) GetFileSetFileByName(name string) (*File, error) {
 	for _, l := range f.Loads {
 		if fs, ok := l.(*FilesetEntry); ok {
-			if strings.Contains(strings.ToLower(fs.EntryID), strings.ToLower(name)) {
+			if strings.EqualFold(fs.EntryID, name) || strings.HasSuffix(strings.ToLower(fs.EntryID), strings.ToLower(name)) {
 				return NewFile(io.NewSectionReader(f.sr, int64(fs.FileOffset), 1<<63-1), FileConfig{
 					Offset:        int64(fs.FileOffset),
 					SectionReader: f.sr,
