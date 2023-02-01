@@ -341,7 +341,7 @@ func (c *Category) dump(verbose bool) string {
 	var cMethods string
 	var iMethods string
 
-	cat := fmt.Sprintf("%s // %#x", c.Name, c.VMAddr)
+	cat := fmt.Sprintf("@interface %s (%s) // %#x", c.Class.Name, c.Name, c.VMAddr)
 
 	if len(c.ClassMethods) > 0 {
 		s := bytes.NewBufferString("// class methods\n")
@@ -351,7 +351,7 @@ func (c *Category) dump(verbose bool) string {
 				rtype, args := decodeMethodTypes(meth.Types)
 				fmt.Fprintf(w, "+ %s;\t// %#x\n", getMethodWithArgs(meth.Name, rtype, args), meth.ImpVMAddr)
 			} else {
-				fmt.Fprintf(w, "+ [%s %s];\t// %#x\n", c.Name, meth.Name, meth.ImpVMAddr)
+				fmt.Fprintf(w, "+[%s %s];\t// %#x\n", c.Name, meth.Name, meth.ImpVMAddr)
 			}
 		}
 		w.Flush()
@@ -365,7 +365,7 @@ func (c *Category) dump(verbose bool) string {
 				rtype, args := decodeMethodTypes(meth.Types)
 				fmt.Fprintf(w, "- %s;\t// %#x\n", getMethodWithArgs(meth.Name, rtype, args), meth.ImpVMAddr)
 			} else {
-				fmt.Fprintf(w, "- [%s %s];\t// %#x\n", c.Name, meth.Name, meth.ImpVMAddr)
+				fmt.Fprintf(w, "-[%s %s];\t// %#x\n", c.Name, meth.Name, meth.ImpVMAddr)
 			}
 		}
 		w.Flush()
@@ -465,7 +465,7 @@ func (p *Protocol) dump(verbose bool) string {
 				rtype, args := decodeMethodTypes(meth.Types)
 				cMethods += fmt.Sprintf("+ %s;\n", getMethodWithArgs(meth.Name, rtype, args))
 			} else {
-				cMethods += fmt.Sprintf("+ [%s %s]\n", p.Name, meth.Name)
+				cMethods += fmt.Sprintf("+[%s %s];\n", p.Name, meth.Name)
 			}
 		}
 	}
@@ -476,7 +476,7 @@ func (p *Protocol) dump(verbose bool) string {
 				rtype, args := decodeMethodTypes(meth.Types)
 				iMethods += fmt.Sprintf("- %s;\n", getMethodWithArgs(meth.Name, rtype, args))
 			} else {
-				iMethods += fmt.Sprintf("- [%s %s]\n", p.Name, meth.Name)
+				iMethods += fmt.Sprintf("-[%s %s];\n", p.Name, meth.Name)
 			}
 		}
 	}
@@ -487,7 +487,7 @@ func (p *Protocol) dump(verbose bool) string {
 				rtype, args := decodeMethodTypes(meth.Types)
 				optMethods += fmt.Sprintf("- %s;\n", getMethodWithArgs(meth.Name, rtype, args))
 			} else {
-				optMethods += fmt.Sprintf("- [%s %s]\n", p.Name, meth.Name)
+				optMethods += fmt.Sprintf("-[%s %s];\n", p.Name, meth.Name)
 			}
 		}
 	}
@@ -615,7 +615,7 @@ func (c *Class) dump(verbose bool) string {
 				rtype, args := decodeMethodTypes(meth.Types)
 				fmt.Fprintf(w, "+ %s;\t// %#x\n", getMethodWithArgs(meth.Name, rtype, args), meth.ImpVMAddr)
 			} else {
-				fmt.Fprintf(w, "+ [%s %s];\t// %#x\n", c.Name, meth.Name, meth.ImpVMAddr)
+				fmt.Fprintf(w, "+[%s %s];\t// %#x\n", c.Name, meth.Name, meth.ImpVMAddr)
 			}
 		}
 		w.Flush()
@@ -629,7 +629,7 @@ func (c *Class) dump(verbose bool) string {
 				rtype, args := decodeMethodTypes(meth.Types)
 				fmt.Fprintf(w, "- %s;\t// %#x\n", getMethodWithArgs(meth.Name, rtype, args), meth.ImpVMAddr)
 			} else {
-				fmt.Fprintf(w, "- [%s %s];\t// %#x\n", c.Name, meth.Name, meth.ImpVMAddr)
+				fmt.Fprintf(w, "-[%s %s];\t// %#x\n", c.Name, meth.Name, meth.ImpVMAddr)
 			}
 		}
 		w.Flush()

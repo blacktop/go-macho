@@ -339,7 +339,7 @@ func getNumberOfArguments(types string) int {
 
 func getArguments(encArgs string) []methodEncodedArg {
 	var args []methodEncodedArg
-	re := regexp.MustCompile(`(?P<type>\D+)(?P<stack>\d+)`)
+	re := regexp.MustCompile(`(?P<type>(\[.*\]|{.*}|\(.*\)|\D+))(?P<stack>\d+)`)
 	for _, t := range re.FindAllStringSubmatch(encArgs, -1) {
 		args = append(args, methodEncodedArg{
 			EncType:   string(t[re.SubexpIndex("type")]),
