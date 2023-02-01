@@ -447,7 +447,7 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 		ClassMethods:          cMethods,
 		Ivars:                 ivars,
 		Props:                 props,
-		Prots:                 prots,
+		Protocols:             prots,
 		ClassPtr:              vmaddr,
 		IsaVMAddr:             classPtr.IsaVMAddr,
 		SuperclassVMAddr:      classPtr.SuperclassVMAddr,
@@ -592,7 +592,7 @@ func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 		ClassMethods:          cMethods,
 		Ivars:                 ivars,
 		Props:                 props,
-		Prots:                 prots,
+		Protocols:             prots,
 		ClassPtr:              vmaddr,
 		IsaVMAddr:             classPtr.IsaVMAddr,
 		SuperclassVMAddr:      classPtr.SuperclassVMAddr,
@@ -846,24 +846,24 @@ func (f *File) getObjcProtocol(vmaddr uint64) (proto *objc.Protocol, err error) 
 	}
 	if protoPtr.InstanceMethodsVMAddr > 0 {
 		protoPtr.InstanceMethodsVMAddr = f.vma.Convert(protoPtr.InstanceMethodsVMAddr)
-		// proto.InstanceMethods, err = f.GetObjCMethods(protoPtr.InstanceMethodsVMAddr)
-		// if err != nil {
-		// 	return nil, fmt.Errorf("failed to read instance method vmaddr: %v", err)
-		// }
+		proto.InstanceMethods, err = f.GetObjCMethods(protoPtr.InstanceMethodsVMAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read instance method vmaddr: %v", err)
+		}
 	}
 	if protoPtr.OptionalInstanceMethodsVMAddr > 0 {
 		protoPtr.OptionalInstanceMethodsVMAddr = f.vma.Convert(protoPtr.OptionalInstanceMethodsVMAddr)
-		// proto.OptionalInstanceMethods, err = f.GetObjCMethods(protoPtr.OptionalInstanceMethodsVMAddr)
-		// if err != nil {
-		// 	return nil, fmt.Errorf("failed to read optional instance method vmaddr: %v", err)
-		// }
+		proto.OptionalInstanceMethods, err = f.GetObjCMethods(protoPtr.OptionalInstanceMethodsVMAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read optional instance method vmaddr: %v", err)
+		}
 	}
 	if protoPtr.ClassMethodsVMAddr > 0 {
 		protoPtr.ClassMethodsVMAddr = f.vma.Convert(protoPtr.ClassMethodsVMAddr)
-		// proto.ClassMethods, err = f.GetObjCMethods(protoPtr.ClassMethodsVMAddr)
-		// if err != nil {
-		// 	return nil, fmt.Errorf("failed to read class method vmaddr: %v", err)
-		// }
+		proto.ClassMethods, err = f.GetObjCMethods(protoPtr.ClassMethodsVMAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read class method vmaddr: %v", err)
+		}
 	}
 	if protoPtr.OptionalClassMethodsVMAddr > 0 {
 		protoPtr.OptionalClassMethodsVMAddr = f.vma.Convert(protoPtr.OptionalClassMethodsVMAddr)
@@ -1395,17 +1395,22 @@ func (f *File) GetCFStrings() ([]objc.CFString, error) {
 				return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 			}
 
-			cfstrings = make([]objc.CFString, int(sec.Size)/binary.Size(objc.CFString64T{}))
-			cfStrTypes := make([]objc.CFString64T, int(sec.Size)/binary.Size(objc.CFString64T{}))
-			if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &cfStrTypes); err != nil {
-				return nil, fmt.Errorf("failed to read %T structs: %v", cfStrTypes, err)
+			r := bytes.NewReader(dat)
+
+			cfstrings = make([]objc.CFString, int(sec.Size)/binary.Size(objc.CFString64Type{}))
+			for idx := range cfstrings {
+				if err := binary.Read(r, f.ByteOrder, &cfstrings[idx].CFString64Type); err != nil {
+					return nil, fmt.Errorf("failed to read %T structs: %v", cfstrings[idx].CFString64Type, err)
+				}
 			}
 
-			for idx, cfstr := range cfStrTypes {
-				cfstr.IsaVMAddr = f.vma.Convert(cfstr.IsaVMAddr)
-				cfstr.Data = f.vma.Convert(cfstr.Data)
-				cfstrings[idx].CFString64T = &cfstr
-				if cfstr.Data == 0 {
+			for idx := range cfstrings {
+				cfstrings[idx].IsaVMAddr = f.vma.Convert(cfstrings[idx].IsaVMAddr)
+				if bind, err := f.GetBindName(cfstrings[idx].IsaVMAddr); err == nil {
+					cfstrings[idx].ISA = bind
+				}
+				cfstrings[idx].Data = f.vma.Convert(cfstrings[idx].Data)
+				if cfstrings[idx].Data == 0 {
 					return nil, fmt.Errorf("unhandled cstring parse case where data is 0") // TODO: finish this
 					// uint64_t n_value;
 					// const char *symbol_name = get_symbol_64(offset + offsetof(struct cfstring64_t, characters), S, info, n_value);
@@ -1413,14 +1418,14 @@ func (f *File) GetCFStrings() ([]objc.CFString, error) {
 					//   return nullptr;
 					// cfs_characters = n_value;
 				}
-				cfstrings[idx].Name, err = f.GetCString(cfstr.Data)
+				cfstrings[idx].Name, err = f.GetCString(cfstrings[idx].Data)
 				if err != nil {
 					return nil, fmt.Errorf("failed to read cstring: %v", err)
 				}
-				if c, ok := f.objc[cfstr.IsaVMAddr]; ok {
+				if c, ok := f.objc[cfstrings[idx].IsaVMAddr]; ok {
 					cfstrings[idx].Class = c.(*objc.Class)
 				}
-				cfstrings[idx].Address = sec.Addr + uint64(idx*binary.Size(objc.CFString64T{}))
+				cfstrings[idx].Address = sec.Addr + uint64(idx*binary.Size(objc.CFString64Type{}))
 				if err != nil {
 					return nil, fmt.Errorf("failed to calulate cfstring vmaddr: %v", err)
 				}

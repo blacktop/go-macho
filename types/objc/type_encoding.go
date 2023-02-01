@@ -95,21 +95,38 @@ type varEncodedType struct {
 }
 
 // decodeMethodTypes decodes the method types and returns a return type and the argument types
-func decodeMethodTypes(encodedTypes string) (string, string) {
+func decodeMethodTypes(encodedTypes string) (string, []string) {
 	var argTypes []string
 
 	// skip return type
 	encArgs := strings.TrimLeft(skipFirstType(encodedTypes), "0123456789")
 
-	for _, arg := range getArguments(encArgs) {
-		argTypes = append(argTypes, arg.DecType)
+	for idx, arg := range getArguments(encArgs) {
+		switch idx {
+		case 0:
+			argTypes = append(argTypes, fmt.Sprintf("(%s)self", arg.DecType))
+		case 1:
+			argTypes = append(argTypes, fmt.Sprintf("(%s)id", arg.DecType))
+		default:
+			argTypes = append(argTypes, fmt.Sprintf("(%s)arg%d", arg.DecType, idx-1))
+		}
 	}
-	if len(argTypes) == 2 {
-		return getReturnType(encodedTypes), ""
-	} else if len(argTypes) > 2 {
-		return getReturnType(encodedTypes), fmt.Sprintf("(%s)", strings.Join(argTypes[2:], ", "))
+	return getReturnType(encodedTypes), argTypes
+}
+
+func getMethodWithArgs(method, returnType string, args []string) string {
+	parts := strings.Split(method, ":")
+	var methodStr string
+	if len(parts) > 1 {
+		for idx, part := range parts {
+			if idx+2 > len(args) || len(part) == 0 {
+				break
+			}
+			methodStr += fmt.Sprintf("%s:%s ", part, args[idx+2])
+		}
+		return fmt.Sprintf("(%s)%s", returnType, strings.TrimSpace(methodStr))
 	}
-	return getReturnType(encodedTypes), fmt.Sprintf("(%s)", strings.Join(argTypes, ", "))
+	return fmt.Sprintf("(%s)%s", returnType, method)
 }
 
 func getPropertyAttributeTypes(attrs string) string {
@@ -322,12 +339,12 @@ func getNumberOfArguments(types string) int {
 
 func getArguments(encArgs string) []methodEncodedArg {
 	var args []methodEncodedArg
-
-	for _, t := range regexp.MustCompile(`.\d+`).FindAllString(encArgs, -1) {
+	re := regexp.MustCompile(`(?P<type>\D+)(?P<stack>\d+)`)
+	for _, t := range re.FindAllStringSubmatch(encArgs, -1) {
 		args = append(args, methodEncodedArg{
-			DecType:   decodeType(string(t[0])),
-			EncType:   string(t[0]),
-			StackSize: t[1:],
+			EncType:   string(t[re.SubexpIndex("type")]),
+			DecType:   decodeType(t[re.SubexpIndex("type")]),
+			StackSize: t[re.SubexpIndex("stack")],
 		})
 	}
 	return args

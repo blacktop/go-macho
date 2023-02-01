@@ -1,8 +1,10 @@
 package objc
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/blacktop/go-macho/types"
 )
@@ -339,36 +341,39 @@ func (c *Category) dump(verbose bool) string {
 	var cMethods string
 	var iMethods string
 
-	cat := fmt.Sprintf("%#x %s", c.VMAddr, c.Name)
+	cat := fmt.Sprintf("%s // %#x", c.Name, c.VMAddr)
 
 	if len(c.ClassMethods) > 0 {
-		cMethods = "  // class methods\n"
+		s := bytes.NewBufferString("// class methods\n")
+		w := tabwriter.NewWriter(s, 0, 0, 1, ' ', 0)
 		for _, meth := range c.ClassMethods {
 			if verbose {
 				rtype, args := decodeMethodTypes(meth.Types)
-				cMethods += fmt.Sprintf("  %#x +(%s)[%s %s] %s\n", meth.ImpVMAddr, rtype, c.Name, meth.Name, args)
+				fmt.Fprintf(w, "+ %s;\t// %#x\n", getMethodWithArgs(meth.Name, rtype, args), meth.ImpVMAddr)
 			} else {
-				cMethods += fmt.Sprintf("  %#x +[%s %s]\n", meth.ImpVMAddr, c.Name, meth.Name)
+				fmt.Fprintf(w, "+ [%s %s];\t// %#x\n", c.Name, meth.Name, meth.ImpVMAddr)
 			}
 		}
-		cMethods += "\n"
+		w.Flush()
+		cMethods = s.String()
 	}
 	if len(c.InstanceMethods) > 0 {
-		iMethods = "  // instance methods\n"
+		s := bytes.NewBufferString("// instance methods\n")
+		w := tabwriter.NewWriter(s, 0, 0, 1, ' ', 0)
 		for _, meth := range c.InstanceMethods {
 			if verbose {
 				rtype, args := decodeMethodTypes(meth.Types)
-				iMethods += fmt.Sprintf("  %#x -(%s)[%s %s] %s\n", meth.ImpVMAddr, rtype, c.Name, meth.Name, args)
+				fmt.Fprintf(w, "- %s;\t// %#x\n", getMethodWithArgs(meth.Name, rtype, args), meth.ImpVMAddr)
 			} else {
-				iMethods += fmt.Sprintf("  %#x -[%s %s]\n", meth.ImpVMAddr, c.Name, meth.Name)
+				fmt.Fprintf(w, "- [%s %s];\t// %#x\n", c.Name, meth.Name, meth.ImpVMAddr)
 			}
 		}
-		iMethods += "\n"
+		w.Flush()
+		iMethods = s.String()
 	}
 
 	return fmt.Sprintf(
-		"%s\n"+
-			"%s%s",
+		"%s\n%s%s@end",
 		cat,
 		cMethods,
 		iMethods)
@@ -443,51 +448,48 @@ func (p *Protocol) dump(verbose bool) string {
 		}
 		protocol += fmt.Sprintf("<%s>", strings.Join(subProts, ", "))
 	}
+	protocol += fmt.Sprintf(" // %#x", p.Ptr)
 	if len(p.InstanceProperties) > 0 {
 		for _, prop := range p.InstanceProperties {
 			if verbose {
-				props += fmt.Sprintf(" @property %s%s\n", getPropertyAttributeTypes(prop.Attributes), prop.Name)
+				props += fmt.Sprintf("@property %s%s;\n", getPropertyAttributeTypes(prop.Attributes), prop.Name)
 			} else {
-				props += fmt.Sprintf(" @property (%s) %s\n", prop.Attributes, prop.Name)
+				props += fmt.Sprintf("@property (%s) %s;\n", prop.Attributes, prop.Name)
 			}
 		}
-		props += "\n"
 	}
 	if len(p.ClassMethods) > 0 {
-		cMethods = "  // class methods\n"
+		cMethods = "// class methods\n"
 		for _, meth := range p.ClassMethods {
 			if verbose {
 				rtype, args := decodeMethodTypes(meth.Types)
-				cMethods += fmt.Sprintf(" +(%s)[%s %s] %s\n", rtype, p.Name, meth.Name, args)
+				cMethods += fmt.Sprintf("+ %s;\n", getMethodWithArgs(meth.Name, rtype, args))
 			} else {
-				cMethods += fmt.Sprintf(" +[%s %s]\n", p.Name, meth.Name)
+				cMethods += fmt.Sprintf("+ [%s %s]\n", p.Name, meth.Name)
 			}
 		}
-		cMethods += "\n"
 	}
 	if len(p.InstanceMethods) > 0 {
-		iMethods = "  // instance methods\n"
+		iMethods = "// instance methods\n"
 		for _, meth := range p.InstanceMethods {
 			if verbose {
 				rtype, args := decodeMethodTypes(meth.Types)
-				iMethods += fmt.Sprintf(" -(%s)[%s %s] %s\n", rtype, p.Name, meth.Name, args)
+				iMethods += fmt.Sprintf("- %s;\n", getMethodWithArgs(meth.Name, rtype, args))
 			} else {
-				iMethods += fmt.Sprintf(" -[%s %s]\n", p.Name, meth.Name)
+				iMethods += fmt.Sprintf("- [%s %s]\n", p.Name, meth.Name)
 			}
 		}
-		iMethods += "\n"
 	}
 	if len(p.OptionalInstanceMethods) > 0 {
-		optMethods = "@optional\n  // instance methods\n"
+		optMethods = "@optional\n// instance methods\n"
 		for _, meth := range p.OptionalInstanceMethods {
 			if verbose {
 				rtype, args := decodeMethodTypes(meth.Types)
-				optMethods += fmt.Sprintf(" -(%s)[%s %s] %s\n", rtype, p.Name, meth.Name, args)
+				optMethods += fmt.Sprintf("- %s;\n", getMethodWithArgs(meth.Name, rtype, args))
 			} else {
-				optMethods += fmt.Sprintf(" -[%s %s]\n", p.Name, meth.Name)
+				optMethods += fmt.Sprintf("- [%s %s]\n", p.Name, meth.Name)
 			}
 		}
-		optMethods += "\n"
 	}
 	return fmt.Sprintf(
 		"%s\n"+
@@ -511,13 +513,14 @@ func (p *Protocol) Verbose() string {
 // CFString object in a 64-bit MachO file
 type CFString struct {
 	Name    string
+	ISA     string
 	Address uint64
 	Class   *Class
-	*CFString64T
+	CFString64Type
 }
 
-// CFString64T object in a 64-bit MachO file
-type CFString64T struct {
+// CFString64Type object in a 64-bit MachO file
+type CFString64Type struct {
 	IsaVMAddr uint64 // class64_t * (64-bit pointer)
 	Info      uint64 // flag bits
 	Data      uint64 // char * (64-bit pointer)
@@ -544,7 +547,7 @@ type Class struct {
 	ClassMethods          []Method
 	Ivars                 []Ivar
 	Props                 []Property
-	Prots                 []Protocol
+	Protocols             []Protocol
 	ClassPtr              uint64
 	IsaVMAddr             uint64
 	SuperclassVMAddr      uint64
@@ -569,63 +572,72 @@ func (c *Class) dump(verbose bool) string {
 		subClass = c.SuperClass
 	}
 
-	class := fmt.Sprintf("%#x %s : %s", c.ClassPtr, c.Name, subClass)
+	class := fmt.Sprintf("@interface %s : %s", c.Name, subClass)
 
-	if len(c.Prots) > 0 {
+	if len(c.Protocols) > 0 {
 		var subProts []string
-		for _, prot := range c.Prots {
+		for _, prot := range c.Protocols {
 			subProts = append(subProts, prot.Name)
 		}
 		class += fmt.Sprintf("<%s>", strings.Join(subProts, ", "))
 	}
 	if len(c.Ivars) > 0 {
-		iVars = " {\n  // instance variables\n"
+		s := bytes.NewBufferString("")
+		w := tabwriter.NewWriter(s, 0, 0, 1, ' ', 0)
+		fmt.Fprintf(w, " { // %#x\n  // instance variables\t   +size (offset)\n", c.ClassPtr)
 		for _, ivar := range c.Ivars {
 			if verbose {
-				iVars += fmt.Sprintf("  %s\n", ivar.Verbose())
+				fmt.Fprintf(w, "  %s\n", ivar.Verbose())
 			} else {
-				iVars += fmt.Sprintf("  %s\n", &ivar)
+				fmt.Fprintf(w, "  %s\n", &ivar)
 			}
 		}
-		iVars += "}\n\n"
+		w.Flush()
+		s.WriteString("}\n\n")
+		iVars = s.String()
+	} else {
+		iVars = "\n"
 	}
 	if len(c.Props) > 0 {
 		for _, prop := range c.Props {
 			if verbose {
-				props += fmt.Sprintf(" @property %s%s\n", getPropertyAttributeTypes(prop.Attributes), prop.Name)
+				props += fmt.Sprintf("@property %s%s;\n", getPropertyAttributeTypes(prop.Attributes), prop.Name)
 			} else {
-				props += fmt.Sprintf(" @property (%s) %s\n", prop.Attributes, prop.Name)
+				props += fmt.Sprintf("@property (%s) %s;\n", prop.Attributes, prop.Name)
 			}
 		}
-		props += "\n"
 	}
 	if len(c.ClassMethods) > 0 {
-		cMethods = "  // class methods\n"
+		s := bytes.NewBufferString("// class methods\n")
+		w := tabwriter.NewWriter(s, 0, 0, 1, ' ', 0)
 		for _, meth := range c.ClassMethods {
 			if verbose {
 				rtype, args := decodeMethodTypes(meth.Types)
-				cMethods += fmt.Sprintf("  %#x +(%s)%s %s\n", meth.ImpVMAddr, rtype, meth.Name, args)
+				fmt.Fprintf(w, "+ %s;\t// %#x\n", getMethodWithArgs(meth.Name, rtype, args), meth.ImpVMAddr)
 			} else {
-				cMethods += fmt.Sprintf("  %#x +[%s %s]\n", meth.ImpVMAddr, c.Name, meth.Name)
+				fmt.Fprintf(w, "+ [%s %s];\t// %#x\n", c.Name, meth.Name, meth.ImpVMAddr)
 			}
 		}
-		cMethods += "\n"
+		w.Flush()
+		cMethods = s.String()
 	}
 	if len(c.InstanceMethods) > 0 {
-		iMethods = "  // instance methods\n"
+		s := bytes.NewBufferString("// instance methods\n")
+		w := tabwriter.NewWriter(s, 0, 0, 1, ' ', 0)
 		for _, meth := range c.InstanceMethods {
 			if verbose {
 				rtype, args := decodeMethodTypes(meth.Types)
-				iMethods += fmt.Sprintf("  %#x -(%s)%s %s\n", meth.ImpVMAddr, rtype, meth.Name, args)
+				fmt.Fprintf(w, "- %s;\t// %#x\n", getMethodWithArgs(meth.Name, rtype, args), meth.ImpVMAddr)
 			} else {
-				iMethods += fmt.Sprintf("  %#x -[%s %s]\n", meth.ImpVMAddr, c.Name, meth.Name)
+				fmt.Fprintf(w, "- [%s %s];\t// %#x\n", c.Name, meth.Name, meth.ImpVMAddr)
 			}
 		}
-		iMethods += "\n"
+		w.Flush()
+		iMethods = s.String()
 	}
 
 	return fmt.Sprintf(
-		"%s%s%s%s%s",
+		"%s%s%s%s%s@end\n",
 		class,
 		iVars,
 		props,
@@ -762,9 +774,9 @@ type Ivar struct {
 
 func (i *Ivar) dump(verbose bool) string {
 	if verbose {
-		return fmt.Sprintf("+%#02x %s%s (%#x)", i.Offset, getIVarType(i.Type), i.Name, i.Size)
+		return fmt.Sprintf("%s%s;\t// +%#02x (%#x)", getIVarType(i.Type), i.Name, i.Size, i.Offset)
 	}
-	return fmt.Sprintf("+%#02x %s %s (%#x)", i.Offset, i.Type, i.Name, i.Size)
+	return fmt.Sprintf("%s %s;\t// +%#02x (%#x)", i.Type, i.Name, i.Size, i.Offset)
 }
 
 func (i *Ivar) String() string {
