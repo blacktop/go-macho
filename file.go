@@ -84,7 +84,8 @@ func loadInSlice(c types.LoadCmd, list []types.LoadCmd) bool {
 // FileConfig is a MachO file config object
 type FileConfig struct {
 	Offset               int64
-	LoadFilter           []types.LoadCmd
+	LoadIncluding        []types.LoadCmd
+	LoadExcluding        []types.LoadCmd
 	VMAddrConverter      types.VMAddrConverter
 	SectionReader        types.MachoReader
 	CacheReader          types.MachoReader
@@ -121,7 +122,8 @@ func (f *File) Close() error {
 // NewFile creates a new File for accessing a Mach-O binary in an underlying reader.
 // The Mach-O binary is expected to start at position 0 in the ReaderAt.
 func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
-	var loadsFilter []types.LoadCmd
+	var loadIncluding []types.LoadCmd
+	var loadExcluding []types.LoadCmd
 
 	f := new(File)
 
@@ -137,7 +139,8 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			f.cr = config[0].CacheReader
 		}
 		f.vma = &config[0].VMAddrConverter
-		loadsFilter = config[0].LoadFilter
+		loadIncluding = config[0].LoadIncluding
+		loadExcluding = config[0].LoadExcluding
 		f.sharedCacheRelativeSelectorBaseVMAddress = config[0].RelativeSelectorBase
 	} else {
 		f.vma = &types.VMAddrConverter{
@@ -182,9 +185,9 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 	if _, err := r.ReadAt(dat, offset); err != nil {
 		return nil, fmt.Errorf("failed to parse command dat: %v", err)
 	}
-	f.Loads = make([]Load, f.NCommands)
+	f.Loads = []Load{}
 	bo := f.ByteOrder
-	for i := range f.Loads {
+	for i := uint32(0); i < f.NCommands; i++ {
 		// Each load command begins with uint32 command and length.
 		if len(dat) < 8 {
 			return nil, &FormatError{offset, "command block too small", nil}
@@ -200,14 +203,16 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 		var s *Segment
 
 		// skip unwanted load commands
-		if len(loadsFilter) > 0 && !loadInSlice(cmd, loadsFilter) {
+		if len(loadIncluding) > 0 && !loadInSlice(cmd, loadIncluding) {
+			continue
+		} else if loadInSlice(cmd, loadExcluding) {
 			continue
 		}
 
 		switch cmd {
 		default:
 			log.Printf("found NEW load command: %s (please let the author know via https://github.com/blacktop/go-macho/issues)", cmd)
-			f.Loads[i] = LoadCmdBytes{types.LoadCmd(cmd), LoadBytes(cmddat)}
+			f.Loads = append(f.Loads, LoadCmdBytes{types.LoadCmd(cmd), LoadBytes(cmddat)})
 		case types.LC_SEGMENT:
 			var seg32 types.Segment32
 			b := bytes.NewReader(cmddat)
@@ -252,7 +257,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				}
 				s.sections = append(s.sections, sh)
 			}
-			f.Loads[i] = s
+			f.Loads = append(f.Loads, s)
 		case types.LC_SEGMENT_64:
 			var seg64 types.Segment64
 			b := bytes.NewReader(cmddat)
@@ -298,7 +303,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				}
 				s.sections = append(s.sections, sh)
 			}
-			f.Loads[i] = s
+			f.Loads = append(f.Loads, s)
 		case types.LC_SYMTAB:
 			var hdr types.SymtabCmd
 			b := bytes.NewReader(cmddat)
@@ -320,7 +325,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			st.LoadBytes = cmddat
 			st.LoadCmd = cmd
 			st.Len = siz
-			f.Loads[i] = st
+			f.Loads = append(f.Loads, st)
 			f.Symtab = st
 		case types.LC_SYMSEG:
 			var led types.SymsegCmd
@@ -335,7 +340,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Len = siz
 			l.Offset = led.Offset
 			l.Size = led.Size
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_THREAD:
 			var t types.ThreadCmd
 			b := bytes.NewReader(cmddat)
@@ -364,7 +369,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				}
 				l.Threads = append(l.Threads, thread)
 			}
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_UNIXTHREAD:
 			var ut types.UnixThreadCmd
 			b := bytes.NewReader(cmddat)
@@ -394,7 +399,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				}
 				l.Threads = append(l.Threads, thread)
 			}
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_LOADFVMLIB:
 			var hdr types.LoadFvmLibCmd
 			b := bytes.NewReader(cmddat)
@@ -412,7 +417,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, &FormatError{offset, "invalid name in LC_LOADFVMLIB command", hdr.NameOffset}
 			}
 			l.Name = cstring(cmddat[hdr.NameOffset:])
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_IDFVMLIB:
 			var hdr types.IDFvmLibCmd
 			b := bytes.NewReader(cmddat)
@@ -430,7 +435,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, &FormatError{offset, "invalid name in LC_IDFVMLIB command", hdr.NameOffset}
 			}
 			l.Name = cstring(cmddat[hdr.NameOffset:])
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_IDENT:
 			var hdr types.IdentCmd
 			b := bytes.NewReader(cmddat)
@@ -452,7 +457,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				}
 				l.StrTable = append(l.StrTable, o)
 			}
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_FVMFILE:
 			var hdr types.FvmFileCmd
 			b := bytes.NewReader(cmddat)
@@ -469,7 +474,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, &FormatError{offset, "invalid name in LC_FVMFILE command", hdr.NameOffset}
 			}
 			l.Name = cstring(cmddat[hdr.NameOffset:])
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_PREPAGE:
 			var hdr types.PrePageCmd
 			b := bytes.NewReader(cmddat)
@@ -480,7 +485,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_DYSYMTAB:
 			var hdr types.DysymtabCmd
 			b := bytes.NewReader(cmddat)
@@ -514,7 +519,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			st.Len = siz
 			st.DysymtabCmd = hdr
 			st.IndirectSyms = x
-			f.Loads[i] = st
+			f.Loads = append(f.Loads, st)
 			f.Dysymtab = st
 		case types.LC_LOAD_DYLIB:
 			var hdr types.DylibCmd
@@ -534,7 +539,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Timestamp = hdr.Timestamp
 			l.CurrentVersion = hdr.CurrentVersion
 			l.CompatVersion = hdr.CompatVersion
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_ID_DYLIB:
 			var hdr types.DylibCmd
 			b := bytes.NewReader(cmddat)
@@ -553,7 +558,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Timestamp = hdr.Timestamp
 			l.CurrentVersion = hdr.CurrentVersion
 			l.CompatVersion = hdr.CompatVersion
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_LOAD_DYLINKER:
 			var hdr types.DylinkerCmd
 			b := bytes.NewReader(cmddat)
@@ -569,7 +574,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, &FormatError{offset, "invalid name in load dylinker command", hdr.NameOffset}
 			}
 			l.Name = cstring(cmddat[hdr.NameOffset:])
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_ID_DYLINKER:
 			var hdr types.IDDylinkerCmd
 			b := bytes.NewReader(cmddat)
@@ -585,7 +590,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, &FormatError{offset, "invalid name in load dylinker command", hdr.NameOffset}
 			}
 			l.Name = cstring(cmddat[hdr.NameOffset:])
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_PREBOUND_DYLIB:
 			var hdr types.PreboundDylibCmd
 			b := bytes.NewReader(cmddat)
@@ -606,7 +611,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, &FormatError{offset, "invalid linked modules in LC_PREBOUND_DYLIB command", hdr.NameOffset}
 			}
 			l.LinkedModulesBitVector = cstring(cmddat[hdr.LinkedModulesOffset:])
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_ROUTINES:
 			var rt types.RoutinesCmd
 			b := bytes.NewReader(cmddat)
@@ -619,7 +624,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Len = siz
 			l.InitAddress = rt.InitAddress
 			l.InitModule = rt.InitModule
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_SUB_FRAMEWORK:
 			var sf types.SubFrameworkCmd
 			b := bytes.NewReader(cmddat)
@@ -635,7 +640,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, &FormatError{offset, "invalid framework in sub-framework command", sf.FrameworkOffset}
 			}
 			l.Framework = cstring(cmddat[sf.FrameworkOffset:])
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_SUB_UMBRELLA:
 			var su types.SubUmbrellaCmd
 			b := bytes.NewReader(cmddat)
@@ -651,7 +656,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, &FormatError{offset, "invalid framework in sub-umbrella command", su.UmbrellaOffset}
 			}
 			l.Umbrella = cstring(cmddat[su.UmbrellaOffset:])
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_SUB_CLIENT:
 			var sc types.SubClientCmd
 			b := bytes.NewReader(cmddat)
@@ -667,7 +672,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, &FormatError{offset, "invalid path in sub client command", sc.ClientOffset}
 			}
 			l.Name = cstring(cmddat[sc.ClientOffset:])
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_SUB_LIBRARY:
 			var s types.SubLibraryCmd
 			b := bytes.NewReader(cmddat)
@@ -683,7 +688,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, &FormatError{offset, "invalid framework in sub-library command", s.LibraryOffset}
 			}
 			l.Library = cstring(cmddat[s.LibraryOffset:])
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_TWOLEVEL_HINTS:
 			var t types.TwolevelHintsCmd
 			b := bytes.NewReader(cmddat)
@@ -699,7 +704,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &l.Hints); err != nil {
 				return nil, fmt.Errorf("failed to read hints data: %v", err)
 			}
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 
 		case types.LC_PREBIND_CKSUM:
 			var p types.PrebindCksumCmd
@@ -712,7 +717,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadCmd = cmd
 			l.Len = siz
 			l.CheckSum = p.CheckSum
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_LOAD_WEAK_DYLIB:
 			var hdr types.DylibCmd
 			b := bytes.NewReader(cmddat)
@@ -731,7 +736,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Timestamp = hdr.Timestamp
 			l.CurrentVersion = hdr.CurrentVersion
 			l.CompatVersion = hdr.CompatVersion
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_ROUTINES_64:
 			var r64 types.Routines64Cmd
 			b := bytes.NewReader(cmddat)
@@ -744,7 +749,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Len = siz
 			l.InitAddress = r64.InitAddress
 			l.InitModule = r64.InitModule
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_UUID:
 			var u types.UUIDCmd
 			b := bytes.NewReader(cmddat)
@@ -756,7 +761,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadCmd = cmd
 			l.Len = siz
 			l.UUID = u.UUID
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_RPATH:
 			var hdr types.RpathCmd
 			b := bytes.NewReader(cmddat)
@@ -775,7 +780,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, &FormatError{offset, "invalid path in rpath command", hdr.PathOffset}
 			}
 			l.Path = cstring(cmddat[hdr.PathOffset:])
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_CODE_SIGNATURE:
 			var hdr types.CodeSignatureCmd
 			b := bytes.NewReader(cmddat)
@@ -798,7 +803,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, fmt.Errorf("failed to ParseCodeSignature: %v", err)
 			}
 			l.CodeSignature = *cs
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_SEGMENT_SPLIT_INFO:
 			var hdr types.SegmentSplitInfoCmd
 			b := bytes.NewReader(cmddat)
@@ -819,7 +824,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(fsr, bo, &l.Version); err != nil {
 				return nil, fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO Version: %v", err)
 			}
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_REEXPORT_DYLIB:
 			var hdr types.ReExportDylibCmd
 			b := bytes.NewReader(cmddat)
@@ -838,7 +843,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Timestamp = hdr.Timestamp
 			l.CurrentVersion = hdr.CurrentVersion
 			l.CompatVersion = hdr.CompatVersion
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_LAZY_LOAD_DYLIB:
 			var hdr types.LazyLoadDylibCmd
 			b := bytes.NewReader(cmddat)
@@ -857,7 +862,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Timestamp = hdr.Timestamp
 			l.CurrentVersion = hdr.CurrentVersion
 			l.CompatVersion = hdr.CompatVersion
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_ENCRYPTION_INFO:
 			var ei types.EncryptionInfoCmd
 			b := bytes.NewReader(cmddat)
@@ -872,7 +877,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Offset = ei.Offset
 			l.Size = ei.Size
 			l.CryptID = ei.CryptID
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_DYLD_INFO:
 			var info types.DyldInfoCmd
 			b := bytes.NewReader(cmddat)
@@ -893,7 +898,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LazyBindSize = info.LazyBindSize
 			l.ExportOff = info.ExportOff
 			l.ExportSize = info.ExportSize
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_DYLD_INFO_ONLY:
 			var info types.DyldInfoOnlyCmd
 			b := bytes.NewReader(cmddat)
@@ -914,7 +919,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LazyBindSize = info.LazyBindSize
 			l.ExportOff = info.ExportOff
 			l.ExportSize = info.ExportSize
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_LOAD_UPWARD_DYLIB:
 			var hdr types.LoadUpwardDylibCmd
 			b := bytes.NewReader(cmddat)
@@ -933,7 +938,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Timestamp = hdr.Timestamp
 			l.CurrentVersion = hdr.CurrentVersion
 			l.CompatVersion = hdr.CompatVersion
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_VERSION_MIN_MACOSX:
 			var verMin types.VersionMinMacOSCmd
 			b := bytes.NewReader(cmddat)
@@ -946,7 +951,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Len = siz
 			l.Version = verMin.Version
 			l.Sdk = verMin.Sdk
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_VERSION_MIN_IPHONEOS:
 			var verMin types.VersionMinIPhoneOSCmd
 			b := bytes.NewReader(cmddat)
@@ -959,7 +964,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Len = siz
 			l.Version = verMin.Version
 			l.Sdk = verMin.Sdk
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_FUNCTION_STARTS:
 			var led types.LinkEditDataCmd
 			b := bytes.NewReader(cmddat)
@@ -973,7 +978,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Len = siz
 			l.Offset = led.Offset
 			l.Size = led.Size
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_DYLD_ENVIRONMENT:
 			var hdr types.DyldEnvironmentCmd
 			b := bytes.NewReader(cmddat)
@@ -989,7 +994,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, &FormatError{offset, "invalid name in dyld environment command", hdr.NameOffset}
 			}
 			l.Name = cstring(cmddat[hdr.NameOffset:])
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_MAIN:
 			var hdr types.EntryPointCmd
 			b := bytes.NewReader(cmddat)
@@ -1002,7 +1007,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Len = siz
 			l.EntryOffset = hdr.EntryOffset
 			l.StackSize = hdr.StackSize
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_DATA_IN_CODE:
 			var led types.LinkEditDataCmd
 			b := bytes.NewReader(cmddat)
@@ -1023,7 +1028,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(bytes.NewReader(ldat), bo, &l.Entries); err != nil {
 				return nil, fmt.Errorf("failed to read LC_DATA_IN_CODE entries: %v", err)
 			}
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_SOURCE_VERSION:
 			var sv types.SourceVersionCmd
 			b := bytes.NewReader(cmddat)
@@ -1035,7 +1040,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadCmd = cmd
 			l.Len = siz
 			l.Version = sv.Version
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_DYLIB_CODE_SIGN_DRS:
 			var led types.LinkEditDataCmd
 			b := bytes.NewReader(cmddat)
@@ -1049,7 +1054,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Len = siz
 			l.Offset = led.Offset
 			l.Size = led.Size
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_ENCRYPTION_INFO_64:
 			var ei types.EncryptionInfo64Cmd
 			b := bytes.NewReader(cmddat)
@@ -1063,7 +1068,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Offset = ei.Offset
 			l.Size = ei.Size
 			l.CryptID = ei.CryptID
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_LINKER_OPTION:
 			var lo types.LinkerOptionCmd
 			b := bytes.NewReader(cmddat)
@@ -1081,7 +1086,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				}
 				l.Options = append(l.Options, o)
 			}
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_LINKER_OPTIMIZATION_HINT:
 			var led types.LinkEditDataCmd
 			b := bytes.NewReader(cmddat)
@@ -1095,7 +1100,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Len = siz
 			l.Offset = led.Offset
 			l.Size = led.Size
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_VERSION_MIN_TVOS:
 			var verMin types.VersionMinMacOSCmd
 			b := bytes.NewReader(cmddat)
@@ -1108,7 +1113,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Len = siz
 			l.Version = verMin.Version
 			l.Sdk = verMin.Sdk
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_VERSION_MIN_WATCHOS:
 			var verMin types.VersionMinWatchOSCmd
 			b := bytes.NewReader(cmddat)
@@ -1121,7 +1126,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Len = siz
 			l.Version = verMin.Version
 			l.Sdk = verMin.Sdk
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_NOTE:
 			var n types.NoteCmd
 			b := bytes.NewReader(cmddat)
@@ -1135,7 +1140,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.DataOwner = n.DataOwner
 			l.Offset = n.Offset
 			l.Size = n.Size
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_BUILD_VERSION:
 			var build types.BuildVersionCmd
 			var buildTool types.BuildVersionTool
@@ -1160,7 +1165,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 					Version: buildTool.Version,
 				})
 			}
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_DYLD_EXPORTS_TRIE:
 			var led types.LinkEditDataCmd
 			b := bytes.NewReader(cmddat)
@@ -1174,7 +1179,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Len = siz
 			l.Offset = led.Offset
 			l.Size = led.Size
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_DYLD_CHAINED_FIXUPS:
 			var led types.DyldChainedFixupsCmd
 			b := bytes.NewReader(cmddat)
@@ -1188,7 +1193,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Len = siz
 			l.Offset = led.Offset
 			l.Size = led.Size
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		case types.LC_FILESET_ENTRY:
 			var hdr types.FilesetEntryCmd
 			b := bytes.NewReader(cmddat)
@@ -1206,7 +1211,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				return nil, &FormatError{offset, "invalid name in load fileset entry command", hdr.EntryIdOffset}
 			}
 			l.EntryID = cstring(cmddat[hdr.EntryIdOffset:])
-			f.Loads[i] = l
+			f.Loads = append(f.Loads, l)
 		}
 		if s != nil {
 			// s.sr = io.NewSectionReader(r, int64(s.Offset), int64(s.Filesz))
