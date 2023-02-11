@@ -32,7 +32,7 @@ var typeEncoding = map[string]string{
 	"z": "size_t",
 	"Z": "int32",
 	"w": "wchar_t",
-	"?": "void", // or "undefined"
+	"?": "undefined",
 	"^": "*",
 	"*": "char *",
 	"%": "NXAtom",
@@ -111,17 +111,24 @@ func decodeMethodTypes(encodedTypes string) (string, []string) {
 }
 
 func getMethodWithArgs(method, returnType string, args []string) string {
+	if len(args) <= 2 {
+		return fmt.Sprintf("(%s)%s", returnType, method)
+	}
+	args = args[2:] // skip self and SEL
+
 	parts := strings.Split(method, ":")
+
 	var methodStr string
-	if len(parts) > 1 {
+	if len(parts) > 1 { // method has arguments based on SEL having ':'
 		for idx, part := range parts {
-			if idx+2 > len(args) || len(part) == 0 {
+			if len(part) == 0 || idx >= len(args) {
 				break
 			}
-			methodStr += fmt.Sprintf("%s:%s ", part, args[idx+2])
+			methodStr += fmt.Sprintf("%s:%s ", part, args[idx])
 		}
 		return fmt.Sprintf("(%s)%s", returnType, strings.TrimSpace(methodStr))
 	}
+	// method has no arguments based on SEL not having ':'
 	return fmt.Sprintf("(%s)%s", returnType, method)
 }
 
@@ -209,7 +216,7 @@ func decodeType(encType string) string {
 	}
 
 	if strings.HasPrefix(encType, "@?") {
-		if len(encType) > 2 {
+		if len(encType) > 2 { // TODO: remove this??
 			pointerType := decodeType(encType[2:])
 			return "id  ^" + pointerType
 		} else {
@@ -230,16 +237,12 @@ func decodeType(encType string) string {
 		return typ
 	}
 
-	// if typ, ok := typeEncoding[string(encType[0])]; ok {
-	// 	return typ + " " + decodeType(encType[1:])
-	// }
-
 	if spec, ok := typeSpecifiers[string(encType[0])]; ok {
 		return spec + " " + decodeType(encType[1:])
 	}
 
 	if strings.HasPrefix(encType, "@\"") && len(encType) > 1 {
-		return strings.Trim(encType, "@\"")
+		return strings.Trim(encType, "@\"") + " *"
 	}
 
 	if strings.HasPrefix(encType, "b") {
@@ -314,9 +317,15 @@ func decodeStructOrUnion(typ, kind string) string {
 	var fields []string
 	fieldName, rest := getFieldName(rest)
 	field, rest, ok := CutType(rest)
+
 	for ok {
 		if fieldName != "" {
-			fields = append(fields, fmt.Sprintf("%s %s;", decodeType(field), fieldName))
+			dtype := decodeType(field)
+			if strings.HasSuffix(dtype, " *") {
+				fields = append(fields, fmt.Sprintf("%s%s;", dtype, fieldName))
+			} else {
+				fields = append(fields, fmt.Sprintf("%s %s;", dtype, fieldName))
+			}
 		} else {
 			if strings.HasPrefix(field, "b") {
 				span := encodingGetSizeOfArguments(field)
@@ -357,8 +366,14 @@ func skipFirstType(typStr string) string {
 		case '^': /* pointers */
 			i++
 		case '@': /* objects */
-			if i < len(typ) && typ[i+1] == '?' {
+			if i+1 < len(typ) && typ[i+1] == '?' {
 				i++ /* Blocks */
+			} else if i+1 < len(typ) && typ[i+1] == '"' {
+				i++
+				for typ[i+1] != '"' {
+					i++ /* Class */
+				}
+				i++
 			}
 			return string(typ[i+1:])
 		case '[': /* arrays */
@@ -404,6 +419,9 @@ func CutType(typStr string) (string, string, bool) {
 	if len(typStr) == 0 {
 		return "", "", false
 	}
+	if len(typStr) == 1 {
+		return typStr, "", true
+	}
 
 	typ := []byte(typStr)
 	for {
@@ -423,8 +441,14 @@ func CutType(typStr string) (string, string, bool) {
 		case '^': /* pointers */
 			i++
 		case '@': /* objects */
-			if i < len(typ) && typ[i+1] == '?' {
+			if i+1 < len(typ) && typ[i+1] == '?' {
 				i++ /* Blocks */
+			} else if i+1 < len(typ) && typ[i+1] == '"' {
+				i++
+				for typ[i+1] != '"' {
+					i++ /* Class */
+				}
+				i++
 			}
 			return string(typ[:i+1]), string(typ[i+1:]), true
 		case 'b': /* bitfields */
@@ -450,50 +474,6 @@ func CutType(typStr string) (string, string, bool) {
 			return string(typ[:i]), string(typ[i:]), true
 		}
 	}
-}
-
-func decodeEncodedType(encodedType string) string {
-	count := getNumberOfArguments(encodedType)
-	fmt.Println("arg count: ", count)
-	// Check if the encoded type is a primitive type
-	if typ, ok := typeEncoding[string(encodedType[0])]; ok {
-		return typ + decodeEncodedType(encodedType[1:])
-	}
-
-	// Check if the encoded type is a structure
-	if strings.HasPrefix(encodedType, "{") && strings.HasSuffix(encodedType, "}") {
-		structure := encodedType[1 : len(encodedType)-1]
-		structureParts := strings.Split(structure, "=")
-		structureName := structureParts[0]
-		structureFields := structureParts[1]
-		fieldTypes := strings.Split(structureFields, "")
-
-		result := "struct " + structureName + " {"
-		for _, field := range fieldTypes {
-			result += decodeEncodedType(field) + ";"
-		}
-		result += "}"
-
-		return result
-	}
-
-	// Check if the encoded type is an array
-	if strings.HasPrefix(encodedType, "[") && strings.HasSuffix(encodedType, "]") {
-		array := encodedType[1 : len(encodedType)-1]
-		arrayParts := strings.Split(array, " ")
-		arrayLength := arrayParts[0]
-		arrayType := decodeEncodedType(arrayParts[1])
-
-		return arrayType + "[" + arrayLength + "]"
-	}
-
-	// Check if the encoded type is a pointer
-	if strings.HasPrefix(encodedType, "^") {
-		pointerType := decodeEncodedType(encodedType[1:])
-		return "*" + pointerType
-	}
-
-	return encodedType
 }
 
 func getNumberOfArguments(types string) int {
