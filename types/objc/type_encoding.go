@@ -112,7 +112,7 @@ func decodeMethodTypes(encodedTypes string) (string, []string) {
 
 func getMethodWithArgs(method, returnType string, args []string) string {
 	if len(args) <= 2 {
-		return fmt.Sprintf("(%s)%s", returnType, method)
+		return fmt.Sprintf("(%s)%s;", returnType, method)
 	}
 	args = args[2:] // skip self and SEL
 
@@ -126,10 +126,10 @@ func getMethodWithArgs(method, returnType string, args []string) string {
 			}
 			methodStr += fmt.Sprintf("%s:%s ", part, args[idx])
 		}
-		return fmt.Sprintf("(%s)%s", returnType, strings.TrimSpace(methodStr))
+		return fmt.Sprintf("(%s)%s;", returnType, strings.TrimSpace(methodStr))
 	}
 	// method has no arguments based on SEL not having ':'
-	return fmt.Sprintf("(%s)%s", returnType, method)
+	return fmt.Sprintf("(%s)%s;", returnType, method)
 }
 
 func getPropertyAttributeTypes(attrs string) string {
