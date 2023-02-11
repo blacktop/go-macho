@@ -12,9 +12,16 @@ func Test_decodeType(t *testing.T) {
 		want string
 	}{
 		{
+			name: "Test all",
+			args: args{
+				encType: "^{OutterStruct=(InnerUnion=q{InnerStruct=ii})b1b2b10b1q}",
+			},
+			want: "struct OutterStruct { union InnerUnion { long long x0; struct InnerStruct { int x0; int x1; } x1; } x0; unsigned int x1 :1; unsigned int x2 :2; unsigned int x3 :10; unsigned int x4 :1; long long x5; } *",
+		},
+		{
 			name: "Test array",
 			args: args{
-				encType: "[2]",
+				encType: "[2^v]",
 			},
 			want: "void * x[2]",
 		},
@@ -23,7 +30,7 @@ func Test_decodeType(t *testing.T) {
 			args: args{
 				encType: "b13",
 			},
-			want: "int x : 13",
+			want: "unsigned int x :13",
 		},
 		{
 			name: "Test struct",
@@ -38,6 +45,13 @@ func Test_decodeType(t *testing.T) {
 				encType: "(?=i)",
 			},
 			want: "union { int x0; }",
+		},
+		{
+			name: "Test block",
+			args: args{
+				encType: "@?",
+			},
+			want: "id /* block */",
 		},
 	}
 	for _, tt := range tests {

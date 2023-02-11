@@ -774,7 +774,12 @@ type Ivar struct {
 
 func (i *Ivar) dump(verbose bool) string {
 	if verbose {
-		return fmt.Sprintf("%s%s;\t// +%#02x (%#x)", getIVarType(i.Type), i.Name, i.Size, i.Offset)
+		ivtype := getIVarType(i.Type)
+		if strings.ContainsAny(ivtype, "[]") { // array special case
+			ivtype = strings.TrimSpace(strings.Replace(ivtype, "x", i.Name, 1))
+			return fmt.Sprintf("%s;\t// +%#02x (%#x)", ivtype, i.Size, i.Offset)
+		}
+		return fmt.Sprintf("%s%s;\t// +%#02x (%#x)", ivtype, i.Name, i.Size, i.Offset)
 	}
 	return fmt.Sprintf("%s %s;\t// +%#02x (%#x)", i.Type, i.Name, i.Size, i.Offset)
 }

@@ -1,21 +1,17 @@
 package objc
 
 import (
-	"bytes"
 	"fmt"
-	"regexp"
 	"strings"
 )
 
 // ref - https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ObjCRuntimeGuide/Articles/ocrtTypeEncodings.html
 
 var typeEncoding = map[string]string{
-	"":  "void",
 	"@": "id",
 	"#": "Class",
 	":": "SEL",
-	// "c": "char",
-	"c": "BOOL", // or "char"
+	"c": "char",
 	"C": "unsigned char",
 	"s": "short",
 	"S": "unsigned short",
@@ -23,8 +19,8 @@ var typeEncoding = map[string]string{
 	"I": "unsigned int",
 	"l": "long",
 	"L": "unsigned long",
-	"q": "int64",
-	"Q": "unsigned int64",
+	"q": "long long",
+	"Q": "unsigned long long",
 	"t": "int128",
 	"T": "unsigned int128",
 	"f": "float",
@@ -36,7 +32,6 @@ var typeEncoding = map[string]string{
 	"z": "size_t",
 	"Z": "int32",
 	"w": "wchar_t",
-	// "?": "unknown",
 	"?": "void", // or "undefined"
 	"^": "*",
 	"*": "char *",
@@ -49,7 +44,8 @@ var typeEncoding = map[string]string{
 	// "}":  "", // _C_STRUCT_E
 	"!":  "vector",
 	"Vv": "void",
-	"^?": "IMP", // void *
+	"^?": "void *",      // void *
+	"@?": "id ^__block", // block type
 }
 var typeSpecifiers = map[string]string{
 	"A": "atomic",
@@ -194,18 +190,51 @@ func getIVarType(ivType string) string {
 	return decodeType(ivType) + " "
 }
 
+func getReturnType(types string) string {
+	if len(types) == 0 {
+		return ""
+	}
+	return decodeType(strings.TrimSuffix(types, skipFirstType(types)))
+}
+
 func decodeType(encType string) string {
 	var s string
+
+	if len(encType) == 0 {
+		return ""
+	}
+
+	if strings.HasPrefix(encType, "^") {
+		return decodeType(encType[1:]) + " *" // pointer
+	}
+
+	if strings.HasPrefix(encType, "@?") {
+		if len(encType) > 2 {
+			pointerType := decodeType(encType[2:])
+			return "id  ^" + pointerType
+		} else {
+			return "id /* block */"
+		}
+	}
+
+	if strings.HasPrefix(encType, "^?") {
+		if len(encType) > 2 {
+			pointerType := decodeType(encType[2:])
+			return "void * " + pointerType
+		} else {
+			return "void *"
+		}
+	}
 
 	if typ, ok := typeEncoding[encType]; ok {
 		return typ
 	}
 
-	if strings.HasPrefix(encType, "^") {
-		return decodeType(encType[1:]) + " *"
-	}
+	// if typ, ok := typeEncoding[string(encType[0])]; ok {
+	// 	return typ + " " + decodeType(encType[1:])
+	// }
 
-	if spec, ok := typeSpecifiers[encType[:1]]; ok {
+	if spec, ok := typeSpecifiers[string(encType[0])]; ok {
 		return spec + " " + decodeType(encType[1:])
 	}
 
@@ -213,23 +242,18 @@ func decodeType(encType string) string {
 		return strings.Trim(encType, "@\"")
 	}
 
+	if strings.HasPrefix(encType, "b") {
+		return decodeBitfield(encType)
+	}
+
 	if len(encType) > 2 {
-		if strings.ContainsRune(encType[:2], '[') { // ARRAY
-			inner := decodeType(encType[strings.IndexByte(encType, '[')+1 : strings.LastIndexByte(encType, ']')])
+		if strings.HasPrefix(encType, "[") { // ARRAY
+			inner := encType[strings.IndexByte(encType, '[')+1 : strings.LastIndexByte(encType, ']')]
 			s += decodeArray(inner)
-		} else if strings.ContainsRune(encType, '{') { // STRUCT
+		} else if strings.HasPrefix(encType, "{") { // STRUCT
 			inner := encType[strings.IndexByte(encType, '{')+1 : strings.LastIndexByte(encType, '}')]
-			s += "struct "
-			if strings.HasPrefix(inner, "@\"") && len(inner) > 1 {
-				inner = strings.Trim(inner, "@\"")
-			}
-			if strings.ContainsRune(inner, '=') {
-				idx := strings.Index(inner, "=")
-				inner = inner[:idx]
-			}
-			s += inner
-			// s += decodeStructure(inner)
-		} else if strings.ContainsRune(encType, '(') { // UNION
+			s += decodeStructure(inner)
+		} else if strings.HasPrefix(encType, "(") { // UNION
 			inner := encType[strings.IndexByte(encType, '(')+1 : strings.LastIndexByte(encType, ')')]
 			s += decodeUnion(inner)
 		}
@@ -244,39 +268,80 @@ func decodeType(encType string) string {
 
 func decodeArray(arrayType string) string {
 	numIdx := strings.LastIndexAny(arrayType, "0123456789")
-	return fmt.Sprintf("[%s]%s", arrayType[:numIdx+1], decodeType(arrayType[numIdx+1:]))
-}
-
-func decodeStructure(structType string) string {
-	sOut := "struct "
-	sOut += decodeType(structType)
-	if strings.ContainsRune(sOut, '=') {
-		sOut = sOut[:strings.Index(sOut, "=")]
+	if len(arrayType) == 1 {
+		return fmt.Sprintf("x[%s]", arrayType)
 	}
-	return sOut
+	return fmt.Sprintf("%s x[%s]", decodeType(arrayType[numIdx+1:]), arrayType[:numIdx+1])
 }
 
-// TODO - finish
+func decodeStructure(structure string) string {
+	return decodeStructOrUnion(structure, "struct")
+}
+
 func decodeUnion(unionType string) string {
-	return unionType
+	return decodeStructOrUnion(unionType, "union")
 }
 
-func getReturnType(types string) string {
-
-	args := skipFirstType(types)
-	encodedRet := strings.TrimSuffix(types, args)
-
-	return decodeType(encodedRet)
+func decodeBitfield(bitfield string) string {
+	span := encodingGetSizeOfArguments(bitfield)
+	return fmt.Sprintf("unsigned int x :%d", span)
 }
 
-func skipFirstType(typedesc string) string {
+func getFieldName(field string) (string, string) {
+	if strings.HasPrefix(field, "\"") {
+		name, rest, ok := strings.Cut(strings.TrimPrefix(field, "\""), "\"")
+		if !ok {
+			return "", field
+		}
+		return name, rest
+	}
+	return "", field
+}
+
+func decodeStructOrUnion(typ, kind string) string {
+	name, rest, _ := strings.Cut(typ, "=")
+	if name == "?" {
+		name = ""
+	} else {
+		name += " "
+	}
+
+	if len(rest) == 0 {
+		return fmt.Sprintf("%s %s", kind, strings.TrimSpace(name))
+	}
+
+	var idx int
+	var fields []string
+	fieldName, rest := getFieldName(rest)
+	field, rest, ok := CutType(rest)
+	for ok {
+		if fieldName != "" {
+			fields = append(fields, fmt.Sprintf("%s %s;", decodeType(field), fieldName))
+		} else {
+			if strings.HasPrefix(field, "b") {
+				span := encodingGetSizeOfArguments(field)
+				fields = append(fields, fmt.Sprintf("unsigned int x%d :%d;", idx, span))
+			} else if strings.HasPrefix(field, "[") {
+				array := decodeType(field)
+				array = strings.TrimSpace(strings.Replace(array, "x", fmt.Sprintf("x%d", idx), 1))
+				fields = append(fields, array)
+			} else {
+				fields = append(fields, fmt.Sprintf("%s x%d;", decodeType(field), idx))
+			}
+			idx++
+		}
+		fieldName, rest = getFieldName(rest)
+		field, rest, ok = CutType(rest)
+	}
+
+	return fmt.Sprintf("%s %s{ %s }", kind, name, strings.Join(fields, " "))
+}
+
+func skipFirstType(typStr string) string {
 	i := 0
-	typesStr := []byte(typedesc)
-
+	typ := []byte(typStr)
 	for {
-		char := typesStr[i]
-		i++
-		switch char {
+		switch typ[i] {
 		case 'O': /* bycopy */
 			fallthrough
 		case 'n': /* in */
@@ -290,25 +355,145 @@ func skipFirstType(typedesc string) string {
 		case 'V': /* oneway */
 			fallthrough
 		case '^': /* pointers */
-			break
+			i++
 		case '@': /* objects */
-			if typesStr[0] == '?' {
+			if i < len(typ) && typ[i+1] == '?' {
 				i++ /* Blocks */
 			}
-			return string(typesStr[i:])
+			return string(typ[i+1:])
 		case '[': /* arrays */
-			return string(typesStr[bytes.IndexByte(typesStr, ']')+1:])
-			// return typedesc[subtypeUntil(typedesc, ']')+1:]
+			i++
+			for typ[i] >= '0' && typ[i] <= '9' {
+				i++
+			}
+			return string(typ[i+subtypeUntil(string(typ[i:]), ']')+1:])
 		case '{': /* structures */
-			return string(typesStr[bytes.IndexByte(typesStr, '}')+1:])
-			// return typedesc[subtypeUntil(typedesc, '}')+1:]
+			i++
+			return string(typ[i+subtypeUntil(string(typ[i:]), '}')+1:])
 		case '(': /* unions */
-			return string(typesStr[bytes.IndexByte(typesStr, ')')+1:])
-			// return typedesc[subtypeUntil(typedesc, ')')+1:]
+			i++
+			return string(typ[i+subtypeUntil(string(typ[i:]), ')')+1:])
 		default: /* basic types */
-			return string(typesStr[i:])
+			i++
+			return string(typ[i:])
 		}
 	}
+}
+
+func subtypeUntil(typ string, end byte) int {
+	var level int
+	head := typ
+	for len(typ) > 0 {
+		if level == 0 && typ[0] == end {
+			return len(head) - len(typ)
+		}
+		switch typ[0] {
+		case ']', '}', ')':
+			level -= 1
+		case '[', '{', '(':
+			level += 1
+		}
+		typ = typ[1:]
+	}
+	return 0
+}
+
+func CutType(typStr string) (string, string, bool) {
+	var i int
+
+	if len(typStr) == 0 {
+		return "", "", false
+	}
+
+	typ := []byte(typStr)
+	for {
+		switch typ[i] {
+		case 'O': /* bycopy */
+			fallthrough
+		case 'n': /* in */
+			fallthrough
+		case 'o': /* out */
+			fallthrough
+		case 'N': /* inout */
+			fallthrough
+		case 'r': /* const */
+			fallthrough
+		case 'V': /* oneway */
+			fallthrough
+		case '^': /* pointers */
+			i++
+		case '@': /* objects */
+			if i < len(typ) && typ[i+1] == '?' {
+				i++ /* Blocks */
+			}
+			return string(typ[:i+1]), string(typ[i+1:]), true
+		case 'b': /* bitfields */
+			i++
+			for i < len(typ) && typ[i] >= '0' && typ[i] <= '9' {
+				i++
+			}
+			return string(typ[:i]), string(typ[i:]), true
+		case '[': /* arrays */
+			i++
+			for typ[i] >= '0' && typ[i] <= '9' {
+				i++
+			}
+			return string(typ[:i+subtypeUntil(string(typ[i:]), ']')+1]), string(typ[i+subtypeUntil(string(typ[i:]), ']')+1:]), true
+		case '{': /* structures */
+			i++
+			return string(typ[:i+subtypeUntil(string(typ[i:]), '}')+1]), string(typ[i+subtypeUntil(string(typ[i:]), '}')+1:]), true
+		case '(': /* unions */
+			i++
+			return string(typ[:i+subtypeUntil(string(typ[i:]), ')')+1]), string(typ[i+subtypeUntil(string(typ[i:]), ')')+1:]), true
+		default: /* basic types */
+			i++
+			return string(typ[:i]), string(typ[i:]), true
+		}
+	}
+}
+
+func decodeEncodedType(encodedType string) string {
+	count := getNumberOfArguments(encodedType)
+	fmt.Println("arg count: ", count)
+	// Check if the encoded type is a primitive type
+	if typ, ok := typeEncoding[string(encodedType[0])]; ok {
+		return typ + decodeEncodedType(encodedType[1:])
+	}
+
+	// Check if the encoded type is a structure
+	if strings.HasPrefix(encodedType, "{") && strings.HasSuffix(encodedType, "}") {
+		structure := encodedType[1 : len(encodedType)-1]
+		structureParts := strings.Split(structure, "=")
+		structureName := structureParts[0]
+		structureFields := structureParts[1]
+		fieldTypes := strings.Split(structureFields, "")
+
+		result := "struct " + structureName + " {"
+		for _, field := range fieldTypes {
+			result += decodeEncodedType(field) + ";"
+		}
+		result += "}"
+
+		return result
+	}
+
+	// Check if the encoded type is an array
+	if strings.HasPrefix(encodedType, "[") && strings.HasSuffix(encodedType, "]") {
+		array := encodedType[1 : len(encodedType)-1]
+		arrayParts := strings.Split(array, " ")
+		arrayLength := arrayParts[0]
+		arrayType := decodeEncodedType(arrayParts[1])
+
+		return arrayType + "[" + arrayLength + "]"
+	}
+
+	// Check if the encoded type is a pointer
+	if strings.HasPrefix(encodedType, "^") {
+		pointerType := decodeEncodedType(encodedType[1:])
+		return "*" + pointerType
+	}
+
+	return encodedType
 }
 
 func getNumberOfArguments(types string) int {
@@ -322,95 +507,47 @@ func getNumberOfArguments(types string) int {
 		// Traverse argument type
 		types = skipFirstType(types)
 		// Skip GNU runtime's register parameter hint
-		if strings.HasPrefix(types, "+") {
-			types = strings.TrimSuffix(types, "+")
-		}
+		types = strings.TrimPrefix(types, "+")
 		// Traverse (possibly negative) argument offset
-		if strings.HasPrefix(types, "-") {
-			types = strings.TrimSuffix(types, "-")
-		}
+		types = strings.TrimPrefix(types, "-")
 		types = strings.TrimLeft(types, "0123456789")
-
+		// Made it past an argument
 		nargs++
 	}
-
 	return nargs
 }
 
 func getArguments(encArgs string) []methodEncodedArg {
 	var args []methodEncodedArg
-	re := regexp.MustCompile(`(?P<type>(\[.*\]|{.*}|\(.*\)|\D+))(?P<stack>\d+)`)
-	for _, t := range re.FindAllStringSubmatch(encArgs, -1) {
+	t, rest, ok := CutType(encArgs)
+	for ok {
+		i := 0
+		for i < len(rest) && rest[i] >= '0' && rest[i] <= '9' {
+			i++
+		}
 		args = append(args, methodEncodedArg{
-			EncType:   string(t[re.SubexpIndex("type")]),
-			DecType:   decodeType(t[re.SubexpIndex("type")]),
-			StackSize: t[re.SubexpIndex("stack")],
+			EncType:   t,
+			DecType:   decodeType(t),
+			StackSize: rest[:i],
 		})
+		t, rest, ok = CutType(rest[i:])
 	}
 	return args
 }
 
-// func skipFirstType(typedesc string) string {
-// 	for {
-// 		switch typedesc[0] {
-// 		case 'O': // bycopy
-// 			fallthrough
-// 		case 'n': // in
-// 			fallthrough
-// 		case 'o': // out
-// 			fallthrough
-// 		case 'N': // inout
-// 			fallthrough
-// 		case 'r': // const
-// 			fallthrough
-// 		case 'V': // oneway
-// 			fallthrough
-// 		case '^': // pointers
-// 			typedesc = typedesc[1:]
-// 		case '@': // objects
-// 			if typedesc[1] == '?' {
-// 				typedesc = typedesc[2:] // Blocks
-// 			}
-// 			return typedesc[1:]
-// 			// arrays
-// 		case '[':
-// 			for typedesc[0] >= '0' && typedesc[0] <= '9' {
-// 				typedesc = typedesc[1:]
-// 			}
-// 			return typedesc[subtypeUntil(typedesc, ']')+1:]
-// 			// structures
-// 		case '{':
-// 			return typedesc[subtypeUntil(typedesc, '}')+1:]
-// 			// unions
-// 		case '(':
-// 			return typedesc[subtypeUntil(typedesc, ')')+1:]
-// 			// basic types
-// 		default:
-// 			return typedesc
-// 		}
-// 		typedesc = typedesc[1:]
-// 	}
-// }
+func encodingGetSizeOfArguments(typedesc string) uint {
+	var stackSize uint
 
-func subtypeUntil(typedesc string, end byte) int {
-	var level int = 0
-	typedesc += "\x00" // Ensure null termination
-	var head = typedesc
+	stackSize = 0
+	typedesc = skipFirstType(typedesc)
 
-	for typedesc[0] != 0 {
-		if typedesc[0] == 0 || (level == 0 && typedesc[0] == end) {
-			return len(typedesc) - len(head)
+	for i := 0; i < len(typedesc); i++ {
+		if typedesc[i] >= '0' && typedesc[i] <= '9' {
+			stackSize = stackSize*10 + uint(typedesc[i]-'0')
+		} else {
+			break
 		}
-
-		switch typedesc[0] {
-		case ']', '}', ')':
-			level -= 1
-		case '[', '{', '(':
-			level += 1
-		}
-
-		typedesc = typedesc[1:]
 	}
 
-	return 0
+	return stackSize
 }
