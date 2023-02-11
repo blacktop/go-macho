@@ -44,8 +44,8 @@ var typeEncoding = map[string]string{
 	// "}":  "", // _C_STRUCT_E
 	"!":  "vector",
 	"Vv": "void",
-	"^?": "void *",      // void *
-	"@?": "id ^__block", // block type
+	"^?": "void *",         // void *
+	"@?": "id /* block */", // block type
 }
 var typeSpecifiers = map[string]string{
 	"A": "atomic",
