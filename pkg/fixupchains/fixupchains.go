@@ -411,7 +411,7 @@ func (dcf *DyldChainedFixups) IsRebase(addr, preferredLoadAddress uint64) (uint6
 		}
 		if DcpArm64eIsRebase(addr) {
 			targetRuntimeOffset = DyldChainedPtrArm64eRebase{Pointer: addr}.UnpackTarget()
-			if (dcf.PointerFormat == DYLD_CHAINED_PTR_ARM64E) || (dcf.PointerFormat == DYLD_CHAINED_PTR_ARM64E_FIRMWARE) {
+			if (dcf.PointerFormat == DYLD_CHAINED_PTR_ARM64E) || (dcf.PointerFormat == DYLD_CHAINED_PTR_ARM64E_USERLAND24) || (dcf.PointerFormat == DYLD_CHAINED_PTR_ARM64E_FIRMWARE) {
 				targetRuntimeOffset -= preferredLoadAddress
 			}
 			return targetRuntimeOffset, true
@@ -422,7 +422,7 @@ func (dcf *DyldChainedFixups) IsRebase(addr, preferredLoadAddress uint64) (uint6
 			return targetRuntimeOffset, false
 		}
 		targetRuntimeOffset = DyldChainedPtr64Rebase{Pointer: addr}.UnpackedTarget()
-		if dcf.PointerFormat == DYLD_CHAINED_PTR_64 {
+		if dcf.PointerFormat == DYLD_CHAINED_PTR_64 || dcf.PointerFormat == DYLD_CHAINED_PTR_64_OFFSET {
 			targetRuntimeOffset -= preferredLoadAddress
 		}
 		return targetRuntimeOffset, true

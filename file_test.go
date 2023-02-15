@@ -617,67 +617,78 @@ func TestNewFileWithSwift(t *testing.T) {
 		return
 	}
 
-	prots, err := got.GetSwiftProtocols()
-	if err != nil && !errors.Is(err, ErrSwiftSectionError) {
-		t.Fatalf("GetSwiftProtocols() error = %v", err)
-	}
-	for _, prot := range prots {
-		fmt.Println(prot)
-	}
-
-	protsconfs, err := got.GetSwiftProtocolConformances()
-	if err != nil && !errors.Is(err, ErrSwiftSectionError) {
-		t.Fatalf("GetSwiftProtocolConformances() error = %v", err)
-	}
-	for _, prot := range protsconfs {
-		fmt.Println(prot)
-	}
-
-	atyps, err := got.GetSwiftAssociatedTypes()
-	if err != nil && !errors.Is(err, ErrSwiftSectionError) {
-		t.Fatalf("GetSwiftAssociatedTypes() error = %v", err)
-	}
-	for _, at := range atyps {
-		fmt.Println(at)
-	}
-
-	bins, err := got.GetSwiftBuiltinTypes()
-	if err != nil && !errors.Is(err, ErrSwiftSectionError) {
-		t.Fatalf("GetSwiftBuiltinTypes() error = %v", err)
-	}
-	for _, bin := range bins {
-		fmt.Println(bin)
-	}
-
-	fds, err := got.GetSwiftFields()
-	if err != nil && !errors.Is(err, ErrSwiftSectionError) {
-		t.Fatalf("GetSwiftFields() error = %v", err)
-	}
-	for _, f := range fds {
-		fmt.Println(f)
-	}
-
-	clos, err := got.GetSwiftClosures()
-	if err != nil && !errors.Is(err, ErrSwiftSectionError) {
-		t.Fatalf("GetSwiftClosures() error = %v", err)
-	}
-	for _, c := range clos {
-		fmt.Println(c)
-	}
-
-	rep, err := got.GetSwiftDynamicReplacementInfo()
-	if err != nil && !errors.Is(err, ErrSwiftSectionError) {
-		t.Fatalf("GetSwiftDynamicReplacementInfo() error = %v", err)
-	}
-	// for _, t := range typs {
-	fmt.Println(rep)
+	// if refStrs, err := got.GetSwiftReflectionStrings(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+	// 	t.Fatalf("GetSwiftReflectionStrings() error = %v", err)
+	// } else {
+	// 	for addr, refstr := range refStrs {
+	// 		fmt.Printf("%#x: %s\n", addr, refstr)
+	// 	}
 	// }
-	typs, err := got.GetSwiftTypes()
-	if err != nil && !errors.Is(err, ErrSwiftSectionError) {
-		t.Fatalf("GetSwiftTypes() error = %v", err)
+
+	if prots, err := got.GetSwiftProtocols(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftProtocols() error = %v", err)
+	} else {
+		for _, prot := range prots {
+			fmt.Println(prot)
+		}
 	}
-	for _, t := range typs {
-		fmt.Println(t)
+
+	if protsconfs, err := got.GetSwiftProtocolConformances(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftProtocolConformances() error = %v", err)
+	} else {
+		for _, prot := range protsconfs {
+			fmt.Printf("%#x: %s\n", prot.Address, prot)
+		}
+	}
+
+	if atyps, err := got.GetSwiftAssociatedTypes(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftAssociatedTypes() error = %v", err)
+	} else {
+		for _, at := range atyps {
+			fmt.Printf("%#x:\n%s\n\n", at.Address, at)
+		}
+	}
+
+	if bins, err := got.GetSwiftBuiltinTypes(); err != nil {
+		if !errors.Is(err, ErrSwiftSectionError) {
+			t.Fatalf("GetSwiftBuiltinTypes() error = %v", err)
+		}
+	} else {
+		for _, bin := range bins {
+			fmt.Println(bin)
+		}
+	}
+
+	if fds, err := got.GetSwiftFields(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftFields() error = %v", err)
+	} else {
+		for _, f := range fds {
+			fmt.Println(f)
+		}
+	}
+
+	if clos, err := got.GetSwiftClosures(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftClosures() error = %v", err)
+	} else {
+		for _, c := range clos {
+			fmt.Println(c)
+		}
+	}
+
+	if rep, err := got.GetSwiftDynamicReplacementInfo(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftDynamicReplacementInfo() error = %v", err)
+	} else {
+		if rep != nil {
+			fmt.Println(rep)
+		}
+	}
+
+	if typs, err := got.GetSwiftTypes(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftTypes() error = %v", err)
+	} else {
+		for _, t := range typs {
+			fmt.Println(t)
+		}
 	}
 }
 

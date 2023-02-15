@@ -121,12 +121,12 @@ func (f Field) String() string {
 			}
 		}
 		if len(r.MangledType) > 0 {
-			hasType = " : "
+			hasType = ": "
 		}
 		recs += fmt.Sprintf("        %s %s%s%s\n", flags, r.Name, hasType, r.MangledType)
 	}
 	if len(f.SuperClass) > 0 {
-		return fmt.Sprintf("%#x:\n%s %s.%s {%s}\n", f.Address, f.Kind, f.MangledType, f.SuperClass, recs)
+		return fmt.Sprintf("// %#x:\n%s %s.%s {%s}\n", f.Address, f.Kind, f.MangledType, f.SuperClass, recs)
 	}
-	return fmt.Sprintf("%#x:\n%s %s {%s}", f.Address, strings.ToLower(f.Kind), f.MangledType, recs)
+	return fmt.Sprintf("// %#x:\n%s %s {%s}\n", f.Address, strings.ToLower(f.Kind), f.MangledType, recs)
 }

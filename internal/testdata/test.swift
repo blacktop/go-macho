@@ -9,4 +9,9 @@ struct Name {
     var b: MyEnum
 }
 
-Name(a: .A, b: .B)
+var name = Name(a: .A, b: .B)
+
+func greet(person: String) -> String {
+    let greeting = "Hello, " + person + "!"
+    return greeting
+}

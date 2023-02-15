@@ -1,6 +1,9 @@
 package swift
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // credit: https://knight.sc/reverse%20engineering/2019/07/17/swift-metadata.html
 
@@ -217,6 +220,21 @@ type AssociatedTypeDescriptor struct {
 	AssociatedTypeRecords []AssociatedTypeRecord
 }
 
+func (a AssociatedTypeDescriptor) String() string {
+	var vars []string
+	for _, v := range a.AssociatedTypeRecords {
+		vars = append(vars, fmt.Sprintf("\t%s: %s", v.Name, v.SubstitutedTypeName))
+	}
+	return fmt.Sprintf(
+		"extension %s: %s {\n"+
+			"%s\n"+
+			"}",
+		a.ConformingTypeName,
+		a.ProtocolTypeName,
+		strings.Join(vars, "\n"),
+	)
+}
+
 // __TEXT.__swift5_builtin
 // This section contains an array of builtin type descriptors.
 // A builtin type descriptor describes the basic layout information about any builtin types referenced from other sections.
@@ -230,6 +248,8 @@ func (f builtinTypeFlag) Alignment() uint16 {
 	return uint16(f & 0xffff)
 }
 
+const MaxNumExtraInhabitants = 0x7FFFFFFF
+
 type BuiltinTypeDescriptor struct {
 	TypeName            int32
 	Size                uint32
@@ -240,6 +260,7 @@ type BuiltinTypeDescriptor struct {
 
 // BuiltinType builtin swift type
 type BuiltinType struct {
+	Address             uint64
 	Name                string
 	Size                uint32
 	Alignment           uint16
@@ -249,14 +270,20 @@ type BuiltinType struct {
 }
 
 func (b BuiltinType) String() string {
+	var numExtraInhabitants string
+	if b.NumExtraInhabitants == MaxNumExtraInhabitants {
+		numExtraInhabitants = "max"
+	} else {
+		numExtraInhabitants = fmt.Sprintf("%d", b.NumExtraInhabitants)
+	}
 	return fmt.Sprintf(
-		"Name:             %s\n"+
-			"Size:             %d\n"+
-			"Alignment:        %d\n"+
-			"BitwiseTakable:   %t\n"+
-			"Stride:           %d\n"+
-			"ExtraInhabitants: %d\n",
-		b.Name, b.Size, b.Alignment, b.BitwiseTakable, b.Stride, b.NumExtraInhabitants)
+		"%#x:         %s\n"+
+			"  size:              %d\n"+
+			"  alignment:         %d\n"+
+			"  bitwise-takable:   %t\n"+
+			"  stride:            %d\n"+
+			"  extra-inhabitants: %s\n",
+		b.Address, b.Name, b.Size, b.Alignment, b.BitwiseTakable, b.Stride, numExtraInhabitants)
 }
 
 // __TEXT.__swift5_capture
@@ -298,10 +325,46 @@ type CaptureDescriptorHeader struct {
 }
 
 type CaptureDescriptor struct {
+	Address uint64
 	CaptureDescriptorHeader
 	CaptureTypes    []string
 	MetadataSources []MetadataSource
 	Bindings        []NecessaryBindings
+}
+
+func (c CaptureDescriptor) String() string {
+	var captureTypes string
+	if len(c.CaptureTypes) > 0 {
+		captureTypes += "\t/* capture types */\n"
+		for _, t := range c.CaptureTypes {
+			captureTypes += fmt.Sprintf("\t%s\n", t)
+		}
+	}
+	var metadataSources string
+	if len(c.MetadataSources) > 0 {
+		metadataSources += "\t/* metadata sources */\n"
+		for _, m := range c.MetadataSources {
+			metadataSources += fmt.Sprintf("\t%s: %s\n", m.MangledType, m.MangledMetadataSource)
+		}
+	}
+	var bindings string
+	if len(c.Bindings) > 0 {
+		bindings += "\t/* necessary bindings */\n"
+		for _, b := range c.Bindings {
+			bindings += fmt.Sprintf("\t// Kind: %d, RequirementsSet: %d, RequirementsVector: %d, Conformances: %d\n", b.Kind, b.RequirementsSet, b.RequirementsVector, b.Conformances)
+		}
+	}
+	return fmt.Sprintf(
+		"block /* %#x */ {\n"+
+			"%s"+
+			"%s"+
+			"%s"+
+			"}",
+		c.Address,
+		captureTypes,
+		metadataSources,
+		bindings,
+	)
 }
 
 // __TEXT.__swift5_typeref

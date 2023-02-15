@@ -12,7 +12,7 @@ type Protocol struct {
 	AssociatedType string
 	Parent         string
 	Descriptor
-	SignatureRequirements []TargetGenericRequirementDescriptor
+	SignatureRequirements []TargetGenericRequirement
 	Requirements          []TargetProtocolRequirement
 }
 
@@ -102,6 +102,12 @@ type TargetGenericRequirementDescriptor struct {
 	Flags                               GenericRequirementFlags
 	Param                               int32 // The type that's constrained, described as a mangled name.
 	TypeOrProtocolOrConformanceOrLayout int32 // UNION: flags determine type
+}
+
+type TargetGenericRequirement struct {
+	Name string
+	Kind string
+	TargetGenericRequirementDescriptor
 }
 
 const (
@@ -249,9 +255,21 @@ type TargetProtocolConformanceDescriptor struct {
 
 type ConformanceDescriptor struct {
 	TargetProtocolConformanceDescriptor
+	Address      uint64
 	Protocol     string
-	TypeRef      *TypeDescriptor
+	NominalType  *TypeDescriptor
 	WitnessTable int32
+}
+
+func (c ConformanceDescriptor) String() string {
+	return fmt.Sprintf(
+		"protocol %s {\n"+
+			"\tnominal type descriptor for %s %s\n"+
+			"}",
+		c.Protocol,
+		c.NominalType.Kind,
+		c.NominalType.Name,
+	)
 }
 
 type TargetWitnessTable struct {

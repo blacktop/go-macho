@@ -270,9 +270,37 @@ type TypeDescriptor struct {
 	Type           any
 }
 
+func (t TypeDescriptor) String() string {
+	switch t.Kind {
+	case CDKindModule:
+		return fmt.Sprintf("module %s", t.Name)
+	case CDKindExtension:
+		return fmt.Sprintf("extension %s", t.Name)
+	case CDKindAnonymous:
+		return fmt.Sprintf("anonymous %s", t.Name)
+	case CDKindProtocol:
+		return fmt.Sprintf("protocol %s", t.Name)
+	case CDKindOpaqueType:
+		return fmt.Sprintf("opaque type %s", t.Name)
+	case CDKindClass:
+		return fmt.Sprintf("class %s", t.Name)
+	case CDKindStruct:
+		return fmt.Sprintf("struct %s", t.Name)
+	case CDKindEnum:
+		return fmt.Sprintf("enum %s", t.Name)
+	default:
+		return fmt.Sprintf("unknown type %s", t.Name)
+	}
+}
+
 type TargetContextDescriptor struct {
 	Flags        ContextDescriptorFlags
 	ParentOffset int32
+}
+
+type TargetModuleContext struct {
+	Name string
+	TargetModuleContextDescriptor
 }
 
 type TargetModuleContextDescriptor struct {

@@ -46,6 +46,7 @@ var typeEncoding = map[string]string{
 	"Vv": "void",
 	"^?": "void *",         // void *
 	"@?": "id /* block */", // block type
+	// "@?": "void (^)(void)", // block type
 }
 var typeSpecifiers = map[string]string{
 	"A": "atomic",
