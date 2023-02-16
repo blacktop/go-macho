@@ -341,7 +341,16 @@ func (c *Category) dump(verbose bool) string {
 	var cMethods string
 	var iMethods string
 
-	cat := fmt.Sprintf("@interface %s (%s) // %#x", c.Class.Name, c.Name, c.VMAddr)
+	var protos string
+	if len(c.Protocols) > 0 {
+		var prots []string
+		for _, prot := range c.Protocols {
+			prots = append(prots, prot.Name)
+		}
+		protos += fmt.Sprintf(" <%s>", strings.Join(prots, ", "))
+	}
+
+	cat := fmt.Sprintf("@interface %s (%s)%s // %#x", c.Class.Name, c.Name, protos, c.VMAddr)
 
 	if len(c.ClassMethods) > 0 {
 		s := bytes.NewBufferString("/* class methods */\n")

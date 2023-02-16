@@ -1445,7 +1445,7 @@ func (f *File) GetPointerAtAddress(address uint64) (uint64, error) {
 	if err := binary.Read(f.cr, binary.LittleEndian, &ptr); err != nil {
 		return 0, fmt.Errorf("failed to read pointer @ %#x: %v", address, err)
 	}
-	return ptr, nil
+	return f.vma.Convert(ptr), nil
 }
 
 // SlidePointer returns slid or un-chained pointer
