@@ -169,6 +169,10 @@ func (i ImageInfo) IsDyldPreoptimized() bool {
 	return (i.Flags & dyldPreoptimized) != 0
 }
 
+func (i ImageInfo) HasSwift() bool {
+	return (i.Flags>>8)&0xff != 0
+}
+
 const (
 	bigSignedMethodListFlag              uint64 = 0x8000000000000000
 	relativeMethodSelectorsAreDirectFlag uint32 = 0x40000000
