@@ -1438,11 +1438,14 @@ func (f *File) GetPointer(offset uint64) (uint64, error) {
 
 // GetPointerAtAddress returns pointer at a given virtual address
 func (f *File) GetPointerAtAddress(address uint64) (uint64, error) {
-	offset, err := f.vma.GetOffset(address)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get offset for address %#x: %v", address, err)
+	if err := f.cr.SeekToAddr(address); err != nil {
+		return 0, fmt.Errorf("failed to Seek to address %#x: %v", address, err)
 	}
-	return f.GetPointer(offset)
+	var ptr uint64
+	if err := binary.Read(f.cr, binary.LittleEndian, &ptr); err != nil {
+		return 0, fmt.Errorf("failed to read pointer @ %#x: %v", address, err)
+	}
+	return ptr, nil
 }
 
 // SlidePointer returns slid or un-chained pointer
@@ -1493,30 +1496,40 @@ func (f *File) GetBindName(pointer uint64) (string, error) {
 			return "", fmt.Errorf("pointer %#x is not a bind", pointer)
 		}
 		return "", fmt.Errorf("MachO does not contain dyld chained fixups importts")
+	} else {
+		binds, err := f.GetBindInfo()
+		if err != nil {
+			return "", fmt.Errorf("failed to parse LC_DYLD_INFO_ONLY bind info: %v", err)
+		}
+		for _, bind := range binds {
+			if (bind.Start + bind.Offset) == pointer {
+				return bind.Name, nil
+			}
+		}
+		return "", fmt.Errorf("pointer %#x is not a bind", pointer)
 	}
-	return "", fmt.Errorf("MachO does not contain dyld chained fixups")
 }
 
 // GetCString returns a c-string at a given virtual address in the MachO
-func (f *File) GetCString(strVMAdr uint64) (string, error) {
-
-	// if sec := f.FindSectionForVMAddr(strVMAdr); sec != nil {
-	// 	if !sec.Flags.IsCstringLiterals() {
-	// 		return "", fmt.Errorf("virtual address not in a cstring section")
-	// 	}
-	// }
-
-	strOffset, err := f.vma.GetOffset(strVMAdr)
-	if err != nil {
-		return "", fmt.Errorf("failed to get offset for cstring at virtual address: %#x: %v", strVMAdr, err)
+func (f *File) GetCString(addr uint64) (string, error) {
+	if err := f.cr.SeekToAddr(addr); err != nil {
+		return "", fmt.Errorf("failed to Seek to address %#x: %v", addr, err)
 	}
 
-	return f.GetCStringAtOffset(int64(strOffset))
+	s, err := bufio.NewReader(f.cr).ReadString('\x00')
+	if err != nil {
+		return "", fmt.Errorf("failed to read strubg at address %#x, %v", addr, err)
+	}
+
+	if len(s) > 0 {
+		return strings.Trim(s, "\x00"), nil
+	}
+
+	return "", fmt.Errorf("string not found at address %#x", addr)
 }
 
 // GetCStringAtOffset returns a c-string at a given offset into the MachO
 func (f *File) GetCStringAtOffset(strOffset int64) (string, error) {
-
 	if _, err := f.cr.Seek(strOffset, io.SeekStart); err != nil {
 		return "", fmt.Errorf("failed to Seek to offset %#x: %v", strOffset, err)
 	}

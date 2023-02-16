@@ -683,10 +683,10 @@ func (f *File) GetObjCCategories() ([]objc.Category, error) {
 					}
 					if categoryPtr.ProtocolsVMAddr > 0 {
 						categoryPtr.ProtocolsVMAddr = f.vma.Convert(categoryPtr.ProtocolsVMAddr)
-						// category.Protocol, err = f.getObjcProtocol(categoryPtr.ProtocolsVMAddr)
-						// if err != nil {
-						// 	return nil, fmt.Errorf("failed to get protocols at vmaddr: %#x; %v", categoryPtr.ClassMethodsVMAddr, err)
-						// }
+						category.Protocols, err = f.parseObjcProtocolList(categoryPtr.ProtocolsVMAddr)
+						if err != nil {
+							return nil, fmt.Errorf("failed to read protocols vmaddr: %v", err)
+						}
 					}
 					if categoryPtr.InstancePropertiesVMAddr > 0 {
 						categoryPtr.InstancePropertiesVMAddr = f.vma.Convert(categoryPtr.InstancePropertiesVMAddr)

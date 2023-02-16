@@ -330,7 +330,7 @@ type Category struct {
 	Name            string
 	VMAddr          uint64
 	Class           *Class
-	Protocol        *Protocol
+	Protocols       []Protocol
 	ClassMethods    []Method
 	InstanceMethods []Method
 	Properties      []Property
