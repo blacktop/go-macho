@@ -113,6 +113,10 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 		return fmt.Errorf("failed to optimize ObjC: %v", err)
 	}
 
+	// if err := f.optimizeStubs(segMap); err != nil {
+	// 	return fmt.Errorf("failed to optimize ObjC: %v", err)
+	// }
+
 	if inCache {
 		f.FileHeader.Flags &= 0x7FFFFFFF // remove in-cache bit
 	}
@@ -169,7 +173,7 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 	os.MkdirAll(filepath.Dir(path), os.ModePerm)
 
 	if err := os.WriteFile(path, buf.Bytes(), 0755); err != nil {
-		return fmt.Errorf("failed to write exported MachO to file %s: %v", path, err)
+		return fmt.Errorf("failed to write exported MachO to file %s: %w", path, err)
 	}
 
 	// FIXME: fixup chains are not yet supported (this should be done in the linkedit optimization step and create a REAL LC_DYLD_CHAINED_FIXUPS load command)
@@ -658,6 +662,61 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 		}
 	}
 	return nil
+}
+
+type stub struct {
+	ADRP uint64
+	LDR  uint64
+	BR   uint64
+}
+
+type authStub struct {
+	ADRP uint32
+	ADD  uint32
+	LDR  uint32
+	BRAA uint32
+}
+
+// TODO: 🚧 finish this
+func (f *File) optimizeStubs(segMap exportSegMap) (*bytes.Buffer, error) {
+	var buf bytes.Buffer
+
+	writeAuthStub := func(saddr, paddr uint64) ([]byte, error) {
+		adrpDelta := (paddr & ^uint64(4096)) - (saddr & ^uint64(4096))
+		immhi := (adrpDelta >> 9) & (0x00FFFFE0)
+		immlo := (adrpDelta << 17) & (0x60000000)
+		addOffset := paddr - (paddr & ^uint64(4096))
+		imm12 := (addOffset << 10) & 0x3FFC00
+		stub := authStub{
+			ADRP: 0x90000011 | uint32(immlo|immhi),
+			ADD:  0x91000231 | uint32(imm12),
+			LDR:  0xF9400230,
+			BRAA: 0xD71F0A11,
+		}
+		if err := binary.Write(&buf, binary.LittleEndian, stub); err != nil {
+			return nil, err
+		}
+		return buf.Bytes(), nil
+	}
+
+	if autGOT := f.Section("__DATA_CONST", "__auth_got"); autGOT != nil {
+		data, err := autGOT.Data()
+		if err != nil {
+			return nil, err
+		}
+		gots := make([]uint64, autGOT.Size/f.pointerSize())
+		if err := binary.Read(bytes.NewReader(data), binary.LittleEndian, &gots); err != nil {
+			return nil, err
+		}
+		for i, got := range gots {
+			if got == 0 {
+				continue
+			}
+			writeAuthStub(autGOT.Addr+uint64(i)*f.pointerSize(), got)
+		}
+	}
+
+	return &buf, nil
 }
 
 func (f *File) optimizeObjC(segMap exportSegMap) error {
