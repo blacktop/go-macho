@@ -340,6 +340,9 @@ func (s *Symtab) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	return nil
 }
 func (s *Symtab) Search(name string) (*Symbol, error) {
+	sort.Slice(s.Syms, func(i, j int) bool {
+		return s.Syms[i].Name < s.Syms[j].Name
+	})
 	i := sort.Search(len(s.Syms), func(i int) bool { return s.Syms[i].Name >= name })
 	if i < len(s.Syms) && s.Syms[i].Name == name {
 		return &s.Syms[i], nil

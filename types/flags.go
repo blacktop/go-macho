@@ -100,6 +100,9 @@ func (k BindKind) String() string {
 type Binds []Bind
 
 func (bs Binds) Search(name string) (*Bind, error) {
+	sort.Slice(bs, func(i, j int) bool {
+		return bs[i].Name < bs[j].Name
+	})
 	i := sort.Search(len(bs), func(i int) bool { return bs[i].Name >= name })
 	if i < len(bs) && bs[i].Name == name {
 		return &bs[i], nil
