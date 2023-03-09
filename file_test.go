@@ -31,7 +31,7 @@ type fileTest struct {
 var fileTests = []fileTest{
 	{
 		"internal/testdata/gcc-386-darwin-exec.base64",
-		types.FileHeader{Magic: 0xfeedface, CPU: types.CPU386, SubCPU: 0x3, Type: 0x2, NCommands: 0xc, SizeCommands: 0x3c0, Flags: 0x85, Reserved: 0x1},
+		types.FileHeader{Magic: 0xfeedface, CPU: types.CPUI386, SubCPU: 0x3, Type: 0x2, NCommands: 0xc, SizeCommands: 0x3c0, Flags: 0x85, Reserved: 0x1},
 		[]any{
 			&SegmentHeader{types.LC_SEGMENT, 0x38, "__PAGEZERO", 0x0, 0x1000, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
 			&SegmentHeader{types.LC_SEGMENT, 0xc0, "__TEXT", 0x1000, 0x1000, 0x0, 0x1000, 0x7, 0x5, 0x2, 0x0, 0},
@@ -112,7 +112,7 @@ var fileTests = []fileTest{
 	},
 	{
 		"internal/testdata/clang-386-darwin-exec-with-rpath.base64",
-		types.FileHeader{Magic: 0xfeedface, CPU: types.CPU386, SubCPU: 0x3, Type: 0x2, NCommands: 0x10, SizeCommands: 0x42c, Flags: 0x1200085, Reserved: 0x1},
+		types.FileHeader{Magic: 0xfeedface, CPU: types.CPUI386, SubCPU: 0x3, Type: 0x2, NCommands: 0x10, SizeCommands: 0x42c, Flags: 0x1200085, Reserved: 0x1},
 		[]any{
 			nil, // LC_SEGMENT
 			nil, // LC_SEGMENT
@@ -160,7 +160,7 @@ var fileTests = []fileTest{
 	},
 	{
 		"internal/testdata/clang-386-darwin.obj.base64",
-		types.FileHeader{Magic: 0xfeedface, CPU: types.CPU386, SubCPU: 0x3, Type: 0x1, NCommands: 0x4, SizeCommands: 0x138, Flags: 0x2000, Reserved: 0x1},
+		types.FileHeader{Magic: 0xfeedface, CPU: types.CPUI386, SubCPU: 0x3, Type: 0x1, NCommands: 0x4, SizeCommands: 0x138, Flags: 0x2000, Reserved: 0x1},
 		nil,
 		nil,
 		map[string][]types.Reloc{

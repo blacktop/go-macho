@@ -40,7 +40,7 @@ func (f *File) HasObjC() bool {
 			}
 		}
 	}
-	if f.CPU == types.CPU386 {
+	if f.CPU == types.CPUI386 {
 		if sec := f.Section("__OBJC", "__image_info"); sec != nil {
 			return true
 		}
@@ -99,7 +99,7 @@ func (f *File) GetObjCToc() objc.Toc {
 			case "__objc_selrefs":
 				oInfo.SelRefs = sec.Size / f.pointerSize()
 			}
-		} else if (f.CPU == types.CPU386) && strings.EqualFold(sec.Name, "__OBJC") {
+		} else if (f.CPU == types.CPUI386) && strings.EqualFold(sec.Name, "__OBJC") {
 			if strings.EqualFold(sec.Name, "__message_refs") {
 				oInfo.SelRefs += sec.SectionHeader.Size / 4
 			} else if strings.EqualFold(sec.Name, "__class") {
