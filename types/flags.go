@@ -100,12 +100,13 @@ func (k BindKind) String() string {
 type Binds []Bind
 
 func (bs Binds) Search(name string) (*Bind, error) {
-	sort.Slice(bs, func(i, j int) bool {
-		return bs[i].Name < bs[j].Name
+	binds := append([]Bind(nil), bs...) // copy symbols
+	sort.Slice(binds, func(i, j int) bool {
+		return binds[i].Name < binds[j].Name
 	})
-	i := sort.Search(len(bs), func(i int) bool { return bs[i].Name >= name })
-	if i < len(bs) && bs[i].Name == name {
-		return &bs[i], nil
+	i := sort.Search(len(binds), func(i int) bool { return binds[i].Name >= name })
+	if i < len(binds) && binds[i].Name == name {
+		return &binds[i], nil
 	}
 	return nil, fmt.Errorf("%s not found in bind info", name)
 }

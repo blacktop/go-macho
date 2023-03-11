@@ -340,12 +340,13 @@ func (s *Symtab) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	return nil
 }
 func (s *Symtab) Search(name string) (*Symbol, error) {
-	sort.Slice(s.Syms, func(i, j int) bool {
-		return s.Syms[i].Name < s.Syms[j].Name
+	syms := append([]Symbol(nil), s.Syms...) // copy symbols
+	sort.Slice(syms, func(i, j int) bool {
+		return syms[i].Name < syms[j].Name
 	})
-	i := sort.Search(len(s.Syms), func(i int) bool { return s.Syms[i].Name >= name })
-	if i < len(s.Syms) && s.Syms[i].Name == name {
-		return &s.Syms[i], nil
+	i := sort.Search(len(syms), func(i int) bool { return syms[i].Name >= name })
+	if i < len(syms) && syms[i].Name == name {
+		return &syms[i], nil
 	}
 	return nil, fmt.Errorf("%s not found in symtab", name)
 }
