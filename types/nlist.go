@@ -359,6 +359,9 @@ func (d NDescType) IsWeakReferenced() bool {
 func (d NDescType) IsWeakDefintion() bool {
 	return (d & WEAK_DEF) != 0
 }
+func (d NDescType) IsWeakDefintionOrReferenced() bool {
+	return (d & (WEAK_DEF | WEAK_REF)) != 0
+}
 func (d NDescType) IsReferenceToWeak() bool {
 	return (d & REF_TO_WEAK) != 0
 }

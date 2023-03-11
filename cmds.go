@@ -385,19 +385,120 @@ type Symbol struct {
 	Value uint64
 }
 
-func (s Symbol) String(m *File) string {
-	var sec string
-	if s.Sect != types.NO_SECT && int(s.Sect) <= len(m.Sections) {
-		sec = fmt.Sprintf("%s.%s", m.Sections[s.Sect-1].Seg, m.Sections[s.Sect-1].Name)
+func (s Symbol) GetType(m *File) string {
+	var typ string
+
+	if s.Type.IsUndefinedSym() {
+		if s.Value != 0 {
+			typ += "(common)  "
+			if s.Desc.GetCommAlign() != 0 {
+				typ += fmt.Sprintf("(alignment 2^%d)", s.Desc.GetCommAlign())
+			}
+		} else {
+			if s.Type.IsPreboundUndefinedSym() {
+				typ += "(prebound  "
+			} else {
+				typ += "("
+			}
+			if s.Desc.IsUndefinedLazy() {
+				typ += "undefined [lazy bound]) "
+			} else if s.Desc.IsPrivateUndefinedLazy() {
+				typ += "undefined [private lazy bound]) "
+			} else if s.Desc.IsPrivateUndefinedNonLazy() {
+				typ += "undefined [private]) "
+			} else {
+				typ += "undefined) "
+			}
+		}
+	} else if s.Type.IsAbsoluteSym() {
+		typ += "(absolute) "
+	} else if s.Type.IsIndirectSym() {
+		typ += "(indirect) "
+	} else if s.Type.IsDefinedInSection() {
+		if s.Sect != types.NO_SECT && int(s.Sect) <= len(m.Sections) {
+			typ += fmt.Sprintf("(%s,%s) ", m.Sections[s.Sect-1].Seg, m.Sections[s.Sect-1].Name)
+		}
+	} else if s.Type.IsDebugSym() {
+		typ += "(debug) "
+	} else {
+		typ += "(?) "
 	}
-	var lib string
-	if s.Desc.GetLibraryOrdinal() != types.SELF_LIBRARY_ORDINAL && s.Desc.GetLibraryOrdinal() < types.MAX_LIBRARY_ORDINAL {
-		if s.Desc.GetLibraryOrdinal() <= uint16(len(m.ImportedLibraries())) {
-			lib = m.ImportedLibraries()[s.Desc.GetLibraryOrdinal()-1]
-			return fmt.Sprintf("0x%016X\t<type:%s, desc:%s>\t%s\t(from %s)", s.Value, s.Type.String(sec), s.Desc, s.Name, filepath.Base(lib))
+
+	if s.Type.IsExternalSym() {
+		if s.Desc.IsReferencedDynamically() {
+			typ += "[referenced dynamically] "
+		}
+		if s.Type.IsPrivateExternalSym() {
+			if s.Desc.IsWeakDefintion() {
+				typ += "weak private external "
+			} else {
+				typ += "private external "
+			}
+		} else {
+			if s.Desc.IsWeakReferenced() || s.Desc.IsWeakDefintion() {
+				if s.Desc.IsWeakDefintionOrReferenced() {
+					typ += "weak external automatically hidden "
+				} else {
+					typ += "weak external "
+				}
+			} else {
+				typ += "external "
+			}
+		}
+	} else {
+		if s.Type.IsPrivateExternalSym() {
+			typ += "non-external (was a private external) "
+		} else {
+			typ += "private "
 		}
 	}
-	return fmt.Sprintf("0x%016X\t<type:%s, desc:%s>\t%s", s.Value, s.Type.String(sec), s.Desc, s.Name)
+
+	if m.Type == types.MH_OBJECT {
+		if s.Desc.IsNoDeadStrip() {
+			typ += "[no dead strip] "
+		}
+		if !s.Type.IsUndefinedSym() && s.Desc.IsSymbolResolver() {
+			typ += "[symbol resolver] "
+		}
+		if !s.Type.IsUndefinedSym() && s.Desc.IsAltEntry() {
+			typ += "[alt entry] "
+		}
+		if !s.Type.IsUndefinedSym() && s.Desc.IsColdFunc() {
+			typ += "[cold func] "
+		}
+	}
+
+	if s.Desc.IsArmThumbDefintion() {
+		typ += "[Thumb] "
+	}
+
+	if s.Type.IsIndirectSym() {
+		// typ += fmt.Sprintf("(for %s)", s.Name) FIXME: find indirect symbol example
+	}
+
+	return strings.TrimSpace(typ)
+}
+func (s Symbol) GetLib(m *File) string {
+	if (m.Flags.TwoLevel() && s.Type.IsUndefinedSym() && s.Value == 0) || s.Type.IsPreboundUndefinedSym() {
+		if s.Desc.GetLibraryOrdinal() > types.SELF_LIBRARY_ORDINAL {
+			switch s.Desc.GetLibraryOrdinal() {
+			case types.EXECUTABLE_ORDINAL:
+				return " (from executable)"
+			case types.DYNAMIC_LOOKUP_ORDINAL:
+				return " (dynamically looked up)"
+			default:
+				if s.Desc.GetLibraryOrdinal() <= uint16(len(m.ImportedLibraries())) {
+					return fmt.Sprintf(" (from %s)", filepath.Base(m.ImportedLibraries()[s.Desc.GetLibraryOrdinal()-1]))
+				} else {
+					return fmt.Sprintf(" (from bad library ordinal %d)", s.Desc.GetLibraryOrdinal())
+				}
+			}
+		}
+	}
+	return ""
+}
+func (s Symbol) String(m *File) string {
+	return fmt.Sprintf("0x%016X\t%s\t%s%s", s.Value, s.GetType(m), s.Name, s.GetLib(m))
 }
 func (s *Symbol) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
