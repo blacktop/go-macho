@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"sort"
 	"strings"
 	"unsafe"
 
@@ -340,13 +339,10 @@ func (s *Symtab) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	return nil
 }
 func (s *Symtab) Search(name string) (*Symbol, error) {
-	syms := append([]Symbol(nil), s.Syms...) // copy symbols
-	sort.Slice(syms, func(i, j int) bool {
-		return syms[i].Name < syms[j].Name
-	})
-	i := sort.Search(len(syms), func(i int) bool { return syms[i].Name >= name })
-	if i < len(syms) && syms[i].Name == name {
-		return &syms[i], nil
+	for _, sym := range s.Syms {
+		if sym.Name == name {
+			return &sym, nil
+		}
 	}
 	return nil, fmt.Errorf("%s not found in symtab", name)
 }

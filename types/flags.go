@@ -2,7 +2,6 @@ package types
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 )
 
@@ -100,13 +99,10 @@ func (k BindKind) String() string {
 type Binds []Bind
 
 func (bs Binds) Search(name string) (*Bind, error) {
-	binds := append([]Bind(nil), bs...) // copy symbols
-	sort.Slice(binds, func(i, j int) bool {
-		return binds[i].Name < binds[j].Name
-	})
-	i := sort.Search(len(binds), func(i int) bool { return binds[i].Name >= name })
-	if i < len(binds) && binds[i].Name == name {
-		return &binds[i], nil
+	for _, b := range bs {
+		if b.Name == name {
+			return &b, nil
+		}
 	}
 	return nil, fmt.Errorf("%s not found in bind info", name)
 }
