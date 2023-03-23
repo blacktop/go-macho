@@ -1398,7 +1398,7 @@ func (f *File) GetOffset(address uint64) (uint64, error) {
 
 func (f *File) getOffset(address uint64) (uint64, error) {
 	for _, seg := range f.Segments() {
-		if seg.Addr <= address && address < seg.Addr+seg.Filesz {
+		if seg.Addr <= address && address < seg.Addr+seg.Memsz {
 			return (address - seg.Addr) + seg.Offset, nil
 		}
 	}
