@@ -270,9 +270,9 @@ func (st CPUSubtype) Caps(cpu CPU) string {
 		caps := st & CpuSubtypeFeatureMask
 		if caps > 0 {
 			if caps&CpuSubtypePtrauthAbiUser == 0 {
-				return fmt.Sprintf("caps: USR%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
+				return fmt.Sprintf("USR%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
 			} else {
-				return fmt.Sprintf("caps: KER%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
+				return fmt.Sprintf("KER%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
 			}
 		}
 	}

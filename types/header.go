@@ -66,15 +66,20 @@ func (h *FileHeader) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	return nil
 }
 func (h *FileHeader) String() string {
+	var caps string
+	if len(h.SubCPU.Caps(h.CPU)) > 0 {
+		caps = fmt.Sprintf(" caps: %s", h.SubCPU.Caps(h.CPU))
+	}
 	return fmt.Sprintf(
 		"Magic         = %s\n"+
 			"Type          = %s\n"+
-			"CPU           = %s, %s %s\n"+
+			"CPU           = %s, %s%s\n"+
 			"Commands      = %d (Size: %d)\n"+
 			"Flags         = %s",
 		h.Magic,
 		h.Type,
-		h.CPU, h.SubCPU.String(h.CPU), h.SubCPU.Caps(h.CPU),
+		h.CPU, h.SubCPU.String(h.CPU),
+		caps,
 		h.NCommands,
 		h.SizeCommands,
 		h.Flags,
@@ -88,13 +93,17 @@ func (h *FileHeader) MarshalJSON() ([]byte, error) {
 		Magic        string   `json:"magic"`
 		Type         string   `json:"type"`
 		CPU          string   `json:"cpu"`
+		SubCPU       string   `json:"subcpu"`
+		SubCPUCaps   string   `json:"subcpu_caps"`
 		Commands     int      `json:"commands"`
 		SizeCommands int      `json:"commands_size"`
 		Flags        []string `json:"flags"`
 	}{
 		Magic:        h.Magic.String(),
 		Type:         h.Type.String(),
-		CPU:          fmt.Sprintf("%s, %s %s", h.CPU, h.SubCPU.String(h.CPU), h.SubCPU.Caps(h.CPU)),
+		CPU:          h.CPU.String(),
+		SubCPU:       h.SubCPU.String(h.CPU),
+		SubCPUCaps:   h.SubCPU.Caps(h.CPU),
 		Commands:     int(h.NCommands),
 		SizeCommands: int(h.SizeCommands),
 		Flags:        h.Flags.Flags(),

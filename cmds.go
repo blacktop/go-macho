@@ -874,7 +874,7 @@ func (d *Dysymtab) String() string {
 }
 func (d *Dysymtab) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd        string `json:"load_command"`
+		LoadCmd        string `json:"load_cmd"`
 		Len            uint32 `json:"length"`
 		Ilocalsym      uint32 `json:"ilocalsym"`
 		Nlocalsym      uint32 `json:"nlocalsym"`
@@ -1000,7 +1000,7 @@ func (d *PreboundDylib) String() string {
 }
 func (d *PreboundDylib) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd                string `json:"load_command"`
+		LoadCmd                string `json:"load_cmd"`
 		Len                    uint32 `json:"length"`
 		Name                   string `json:"name"`
 		NumModules             uint32 `json:"num_modules"`
@@ -1038,7 +1038,7 @@ func (l *Routines) String() string {
 }
 func (l *Routines) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd     string `json:"load_command"`
+		LoadCmd     string `json:"load_cmd"`
 		Len         uint32 `json:"length"`
 		InitAddress uint32 `json:"init_address"`
 		InitModule  uint32 `json:"init_module"`
@@ -1082,7 +1082,7 @@ func (l *SubFramework) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 func (l *SubFramework) String() string { return l.Framework }
 func (l *SubFramework) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd   string `json:"load_command"`
+		LoadCmd   string `json:"load_cmd"`
 		Len       uint32 `json:"length"`
 		Framework string `json:"framework"`
 	}{
@@ -1124,7 +1124,7 @@ func (l *SubUmbrella) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 func (l *SubUmbrella) String() string { return l.Umbrella }
 func (l *SubUmbrella) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd  string `json:"load_command"`
+		LoadCmd  string `json:"load_cmd"`
 		Len      uint32 `json:"length"`
 		Umbrella string `json:"umbrella"`
 	}{
@@ -1168,7 +1168,7 @@ func (l *SubClient) String() string {
 }
 func (l *SubClient) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd string `json:"load_command"`
+		LoadCmd string `json:"load_cmd"`
 		Len     uint32 `json:"length"`
 		Name    string `json:"name"`
 	}{
@@ -1210,7 +1210,7 @@ func (l *SubLibrary) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 func (l *SubLibrary) String() string { return l.Library }
 func (l *SubLibrary) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd string `json:"load_command"`
+		LoadCmd string `json:"load_cmd"`
 		Len     uint32 `json:"length"`
 		Library string `json:"library"`
 	}{
@@ -1248,7 +1248,7 @@ func (l *TwolevelHints) String() string {
 }
 func (l *TwolevelHints) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd string               `json:"load_command"`
+		LoadCmd string               `json:"load_cmd"`
 		Len     uint32               `json:"length"`
 		Offset  uint32               `json:"offset"`
 		Hints   []types.TwolevelHint `json:"hints,omitempty"`
@@ -1284,7 +1284,7 @@ func (l *PrebindCheckSum) String() string {
 }
 func (l *PrebindCheckSum) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd  string `json:"load_command"`
+		LoadCmd  string `json:"load_cmd"`
 		Len      uint32 `json:"length"`
 		CheckSum uint32 `json:"checksum"`
 	}{
@@ -1327,7 +1327,7 @@ func (l *Routines64) String() string {
 }
 func (l *Routines64) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd     string `json:"load_command"`
+		LoadCmd     string `json:"load_cmd"`
 		Len         uint32 `json:"length"`
 		InitAddress uint64 `json:"init_address"`
 		InitModule  uint64 `json:"init_module"`
@@ -1363,7 +1363,7 @@ func (l *UUID) String() string {
 }
 func (l *UUID) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd string `json:"load_command"`
+		LoadCmd string `json:"load_cmd"`
 		Len     uint32 `json:"length"`
 		UUID    string `json:"uuid"`
 	}{
@@ -1407,7 +1407,7 @@ func (r *Rpath) String() string {
 }
 func (r *Rpath) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd string `json:"load_command"`
+		LoadCmd string `json:"load_cmd"`
 		Len     uint32 `json:"length"`
 		Path    string `json:"path"`
 	}{
@@ -1442,7 +1442,7 @@ func (l *CodeSignature) String() string { // TODO: add more info
 }
 func (l *CodeSignature) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd       string                  `json:"load_command"`
+		LoadCmd       string                  `json:"load_cmd"`
 		Len           uint32                  `json:"length"`
 		Offset        uint32                  `json:"offset"`
 		Size          uint32                  `json:"size"`
@@ -1487,7 +1487,7 @@ func (s *SplitInfo) String() string {
 }
 func (l *SplitInfo) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd string `json:"load_command"`
+		LoadCmd string `json:"load_cmd"`
 		Len     uint32 `json:"length"`
 		Offset  uint32 `json:"offset"`
 		Size    uint32 `json:"size"`
@@ -1555,7 +1555,7 @@ func (e *EncryptionInfo) String() string {
 }
 func (l *EncryptionInfo) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd string `json:"load_command"`
+		LoadCmd string `json:"load_cmd"`
 		Len     uint32 `json:"length"`
 		Offset  uint32 `json:"offset"`
 		Size    uint32 `json:"size"`
@@ -1621,7 +1621,7 @@ func (d *DyldInfo) String() string {
 }
 func (l *DyldInfo) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd      string `json:"load_command"`
+		LoadCmd      string `json:"load_cmd"`
 		Len          uint32 `json:"length"`
 		RebaseOff    uint32 `json:"rebase_offset"`
 		RebaseSize   uint32 `json:"rebase_size"`
@@ -1734,7 +1734,7 @@ func (e *EntryPoint) String() string {
 }
 func (e *EntryPoint) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd string `json:"load_command"`
+		LoadCmd string `json:"load_cmd"`
 		Len     uint32 `json:"length"`
 		Entry   uint64 `json:"entry_offset"`
 		Stack   uint64 `json:"stack_size"`
@@ -1781,7 +1781,7 @@ func (d *DataInCode) String() string {
 }
 func (l *DataInCode) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd string `json:"load_command"`
+		LoadCmd string `json:"load_cmd"`
 		Len     uint32 `json:"length"`
 		Offset  uint32 `json:"offset"`
 		Size    uint32 `json:"size"`
@@ -1839,7 +1839,7 @@ func (s *SourceVersion) String() string {
 }
 func (s *SourceVersion) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd string `json:"load_command"`
+		LoadCmd string `json:"load_cmd"`
 		Len     uint32 `json:"length"`
 		Version string `json:"version"`
 	}{
@@ -1894,7 +1894,7 @@ func (e *EncryptionInfo64) String() string {
 }
 func (e *EncryptionInfo64) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd string `json:"load_command"`
+		LoadCmd string `json:"load_cmd"`
 		Len     uint32 `json:"length"`
 		Offset  uint32 `json:"offset"`
 		Size    uint32 `json:"size"`
@@ -1944,7 +1944,7 @@ func (l *LinkerOption) String() string {
 }
 func (l *LinkerOption) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd string   `json:"load_command"`
+		LoadCmd string   `json:"load_cmd"`
 		Len     uint32   `json:"length"`
 		Options []string `json:"options"`
 	}{
@@ -2004,7 +2004,7 @@ func (n *Note) String() string {
 }
 func (n *Note) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd   string `json:"load_command"`
+		LoadCmd   string `json:"load_cmd"`
 		Len       uint32 `json:"length"`
 		DataOwner string `json:"data_owner"`
 		Offset    uint64 `json:"offset"`
@@ -2064,7 +2064,7 @@ func (b *BuildVersion) String() string {
 }
 func (b *BuildVersion) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd  string                   `json:"load_command"`
+		LoadCmd  string                   `json:"load_cmd"`
 		Len      uint32                   `json:"length"`
 		Platform string                   `json:"platform"`
 		Minos    string                   `json:"min_os"`
@@ -2134,7 +2134,7 @@ func (f *FilesetEntry) String() string {
 }
 func (l *FilesetEntry) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd string `json:"load_command"`
+		LoadCmd string `json:"load_cmd"`
 		Len     uint32 `json:"length"`
 		Offset  uint64 `json:"offset"`
 		Addr    uint64 `json:"address"`
@@ -2191,7 +2191,7 @@ func (d *Dylib) String() string {
 }
 func (d *Dylib) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd   string `json:"load_command"`
+		LoadCmd   string `json:"load_cmd"`
 		Len       uint32 `json:"length"`
 		Name      string `json:"name"`
 		Timestamp uint32 `json:"timestamp"`
@@ -2243,7 +2243,7 @@ func (d *Dylinker) String() string {
 }
 func (d *Dylinker) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd string `json:"load_command"`
+		LoadCmd string `json:"load_cmd"`
 		Len     uint32 `json:"length"`
 		Name    string `json:"name"`
 	}{
@@ -2273,7 +2273,7 @@ func (v *VersionMin) String() string {
 }
 func (v *VersionMin) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd string `json:"load_command"`
+		LoadCmd string `json:"load_cmd"`
 		Len     uint32 `json:"length"`
 		Version string `json:"version"`
 		SDK     string `json:"sdk"`
@@ -2307,7 +2307,7 @@ func (l *LinkEditData) String() string {
 }
 func (l *LinkEditData) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd string `json:"load_command"`
+		LoadCmd string `json:"load_cmd"`
 		Len     uint32 `json:"length"`
 		Offset  uint32 `json:"offset"`
 		Size    uint32 `json:"size"`
