@@ -2511,21 +2511,24 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 							// targetValue = targetValue + slide;
 							// *(uint64_t*)address = targetValue;
 						}
+					} else {
+						// the ordinal is bits [0..15]
+						ord := ptr & 0xFFFF
+						// XXX: there is a note in LIEF source about adding +1 to ordinalTableSize 
+						// when parsing it because of ld64 - I haven't investigated yet - fG!
+						if ord > ordinalTableSize { // TODO: make sure this is right
+							return nil, fmt.Errorf("bind ordinal is out of range")
+						}
+						ordinalTable[ord].Value = ptr
+						ordinalTable[ord].Offset = segOffset
+						binds = append(binds, ordinalTable[ord])
 					}
-					// the ordinal is bits [0..15]
-					ord := ptr & 0xFFFF
-					if ord > ordinalTableSize { // TODO: make sure this is right
-						return nil, fmt.Errorf("bind ordinal is out of range")
-					}
-					ordinalTable[ord].Value = ptr
-					ordinalTable[ord].Offset = segOffset
-					binds = append(binds, ordinalTable[ord])
 					// The delta is bits [51..61]
 					// And bit 62 is to tell us if we are a rebase (0) or bind (1)
 					ptr &= ^uint64(1 << 62)
 					delta = (ptr & 0x3FF8000000000000) >> 51
 					segOffset += delta * f.pointerSize()
-					if delta != 0 {
+					if delta == 0 {
 						break
 					}
 				}
