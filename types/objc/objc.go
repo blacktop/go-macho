@@ -344,6 +344,7 @@ type Category struct {
 func (c *Category) dump(verbose bool) string {
 	var cMethods string
 	var iMethods string
+	var isSwift string
 
 	var protos string
 	if len(c.Protocols) > 0 {
@@ -357,8 +358,11 @@ func (c *Category) dump(verbose bool) string {
 	var className string
 	if c.Class != nil {
 		className = c.Class.Name + " "
+		if c.Class.IsSwift() {
+			isSwift = " (Swift)"
+		}
 	}
-	cat := fmt.Sprintf("@interface %s(%s)%s // %#x", className, c.Name, protos, c.VMAddr)
+	cat := fmt.Sprintf("@interface %s(%s)%s // %#x%s", className, c.Name, protos, c.VMAddr, isSwift)
 
 	if len(c.ClassMethods) > 0 {
 		s := bytes.NewBufferString("/* class methods */\n")
@@ -557,18 +561,6 @@ type CFString64Type struct {
 	Length    uint64 // number of non-NULL characters in above
 }
 
-const (
-	FAST_DATA_MASK   = 0xfffffffc
-	FAST_DATA_MASK64 = 0x00007ffffffffff8
-)
-
-const (
-	FAST_IS_SWIFT_LEGACY = 0x1 // < 5
-	FAST_IS_SWIFT_STABLE = 0x2 // 5.X
-
-	IsSwiftPreStableABI = 0x1
-)
-
 type Class struct {
 	Name                  string
 	SuperClass            string
@@ -592,6 +584,7 @@ type Class struct {
 func (c *Class) dump(verbose bool) string {
 	var iVars string
 	var props string
+	var isSwift string
 	var cMethods string
 	var iMethods string
 
@@ -600,6 +593,10 @@ func (c *Class) dump(verbose bool) string {
 		subClass = "<ROOT>"
 	} else if len(c.SuperClass) > 0 {
 		subClass = c.SuperClass
+	}
+
+	if c.IsSwift() {
+		isSwift = " (Swift)"
 	}
 
 	class := fmt.Sprintf("@interface %s : %s", c.Name, subClass)
@@ -614,7 +611,7 @@ func (c *Class) dump(verbose bool) string {
 	if len(c.Ivars) > 0 {
 		s := bytes.NewBufferString("")
 		w := tabwriter.NewWriter(s, 0, 0, 1, ' ', 0)
-		fmt.Fprintf(w, " { // %#x\n  /* instance variables */\t// +size   offset\n", c.ClassPtr)
+		fmt.Fprintf(w, " { // %#x%s\n  /* instance variables */\t// +size   offset\n", c.ClassPtr, isSwift)
 		// s.WriteString(fmt.Sprintf(" { // %#x\n  // instance variables\t   +size   offset\n", c.ClassPtr))
 		for _, ivar := range c.Ivars {
 			if verbose {
@@ -629,7 +626,7 @@ func (c *Class) dump(verbose bool) string {
 		s.WriteString("}\n\n")
 		iVars = s.String()
 	} else {
-		iVars = "\n"
+		iVars = fmt.Sprintf(" { // %#x%s\n", c.ClassPtr, isSwift)
 	}
 	if len(c.Props) > 0 {
 		for _, prop := range c.Props {
@@ -692,6 +689,9 @@ func (c *Class) dump(verbose bool) string {
 		iMethods)
 }
 
+func (c *Class) IsSwift() bool {
+	return c.IsSwiftLegacy || c.IsSwiftStable
+}
 func (c *Class) String() string {
 	return c.dump(false)
 }
@@ -711,6 +711,23 @@ type SwiftClassMetadata struct {
 	ObjcClassT
 	SwiftClassFlags uint32
 }
+
+const (
+	FAST_IS_SWIFT_LEGACY = 1 << 0 // < 5
+	FAST_IS_SWIFT_STABLE = 1 << 1 // 5.X
+	FAST_HAS_DEFAULT_RR  = 1 << 2
+	IsSwiftPreStableABI  = 0x1
+)
+
+const (
+	FAST_DATA_MASK  = 0xfffffffc
+	FAST_FLAGS_MASK = 0x00000003
+
+	FAST_DATA_MASK64_IPHONE = 0x0000007ffffffff8
+	FAST_DATA_MASK64        = 0x00007ffffffffff8
+	FAST_FLAGS_MASK64       = 0x0000000000000007
+	FAST_IS_RW_POINTER64    = 0x8000000000000000
+)
 
 type ClassRoFlags uint32
 
@@ -737,6 +754,7 @@ const (
 	RO_HAS_WEAK_WITHOUT_ARC ClassRoFlags = (1 << 9)
 	// class does not allow associated objects on instances
 	RO_FORBIDS_ASSOCIATED_OBJECTS ClassRoFlags = (1 << 10)
+
 	// class is in an unloadable bundle - must never be set by compiler
 	RO_FROM_BUNDLE ClassRoFlags = (1 << 29)
 	// class is unrealized future class - must never be set by compiler

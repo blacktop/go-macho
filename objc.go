@@ -607,8 +607,8 @@ func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 		MethodCacheBuckets:    classPtr.MethodCacheBuckets,
 		MethodCacheProperties: classPtr.MethodCacheProperties,
 		DataVMAddr:            classPtr.DataVMAddrAndFastFlags & objc.FAST_DATA_MASK64,
-		IsSwiftLegacy:         (classPtr.DataVMAddrAndFastFlags&objc.FAST_IS_SWIFT_LEGACY == 1),
-		IsSwiftStable:         (classPtr.DataVMAddrAndFastFlags&objc.FAST_IS_SWIFT_STABLE == 1),
+		IsSwiftLegacy:         (classPtr.DataVMAddrAndFastFlags&objc.FAST_IS_SWIFT_LEGACY != 0),
+		IsSwiftStable:         (classPtr.DataVMAddrAndFastFlags&objc.FAST_IS_SWIFT_STABLE != 0),
 		ReadOnlyData:          *info,
 	}, nil
 }
