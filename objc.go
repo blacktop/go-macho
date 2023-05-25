@@ -31,6 +31,14 @@ func (f *File) GetObjC(addr uint64) (any, bool) {
 	return val, ok
 }
 
+func (f *File) rebasePtr(ptr uint64) uint64 {
+	if f.Flags.DylibInCache() {
+		return ptr
+	} else {
+		return ptr + f.GetBaseAddress()
+	}
+}
+
 // HasObjC returns true if MachO contains a __objc_imageinfo section
 func (f *File) HasObjC() bool {
 	for _, s := range f.Segments() {
@@ -448,7 +456,7 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 		Ivars:                 ivars,
 		Props:                 props,
 		Protocols:             prots,
-		ClassPtr:              vmaddr,
+		ClassPtr:              f.rebasePtr(vmaddr),
 		IsaVMAddr:             classPtr.IsaVMAddr,
 		SuperclassVMAddr:      classPtr.SuperclassVMAddr,
 		MethodCacheBuckets:    classPtr.MethodCacheBuckets,
@@ -593,7 +601,7 @@ func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 		Ivars:                 ivars,
 		Props:                 props,
 		Protocols:             prots,
-		ClassPtr:              vmaddr,
+		ClassPtr:              f.rebasePtr(vmaddr),
 		IsaVMAddr:             classPtr.IsaVMAddr,
 		SuperclassVMAddr:      classPtr.SuperclassVMAddr,
 		MethodCacheBuckets:    classPtr.MethodCacheBuckets,
@@ -639,7 +647,7 @@ func (f *File) GetObjCCategories() ([]objc.Category, error) {
 						return nil, fmt.Errorf("failed to read %T: %v", categoryPtr, err)
 					}
 
-					category := objc.Category{VMAddr: ptr}
+					category := objc.Category{VMAddr: f.rebasePtr(ptr)}
 
 					categoryPtr.NameVMAddr = f.vma.Convert(categoryPtr.NameVMAddr)
 					category.Name, err = f.GetCString(categoryPtr.NameVMAddr)
@@ -771,7 +779,7 @@ func (f *File) parseCategory(vmaddr uint64) (*objc.Category, error) {
 
 	return &objc.Category{
 		Name:      name,
-		VMAddr:    vmaddr,
+		VMAddr:    f.rebasePtr(vmaddr),
 		CategoryT: categoryPtr,
 	}, nil
 }
@@ -815,7 +823,7 @@ func (f *File) getObjcProtocol(vmaddr uint64) (proto *objc.Protocol, err error) 
 		return nil, fmt.Errorf("failed to read protocol_t: %v", err)
 	}
 
-	proto = &objc.Protocol{Ptr: vmaddr}
+	proto = &objc.Protocol{Ptr: f.rebasePtr(vmaddr)}
 
 	if protoPtr.NameVMAddr > 0 {
 		protoPtr.NameVMAddr = f.vma.Convert(protoPtr.NameVMAddr)
