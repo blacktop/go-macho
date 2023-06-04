@@ -816,13 +816,15 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Len = siz
 			l.Offset = hdr.Offset
 			l.Size = hdr.Size
-			ldat := make([]byte, l.Size)
-			if _, err := f.cr.ReadAt(ldat, int64(l.Offset)); err != nil {
-				return nil, fmt.Errorf("failed to read SplitInfo data at offset=%#x; %v", int64(hdr.Offset), err)
-			}
-			fsr := bytes.NewReader(ldat)
-			if err := binary.Read(fsr, bo, &l.Version); err != nil {
-				return nil, fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO Version: %v", err)
+			if l.Size > 0 {
+				ldat := make([]byte, l.Size)
+				if _, err := f.cr.ReadAt(ldat, int64(l.Offset)); err != nil {
+					return nil, fmt.Errorf("failed to read SplitInfo data at offset=%#x; %v", int64(hdr.Offset), err)
+				}
+				fsr := bytes.NewReader(ldat)
+				if err := binary.Read(fsr, bo, &l.Version); err != nil {
+					return nil, fmt.Errorf("failed to read LC_SEGMENT_SPLIT_INFO Version: %v", err)
+				}
 			}
 			f.Loads = append(f.Loads, l)
 		case types.LC_REEXPORT_DYLIB:
@@ -2514,7 +2516,7 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 					} else {
 						// the ordinal is bits [0..15]
 						ord := ptr & 0xFFFF
-						// XXX: there is a note in LIEF source about adding +1 to ordinalTableSize 
+						// XXX: there is a note in LIEF source about adding +1 to ordinalTableSize
 						// when parsing it because of ld64 - I haven't investigated yet - fG!
 						if ord > ordinalTableSize { // TODO: make sure this is right
 							return nil, fmt.Errorf("bind ordinal is out of range")
