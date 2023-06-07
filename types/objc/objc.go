@@ -225,16 +225,16 @@ func (el EntryList) String() string {
 	return fmt.Sprintf("Size: %d, Count: %d", el.Size, el.Count)
 }
 
-type Entry uint64
+type Entry int64
 
-func (e Entry) MethodListCount() uint16 {
-	return uint16(types.ExtractBits(uint64(e), 0, 16))
+func (e Entry) ImageIndex() uint16 {
+	return uint16(e & 0xFFFF)
 }
 func (e Entry) MethodListOffset() int64 {
-	return int64(types.ExtractBits(uint64(e), 16, 48))
+	return int64(e >> 16)
 }
 func (e Entry) String() string {
-	return fmt.Sprintf("MethodListCount: %d, MethodListOffset: %d", e.MethodListCount(), e.MethodListOffset())
+	return fmt.Sprintf("image_index: %d, method_list_offset: %d", e.ImageIndex(), e.MethodListOffset())
 }
 
 type MethodList struct {

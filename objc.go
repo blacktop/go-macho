@@ -325,8 +325,7 @@ func (f *File) GetObjCNonLazyClasses() ([]*objc.Class, error) {
 }
 
 func (f *File) disablePreattachedCategories(vmaddr uint64) (uint64, error) {
-	unknownFlag := uint64(0x1000000000000) // maybe base class?
-	if (vmaddr & 1) != 0 {                 // preattached categories
+	if (vmaddr & 1) != 0 { // has preattached categories
 		if err := f.cr.SeekToAddr(vmaddr & 0xFFFFFFFFFFFFFFFE); err != nil {
 			return 0, fmt.Errorf("failed to seek to entry_list_t at %#x: %v", vmaddr&0xFFFFFFFFFFFFFFFE, err)
 		}
@@ -346,10 +345,6 @@ func (f *File) disablePreattachedCategories(vmaddr uint64) (uint64, error) {
 		var mladdrs []uint64
 		for idx, entry := range entries {
 			mladdrs = append(mladdrs, uint64(int64(curr)+int64(idx*binary.Size(entry))+entry.MethodListOffset()))
-		}
-
-		if (unknownFlag & mladdrs[len(mladdrs)-1]) != 0 {
-			return mladdrs[len(mladdrs)-1] & 0xFFFEFFFFFFFFFFFF, nil
 		}
 
 		return mladdrs[len(mladdrs)-1], nil
