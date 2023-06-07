@@ -513,6 +513,7 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 	}, nil
 }
 
+// TODO: get rid of old GetObjCClass
 // GetObjCClass parses an Objective-C class at a given virtual memory address
 func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 
@@ -549,6 +550,10 @@ func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 
 	var methods []objc.Method
 	if info.BaseMethodsVMAddr > 0 {
+		info.BaseMethodsVMAddr, err = f.disablePreattachedCategories(info.BaseMethodsVMAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to disable preattached categories: %v", err)
+		}
 		methods, err = f.GetObjCMethods(info.BaseMethodsVMAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get methods at vmaddr: %#x; %v", info.BaseMethodsVMAddr, err)
@@ -557,6 +562,10 @@ func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 
 	var prots []objc.Protocol
 	if info.BaseProtocolsVMAddr > 0 {
+		info.BaseProtocolsVMAddr, err = f.disablePreattachedCategories(info.BaseProtocolsVMAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to disable preattached categories: %v", err)
+		}
 		prots, err = f.parseObjcProtocolList(info.BaseProtocolsVMAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read protocols vmaddr: %v", err)
@@ -573,6 +582,10 @@ func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 
 	var props []objc.Property
 	if info.BasePropertiesVMAddr > 0 {
+		info.BasePropertiesVMAddr, err = f.disablePreattachedCategories(info.BasePropertiesVMAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to disable preattached categories: %v", err)
+		}
 		props, err = f.GetObjCProperties(info.BasePropertiesVMAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get props at vmaddr: %#x; %v", info.BasePropertiesVMAddr, err)
