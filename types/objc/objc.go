@@ -217,12 +217,12 @@ func (m methodPtr) Pointer() uint64 {
 }
 
 type EntryList struct {
-	Size  uint32
-	Count uint32
+	Entsize uint32
+	Count   uint32
 }
 
 func (el EntryList) String() string {
-	return fmt.Sprintf("Size: %d, Count: %d", el.Size, el.Count)
+	return fmt.Sprintf("ent_size: %d, count: %d", el.Entsize, el.Count)
 }
 
 type Entry int64
