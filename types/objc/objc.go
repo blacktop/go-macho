@@ -216,6 +216,27 @@ func (m methodPtr) Pointer() uint64 {
 	return uint64(m & ^methodPtr(kindMask))
 }
 
+type EntryList struct {
+	Size  uint32
+	Count uint32
+}
+
+func (el EntryList) String() string {
+	return fmt.Sprintf("Size: %d, Count: %d", el.Size, el.Count)
+}
+
+type Entry uint64
+
+func (e Entry) MethodListCount() uint16 {
+	return uint16(types.ExtractBits(uint64(e), 0, 16))
+}
+func (e Entry) MethodListOffset() int64 {
+	return int64(types.ExtractBits(uint64(e), 16, 48))
+}
+func (e Entry) String() string {
+	return fmt.Sprintf("MethodListCount: %d, MethodListOffset: %d", e.MethodListCount(), e.MethodListOffset())
+}
+
 type MethodList struct {
 	EntSizeAndFlags uint32
 	Count           uint32

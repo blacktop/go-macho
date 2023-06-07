@@ -324,6 +324,39 @@ func (f *File) GetObjCNonLazyClasses() ([]*objc.Class, error) {
 	return classes, nil
 }
 
+func (f *File) disablePreattachedCategories(vmaddr uint64) (uint64, error) {
+	unknownFlag := uint64(0x1000000000000) // maybe base class?
+	if (vmaddr & 1) != 0 {                 // preattached categories
+		if err := f.cr.SeekToAddr(vmaddr & 0xFFFFFFFFFFFFFFFE); err != nil {
+			return 0, fmt.Errorf("failed to seek to entry_list_t at %#x: %v", vmaddr&0xFFFFFFFFFFFFFFFE, err)
+		}
+
+		var entryList objc.EntryList
+		if err := binary.Read(f.cr, f.ByteOrder, &entryList); err != nil {
+			return 0, fmt.Errorf("failed to read entry_list_t at %#x: %v", vmaddr&0xFFFFFFFFFFFFFFFE, err)
+		}
+
+		entries := make([]objc.Entry, entryList.Count)
+		if err := binary.Read(f.cr, f.ByteOrder, &entries); err != nil {
+			return 0, fmt.Errorf("failed to read entries[entry_count]: %v", err)
+		}
+
+		curr := (vmaddr & 0xFFFFFFFFFFFFFFFE) + uint64(binary.Size(entryList))
+
+		var mladdrs []uint64
+		for idx, entry := range entries {
+			mladdrs = append(mladdrs, uint64(int64(curr)+int64(idx*binary.Size(entry))+entry.MethodListOffset()))
+		}
+
+		if (unknownFlag & mladdrs[len(mladdrs)-1]) != 0 {
+			return mladdrs[len(mladdrs)-1] & 0xFFFEFFFFFFFFFFFF, nil
+		}
+
+		return mladdrs[len(mladdrs)-1], nil
+	}
+	return vmaddr, nil
+}
+
 // GetObjCClass parses an Objective-C class at a given virtual memory address
 func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 
@@ -359,6 +392,10 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 
 	var methods []objc.Method
 	if info.BaseMethodsVMAddr > 0 {
+		info.BaseMethodsVMAddr, err = f.disablePreattachedCategories(info.BaseMethodsVMAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to disable preattached categories: %v", err)
+		}
 		methods, err = f.GetObjCMethods(info.BaseMethodsVMAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get methods at vmaddr: %#x; %v", info.BaseMethodsVMAddr, err)
@@ -367,6 +404,10 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 
 	var prots []objc.Protocol
 	if info.BaseProtocolsVMAddr > 0 {
+		info.BaseProtocolsVMAddr, err = f.disablePreattachedCategories(info.BaseProtocolsVMAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to disable preattached categories: %v", err)
+		}
 		prots, err = f.parseObjcProtocolList(info.BaseProtocolsVMAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read protocols vmaddr: %v", err)
@@ -383,6 +424,10 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 
 	var props []objc.Property
 	if info.BasePropertiesVMAddr > 0 {
+		info.BasePropertiesVMAddr, err = f.disablePreattachedCategories(info.BasePropertiesVMAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to disable preattached categories: %v", err)
+		}
 		props, err = f.GetObjCProperties(info.BasePropertiesVMAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get props at vmaddr: %#x; %v", info.BasePropertiesVMAddr, err)
