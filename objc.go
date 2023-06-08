@@ -265,13 +265,21 @@ func (f *File) GetObjCClasses() ([]*objc.Class, error) {
 				}
 
 				for _, ptr := range ptrs {
-					ptr = f.vma.Convert(ptr)
-					if c, ok := f.GetObjC(ptr); ok {
+					if c, ok := f.GetObjC(f.vma.Convert(ptr)); ok {
 						classes = append(classes, c.(*objc.Class))
 					} else {
-						class, err := f.GetObjCClass2(ptr)
+						class, err := f.GetObjCClass2(f.vma.Convert(ptr))
 						if err != nil {
-							return nil, fmt.Errorf("failed to read objc_class_t at vmaddr %#x: %v", ptr, err)
+							if f.HasFixups() {
+								bindName, err := f.GetBindName(ptr)
+								if err == nil {
+									class = &objc.Class{Name: strings.TrimPrefix(bindName, "_OBJC_CLASS_$_")}
+								} else {
+									return nil, fmt.Errorf("failed to read objc_class_t at vmaddr %#x: %v", ptr, err)
+								}
+							} else {
+								return nil, fmt.Errorf("failed to read objc_class_t at vmaddr %#x: %v", ptr, err)
+							}
 						}
 						classes = append(classes, class)
 						f.PutObjC(ptr, class)
@@ -311,7 +319,7 @@ func (f *File) GetObjCNonLazyClasses() ([]*objc.Class, error) {
 					} else {
 						class, err := f.GetObjCClass2(ptr)
 						if err != nil {
-							return nil, fmt.Errorf("failed to read objc_class_t at vmaddr %#x: %v", ptr, err)
+							return nil, fmt.Errorf("failed to read non-lazy objc_class_t at vmaddr %#x: %v", ptr, err)
 						}
 						classes = append(classes, class)
 						f.PutObjC(ptr, class)
@@ -794,7 +802,7 @@ func (f *File) GetObjCNonLazyCategories() ([]*objc.Category, error) {
 					} else {
 						cat, err := f.parseCategory(ptr)
 						if err != nil {
-							return nil, fmt.Errorf("failed to read objc_class_t at vmaddr %#x: %v", ptr, err)
+							return nil, fmt.Errorf("failed to read non-lazy category_t at vmaddr %#x: %v", ptr, err)
 						}
 						cats = append(cats, cat)
 						f.PutObjC(ptr, cat)
@@ -1389,7 +1397,7 @@ func (f *File) GetObjCProtoReferences() (map[uint64]*objc.Protocol, error) {
 					for idx, ptr := range protoPtrs {
 						proto, err := f.getObjcProtocol(f.vma.Convert(ptr))
 						if err != nil {
-							return nil, fmt.Errorf("failed to read objc_class_t at superref ptr: %#x (converted %#x); %v", ptr, f.vma.Convert(ptr), err)
+							return nil, fmt.Errorf("failed to read protocol_t at ptr: %#x (converted %#x); %v", ptr, f.vma.Convert(ptr), err)
 						}
 						protRefs[sec.Addr+uint64(idx*sizeOfInt64)] = proto
 					}
