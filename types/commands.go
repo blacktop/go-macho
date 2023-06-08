@@ -73,6 +73,7 @@ const (
 	LC_DYLD_EXPORTS_TRIE        LoadCmd = (0x33 | LC_REQ_DYLD) // used with linkedit_data_command, payload is trie
 	LC_DYLD_CHAINED_FIXUPS      LoadCmd = (0x34 | LC_REQ_DYLD) // used with linkedit_data_command
 	LC_FILESET_ENTRY            LoadCmd = (0x35 | LC_REQ_DYLD) /* used with fileset_entry_command */
+	LC_ATOM_INFO                LoadCmd = 0x36                 /* used with linkedit_data_command */
 )
 
 type SegFlag uint32
@@ -809,6 +810,7 @@ type LinkEditDataCmd struct {
 	LoadCmd /* LC_CODE_SIGNATURE, LC_SEGMENT_SPLIT_INFO,
 	   LC_FUNCTION_STARTS, LC_DATA_IN_CODE,
 	   LC_DYLIB_CODE_SIGN_DRS,
+	   LC_ATOM_INFO,
 	   LC_LINKER_OPTIMIZATION_HINT,
 	   LC_DYLD_EXPORTS_TRIE, or
 	   LC_DYLD_CHAINED_FIXUPS. */

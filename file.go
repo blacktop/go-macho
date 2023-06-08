@@ -1214,6 +1214,19 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			}
 			l.EntryID = cstring(cmddat[hdr.EntryIdOffset:])
 			f.Loads = append(f.Loads, l)
+		case types.LC_ATOM_INFO:
+			var led types.LinkEditDataCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &led); err != nil {
+				return nil, fmt.Errorf("failed to read LC_ATOM_INFO: %v", err)
+			}
+			l := new(AtomInfo)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			l.Offset = led.Offset
+			l.Size = led.Size
+			f.Loads = append(f.Loads, l)
 		}
 		if s != nil {
 			// s.sr = io.NewSectionReader(r, int64(s.Offset), int64(s.Filesz))
