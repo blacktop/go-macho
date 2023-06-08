@@ -155,6 +155,8 @@ func (t NType) String(secName string) string {
 			out = append(out, "debug(source file)")
 		case t.IsObjectFile():
 			out = append(out, "debug(object file)")
+		case t.IsLib():
+			out = append(out, "debug(dylib)")
 		case t.IsLocalSym():
 			out = append(out, "debug(local)")
 		case t.IsIncludeFileBegin():
@@ -451,10 +453,11 @@ const (
 	N_ENSYM NType = 0x4e /* end nsect sym: 0,,n_sect,0,address */
 	N_SSYM  NType = 0x60 /* structure elt: name,,NO_SECT,type,struct_offset */
 	N_SO    NType = 0x64 /* source file name: name,,n_sect,0,address */
-	N_OSO   NType = 0x66 /* object file name: name,,(see below),0,st_mtime */
+	N_OSO   NType = 0x66 /* object file name: name,,(see below),1,st_mtime */
 	/*   historically N_OSO set n_sect to 0. The N_OSO
 	 *   n_sect may instead hold the low byte of the
 	 *   cpusubtype value from the Mach-O header. */
+	N_LIB     NType = 0x68 /* dynamic library file name: name,,NO_SECT,0,0 */
 	N_LSYM    NType = 0x80 /* local sym: name,,NO_SECT,type,offset */
 	N_BINCL   NType = 0x82 /* include file beginning: name,,NO_SECT,0,sum */
 	N_SOL     NType = 0x84 /* #included file name: name,,n_sect,0,address */
@@ -518,6 +521,9 @@ func (t NType) IsSourceFile() bool {
 }
 func (t NType) IsObjectFile() bool {
 	return t == N_OSO
+}
+func (t NType) IsLib() bool {
+	return t == N_LIB
 }
 func (t NType) IsLocalSym() bool {
 	return t == N_LSYM
