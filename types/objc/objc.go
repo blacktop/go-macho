@@ -203,8 +203,9 @@ const (
 	// `small` encompasses both small and small direct methods. We
 	// distinguish those cases by doing a range check against the shared
 	// cache.
-	small     MLKind = 1
-	bigSigned MLKind = 2
+	small       MLKind = 1
+	bigSigned   MLKind = 2
+	bigStripped MLKind = 3 // ***HACK: This is a TEMPORARY HACK FOR EXCLAVEKIT. It MUST go away.
 )
 
 type methodPtr uint64
