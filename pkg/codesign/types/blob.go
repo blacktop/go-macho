@@ -20,8 +20,50 @@ const (
 	CS_SUPPL_SIGNER_TYPE_TRUSTCACHE = 7
 	CS_SUPPL_SIGNER_TYPE_LOCAL      = 8
 
+	CS_SIGNER_TYPE_OOPJIT = 9
+
+	/* Validation categories used for trusted launch environment */
+	CS_VALIDATION_CATEGORY_INVALID       = 0
+	CS_VALIDATION_CATEGORY_PLATFORM      = 1
+	CS_VALIDATION_CATEGORY_TESTFLIGHT    = 2
+	CS_VALIDATION_CATEGORY_DEVELOPMENT   = 3
+	CS_VALIDATION_CATEGORY_APP_STORE     = 4
+	CS_VALIDATION_CATEGORY_ENTERPRISE    = 5
+	CS_VALIDATION_CATEGORY_DEVELOPER_ID  = 6
+	CS_VALIDATION_CATEGORY_LOCAL_SIGNING = 7
+	CS_VALIDATION_CATEGORY_ROSETTA       = 8
+	CS_VALIDATION_CATEGORY_OOPJIT        = 9
+	CS_VALIDATION_CATEGORY_NONE          = 10
+
+	/* The set of application types we support for linkage signatures */
+	CS_LINKAGE_APPLICATION_INVALID = 0
+	CS_LINKAGE_APPLICATION_ROSETTA = 1
+	/* XOJIT has been renamed to OOP-JIT */
+	CS_LINKAGE_APPLICATION_XOJIT  = 2
+	CS_LINKAGE_APPLICATION_OOPJIT = 2
+
+	/* The set of application sub-types we support for linkage signatures */
+
+	/*
+	 * For backwards compatibility with older signatures, the AOT sub-type is kept
+	 * as 0.
+	 */
+	CS_LINKAGE_APPLICATION_ROSETTA_AOT = 0
+	/* OOP-JIT sub-types -- XOJIT type kept for external dependencies */
+	CS_LINKAGE_APPLICATION_XOJIT_PREVIEWS  = 1
+	CS_LINKAGE_APPLICATION_OOPJIT_INVALID  = 0
+	CS_LINKAGE_APPLICATION_OOPJIT_PREVIEWS = 1
+
 	CSTYPE_INDEX_REQUIREMENTS = 0x00000002 /* compat with amfi */
 	CSTYPE_INDEX_ENTITLEMENTS = 0x00000005 /* compat with amfi */
+)
+
+const (
+	/*
+	 * Defined launch types
+	 */
+	CS_LAUNCH_TYPE_NONE           = 0
+	CS_LAUNCH_TYPE_SYSTEM_SERVICE = 1
 )
 
 var NULL_PAGE_SHA256_HASH = []byte{
@@ -35,16 +77,17 @@ type Magic uint32
 
 const (
 	// Magic numbers used by Code Signing
-	MAGIC_REQUIREMENT               Magic = 0xfade0c00 // single Requirement blob
-	MAGIC_REQUIREMENTS              Magic = 0xfade0c01 // Requirements vector (internal requirements)
-	MAGIC_CODEDIRECTORY             Magic = 0xfade0c02 // CodeDirectory blob
-	MAGIC_EMBEDDED_SIGNATURE        Magic = 0xfade0cc0 // embedded form of signature data
-	MAGIC_EMBEDDED_SIGNATURE_OLD    Magic = 0xfade0b02 /* XXX */
-	MAGIC_LIBRARY_DEPENDENCY_BLOB   Magic = 0xfade0c05
-	MAGIC_EMBEDDED_ENTITLEMENTS     Magic = 0xfade7171 /* embedded entitlements */
-	MAGIC_EMBEDDED_ENTITLEMENTS_DER Magic = 0xfade7172 /* embedded entitlements */
-	MAGIC_DETACHED_SIGNATURE        Magic = 0xfade0cc1 // multi-arch collection of embedded signatures
-	MAGIC_BLOBWRAPPER               Magic = 0xfade0b01 // used for the cms blob
+	MAGIC_REQUIREMENT                Magic = 0xfade0c00 // single Requirement blob
+	MAGIC_REQUIREMENTS               Magic = 0xfade0c01 // Requirements vector (internal requirements)
+	MAGIC_CODEDIRECTORY              Magic = 0xfade0c02 // CodeDirectory blob
+	MAGIC_EMBEDDED_SIGNATURE         Magic = 0xfade0cc0 // embedded form of signature data
+	MAGIC_EMBEDDED_SIGNATURE_OLD     Magic = 0xfade0b02 /* XXX */
+	MAGIC_LIBRARY_DEPENDENCY_BLOB    Magic = 0xfade0c05
+	MAGIC_EMBEDDED_ENTITLEMENTS      Magic = 0xfade7171 /* embedded entitlements */
+	MAGIC_EMBEDDED_ENTITLEMENTS_DER  Magic = 0xfade7172 /* embedded entitlements */
+	MAGIC_DETACHED_SIGNATURE         Magic = 0xfade0cc1 // multi-arch collection of embedded signatures
+	MAGIC_BLOBWRAPPER                Magic = 0xfade0b01 // used for the cms blob
+	MAGIC_EMBEDDED_LAUNCH_CONSTRAINT Magic = 0xfade8181 // Light weight code requirement
 )
 
 func (cm Magic) String() string {
@@ -69,6 +112,8 @@ func (cm Magic) String() string {
 		return "Detached Signature"
 	case MAGIC_BLOBWRAPPER:
 		return "Blob Wrapper"
+	case MAGIC_EMBEDDED_LAUNCH_CONSTRAINT:
+		return "Embedded Launch Constraint"
 	default:
 		return fmt.Sprintf("Magic(%#x)", uint32(cm))
 	}
@@ -150,13 +195,16 @@ type SlotType uint32
 
 const (
 	CSSLOT_CODEDIRECTORY                 SlotType = 0
-	CSSLOT_INFOSLOT                      SlotType = 1      // Info.plist
-	CSSLOT_REQUIREMENTS                  SlotType = 2      // internal requirements
-	CSSLOT_RESOURCEDIR                   SlotType = 3      // resource directory
-	CSSLOT_APPLICATION                   SlotType = 4      // Application specific slot/Top-level directory list
-	CSSLOT_ENTITLEMENTS                  SlotType = 5      // embedded entitlement configuration
-	CSSLOT_REP_SPECIFIC                  SlotType = 6      // for use by disk images
-	CSSLOT_ENTITLEMENTS_DER              SlotType = 7      // DER representation of entitlements plist
+	CSSLOT_INFOSLOT                      SlotType = 1 // Info.plist
+	CSSLOT_REQUIREMENTS                  SlotType = 2 // internal requirements
+	CSSLOT_RESOURCEDIR                   SlotType = 3 // resource directory
+	CSSLOT_APPLICATION                   SlotType = 4 // Application specific slot/Top-level directory list
+	CSSLOT_ENTITLEMENTS                  SlotType = 5 // embedded entitlement configuration
+	CSSLOT_REP_SPECIFIC                  SlotType = 6 // for use by disk images
+	CSSLOT_ENTITLEMENTS_DER              SlotType = 7 // DER representation of entitlements plist
+	CSSLOT_LAUNCH_CONSTRAINT_SELF        SlotType = 8
+	CSSLOT_LAUNCH_CONSTRAINT_PARENT      SlotType = 9
+	CSSLOT_LAUNCH_CONSTRAINT_RESPONSIBLE SlotType = 10
 	CSSLOT_ALTERNATE_CODEDIRECTORIES     SlotType = 0x1000 // Used for expressing a code directory using an alternate digest type.
 	CSSLOT_ALTERNATE_CODEDIRECTORIES1    SlotType = 0x1001 // Used for expressing a code directory using an alternate digest type.
 	CSSLOT_ALTERNATE_CODEDIRECTORIES2    SlotType = 0x1002 // Used for expressing a code directory using an alternate digest type.
@@ -187,6 +235,12 @@ func (c SlotType) String() string {
 		return "DMG Specific"
 	case CSSLOT_ENTITLEMENTS_DER:
 		return "Entitlements ASN1/DER"
+	case CSSLOT_LAUNCH_CONSTRAINT_SELF:
+		return "Launch Constraint (self)"
+	case CSSLOT_LAUNCH_CONSTRAINT_PARENT:
+		return "Launch Constraint (parent)"
+	case CSSLOT_LAUNCH_CONSTRAINT_RESPONSIBLE:
+		return "Launch Constraint (responsible)"
 	case CSSLOT_ALTERNATE_CODEDIRECTORIES:
 		return "Alternate CodeDirectories 0"
 	case CSSLOT_ALTERNATE_CODEDIRECTORIES1:

@@ -338,11 +338,11 @@ type CdRuntime struct {
 
 type CdLinkage struct {
 	/* Version 0x20600 */
-	LinkageHashType  uint8 `json:"linkage_hash_type,omitempty"`
-	LinkageTruncated uint8 `json:"linkage_truncated,omitempty"`
-	_                uint16
-	LinkageOffset    uint32 `json:"linkage_offset,omitempty"`
-	LinkageSize      uint32 `json:"linkage_size,omitempty"`
+	LinkageHashType           uint8  `json:"linkage_hash_type,omitempty"`
+	LinkageApplicationType    uint8  `json:"linkage_application_type,omitempty"`
+	LinkageApplicationSubType uint16 `json:"linkage_application_sub_type,omitempty"`
+	LinkageOffset             uint32 `json:"linkage_offset,omitempty"`
+	LinkageSize               uint32 `json:"linkage_size,omitempty"`
 }
 
 // Scatter object
