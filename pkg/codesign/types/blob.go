@@ -240,7 +240,7 @@ func (c SlotType) String() string {
 	case CSSLOT_LAUNCH_CONSTRAINT_PARENT:
 		return "Launch Constraint (parent)"
 	case CSSLOT_LAUNCH_CONSTRAINT_RESPONSIBLE:
-		return "Launch Constraint (responsible)"
+		return "Launch Constraint (responsible proc)"
 	case CSSLOT_ALTERNATE_CODEDIRECTORIES:
 		return "Alternate CodeDirectories 0"
 	case CSSLOT_ALTERNATE_CODEDIRECTORIES1:
