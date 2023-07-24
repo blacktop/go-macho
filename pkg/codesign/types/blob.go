@@ -50,9 +50,10 @@ const (
 	 */
 	CS_LINKAGE_APPLICATION_ROSETTA_AOT = 0
 	/* OOP-JIT sub-types -- XOJIT type kept for external dependencies */
-	CS_LINKAGE_APPLICATION_XOJIT_PREVIEWS  = 1
-	CS_LINKAGE_APPLICATION_OOPJIT_INVALID  = 0
-	CS_LINKAGE_APPLICATION_OOPJIT_PREVIEWS = 1
+	CS_LINKAGE_APPLICATION_XOJIT_PREVIEWS    = 1
+	CS_LINKAGE_APPLICATION_OOPJIT_INVALID    = 0
+	CS_LINKAGE_APPLICATION_OOPJIT_PREVIEWS   = 1
+	CS_LINKAGE_APPLICATION_OOPJIT_MLCOMPILER = 2
 
 	CSTYPE_INDEX_REQUIREMENTS = 0x00000002 /* compat with amfi */
 	CSTYPE_INDEX_ENTITLEMENTS = 0x00000005 /* compat with amfi */
@@ -205,6 +206,7 @@ const (
 	CSSLOT_LAUNCH_CONSTRAINT_SELF        SlotType = 8
 	CSSLOT_LAUNCH_CONSTRAINT_PARENT      SlotType = 9
 	CSSLOT_LAUNCH_CONSTRAINT_RESPONSIBLE SlotType = 10
+	CSSLOT_LIBRARY_CONSTRAINT            SlotType = 11
 	CSSLOT_ALTERNATE_CODEDIRECTORIES     SlotType = 0x1000 // Used for expressing a code directory using an alternate digest type.
 	CSSLOT_ALTERNATE_CODEDIRECTORIES1    SlotType = 0x1001 // Used for expressing a code directory using an alternate digest type.
 	CSSLOT_ALTERNATE_CODEDIRECTORIES2    SlotType = 0x1002 // Used for expressing a code directory using an alternate digest type.
@@ -241,6 +243,8 @@ func (c SlotType) String() string {
 		return "Launch Constraint (parent)"
 	case CSSLOT_LAUNCH_CONSTRAINT_RESPONSIBLE:
 		return "Launch Constraint (responsible proc)"
+	case CSSLOT_LIBRARY_CONSTRAINT:
+		return "Library Constraint"
 	case CSSLOT_ALTERNATE_CODEDIRECTORIES:
 		return "Alternate CodeDirectories 0"
 	case CSSLOT_ALTERNATE_CODEDIRECTORIES1:

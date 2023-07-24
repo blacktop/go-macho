@@ -16,12 +16,16 @@ import (
 
 // CodeSignature object
 type CodeSignature struct {
-	CodeDirectories []types.CodeDirectory `json:"code_directories,omitempty"`
-	Requirements    []types.Requirement   `json:"requirements,omitempty"`
-	CMSSignature    []byte                `json:"cms_signature,omitempty"`
-	Entitlements    string                `json:"entitlements,omitempty"`
-	EntitlementsDER []byte                `json:"entitlements_der,omitempty"`
-	Errors          []error               `json:"errors,omitempty"`
+	CodeDirectories              []types.CodeDirectory `json:"code_directories,omitempty"`
+	Requirements                 []types.Requirement   `json:"requirements,omitempty"`
+	CMSSignature                 []byte                `json:"cms_signature,omitempty"`
+	Entitlements                 string                `json:"entitlements,omitempty"`
+	EntitlementsDER              []byte                `json:"entitlements_der,omitempty"`
+	LaunchConstraintsSelf        []byte                `json:"launch_constraints_self,omitempty"`
+	LaunchConstraintsParent      []byte                `json:"launch_constraints_parent,omitempty"`
+	LaunchConstraintsResponsible []byte                `json:"launch_constraints_responsible,omitempty"`
+	LibraryConstraints           []byte                `json:"library_constraints,omitempty"`
+	Errors                       []error               `json:"errors,omitempty"`
 }
 
 // ParseCodeSignature parses the LC_CODE_SIGNATURE data
@@ -131,6 +135,28 @@ func ParseCodeSignature(cmddat []byte) (*CodeSignature, error) {
 			fallthrough // TODO 🤷‍♂️
 		case types.CSSLOT_TICKETSLOT:
 			fallthrough // TODO 🤷‍♂️
+		case types.CSSLOT_LAUNCH_CONSTRAINT_SELF, types.CSSLOT_LAUNCH_CONSTRAINT_PARENT, types.CSSLOT_LAUNCH_CONSTRAINT_RESPONSIBLE, types.CSSLOT_LIBRARY_CONSTRAINT:
+			lcBlob := types.BlobHeader{}
+			if err := binary.Read(r, binary.BigEndian, &lcBlob); err != nil {
+				return nil, err
+			}
+			if lcBlob.Magic != types.MAGIC_EMBEDDED_LAUNCH_CONSTRAINT {
+				return nil, fmt.Errorf("invalid CSSLOT_LAUNCH_CONSTRAINT_SELF blob magic: %s", lcBlob.Magic)
+			}
+			lcData := make([]byte, int(lcBlob.Length)-binary.Size(lcBlob))
+			if err := binary.Read(r, binary.BigEndian, &lcData); err != nil {
+				return nil, err
+			}
+			switch index.Type {
+			case types.CSSLOT_LAUNCH_CONSTRAINT_SELF:
+				cs.LaunchConstraintsSelf = lcData
+			case types.CSSLOT_LAUNCH_CONSTRAINT_PARENT:
+				cs.LaunchConstraintsParent = lcData
+			case types.CSSLOT_LAUNCH_CONSTRAINT_RESPONSIBLE:
+				cs.LaunchConstraintsResponsible = lcData
+			case types.CSSLOT_LIBRARY_CONSTRAINT:
+				cs.LibraryConstraints = lcData
+			}
 		default:
 			cs.Errors = append(cs.Errors, fmt.Errorf("unknown slot type: %s, please notify author", index.Type))
 		}

@@ -18,5 +18,5 @@
 *.plist
 changelog.yml
 .chglog.yml
-__debug_bin
+__debug_*
 test*
