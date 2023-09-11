@@ -1452,7 +1452,7 @@ func (l *CodeSignature) MarshalJSON() ([]byte, error) {
 		Len:           l.Len,
 		Offset:        l.Offset,
 		Size:          l.Size,
-		CodeSignature: nil, // TODO: add MarshalJSON for CodeSignature
+		CodeSignature: &l.CodeSignature,
 	})
 }
 

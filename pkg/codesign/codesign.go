@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -26,6 +27,67 @@ type CodeSignature struct {
 	LaunchConstraintsResponsible []byte                `json:"launch_constraints_responsible,omitempty"`
 	LibraryConstraints           []byte                `json:"library_constraints,omitempty"`
 	Errors                       []error               `json:"errors,omitempty"`
+}
+
+// MarshalJSON custom JSON marshaller for CodeSignature
+func (cs *CodeSignature) MarshalJSON() ([]byte, error) {
+	var (
+		err                         error
+		lcself, lcpar, lcresp, libc *types.LaunchContraints
+	)
+	if len(cs.LaunchConstraintsSelf) > 0 {
+		lcself, err = types.ParseLaunchContraints(cs.LaunchConstraintsSelf)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse launch constraints (self): %w", err)
+		}
+	}
+	if len(cs.LaunchConstraintsParent) > 0 {
+		lcpar, err = types.ParseLaunchContraints(cs.LaunchConstraintsParent)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse launch constraints (self): %w", err)
+		}
+	}
+	if len(cs.LaunchConstraintsResponsible) > 0 {
+		lcresp, err = types.ParseLaunchContraints(cs.LaunchConstraintsResponsible)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse launch constraints (self): %w", err)
+		}
+	}
+	if len(cs.LibraryConstraints) > 0 {
+		libc, err = types.ParseLaunchContraints(cs.LibraryConstraints)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse launch constraints (self): %w", err)
+		}
+	}
+	return json.Marshal(&struct {
+		CodeDirectories              []types.CodeDirectory   `json:"code_directories,omitempty"`
+		Requirements                 []types.Requirement     `json:"requirements,omitempty"`
+		CMSSignature                 []byte                  `json:"cms_signature,omitempty"`
+		Entitlements                 string                  `json:"entitlements,omitempty"`
+		EntitlementsDER              []byte                  `json:"entitlements_der,omitempty"`
+		LaunchConstraintsSelf        *types.LaunchContraints `json:"launch_constraints_self,omitempty"`
+		LaunchConstraintsParent      *types.LaunchContraints `json:"launch_constraints_parent,omitempty"`
+		LaunchConstraintsResponsible *types.LaunchContraints `json:"launch_constraints_responsible,omitempty"`
+		LibraryConstraints           *types.LaunchContraints `json:"library_constraints,omitempty"`
+		Errors                       []string                `json:"errors,omitempty"`
+	}{
+		CodeDirectories:              cs.CodeDirectories,
+		Requirements:                 cs.Requirements,
+		CMSSignature:                 cs.CMSSignature,
+		Entitlements:                 cs.Entitlements,
+		EntitlementsDER:              cs.EntitlementsDER,
+		LaunchConstraintsSelf:        lcself,
+		LaunchConstraintsParent:      lcpar,
+		LaunchConstraintsResponsible: lcresp,
+		LibraryConstraints:           libc,
+		Errors: func() []string {
+			var errs []string
+			for _, e := range cs.Errors {
+				errs = append(errs, e.Error())
+			}
+			return errs
+		}(),
+	})
 }
 
 // ParseCodeSignature parses the LC_CODE_SIGNATURE data
