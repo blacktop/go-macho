@@ -384,7 +384,13 @@ func (c *Category) dump(verbose bool) string {
 			isSwift = " (Swift)"
 		}
 	}
-	cat := fmt.Sprintf("@interface %s(%s)%s // %#x%s", className, c.Name, protos, c.VMAddr, isSwift)
+
+	var cat string
+	if verbose {
+		cat = fmt.Sprintf("@interface %s(%s)%s // %#x%s", className, c.Name, protos, c.VMAddr, isSwift)
+	} else {
+		cat = fmt.Sprintf("@interface %s(%s)%s", className, c.Name, protos)
+	}
 
 	if len(c.ClassMethods) > 0 {
 		s := bytes.NewBufferString("/* class methods */\n")
@@ -397,7 +403,7 @@ func (c *Category) dump(verbose bool) string {
 				s.WriteString(fmt.Sprintf("+ %s\n", getMethodWithArgs(meth.Name, rtype, args)))
 				// s.WriteString(fmt.Sprintf("+ %-80s // %#x\n", getMethodWithArgs(meth.Name, rtype, args), meth.ImpVMAddr))
 			} else {
-				fmt.Fprintf(w, "+[%s %s];\t// %#x\n", c.Name, meth.Name, meth.ImpVMAddr)
+				fmt.Fprintf(w, "+[%s %s];\n", c.Name, meth.Name)
 				// s.WriteString(fmt.Sprintf("+[%s %s]; %-40s\n", c.Name, meth.Name, fmt.Sprintf("// %#x", meth.ImpVMAddr)))
 			}
 		}
@@ -420,7 +426,7 @@ func (c *Category) dump(verbose bool) string {
 				s.WriteString(fmt.Sprintf("- %s\n", getMethodWithArgs(meth.Name, rtype, args)))
 				// s.WriteString(fmt.Sprintf("- %-80s // %#x\n", getMethodWithArgs(meth.Name, rtype, args), meth.ImpVMAddr))
 			} else {
-				fmt.Fprintf(w, "-[%s %s];\t// %#x\n", c.Name, meth.Name, meth.ImpVMAddr)
+				fmt.Fprintf(w, "-[%s %s];\n", c.Name, meth.Name)
 				// s.WriteString(fmt.Sprintf("-[%s %s]; %-40sn", c.Name, meth.Name, fmt.Sprintf("// %#x", meth.ImpVMAddr)))
 			}
 		}
@@ -504,7 +510,9 @@ func (p *Protocol) dump(verbose bool) string {
 		}
 		protocol += fmt.Sprintf("<%s>", strings.Join(subProts, ", "))
 	}
-	protocol += fmt.Sprintf(" // %#x", p.Ptr)
+	if verbose {
+		protocol += fmt.Sprintf(" // %#x", p.Ptr)
+	}
 	if len(p.InstanceProperties) > 0 {
 		for _, prop := range p.InstanceProperties {
 			if verbose {
@@ -630,10 +638,14 @@ func (c *Class) dump(verbose bool) string {
 		}
 		class += fmt.Sprintf("<%s>", strings.Join(subProts, ", "))
 	}
+	class += fmt.Sprintf(" {")
+	if verbose {
+		class += fmt.Sprintf(" // %#x%s", c.ClassPtr, isSwift)
+	}
 	if len(c.Ivars) > 0 {
 		s := bytes.NewBufferString("")
 		w := tabwriter.NewWriter(s, 0, 0, 1, ' ', 0)
-		fmt.Fprintf(w, " { // %#x%s\n  /* instance variables */\t// +size   offset\n", c.ClassPtr, isSwift)
+		fmt.Fprintf(w, "\n  /* instance variables */\t// +size   offset\n")
 		// s.WriteString(fmt.Sprintf(" { // %#x\n  // instance variables\t   +size   offset\n", c.ClassPtr))
 		for _, ivar := range c.Ivars {
 			if verbose {
@@ -648,7 +660,7 @@ func (c *Class) dump(verbose bool) string {
 		s.WriteString("}\n\n")
 		iVars = s.String()
 	} else {
-		iVars = fmt.Sprintf(" { // %#x%s\n", c.ClassPtr, isSwift)
+		iVars = fmt.Sprintf("\n")
 	}
 	if len(c.Props) > 0 {
 		for _, prop := range c.Props {
@@ -661,7 +673,7 @@ func (c *Class) dump(verbose bool) string {
 		props += "\n"
 	}
 	if len(c.ClassMethods) > 0 {
-		s := bytes.NewBufferString("/* class methods */\n\n")
+		s := bytes.NewBufferString("/* class methods */\n")
 		w := tabwriter.NewWriter(s, 0, 0, 1, ' ', 0)
 		for _, meth := range c.ClassMethods {
 			if verbose {
@@ -671,7 +683,7 @@ func (c *Class) dump(verbose bool) string {
 				s.WriteString(fmt.Sprintf("+ %s\n", getMethodWithArgs(meth.Name, rtype, args)))
 				// s.WriteString(fmt.Sprintf("+ %-80s // %#x\n", getMethodWithArgs(meth.Name, rtype, args), meth.ImpVMAddr))
 			} else {
-				fmt.Fprintf(w, "+[%s %s];\t// %#x\n", c.Name, meth.Name, meth.ImpVMAddr)
+				fmt.Fprintf(w, "+[%s %s];\n", c.Name, meth.Name)
 				// s.WriteString(fmt.Sprintf("+[%s %s]; %-40s\n", c.Name, meth.Name, fmt.Sprintf("// %#x", meth.ImpVMAddr)))
 			}
 		}
@@ -681,9 +693,9 @@ func (c *Class) dump(verbose bool) string {
 	if len(c.InstanceMethods) > 0 {
 		var s *bytes.Buffer
 		if len(c.ClassMethods) > 0 {
-			s = bytes.NewBufferString("\n/* instance methods */\n\n")
+			s = bytes.NewBufferString("\n/* instance methods */\n")
 		} else {
-			s = bytes.NewBufferString("/* instance methods */\n\n")
+			s = bytes.NewBufferString("/* instance methods */\n")
 		}
 		w := tabwriter.NewWriter(s, 0, 0, 1, ' ', 0)
 		for _, meth := range c.InstanceMethods {
@@ -694,7 +706,7 @@ func (c *Class) dump(verbose bool) string {
 				s.WriteString(fmt.Sprintf("- %s\n", getMethodWithArgs(meth.Name, rtype, args)))
 				// s.WriteString(fmt.Sprintf("- %-80s // %#x\n", getMethodWithArgs(meth.Name, rtype, args), meth.ImpVMAddr))
 			} else {
-				fmt.Fprintf(w, "-[%s %s];\t// %#x\n", c.Name, meth.Name, meth.ImpVMAddr)
+				fmt.Fprintf(w, "-[%s %s];\n", c.Name, meth.Name)
 				// s.WriteString(fmt.Sprintf("-[%s %s]; %-40s\n", c.Name, meth.Name, fmt.Sprintf("// %#x", meth.ImpVMAddr)))
 			}
 		}
