@@ -667,13 +667,35 @@ func TestNewFileWithSwift(t *testing.T) {
 		return
 	}
 
-	// if refStrs, err := got.GetSwiftReflectionStrings(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
-	// 	t.Fatalf("GetSwiftReflectionStrings() error = %v", err)
-	// } else {
-	// 	for addr, refstr := range refStrs {
-	// 		fmt.Printf("%#x: %s\n", addr, refstr)
-	// 	}
-	// }
+	if entry, err := got.GetSwiftEntry(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftReflectionStrings() error = %v", err)
+	} else {
+		fmt.Printf("%#x: entry\n", entry)
+	}
+
+	if refStrs, err := got.GetSwiftTypeRefs(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftReflectionStrings() error = %v", err)
+	} else {
+		for addr, refstr := range refStrs {
+			fmt.Printf("%#x: %s\n", addr, refstr)
+		}
+	}
+
+	if typs, err := got.GetSwiftTypes(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftTypes() error = %v", err)
+	} else {
+		for _, t := range typs {
+			fmt.Println(t)
+		}
+	}
+
+	if refStrs, err := got.GetSwiftReflectionStrings(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftReflectionStrings() error = %v", err)
+	} else {
+		for addr, refstr := range refStrs {
+			fmt.Printf("%#x: %s\n", addr, refstr)
+		}
+	}
 
 	if prots, err := got.GetSwiftProtocols(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
 		t.Fatalf("GetSwiftProtocols() error = %v", err)
@@ -730,14 +752,6 @@ func TestNewFileWithSwift(t *testing.T) {
 	} else {
 		if rep != nil {
 			fmt.Println(rep)
-		}
-	}
-
-	if typs, err := got.GetSwiftTypes(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
-		t.Fatalf("GetSwiftTypes() error = %v", err)
-	} else {
-		for _, t := range typs {
-			fmt.Println(t)
 		}
 	}
 }
