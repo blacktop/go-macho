@@ -23,21 +23,29 @@ func _() {
 	_ = x[realityOSSimulator-12]
 	_ = x[firmware-13]
 	_ = x[sepOS-14]
+	_ = x[PLATFORM_MACOS_EXCLAVECORE-15]
+	_ = x[PLATFORM_MACOS_EXCLAVEKIT-16]
+	_ = x[PLATFORM_IOS_EXCLAVECORE-17]
+	_ = x[PLATFORM_IOS_EXCLAVEKIT-18]
+	_ = x[PLATFORM_TVOS_EXCLAVECORE-19]
+	_ = x[PLATFORM_TVOS_EXCLAVEKIT-20]
+	_ = x[PLATFORM_WATCHOS_EXCLAVECORE-21]
+	_ = x[PLATFORM_WATCHOS_EXCLAVEKIT-22]
 	_ = x[any-4294967295]
 }
 
 const (
-	_Platform_name_0 = "unknownmacOSiOStvOSwatchOSbridgeOSmacCatalystiOSSimulatortvOSSimulatorwatchOSSimulatordriverKitrealityOSrealityOSSimulatorfirmwaresepOS"
+	_Platform_name_0 = "unknownmacOSiOStvOSwatchOSbridgeOSmacCatalystiOSSimulatortvOSSimulatorwatchOSSimulatordriverKitrealityOSrealityOSSimulatorfirmwaresepOSPLATFORM_MACOS_EXCLAVECOREPLATFORM_MACOS_EXCLAVEKITPLATFORM_IOS_EXCLAVECOREPLATFORM_IOS_EXCLAVEKITPLATFORM_TVOS_EXCLAVECOREPLATFORM_TVOS_EXCLAVEKITPLATFORM_WATCHOS_EXCLAVECOREPLATFORM_WATCHOS_EXCLAVEKIT"
 	_Platform_name_1 = "any"
 )
 
 var (
-	_Platform_index_0 = [...]uint8{0, 7, 12, 15, 19, 26, 34, 45, 57, 70, 86, 95, 104, 122, 130, 135}
+	_Platform_index_0 = [...]uint16{0, 7, 12, 15, 19, 26, 34, 45, 57, 70, 86, 95, 104, 122, 130, 135, 161, 186, 210, 233, 258, 282, 310, 337}
 )
 
 func (i Platform) String() string {
 	switch {
-	case i <= 14:
+	case i <= 22:
 		return _Platform_name_0[_Platform_index_0[i]:_Platform_index_0[i+1]]
 	case i == 4294967295:
 		return _Platform_name_1
