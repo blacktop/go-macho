@@ -38,6 +38,7 @@ type File struct {
 	exptrieData []byte
 	binds       types.Binds
 	objc        map[uint64]any
+	swift       map[uint64]any
 	ledata      *bytes.Buffer // tmp storage of linkedit data
 
 	sharedCacheRelativeSelectorBaseVMAddress uint64 // objc_opt version 16
@@ -2756,6 +2757,15 @@ func (f *File) FindSymbolAddress(symbol string) (uint64, error) {
 			return sym.Value, nil
 		}
 	}
+	exports, err := f.GetExports()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get exports: %v", err)
+	}
+	for _, sym := range exports {
+		if strings.EqualFold(sym.Name, symbol) {
+			return sym.Address, nil
+		}
+	}
 	return 0, fmt.Errorf("symbol not found in macho symtab")
 }
 
@@ -2769,8 +2779,19 @@ func (f *File) FindAddressSymbols(addr uint64) ([]Symbol, error) {
 			syms = append(syms, sym)
 		}
 	}
+	if f.DyldExportsTrie() != nil && f.DyldExportsTrie().Size > 0 {
+		exports, err := f.DyldExports()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get exports: %v", err)
+		}
+		for _, sym := range exports {
+			if sym.Address == addr {
+				syms = append(syms, Symbol{Name: sym.Name, Value: sym.Address})
+			}
+		}
+	}
 	if len(syms) > 0 {
 		return syms, nil
 	}
-	return nil, fmt.Errorf("symbol(s) not found in macho symtab for addr 0x%016x", addr)
+	return nil, fmt.Errorf("symbol(s) not found in macho symtab for addr %#x", addr)
 }
