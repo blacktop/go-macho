@@ -51,14 +51,20 @@ func (i Toc) String() string {
 type ImageInfoFlag uint32
 
 const (
-	IsReplacement              ImageInfoFlag = 1 << 0 // used for Fix&Continue, now ignored
+	DyldCategoriesOptimized    ImageInfoFlag = 1 << 0 // categories were optimized by dyld
 	SupportsGC                 ImageInfoFlag = 1 << 1 // image supports GC
 	RequiresGC                 ImageInfoFlag = 1 << 2 // image requires GC
 	OptimizedByDyld            ImageInfoFlag = 1 << 3 // image is from an optimized shared cache
 	SignedClassRO              ImageInfoFlag = 1 << 4 // class_ro_t pointers are signed
 	IsSimulated                ImageInfoFlag = 1 << 5 // image compiled for a simulator platform
 	HasCategoryClassProperties ImageInfoFlag = 1 << 6 // class properties in category_t
-	OptimizedByDyldClosure     ImageInfoFlag = 1 << 7 // dyld (not the shared cache) optimized this.
+
+	// OptimizedByDyldClosure is currently set by dyld, but we don't use it
+	// anymore. Instead use
+	// _dyld_objc_notify_mapped_info::dyldObjCRefsOptimized.
+	// Once dyld stops setting it, it will be unused.
+	OptimizedByDyldClosure ImageInfoFlag = 1 << 7 // dyld (not the shared cache) optimized this.
+
 	// 1 byte Swift unstable ABI version number
 	SwiftUnstableVersionMaskShift = 8
 	SwiftUnstableVersionMask      = 0xff << SwiftUnstableVersionMaskShift
@@ -68,24 +74,52 @@ const (
 	SwiftStableVersionMask      = 0xffff << SwiftStableVersionMaskShift
 )
 
-func (f ImageInfoFlag) IsReplacement() bool {
-	return f&IsReplacement != 0
+// DyldCategoriesOptimized
+//
+//	Indicates that dyld preattached categories from this image in the shared
+//	cache and we don't need to scan those categories ourselves. Note: this bit
+//	used to be used for the IsReplacement flag used for Fix & Continue. That
+//	usage is obsolete.
+func (f ImageInfoFlag) DyldCategoriesOptimized() bool {
+	return f&DyldCategoriesOptimized != 0
 }
+
+// SupportsGC
+//
+//	App: GC is required. Framework: GC is supported but not required.
 func (f ImageInfoFlag) SupportsGC() bool {
 	return f&SupportsGC != 0
 }
+
+// RequiresGC
+//
+//	Framework: GC is required.
 func (f ImageInfoFlag) RequiresGC() bool {
 	return f&RequiresGC != 0
 }
+
+// OptimizedByDyld
+//
+//	Assorted metadata precooked in the dyld shared cache.
+//	Never set for images outside the shared cache file itself.
 func (f ImageInfoFlag) OptimizedByDyld() bool {
 	return f&OptimizedByDyld != 0
 }
 func (f ImageInfoFlag) SignedClassRO() bool {
 	return f&SignedClassRO != 0
 }
+
+// IsSimulated
+//
+//	Image was compiled for a simulator platform. Not used by the runtime.
 func (f ImageInfoFlag) IsSimulated() bool {
 	return f&IsSimulated != 0
 }
+
+// HasClassProperties
+//
+//	New ABI: category_t.classProperties fields are present.
+//	Old ABI: Set by some compilers. Not used by the runtime.
 func (f ImageInfoFlag) HasCategoryClassProperties() bool {
 	return f&HasCategoryClassProperties != 0
 }
@@ -95,8 +129,8 @@ func (f ImageInfoFlag) OptimizedByDyldClosure() bool {
 
 func (f ImageInfoFlag) List() []string {
 	var flags []string
-	if (f & IsReplacement) != 0 {
-		flags = append(flags, "IsReplacement")
+	if (f & DyldCategoriesOptimized) != 0 {
+		flags = append(flags, "DyldCategoriesOptimized")
 	}
 	if (f & SupportsGC) != 0 {
 		flags = append(flags, "SupportsGC")
