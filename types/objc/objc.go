@@ -944,16 +944,16 @@ type OptOffsets2 struct {
 	InlinedMethodsEnd   uint64
 }
 
-type ImpCache struct {
-	PreoptCacheT
-	Entries []PreoptCacheEntryT
+type ImpCacheV1 struct {
+	ImpCacheHeaderV1
+	Entries []ImpCacheEntryV1
 }
-type PreoptCacheEntryT struct {
+type ImpCacheEntryV1 struct {
 	SelOffset uint32
 	ImpOffset uint32
 }
 
-type PreoptCacheT struct {
+type ImpCacheHeaderV1 struct {
 	FallbackClassOffset int32
 	Info                uint32
 	// uint32_t cache_shift :  5
@@ -963,25 +963,25 @@ type PreoptCacheT struct {
 	// uint32_t bit_one     :  1
 }
 
-func (p PreoptCacheT) CacheShift() uint32 {
+func (p ImpCacheHeaderV1) CacheShift() uint32 {
 	return uint32(types.ExtractBits(uint64(p.Info), 0, 5))
 }
-func (p PreoptCacheT) CacheMask() uint32 {
+func (p ImpCacheHeaderV1) CacheMask() uint32 {
 	return uint32(types.ExtractBits(uint64(p.Info), 5, 11))
 }
-func (p PreoptCacheT) Occupied() uint32 {
+func (p ImpCacheHeaderV1) Occupied() uint32 {
 	return uint32(types.ExtractBits(uint64(p.Info), 16, 14))
 }
-func (p PreoptCacheT) HasInlines() bool {
+func (p ImpCacheHeaderV1) HasInlines() bool {
 	return types.ExtractBits(uint64(p.Info), 30, 1) != 0
 }
-func (p PreoptCacheT) BitOne() bool {
+func (p ImpCacheHeaderV1) BitOne() bool {
 	return types.ExtractBits(uint64(p.Info), 31, 1) != 0
 }
-func (p PreoptCacheT) Capacity() uint32 {
+func (p ImpCacheHeaderV1) Capacity() uint32 {
 	return p.CacheMask() + 1
 }
-func (p PreoptCacheT) String() string {
+func (p ImpCacheHeaderV1) String() string {
 	return fmt.Sprintf("cache_shift: %d, cache_mask: %d, occupied: %d, has_inlines: %t, bit_one: %t",
 		p.CacheShift(),
 		p.CacheMask(),
@@ -1001,23 +1001,20 @@ type IntObj struct {
 	Number       uint64
 }
 
-type ImpCache2 struct {
-	PreoptCache2T
-	Entries []PreoptCacheEntry2T
+type ImpCacheV2 struct {
+	ImpCacheHeaderV2
+	Entries []ImpCacheEntryV2
 }
-type PreoptCacheEntry2T struct {
-	ImpOffset int64
-	SelOffset uint64
+type ImpCacheEntryV2 uint64
+
+func (e ImpCacheEntryV2) GetImpOffset() int64 {
+	return int64(types.ExtractBits(uint64(e), 0, 38))
+}
+func (e ImpCacheEntryV2) GetSelOffset() uint64 {
+	return types.ExtractBits(uint64(e), 38, 26)
 }
 
-func (e PreoptCacheEntry2T) GetImpOffset() int64 {
-	return int64(types.ExtractBits(uint64(e.ImpOffset), 0, 38))
-}
-func (e PreoptCacheEntry2T) GetSelOffset() uint32 {
-	return uint32(types.ExtractBits(uint64(e.SelOffset), 0, 26))
-}
-
-type PreoptCache2T struct { // FIXME: 64bit new version
+type ImpCacheHeaderV2 struct { // FIXME: 64bit new version
 	FallbackClassOffset int64
 	Info                uint64
 	// int64_t  fallback_class_offset;
@@ -1036,25 +1033,25 @@ type PreoptCache2T struct { // FIXME: 64bit new version
 	// preopt_cache_entry_t entries[];
 }
 
-func (p PreoptCache2T) CacheShift() uint32 {
+func (p ImpCacheHeaderV2) CacheShift() uint32 {
 	return uint32(types.ExtractBits(uint64(p.Info), 0, 5))
 }
-func (p PreoptCache2T) CacheMask() uint32 {
+func (p ImpCacheHeaderV2) CacheMask() uint32 {
 	return uint32(types.ExtractBits(uint64(p.Info), 5, 11))
 }
-func (p PreoptCache2T) Occupied() uint32 {
+func (p ImpCacheHeaderV2) Occupied() uint32 {
 	return uint32(types.ExtractBits(uint64(p.Info), 16, 14))
 }
-func (p PreoptCache2T) HasInlines() bool {
+func (p ImpCacheHeaderV2) HasInlines() bool {
 	return types.ExtractBits(uint64(p.Info), 30, 1) != 0
 }
-func (p PreoptCache2T) BitOne() bool {
+func (p ImpCacheHeaderV2) BitOne() bool {
 	return types.ExtractBits(uint64(p.Info), 63, 1) != 0
 }
-func (p PreoptCache2T) Capacity() uint32 {
+func (p ImpCacheHeaderV2) Capacity() uint32 {
 	return p.CacheMask() + 1
 }
-func (p PreoptCache2T) String() string {
+func (p ImpCacheHeaderV2) String() string {
 	return fmt.Sprintf("cache_shift: %d, cache_mask: %d, occupied: %d, has_inlines: %t, bit_one: %t",
 		p.CacheShift(),
 		p.CacheMask(),
