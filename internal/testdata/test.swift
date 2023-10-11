@@ -1,5 +1,5 @@
 enum MyEnum: String {
-    case A = "test"
+    case A = "testaaaabbbbccccddddeeeeffff"
     case B
     case C
 }
@@ -15,3 +15,5 @@ func greet(person: String) -> String {
     let greeting = "Hello, " + person + "!"
     return greeting
 }
+
+print(greet(person: "world"))

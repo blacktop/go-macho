@@ -221,14 +221,26 @@ type AssociatedTypeDescriptor struct {
 }
 
 func (a AssociatedTypeDescriptor) String() string {
+	return a.dump(false)
+}
+func (a AssociatedTypeDescriptor) Verbose() string {
+	return a.dump(true)
+}
+func (a AssociatedTypeDescriptor) dump(verbose bool) string {
+	var addr string
 	var vars []string
 	for _, v := range a.AssociatedTypeRecords {
 		vars = append(vars, fmt.Sprintf("\t%s: %s", v.Name, v.SubstitutedTypeName))
 	}
+	if verbose {
+		addr = fmt.Sprintf("// %#x\n", a.Address)
+	}
 	return fmt.Sprintf(
-		"extension %s: %s {\n"+
+		"%s"+
+			"extension %s: %s {\n"+
 			"%s\n"+
 			"}",
+		addr,
 		a.ConformingTypeName,
 		a.ProtocolTypeName,
 		strings.Join(vars, "\n"),
@@ -318,6 +330,7 @@ type NecessaryBindings struct {
 	Conformances       int32
 }
 
+// ref: include/swift/RemoteInspection/Records.h - CaptureDescriptor
 type CaptureDescriptorHeader struct {
 	NumCaptureTypes    uint32 // The number of captures in the closure and the number of typerefs that immediately follow this struct.
 	NumMetadataSources uint32 // The number of sources of metadata available in the MetadataSourceMap directly following the list of capture's typerefs.

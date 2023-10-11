@@ -126,6 +126,9 @@ func (f TypeContextDescriptorFlags) MetadataInitialization() MetadataInitializat
 func (f TypeContextDescriptorFlags) HasImportInfo() bool {
 	return types.ExtractBits(uint64(f), int32(HasImportInfo), 1) != 0
 }
+func (f TypeContextDescriptorFlags) HasCanonicalMetadataPrespecializations() bool {
+	return types.ExtractBits(uint64(f), int32(HasCanonicalMetadataPrespecializations), 1) != 0
+}
 func (f TypeContextDescriptorFlags) IsActor() bool {
 	return types.ExtractBits(uint64(f), int32(Class_IsActor), 1) != 0
 }
@@ -222,8 +225,32 @@ type TargetSingletonMetadataInitialization struct {
 	CompletionFunction int32 // The completion function. The pattern will always be null, even for a resilient class.
 }
 
+// TargetForeignMetadataInitialization is the control structure for performing non-trivial initialization of
+// singleton foreign metadata.
 type TargetForeignMetadataInitialization struct {
 	CompletionFunction int32 // The completion function. The pattern will always be null.
+}
+
+type TargetCanonicalSpecializedMetadatasListCount struct {
+	Count uint32
+}
+
+type TargetCanonicalSpecializedMetadatasListEntry struct {
+	Metadata int32
+}
+
+type TargetCanonicalSpecializedMetadatasCachingOnceToken struct {
+	Token int32
+}
+
+type TargetOverrideTableHeader struct {
+	NumEntries uint32
+}
+
+type TargetMethodOverrideDescriptor struct {
+	Class  int32
+	Method int32
+	Impl   int32
 }
 
 type ContextDescriptorFlags uint32
@@ -261,6 +288,7 @@ type TypeDescriptor struct {
 	Address        uint64
 	Parent         Type
 	Name           string
+	SuperClass     string
 	Kind           ContextDescriptorKind
 	AccessFunction uint64
 	FieldOffsets   []int32
@@ -271,23 +299,140 @@ type TypeDescriptor struct {
 }
 
 func (t TypeDescriptor) String() string {
+	return t.dump(false)
+}
+func (t TypeDescriptor) Verbose() string {
+	return t.dump(true)
+}
+func (t TypeDescriptor) dump(verbose bool) string {
+	var addr string
 	switch t.Kind {
 	case CDKindModule:
-		return fmt.Sprintf("module %s", t.Name)
+		if verbose {
+			addr = fmt.Sprintf("// %#x\n", t.Address)
+		}
+		return fmt.Sprintf("%s%s %s", addr, t.Kind, t.Name)
 	case CDKindExtension:
-		return fmt.Sprintf("extension %s", t.Name)
+		if verbose {
+			addr = fmt.Sprintf("// %#x\n", t.Address)
+		}
+		return fmt.Sprintf("%s%s %s", addr, t.Kind, t.Name)
 	case CDKindAnonymous:
-		return fmt.Sprintf("anonymous %s", t.Name)
+		if verbose {
+			addr = fmt.Sprintf("// %#x\n", t.Address)
+		}
+		return fmt.Sprintf("%s%s %s", addr, t.Kind, t.Name)
 	case CDKindProtocol:
-		return fmt.Sprintf("protocol %s", t.Name)
+		if verbose {
+			addr = fmt.Sprintf("// %#x\n", t.Address)
+		}
+		return fmt.Sprintf("%s%s %s", addr, t.Kind, t.Name)
 	case CDKindOpaqueType:
-		return fmt.Sprintf("opaque type %s", t.Name)
+		if verbose {
+			addr = fmt.Sprintf("// %#x\n", t.Address)
+		}
+		return fmt.Sprintf("%s%s %s", addr, t.Kind, t.Name)
 	case CDKindClass:
-		return fmt.Sprintf("class %s", t.Name)
+		var fields []string
+		for _, f := range t.Fields {
+			for _, r := range f.Records {
+				var typ string
+				if len(r.MangledType) > 0 {
+					if strings.HasPrefix(r.MangledType, "symbolic ") {
+						typ = fmt.Sprintf(" = %s()", r.MangledType[9:])
+					} else {
+						typ = fmt.Sprintf(": %s", r.MangledType)
+					}
+				}
+				if verbose {
+					addr = fmt.Sprintf("/* %#x */ ", f.Address)
+				}
+				fields = append(fields, fmt.Sprintf("    %s%s %s%s", addr, r.Flags, strings.Replace(r.Name, "$__lazy_storage_$_", "lazy ", 1), typ))
+			}
+		}
+		var meths []string
+		if t.VTable != nil {
+			for _, m := range t.VTable.Methods {
+				sym := m.Symbol
+				if m.Symbol == "" && m.Impl == 0 {
+					sym = fmt.Sprintf("/* <stripped> %s */", m.Flags.String(""))
+				} else if m.Symbol == "" && m.Impl != 0 {
+					sym = fmt.Sprintf("func sub_%x // %s", m.Address, m.Flags.String(""))
+				} else {
+					sym = fmt.Sprintf("func %s // %s", sym, m.Flags.String(""))
+				}
+				if verbose {
+					addr = fmt.Sprintf("/* %#x */ ", m.Address)
+				}
+				meths = append(meths, fmt.Sprintf("    %s%s", addr, sym))
+			}
+		}
+		if len(fields) == 0 && len(meths) == 0 {
+			if verbose {
+				addr = fmt.Sprintf(" // %#x", t.Address)
+			}
+			return fmt.Sprintf("%s %s.%s {}%s\n", t.Kind, t.Parent.Name, t.Name, addr)
+		}
+		if len(fields) > 0 {
+			fields = append([]string{"  /* fields */"}, fields...)
+		}
+		if len(meths) > 0 {
+			if len(fields) > 0 {
+				meths = append([]string{"\n  /* methods */"}, meths...)
+			} else {
+				meths = append([]string{"  /* methods */"}, meths...)
+			}
+		}
+		var superClass string
+		if t.SuperClass != "" {
+			superClass = fmt.Sprintf(": %s", t.SuperClass)
+		}
+		if verbose {
+			addr = fmt.Sprintf("// %#x\n", t.Address)
+		}
+		return fmt.Sprintf("%s%s %s.%s%s {\n%s%s\n}", addr, t.Kind, t.Parent.Name, t.Name, superClass, strings.Join(fields, "\n"), strings.Join(meths, "\n"))
 	case CDKindStruct:
-		return fmt.Sprintf("struct %s", t.Name)
+		var fields []string
+		for _, f := range t.Fields {
+			for _, r := range f.Records {
+				if verbose {
+					addr = fmt.Sprintf(" // %#x", t.Address)
+				}
+				fields = append(fields, fmt.Sprintf("    %s %s: %s%s", r.Flags, r.Name, r.MangledType, addr))
+			}
+		}
+		if verbose {
+			addr = fmt.Sprintf("// %#x\n", t.Address)
+		}
+		if len(fields) == 0 {
+			return fmt.Sprintf("%s%s %s.%s {}", addr, t.Kind, t.Parent.Name, t.Name)
+		}
+		return fmt.Sprintf("%s%s %s.%s {\n%s\n}", addr, t.Kind, t.Parent.Name, t.Name, strings.Join(fields, "\n"))
 	case CDKindEnum:
-		return fmt.Sprintf("enum %s", t.Name)
+		var fields []string
+		for _, f := range t.Fields {
+			for _, r := range f.Records {
+				cs := "case"
+				if r.Flags == "indirect case" {
+					cs = "indirect case"
+				}
+				var typ string
+				if len(r.MangledType) > 0 {
+					typ = fmt.Sprintf(": %s", r.MangledType)
+				}
+				if verbose {
+					addr = fmt.Sprintf(" // %#x", f.Address)
+				}
+				fields = append(fields, fmt.Sprintf("    %s %s%s%s", cs, r.Name, typ, addr))
+			}
+		}
+		if verbose {
+			addr = fmt.Sprintf("// %#x\n", t.Address)
+		}
+		if len(fields) == 0 {
+			return fmt.Sprintf("%s%s %s.%s {}", addr, t.Kind, t.Parent.Name, t.Name)
+		}
+		return fmt.Sprintf("%s%s %s.%s {\n%s\n}", addr, t.Kind, t.Parent.Name, t.Name, strings.Join(fields, "\n"))
 	default:
 		return fmt.Sprintf("unknown type %s", t.Name)
 	}
@@ -353,6 +498,8 @@ type TargetStructDescriptor struct {
 	FieldOffsetVectorOffset uint32
 }
 
+// TargetProtocolDescriptor
+// ref: include/swift/ABI/MetadataValues.h
 type TargetProtocolDescriptor struct {
 	TargetContextDescriptor
 	NameOffset                 int32  // The name of the protocol.
@@ -366,14 +513,28 @@ type TargetOpaqueTypeDescriptor struct {
 	TargetContextDescriptor
 }
 
+type ExtraClassDescriptorFlags uint32
+
+const (
+	HasObjCResilientClassStub ExtraClassDescriptorFlags = 0
+)
+
+type TargetResilientSuperclass struct {
+	Superclass int32
+}
+
+type TargetObjCResilientClassStubInfo struct {
+	Stub int32 // Objective-C class stub.
+}
+
 type TargetClassDescriptor struct {
 	TargetTypeContextDescriptor
-	SuperclassType              int32
-	MetadataNegativeSizeInWords uint32
-	MetadataPositiveSizeInWords uint32
-	NumImmediateMembers         uint32
-	NumFields                   uint32
-	FieldOffsetVectorOffset     uint32
+	SuperclassType                                       int32
+	MetadataNegativeSizeInWordsORResilientMetadataBounds uint32
+	MetadataPositiveSizeInWordsORExtraClassFlags         uint32
+	NumImmediateMembers                                  uint32
+	NumFields                                            uint32
+	FieldOffsetVectorOffset                              uint32
 }
 
 type TargetTypeGenericContextDescriptorHeader struct {
@@ -402,23 +563,13 @@ func (g TargetGenericContextDescriptorHeader) HasArguments() bool {
 type VTable struct {
 	TargetVTableDescriptorHeader
 	MethodListOffset int64
-	Methods          []TargetMethodDescriptor
+	Methods          []Method
 }
 
-type method struct {
-	Flags   MethodDescriptorFlags
+type Method struct {
+	TargetMethodDescriptor
 	Address uint64
-}
-
-func (v *VTable) GetMethods(base uint64) []method {
-	var methods []method
-	for idx, m := range v.Methods {
-		methods = append(methods, method{
-			Flags:   m.Flags,
-			Address: base + uint64(v.MethodListOffset+int64(m.Impl)+int64((idx*8)+4)),
-		})
-	}
-	return methods
+	Symbol  string
 }
 
 type TargetVTableDescriptorHeader struct {
@@ -434,12 +585,12 @@ type TargetMethodDescriptor struct {
 type mdKind uint8
 
 const (
-	Method mdKind = iota
-	Init
-	Getter
-	Setter
-	ModifyCoroutine
-	ReadCoroutine
+	MDKMethod mdKind = iota
+	MDKInit
+	MDKGetter
+	MDKSetter
+	MDKModifyCoroutine
+	MDKReadCoroutine
 )
 
 const (
@@ -451,17 +602,17 @@ type MethodDescriptorFlags uint32
 
 func (f MethodDescriptorFlags) Kind() string {
 	switch mdKind(f & 0x0F) {
-	case Method:
+	case MDKMethod:
 		return "method"
-	case Init:
+	case MDKInit:
 		return "init"
-	case Getter:
+	case MDKGetter:
 		return "getter"
-	case Setter:
+	case MDKSetter:
 		return "setter"
-	case ModifyCoroutine:
+	case MDKModifyCoroutine:
 		return "modify coroutine"
-	case ReadCoroutine:
+	case MDKReadCoroutine:
 		return "read coroutine"
 	default:
 		return fmt.Sprintf("unknown kind %d", mdKind(f&0x0F))
@@ -479,7 +630,7 @@ func (f MethodDescriptorFlags) IsAsync() bool {
 func (f MethodDescriptorFlags) ExtraDiscriminator() uint16 {
 	return uint16(f >> ExtraDiscriminatorShift)
 }
-func (f MethodDescriptorFlags) String() string {
+func (f MethodDescriptorFlags) String(field string) string {
 	var flags []string
 	if f.IsInstance() {
 		flags = append(flags, "instance")
@@ -496,7 +647,10 @@ func (f MethodDescriptorFlags) String() string {
 	if len(strings.Join(flags, "|")) == 0 {
 		return f.Kind()
 	}
-	return fmt.Sprintf("%s (%s)", f.Kind(), strings.Join(flags, "|"))
+	if len(field) > 0 {
+		field += " "
+	}
+	return fmt.Sprintf("%s%s (%s)", field, f.Kind(), strings.Join(flags, "|"))
 }
 
 // __swift5_acfuncs
@@ -543,4 +697,47 @@ type AccessibleFunctionCacheEntry struct {
 type AccessibleFunctionsState struct {
 	Cache          AccessibleFunctionCacheEntry
 	SectionsToScan AccessibleFunctionsSection
+}
+
+type MultiPayloadEnumSizeAndFlags uint32
+
+func (f MultiPayloadEnumSizeAndFlags) Size() uint16 {
+	return uint16(f >> 16)
+}
+func (f MultiPayloadEnumSizeAndFlags) Flags() uint16 {
+	return uint16(f & 0xffff)
+}
+func (f MultiPayloadEnumSizeAndFlags) UsesPayloadSpareBits() bool {
+	return (f.Flags() & 1) != 0
+}
+func (f MultiPayloadEnumSizeAndFlags) String() string {
+	return fmt.Sprintf("size: %d, flags: %d, uses_payload_spare_bits: %t", f.Size(), f.Flags(), f.UsesPayloadSpareBits())
+}
+
+type MultiPayloadEnumPayloadSpareBitMaskByteCount uint32
+
+func (f MultiPayloadEnumPayloadSpareBitMaskByteCount) ByteOffset() uint16 {
+	return uint16(f >> 16)
+}
+func (f MultiPayloadEnumPayloadSpareBitMaskByteCount) ByteCount() uint16 {
+	return uint16(f & 0xffff)
+}
+func (f MultiPayloadEnumPayloadSpareBitMaskByteCount) String() string {
+	return fmt.Sprintf("byte_offset: %d, byte_count: %d", f.ByteOffset(), f.ByteCount())
+}
+
+// ref: include/swift/RemoteInspection/Records.h
+type MultiPayloadEnumDescriptor struct {
+	TypeName int32
+	Contents []uint32
+}
+
+type MultiPayloadEnum struct {
+	Address  uint64
+	Type     string
+	Contents []uint32
+}
+
+func (e MultiPayloadEnum) String() string {
+	return fmt.Sprintf("// %#x (multi-payload)\nenum %s {}", e.Address, e.Type)
 }

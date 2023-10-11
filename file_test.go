@@ -681,13 +681,13 @@ func TestNewFileWithSwift(t *testing.T) {
 	// 	}
 	// }
 
-	// if typs, err := got.GetSwiftTypes(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
-	// 	t.Fatalf("GetSwiftTypes() error = %v", err)
-	// } else {
-	// 	for _, t := range typs {
-	// 		fmt.Println(t)
-	// 	}
-	// }
+	if typs, err := got.GetSwiftTypes(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftTypes() error = %v", err)
+	} else {
+		for _, t := range typs {
+			fmt.Println(t)
+		}
+	}
 
 	// if refStrs, err := got.GetSwiftReflectionStrings(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
 	// 	t.Fatalf("GetSwiftReflectionStrings() error = %v", err)
@@ -701,7 +701,7 @@ func TestNewFileWithSwift(t *testing.T) {
 		t.Fatalf("GetSwiftProtocols() error = %v", err)
 	} else {
 		for _, prot := range prots {
-			fmt.Println(prot)
+			fmt.Println(prot.Verbose())
 		}
 	}
 
@@ -713,29 +713,37 @@ func TestNewFileWithSwift(t *testing.T) {
 		}
 	}
 
-	if atyps, err := got.GetSwiftAssociatedTypes(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
-		t.Fatalf("GetSwiftAssociatedTypes() error = %v", err)
-	} else {
-		for _, at := range atyps {
-			fmt.Println(at)
-		}
-	}
+	// if atyps, err := got.GetSwiftAssociatedTypes(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+	// 	t.Fatalf("GetSwiftAssociatedTypes() error = %v", err)
+	// } else {
+	// 	for _, at := range atyps {
+	// 		fmt.Println(at)
+	// 	}
+	// }
 
-	if bins, err := got.GetSwiftBuiltinTypes(); err != nil {
-		if !errors.Is(err, ErrSwiftSectionError) {
-			t.Fatalf("GetSwiftBuiltinTypes() error = %v", err)
-		}
-	} else {
-		for _, bin := range bins {
-			fmt.Println(bin)
-		}
-	}
+	// if bins, err := got.GetSwiftBuiltinTypes(); err != nil {
+	// 	if !errors.Is(err, ErrSwiftSectionError) {
+	// 		t.Fatalf("GetSwiftBuiltinTypes() error = %v", err)
+	// 	}
+	// } else {
+	// 	for _, bin := range bins {
+	// 		fmt.Println(bin)
+	// 	}
+	// }
 
-	if fds, err := got.GetSwiftFields(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
-		t.Fatalf("GetSwiftFields() error = %v", err)
+	// if fds, err := got.GetSwiftFields(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+	// 	t.Fatalf("GetSwiftFields() error = %v", err)
+	// } else {
+	// 	for _, f := range fds {
+	// 		fmt.Println(f)
+	// 	}
+	// }
+
+	if mpenums, err := got.GetMultiPayloadEnums(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetMultiPayloadEnums() error = %v", err)
 	} else {
-		for _, f := range fds {
-			fmt.Println(f)
+		for _, e := range mpenums {
+			fmt.Println(e)
 		}
 	}
 

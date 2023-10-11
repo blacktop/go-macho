@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-//go:generate stringer -type=FieldDescriptorKind,FieldRecordFlags -linecomment -output fields_string.go
+//go:generate stringer -type=FieldDescriptorKind -linecomment -output fields_string.go
 
 // ref: swift/include/swift/Reflection/Records.h
 
@@ -26,6 +26,25 @@ const (
 	// IsArtificial is this an artificial field?
 	IsArtificial FieldRecordFlags = 0x4
 )
+
+func (f FieldRecordFlags) String() string { // TODO: this is dumb (does ind or anon ever happen?)
+	var out string
+	if f&IsIndirectCase == IsIndirectCase {
+		out = "indirect case"
+	}
+	if f&IsArtificial == IsArtificial {
+		if len(out) > 0 {
+			out += " | "
+		}
+		out += "artificial"
+	}
+	if (f & IsVar) == IsVar {
+		out = "var"
+	} else {
+		out = "let"
+	}
+	return out
+}
 
 type FieldDescriptorKind uint16
 
@@ -126,7 +145,7 @@ func (f Field) String() string {
 		recs += fmt.Sprintf("        %s %s%s%s\n", flags, r.Name, hasType, r.MangledType)
 	}
 	if len(f.SuperClass) > 0 {
-		return fmt.Sprintf("// %#x:\n%s %s.%s {%s}\n", f.Address, f.Kind, f.MangledType, f.SuperClass, recs)
+		return fmt.Sprintf("// %#x:\n%s %s: %s {%s}\n", f.Address, f.Kind, f.MangledType, f.SuperClass, recs)
 	}
 	return fmt.Sprintf("// %#x:\n%s %s {%s}\n", f.Address, strings.ToLower(f.Kind), f.MangledType, recs)
 }

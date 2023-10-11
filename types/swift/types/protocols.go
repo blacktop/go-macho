@@ -8,28 +8,42 @@ import (
 
 // Protocol swift protocol object
 type Protocol struct {
-	Name           string
-	AssociatedType string
-	Parent         string
-	Descriptor
+	Header                TargetProtocolDescriptor
+	Address               uint64
+	Name                  string
+	AssociatedType        string
+	Parent                string
 	SignatureRequirements []TargetGenericRequirement
 	Requirements          []TargetProtocolRequirement
 }
 
 func (p Protocol) String() string {
-	var associateType string
-	if p.Descriptor.AssociatedTypeNamesOffset != 0 {
-		associateType = fmt.Sprintf("AssociatedType: %s\n", p.AssociatedType)
+	return p.dump(false)
+}
+func (p Protocol) Verbose() string {
+	return p.dump(true)
+}
+func (p Protocol) dump(verbose bool) string {
+	var addr string
+	var reqs string
+	if len(p.Requirements) > 0 {
+		reqs = "  /* requirements */\n"
+		for _, req := range p.Requirements {
+			if verbose && req.DefaultImplementation != 0 {
+				addr = fmt.Sprintf(" // %#x", req.DefaultImplementation)
+			}
+			reqs += fmt.Sprintf("    %s%s\n", req.Flags, addr)
+		}
 	}
-	var parent string
-	if p.Descriptor.ParentOffset != 0 {
-		parent = fmt.Sprintf("\n---\nParent: %s\n", p.Parent)
+	if verbose {
+		addr = fmt.Sprintf("// %#x\n", p.Address)
 	}
 	return fmt.Sprintf(
-		"Name:           %s\n"+
-			"%s"+
-			"%s%s",
-		p.Name, associateType, p.Descriptor, parent)
+		"%sprotocol %s {\n%s}",
+		addr,
+		p.Name,
+		reqs,
+	)
 }
 
 // ProtocolContextDescriptorFlags flags for protocol context descriptors.
@@ -50,27 +64,6 @@ const (
 // Descriptor in __TEXT.__swift5_protos
 // This section contains an array of 32-bit signed integers.
 // Each integer is a relative offset that points to a protocol descriptor in the __TEXT.__const section.
-type Descriptor struct {
-	Flags                      ContextDescriptorFlags // overide kind specific flags w/ ProtocolContextDescriptorFlags TODO: handle kind specific flags
-	ParentOffset               int32
-	NameOffset                 int32  // The name of the protocol.
-	NumRequirementsInSignature uint32 // The number of generic requirements in the requirement signature of the protocol.
-	NumRequirements            uint32 /* The number of requirements in the protocol. If any requirements beyond MinimumWitnessTableSizeInWords are present
-	 * in the witness table template, they will be not be overwritten with defaults. */
-	AssociatedTypeNamesOffset int32 // Associated type names, as a space-separated list in the same order as the requirements.
-}
-
-func (d Descriptor) GetProtocolContextDescriptorFlags() ProtocolContextDescriptorFlags {
-	return ProtocolContextDescriptorFlags(d.Flags.KindSpecific())
-}
-
-func (d Descriptor) String() string {
-	return fmt.Sprintf(
-		"Flags: (%s)\n"+
-			"NumRequirementsInSignature: %d\n"+
-			"NumRequirements:            %d",
-		d.Flags, d.NumRequirementsInSignature, d.NumRequirements)
-}
 
 type GenericRequirementKind uint8
 
@@ -98,6 +91,7 @@ func (f GenericRequirementFlags) String() string {
 	return fmt.Sprintf("key_arg: %t, extra_arg: %t, kind: %s", f.HasKeyArgument(), f.HasExtraArgument(), f.Kind())
 }
 
+// ref: swift/ABI/Metadata.h - TargetGenericRequirementDescriptor
 type TargetGenericRequirementDescriptor struct {
 	Flags                               GenericRequirementFlags
 	Param                               int32 // The type that's constrained, described as a mangled name.
@@ -108,6 +102,26 @@ type TargetGenericRequirement struct {
 	Name string
 	Kind string
 	TargetGenericRequirementDescriptor
+}
+
+// ref: swift/ABI/GenericContext.h - GenericPackShapeHeader
+type GenericPackShapeHeader struct {
+	NumPacks        uint16 // The number of generic parameters and conformance requirements which are packs.
+	NumShapeClasses uint16 // The number of equivalence classes in the same-shape relation.
+}
+type GenericPackKind uint16
+
+const (
+	Metadata     GenericPackKind = 0
+	WitnessTable GenericPackKind = 1
+)
+
+// ref: swift/ABI/GenericContext.h - GenericPackShapeDescriptor
+type GenericPackShapeDescriptor struct {
+	Kind       GenericPackKind
+	Index      uint16 // The index of this metadata pack or witness table pack in the generic arguments array.
+	ShapeClass uint16 // The equivalence class of this pack under the same-shape relation.
+	_          uint16 // Unused
 }
 
 const (
@@ -157,7 +171,7 @@ func (f ProtocolRequirementFlags) IsFunctionImpl() bool {
 	}
 }
 func (f ProtocolRequirementFlags) String() string {
-	return fmt.Sprintf("kind: %s, instance: %t, async: %t, signed_with_addr: %t, extra_discriminator: %d, function_impl: %t",
+	return fmt.Sprintf("kind: %s, instance: %t, async: %t, signed_with_addr: %t, extra_discriminator: %x, function_impl: %t",
 		f.Kind(),
 		f.IsInstance(),
 		f.IsAsync(),
@@ -166,9 +180,12 @@ func (f ProtocolRequirementFlags) String() string {
 		f.IsFunctionImpl())
 }
 
+// TargetProtocolRequirement protocol requirement descriptor. This describes a single protocol requirement in a protocol descriptor.
+// The index of the requirement in the descriptor determines the offset of the witness in a witness table for this protocol.
+// ref: swift/ABI/Metadata.h - TargetProtocolRequirement
 type TargetProtocolRequirement struct {
 	Flags                 ProtocolRequirementFlags
-	DefaultImplementation int32
+	DefaultImplementation int32 // The optional default implementation of the protocol.
 }
 
 type ConformanceFlags uint32
@@ -177,16 +194,19 @@ const (
 	UnusedLowBits ConformanceFlags = 0x07 // historical conformance kind
 
 	TypeMetadataKindMask  ConformanceFlags = 0x7 << 3 // 8 type reference kinds
-	TypeMetadataKindShift ConformanceFlags = 3
+	TypeMetadataKindShift                  = 3
 
 	IsRetroactiveMask          ConformanceFlags = 0x01 << 6
 	IsSynthesizedNonUniqueMask ConformanceFlags = 0x01 << 7
 
 	NumConditionalRequirementsMask  ConformanceFlags = 0xFF << 8
-	NumConditionalRequirementsShift ConformanceFlags = 8
+	NumConditionalRequirementsShift                  = 8
 
 	HasResilientWitnessesMask  ConformanceFlags = 0x01 << 16
 	HasGenericWitnessTableMask ConformanceFlags = 0x01 << 17
+
+	NumConditionalPackDescriptorsMask  ConformanceFlags = 0xFF << 24
+	NumConditionalPackDescriptorsShift                  = 24
 )
 
 // IsRetroactive Is the conformance "retroactive"?
@@ -226,18 +246,24 @@ func (f ConformanceFlags) HasGenericWitnessTable() bool {
 	return (f & HasGenericWitnessTableMask) != 0
 }
 
+// NumConditionalPackShapeDescriptors retrieve the # of conditional pack shape descriptors.
+func (f ConformanceFlags) NumConditionalPackShapeDescriptors() int {
+	return int((f & NumConditionalPackDescriptorsMask) >> NumConditionalPackDescriptorsShift)
+}
+
 // GetTypeReferenceKind retrieve the type reference kind kind.
 func (f ConformanceFlags) GetTypeReferenceKind() TypeReferenceKind {
 	return TypeReferenceKind((f & TypeMetadataKindMask) >> TypeMetadataKindShift)
 }
 
 func (f ConformanceFlags) String() string {
-	return fmt.Sprintf("retroactive: %t, synthesized_nonunique: %t, num_cond_reqs: %d, has_resilient_witnesses: %t, has_generic_witness_table: %t, type_reference_kind: %s",
+	return fmt.Sprintf("retroactive: %t, synthesized_nonunique: %t, num_cond_reqs: %d, has_resilient_witnesses: %t, has_generic_witness_table: %t, num_cond_pack_shape_desc: %d, type_reference_kind: %s",
 		f.IsRetroactive(),
 		f.IsSynthesizedNonUnique(),
 		f.GetNumConditionalRequirements(),
 		f.HasResilientWitnesses(),
 		f.HasGenericWitnessTable(),
+		f.NumConditionalPackShapeDescriptors(),
 		f.GetTypeReferenceKind(),
 	)
 }
@@ -247,31 +273,101 @@ func (f ConformanceFlags) String() string {
 // Each integer is a relative offset that points to a protocol conformance descriptor in the __TEXT.__const section.
 
 type TargetProtocolConformanceDescriptor struct {
-	ProtocolOffsest            int32
-	TypeRefOffsest             int32
-	WitnessTablePatternOffsest int32
-	Flags                      ConformanceFlags
+	ProtocolOffsest            int32            // The protocol being conformed to.
+	TypeRefOffsest             int32            // Some description of the type that conforms to the protocol.
+	WitnessTablePatternOffsest int32            // The witness table pattern, which may also serve as the witness table.
+	Flags                      ConformanceFlags // Various flags, including the kind of conformance.
 }
 
 type ConformanceDescriptor struct {
 	TargetProtocolConformanceDescriptor
-	Address      uint64
-	Protocol     string
-	NominalType  *TypeDescriptor
-	WitnessTable int32
+	Address                 uint64
+	Protocol                string
+	TypeRef                 *TypeDescriptor
+	Retroactive             *TargetModuleContext // context of a retroactive conformance
+	ConditionalRequirements []TargetGenericRequirement
+	ResilientWitnesses      []ResilientWitnesses
+	GenericWitnessTable     TargetGenericWitnessTable
 }
 
 func (c ConformanceDescriptor) String() string {
+	return c.dump(false)
+}
+func (c ConformanceDescriptor) Verbose() string {
+	return c.dump(true)
+}
+func (c ConformanceDescriptor) dump(verbose bool) string {
+	var addr string
+	var retroactive string
+	if c.Flags.IsRetroactive() {
+		retroactive = fmt.Sprintf(": %s", c.Retroactive.Name)
+	}
+	var reqs string
+	if len(c.ConditionalRequirements) > 0 {
+		reqs = "\n  /* conditional requirements */\n"
+		for _, req := range c.ConditionalRequirements {
+			reqs += fmt.Sprintf("    %s: %s\n", req.Name, req.Kind)
+		}
+	}
+	var resilientWitnesses string
+	if len(c.ResilientWitnesses) > 0 {
+		resilientWitnesses = "\n  /* resilient witnesses */\n"
+		for _, witness := range c.ResilientWitnesses {
+			if verbose {
+				addr = fmt.Sprintf("\t// %#x", witness.Implementation)
+			}
+			resilientWitnesses += fmt.Sprintf("    %s%s\n", witness.ProtocolRequirement, addr)
+		}
+	}
+	if verbose {
+		addr = fmt.Sprintf("// %#x\n", c.Address)
+	}
 	return fmt.Sprintf(
-		"protocol %s {\n"+
-			"\tnominal type descriptor for %s %s\n"+
+		"%s"+
+			"%s%s {\n"+
+			"    %s %s.%s // %#x\n"+
+			"%s"+
+			"%s"+
 			"}",
+		addr,
 		c.Protocol,
-		c.NominalType.Kind,
-		c.NominalType.Name,
+		retroactive,
+		c.TypeRef.Kind,
+		c.TypeRef.Parent.Name,
+		c.TypeRef.Name,
+		c.TypeRef.AccessFunction,
+		reqs,
+		resilientWitnesses,
 	)
 }
 
 type TargetWitnessTable struct {
 	Description int32
+}
+
+type ResilientWitnesses struct {
+	ProtocolRequirement string
+	Implementation      uint64
+}
+
+// TargetResilientWitnessesHeader object
+// ref: swift/ABI/Metadata.h - TargetResilientWitnessesHeader
+type TargetResilientWitnessesHeader struct {
+	NumWitnesses uint32
+}
+
+// TargetResilientWitness object
+// ref: swift/ABI/Metadata.h - TargetResilientWitness
+type TargetResilientWitness struct {
+	Requirement uint32
+	Impl        int32
+}
+
+// TargetGenericWitnessTable object
+// ref: swift/ABI/Metadata.h - TargetGenericWitnessTable
+type TargetGenericWitnessTable struct {
+	WitnessTableSizeInWords                                uint16
+	WitnessTablePrivateSizeInWordsAndRequiresInstantiation uint16
+	Instantiator                                           int32
+	PrivateData                                            int32
 }
