@@ -1,0 +1,114 @@
+package swift
+
+import (
+	"encoding/binary"
+	"fmt"
+	"io"
+	"strings"
+)
+
+// __TEXT.__swift5_assocty
+// This section contains an array of associated type descriptors.
+// An associated type descriptor contains a collection of associated type records for a conformance.
+// An associated type records describe the mapping from an associated type to the type witness of a conformance.
+
+type AssociatedType struct {
+	AssociatedTypeDescriptor
+	Address            uint64
+	ConformingTypeAddr uint64
+	ConformingTypeName string
+	ProtocolTypeName   string
+	TypeRecords        []ATRecordType
+}
+
+func (a AssociatedType) String() string {
+	return a.dump(false)
+}
+func (a AssociatedType) Verbose() string {
+	return a.dump(true)
+}
+func (a AssociatedType) dump(verbose bool) string {
+	var addr string
+	var vars []string
+	for _, v := range a.TypeRecords {
+		vars = append(vars, fmt.Sprintf("    %s: %s", v.Name, v.SubstitutedTypeName))
+	}
+	if verbose {
+		addr = fmt.Sprintf("// %#x\n", a.Address)
+	}
+	return fmt.Sprintf(
+		"%s"+
+			"extension %s: %s {\n"+
+			"%s\n"+
+			"}",
+		addr,
+		a.ConformingTypeName,
+		a.ProtocolTypeName,
+		strings.Join(vars, "\n"),
+	)
+}
+
+// AssociatedTypeDescriptor an associated type descriptor contains a collection of associated type records for a conformance.
+// ref: include/swift/RemoteInspection/Records.h
+type AssociatedTypeDescriptor struct {
+	ConformingTypeNameOffset RelativeDirectPointer
+	ProtocolTypeNameOffset   RelativeDirectPointer
+	NumAssociatedTypes       uint32
+	AssociatedTypeRecordSize uint32
+}
+
+func ReadAssociatedTypeDescriptor(r io.Reader, addr uint64) (AssociatedTypeDescriptor, error) {
+	atd := AssociatedTypeDescriptor{
+		ConformingTypeNameOffset: RelativeDirectPointer{
+			Address: addr,
+		},
+		ProtocolTypeNameOffset: RelativeDirectPointer{
+			Address: addr + uint64(binary.Size(RelativeDirectPointer{}.RelOff)),
+		},
+	}
+	if err := binary.Read(r, binary.LittleEndian, &atd.ConformingTypeNameOffset.RelOff); err != nil {
+		return AssociatedTypeDescriptor{}, err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &atd.ProtocolTypeNameOffset.RelOff); err != nil {
+		return AssociatedTypeDescriptor{}, err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &atd.NumAssociatedTypes); err != nil {
+		return AssociatedTypeDescriptor{}, err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &atd.AssociatedTypeRecordSize); err != nil {
+		return AssociatedTypeDescriptor{}, err
+	}
+	return atd, nil
+}
+
+type ATRecordType struct {
+	AssociatedTypeRecord
+	Name                string
+	SubstitutedTypeName string
+	SubstitutedTypeAddr uint64
+}
+
+// AssociatedTypeRecord type records describe the mapping from an associated type to the type witness of a conformance.
+// ref: include/swift/RemoteInspection/Records.h
+type AssociatedTypeRecord struct {
+	NameOffset                RelativeDirectPointer
+	SubstitutedTypeNameOffset RelativeDirectPointer
+}
+
+func ReadAssociatedTypeRecord(r io.Reader, addr uint64) (AssociatedTypeRecord, error) {
+	atr := AssociatedTypeRecord{
+		NameOffset: RelativeDirectPointer{
+			Address: addr,
+		},
+		SubstitutedTypeNameOffset: RelativeDirectPointer{
+			Address: addr + uint64(binary.Size(RelativeDirectPointer{}.RelOff)),
+		},
+	}
+	if err := binary.Read(r, binary.LittleEndian, &atr.NameOffset.RelOff); err != nil {
+		return AssociatedTypeRecord{}, err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &atr.SubstitutedTypeNameOffset.RelOff); err != nil {
+		return AssociatedTypeRecord{}, err
+	}
+	return atr, nil
+}

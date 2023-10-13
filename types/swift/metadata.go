@@ -1,6 +1,6 @@
-package types
+package swift
 
-//go:generate stringer -type MetadataKind -linecomment
+//go:generate stringer -type MetadataKind -linecomment -output metadata_string.go
 
 const (
 	// Non-type metadata kinds have this bit set.

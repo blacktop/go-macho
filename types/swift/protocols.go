@@ -1,14 +1,16 @@
-package types
+package swift
 
 import (
+	"encoding/binary"
 	"fmt"
+	"io"
 )
 
 //go:generate stringer -type GenericRequirementKind,ProtocolRequirementKind -linecomment -output protocols_string.go
 
 // Protocol swift protocol object
 type Protocol struct {
-	Header                TargetProtocolDescriptor
+	TargetProtocolDescriptor
 	Address               uint64
 	Name                  string
 	AssociatedType        string
@@ -29,21 +31,49 @@ func (p Protocol) dump(verbose bool) string {
 	if len(p.Requirements) > 0 {
 		reqs = "  /* requirements */\n"
 		for _, req := range p.Requirements {
-			if verbose && req.DefaultImplementation != 0 {
-				addr = fmt.Sprintf(" // %#x", req.DefaultImplementation)
+			var rtyp string
+			switch req.Flags.Kind() {
+			case PRKindMethodc:
+				rtyp = "func"
+			default:
+				rtyp = "var"
 			}
-			reqs += fmt.Sprintf("    %s%s\n", req.Flags, addr)
+			if !req.Flags.IsInstance() {
+				rtyp = "static " + rtyp
+			}
+			if verbose {
+				addr = " // <stripped>"
+				if req.DefaultImplementation != 0 {
+					addr = fmt.Sprintf(" // %#x", req.DefaultImplementation)
+				}
+				if req.Flags.IsSignedWithAddress() && req.Flags.ExtraDiscriminator() != 0 {
+					addr += fmt.Sprintf(" __ptrauth(%#04x)", req.Flags.ExtraDiscriminator())
+				}
+			}
+			reqs += fmt.Sprintf("    %s {%s}%s\n", rtyp, req.Flags.Kind(), addr)
 		}
 	}
 	if verbose {
 		addr = fmt.Sprintf("// %#x\n", p.Address)
 	}
 	return fmt.Sprintf(
-		"%sprotocol %s {\n%s}",
+		"%sprotocol %s.%s {\n%s}",
 		addr,
+		p.Parent,
 		p.Name,
 		reqs,
 	)
+}
+
+// TargetProtocolDescriptor
+// ref: include/swift/ABI/MetadataValues.h
+type TargetProtocolDescriptor struct {
+	TargetContextDescriptor
+	NameOffset                 int32  // The name of the protocol.
+	NumRequirementsInSignature uint32 // The number of generic requirements in the requirement signature of the protocol.
+	NumRequirements            uint32 /* The number of requirements in the protocol. If any requirements beyond MinimumWitnessTableSizeInWords are present
+	 * in the witness table template, they will be not be overwritten with defaults. */
+	AssociatedTypeNamesOffset int32 // Associated type names, as a space-separated list in the same order as the requirements.
 }
 
 // ProtocolContextDescriptorFlags flags for protocol context descriptors.
@@ -104,11 +134,13 @@ type TargetGenericRequirement struct {
 	TargetGenericRequirementDescriptor
 }
 
+// GenericPackShapeHeader object
 // ref: swift/ABI/GenericContext.h - GenericPackShapeHeader
 type GenericPackShapeHeader struct {
 	NumPacks        uint16 // The number of generic parameters and conformance requirements which are packs.
 	NumShapeClasses uint16 // The number of equivalence classes in the same-shape relation.
 }
+
 type GenericPackKind uint16
 
 const (
@@ -116,6 +148,18 @@ const (
 	WitnessTable GenericPackKind = 1
 )
 
+// GenericPackShapeDescriptor the GenericPackShapeHeader is followed by an array of these descriptors,
+// whose length is given by the header's NumPacks field.
+//
+// The invariant is that all pack descriptors with GenericPackKind::Metadata
+// must precede those with GenericPackKind::WitnessTable, and for each kind,
+// the pack descriptors are ordered by their Index.
+//
+// This allows us to iterate over the generic arguments array in parallel
+// with the array of pack shape descriptors. We know we have a metadata
+// or witness table when we reach the generic argument whose index is
+// stored in the next descriptor; we increment the descriptor pointer in this case.
+//
 // ref: swift/ABI/GenericContext.h - GenericPackShapeDescriptor
 type GenericPackShapeDescriptor struct {
 	Kind       GenericPackKind
@@ -273,21 +317,54 @@ func (f ConformanceFlags) String() string {
 // Each integer is a relative offset that points to a protocol conformance descriptor in the __TEXT.__const section.
 
 type TargetProtocolConformanceDescriptor struct {
-	ProtocolOffsest            int32            // The protocol being conformed to.
-	TypeRefOffsest             int32            // Some description of the type that conforms to the protocol.
-	WitnessTablePatternOffsest int32            // The witness table pattern, which may also serve as the witness table.
-	Flags                      ConformanceFlags // Various flags, including the kind of conformance.
+	ProtocolOffsest            RelativeDirectPointer // The protocol being conformed to.
+	TypeRefOffsest             RelativeDirectPointer // Some description of the type that conforms to the protocol.
+	WitnessTablePatternOffsest RelativeDirectPointer // The witness table pattern, which may also serve as the witness table.
+	Flags                      ConformanceFlags      // Various flags, including the kind of conformance.
+}
+
+func (c TargetProtocolConformanceDescriptor) Size() int64 {
+	return int64(4 * binary.Size(uint32(0))) // 4 x uint32
 }
 
 type ConformanceDescriptor struct {
 	TargetProtocolConformanceDescriptor
 	Address                 uint64
 	Protocol                string
-	TypeRef                 *TypeDescriptor
+	TypeRef                 *Type
 	Retroactive             *TargetModuleContext // context of a retroactive conformance
 	ConditionalRequirements []TargetGenericRequirement
+	ConditionalPackShapes   []GenericPackShapeDescriptor
 	ResilientWitnesses      []ResilientWitnesses
 	GenericWitnessTable     TargetGenericWitnessTable
+	WitnessTablePattern     string
+}
+
+func (c *ConformanceDescriptor) ReadDescriptor(r io.Reader) error {
+	c.TargetProtocolConformanceDescriptor = TargetProtocolConformanceDescriptor{
+		ProtocolOffsest: RelativeDirectPointer{
+			Address: c.Address,
+		},
+		TypeRefOffsest: RelativeDirectPointer{
+			Address: c.Address + uint64(binary.Size(RelativeDirectPointer{}.RelOff)),
+		},
+		WitnessTablePatternOffsest: RelativeDirectPointer{
+			Address: c.Address + uint64(binary.Size(RelativeDirectPointer{}.RelOff))*2,
+		},
+	}
+	if err := binary.Read(r, binary.LittleEndian, &c.TargetProtocolConformanceDescriptor.ProtocolOffsest.RelOff); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &c.TargetProtocolConformanceDescriptor.TypeRefOffsest.RelOff); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &c.TargetProtocolConformanceDescriptor.WitnessTablePatternOffsest.RelOff); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &c.TargetProtocolConformanceDescriptor.Flags); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c ConformanceDescriptor) String() string {
@@ -332,10 +409,10 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 		addr,
 		c.Protocol,
 		retroactive,
-		c.TypeRef.Kind,
-		c.TypeRef.Parent.Name,
-		c.TypeRef.Name,
-		c.TypeRef.AccessFunction,
+		// c.TypeRef.Kind,
+		// c.TypeRef.Parent.Name,
+		// c.TypeRef.Name,
+		// c.TypeRef.AccessFunction,
 		reqs,
 		resilientWitnesses,
 	)
@@ -350,7 +427,13 @@ type ResilientWitnesses struct {
 	Implementation      uint64
 }
 
-// TargetResilientWitnessesHeader object
+// TargetProtocolRecord the structure of a protocol reference record.
+// ref: swift/ABI/Metadata.h
+type TargetProtocolRecord struct {
+	Protocol int32 // The protocol referenced (the remaining low bit is reserved for future use)
+}
+
+// TargetResilientWitnessesHeader a header containing information about the resilient witnesses in a protocol conformance descriptor.
 // ref: swift/ABI/Metadata.h - TargetResilientWitnessesHeader
 type TargetResilientWitnessesHeader struct {
 	NumWitnesses uint32

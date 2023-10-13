@@ -10,7 +10,8 @@
 - [ ] `__swift5_proto`
 - [ ] `__swift5_types`
 - [ ] `__swift5_types2` // the section containing additional type references
-- [x] `__swift5_protos`
+- [ ] `__swift5_typeref`
+- [ ] `__swift5_protos`
 - [ ] `__swift5_capture`
 - [x] `__swift5_replace`
 - [x] `__swift5_replac2`
