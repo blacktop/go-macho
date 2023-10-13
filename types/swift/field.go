@@ -112,31 +112,34 @@ type FieldDescriptor struct {
 	NumFields             uint32
 }
 
-func ReadFieldDescriptor(r io.Reader, addr uint64) (FieldDescriptor, error) {
-	fd := FieldDescriptor{
-		MangledTypeNameOffset: RelativeDirectPointer{
-			Address: addr,
-		},
-		SuperclassOffset: RelativeDirectPointer{
-			Address: addr + uint64(binary.Size(RelativeDirectPointer{}.RelOff)),
-		},
-	}
+func (fd FieldDescriptor) Size() uint64 {
+	return uint64(
+		binary.Size(fd.MangledTypeNameOffset.RelOff) +
+			binary.Size(fd.SuperclassOffset.RelOff) +
+			binary.Size(fd.Kind) +
+			binary.Size(fd.FieldRecordSize) +
+			binary.Size(fd.NumFields))
+}
+
+func (fd *FieldDescriptor) Read(r io.Reader, addr uint64) error {
+	fd.MangledTypeNameOffset.Address = addr
+	fd.SuperclassOffset.Address = addr + uint64(binary.Size(RelativeDirectPointer{}.RelOff))
 	if err := binary.Read(r, binary.LittleEndian, &fd.MangledTypeNameOffset.RelOff); err != nil {
-		return FieldDescriptor{}, err
+		return err
 	}
 	if err := binary.Read(r, binary.LittleEndian, &fd.SuperclassOffset.RelOff); err != nil {
-		return FieldDescriptor{}, err
+		return err
 	}
 	if err := binary.Read(r, binary.LittleEndian, &fd.Kind); err != nil {
-		return FieldDescriptor{}, err
+		return err
 	}
 	if err := binary.Read(r, binary.LittleEndian, &fd.FieldRecordSize); err != nil {
-		return FieldDescriptor{}, err
+		return err
 	}
 	if err := binary.Read(r, binary.LittleEndian, &fd.NumFields); err != nil {
-		return FieldDescriptor{}, err
+		return err
 	}
-	return fd, nil
+	return nil
 }
 
 type FieldRecord struct {
@@ -151,25 +154,29 @@ type FieldRecordDescriptor struct {
 	FieldNameOffset       RelativeDirectPointer
 }
 
-func ReadFieldRecordDescriptor(r io.Reader, addr uint64) (FieldRecordDescriptor, error) {
-	frd := FieldRecordDescriptor{
-		MangledTypeNameOffset: RelativeDirectPointer{
-			Address: addr + uint64(binary.Size(FieldRecordDescriptor{}.Flags)),
-		},
-		FieldNameOffset: RelativeDirectPointer{
-			Address: addr + uint64(binary.Size(FieldRecordDescriptor{}.Flags)+binary.Size(RelativeDirectPointer{}.RelOff)),
-		},
-	}
+func (fd FieldRecordDescriptor) Size() uint64 {
+	return uint64(
+		binary.Size(fd.Flags) +
+			binary.Size(fd.MangledTypeNameOffset.RelOff) +
+			binary.Size(fd.FieldNameOffset.RelOff))
+}
+
+func (frd *FieldRecordDescriptor) Read(r io.Reader, addr uint64) error {
+	frd.MangledTypeNameOffset.Address = addr + uint64(binary.Size(FieldRecordDescriptor{}.Flags))
+	frd.FieldNameOffset.Address = addr +
+		uint64(
+			binary.Size(FieldRecordDescriptor{}.Flags)+
+				binary.Size(RelativeDirectPointer{}.RelOff))
 	if err := binary.Read(r, binary.LittleEndian, &frd.Flags); err != nil {
-		return FieldRecordDescriptor{}, err
+		return err
 	}
 	if err := binary.Read(r, binary.LittleEndian, &frd.MangledTypeNameOffset.RelOff); err != nil {
-		return FieldRecordDescriptor{}, err
+		return err
 	}
 	if err := binary.Read(r, binary.LittleEndian, &frd.FieldNameOffset.RelOff); err != nil {
-		return FieldRecordDescriptor{}, err
+		return err
 	}
-	return frd, nil
+	return nil
 }
 
 type FieldRecordFlags uint32

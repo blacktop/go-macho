@@ -13,8 +13,8 @@ type Protocol struct {
 	TargetProtocolDescriptor
 	Address               uint64
 	Name                  string
+	Parent                *TargetModuleContext
 	AssociatedType        string
-	Parent                string
 	SignatureRequirements []TargetGenericRequirement
 	Requirements          []TargetProtocolRequirement
 }
@@ -43,8 +43,8 @@ func (p Protocol) dump(verbose bool) string {
 			}
 			if verbose {
 				addr = " // <stripped>"
-				if req.DefaultImplementation != 0 {
-					addr = fmt.Sprintf(" // %#x", req.DefaultImplementation)
+				if req.DefaultImplementation.IsSet() {
+					addr = fmt.Sprintf(" // %#x", req.DefaultImplementation.GetAddress())
 				}
 				if req.Flags.IsSignedWithAddress() && req.Flags.ExtraDiscriminator() != 0 {
 					addr += fmt.Sprintf(" __ptrauth(%#04x)", req.Flags.ExtraDiscriminator())
@@ -59,7 +59,7 @@ func (p Protocol) dump(verbose bool) string {
 	return fmt.Sprintf(
 		"%sprotocol %s.%s {\n%s}",
 		addr,
-		p.Parent,
+		p.Parent.Name,
 		p.Name,
 		reqs,
 	)
@@ -69,11 +69,42 @@ func (p Protocol) dump(verbose bool) string {
 // ref: include/swift/ABI/MetadataValues.h
 type TargetProtocolDescriptor struct {
 	TargetContextDescriptor
-	NameOffset                 int32  // The name of the protocol.
-	NumRequirementsInSignature uint32 // The number of generic requirements in the requirement signature of the protocol.
-	NumRequirements            uint32 /* The number of requirements in the protocol. If any requirements beyond MinimumWitnessTableSizeInWords are present
+	NameOffset                 RelativeDirectPointer // The name of the protocol.
+	NumRequirementsInSignature uint32                // The number of generic requirements in the requirement signature of the protocol.
+	NumRequirements            uint32                /* The number of requirements in the protocol. If any requirements beyond MinimumWitnessTableSizeInWords are present
 	 * in the witness table template, they will be not be overwritten with defaults. */
-	AssociatedTypeNamesOffset int32 // Associated type names, as a space-separated list in the same order as the requirements.
+	AssociatedTypeNamesOffset RelativeDirectPointer // Associated type names, as a space-separated list in the same order as the requirements.
+}
+
+func (d TargetProtocolDescriptor) Size() int64 {
+	return int64(
+		int(d.TargetContextDescriptor.Size()) +
+			binary.Size(d.NameOffset.RelOff) +
+			binary.Size(d.NumRequirementsInSignature) +
+			binary.Size(d.NumRequirements) +
+			binary.Size(d.AssociatedTypeNamesOffset.RelOff))
+}
+
+func (d *TargetProtocolDescriptor) Read(r io.Reader, addr uint64) error {
+	if err := d.TargetContextDescriptor.Read(r, addr); err != nil {
+		return err
+	}
+	addr += uint64(d.TargetContextDescriptor.Size())
+	d.NameOffset.Address = addr
+	d.AssociatedTypeNamesOffset.Address = addr + uint64(binary.Size(uint32(0)*3))
+	if err := binary.Read(r, binary.LittleEndian, &d.NameOffset.RelOff); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &d.NumRequirementsInSignature); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &d.NumRequirements); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &d.AssociatedTypeNamesOffset.RelOff); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ProtocolContextDescriptorFlags flags for protocol context descriptors.
@@ -229,7 +260,22 @@ func (f ProtocolRequirementFlags) String() string {
 // ref: swift/ABI/Metadata.h - TargetProtocolRequirement
 type TargetProtocolRequirement struct {
 	Flags                 ProtocolRequirementFlags
-	DefaultImplementation int32 // The optional default implementation of the protocol.
+	DefaultImplementation RelativeDirectPointer // The optional default implementation of the protocol.
+}
+
+func (pr TargetProtocolRequirement) Size() int64 {
+	return int64(binary.Size(pr.Flags) + binary.Size(pr.DefaultImplementation.RelOff))
+}
+
+func (pr *TargetProtocolRequirement) Read(r io.Reader, addr uint64) error {
+	pr.DefaultImplementation.Address = addr + uint64(binary.Size(pr.Flags))
+	if err := binary.Read(r, binary.LittleEndian, &pr.Flags); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &pr.DefaultImplementation.RelOff); err != nil {
+		return err
+	}
+	return nil
 }
 
 type ConformanceFlags uint32
@@ -409,10 +455,10 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 		addr,
 		c.Protocol,
 		retroactive,
-		// c.TypeRef.Kind,
-		// c.TypeRef.Parent.Name,
-		// c.TypeRef.Name,
-		// c.TypeRef.AccessFunction,
+		c.TypeRef.Kind,
+		c.TypeRef.Parent.Name,
+		c.TypeRef.Name,
+		c.TypeRef.AccessFunction,
 		reqs,
 		resilientWitnesses,
 	)

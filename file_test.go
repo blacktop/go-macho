@@ -707,6 +707,38 @@ func TestNewFileWithSwift(t *testing.T) {
 		}
 	}
 
+	if typs, err := got.GetColocateTypeDescriptors(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetColocateTypeDescriptors() error = %v", err)
+	} else {
+		for _, typ := range typs {
+			fmt.Println(typ.Verbose())
+		}
+	}
+
+	if mdatas, err := got.GetColocateMetadata(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetColocateMetadata() error = %v", err)
+	} else {
+		for _, mdat := range mdatas {
+			fmt.Println(mdat.Verbose())
+		}
+	}
+
+	// if refStrs, err := got.GetSwiftTypeRefs(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+	// 	t.Fatalf("GetSwiftTypeRefs() error = %v", err)
+	// } else {
+	// 	for addr, refstr := range refStrs {
+	// 		fmt.Printf("%#x: %s\n", addr, refstr)
+	// 	}
+	// }
+
+	if typs, err := got.GetSwiftTypes(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftTypes() error = %v", err)
+	} else {
+		for _, t := range typs {
+			fmt.Println(t)
+		}
+	}
+
 	if prots, err := got.GetSwiftProtocols(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
 		t.Fatalf("GetSwiftProtocols() error = %v", err)
 	} else {
@@ -722,38 +754,6 @@ func TestNewFileWithSwift(t *testing.T) {
 			fmt.Println(prot.Verbose())
 		}
 	}
-
-	// if typs, err := got.GetColocateTypeDescriptors(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
-	// 	t.Fatalf("GetColocateTypeDescriptors() error = %v", err)
-	// } else {
-	// 	for _, typ := range typs {
-	// 		fmt.Println(typ.Verbose())
-	// 	}
-	// }
-
-	// if mdatas, err := got.GetColocateMetadata(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
-	// 	t.Fatalf("GetColocateMetadata() error = %v", err)
-	// } else {
-	// 	for _, mdat := range mdatas {
-	// 		fmt.Println(mdat.Verbose())
-	// 	}
-	// }
-
-	// if refStrs, err := got.GetSwiftTypeRefs(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
-	// 	t.Fatalf("GetSwiftTypeRefs() error = %v", err)
-	// } else {
-	// 	for addr, refstr := range refStrs {
-	// 		fmt.Printf("%#x: %s\n", addr, refstr)
-	// 	}
-	// }
-
-	// if typs, err := got.GetSwiftTypes(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
-	// 	t.Fatalf("GetSwiftTypes() error = %v", err)
-	// } else {
-	// 	for _, t := range typs {
-	// 		fmt.Println(t)
-	// 	}
-	// }
 
 	if mpenums, err := got.GetMultiPayloadEnums(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
 		t.Fatalf("GetMultiPayloadEnums() error = %v", err)

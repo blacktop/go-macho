@@ -1,8 +1,11 @@
 package swift
 
 import (
+	"encoding/binary"
 	"fmt"
+	"io"
 	"strings"
+	"unsafe"
 
 	"github.com/blacktop/go-macho/types"
 )
@@ -15,7 +18,7 @@ import (
 
 type Type struct {
 	Address        uint64
-	Parent         *Type
+	Parent         *TargetModuleContext
 	Name           string
 	SuperClass     string
 	Kind           ContextDescriptorKind
@@ -402,30 +405,57 @@ func (f ContextDescriptorFlags) String() string {
 // TargetContextDescriptor base class for all context descriptors.
 type TargetContextDescriptor struct {
 	Flags        ContextDescriptorFlags // Flags describing the context, including its kind and format version.
-	ParentOffset int32                  // The parent context, or null if this is a top-level context.
+	ParentOffset RelativeDirectPointer  // The parent context, or null if this is a top-level context.
+}
+
+func (cd TargetContextDescriptor) Size() int64 {
+	return int64(binary.Size(uint32(0)) * 2)
+}
+
+func (cd *TargetContextDescriptor) Read(r io.Reader, addr uint64) error {
+	cd.ParentOffset.Address = addr + uint64(binary.Size(uint32(0)))
+	if err := binary.Read(r, binary.LittleEndian, &cd.Flags); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &cd.ParentOffset.RelOff); err != nil {
+		return err
+	}
+	return nil
 }
 
 // TargetTypeContextDescriptor object
 type TargetTypeContextDescriptor struct {
 	TargetContextDescriptor
-	NameOffset        int32 // The name of the type.
-	AccessFunctionPtr int32 // A pointer to the metadata access function for this type.
-	FieldsOffset      int32 // A pointer to the field descriptor for the type, if any.
+	NameOffset        RelativeDirectPointer // The name of the type.
+	AccessFunctionPtr RelativeDirectPointer // A pointer to the metadata access function for this type.
+	FieldsOffset      RelativeDirectPointer // A pointer to the field descriptor for the type, if any.
 }
 
-type TargetModuleContext struct {
-	TargetModuleContextDescriptor
-	Name string
+func (tcd TargetTypeContextDescriptor) Size() int64 {
+	return tcd.TargetContextDescriptor.Size() +
+		int64(binary.Size(tcd.NameOffset.RelOff)) +
+		int64(binary.Size(tcd.AccessFunctionPtr.RelOff)) +
+		int64(binary.Size(tcd.FieldsOffset.RelOff))
 }
 
-type TargetModuleContextDescriptor struct {
-	TargetContextDescriptor
-	NameOffset int32
-}
-
-type TargetExtensionContextDescriptor struct {
-	TargetContextDescriptor
-	ExtendedContext int32
+func (tcd *TargetTypeContextDescriptor) Read(r io.Reader, addr uint64) error {
+	if err := tcd.TargetContextDescriptor.Read(r, addr); err != nil {
+		return err
+	}
+	addr += uint64(tcd.TargetContextDescriptor.Size())
+	tcd.NameOffset.Address = addr
+	tcd.AccessFunctionPtr.Address = addr + uint64(unsafe.Sizeof(RelativeDirectPointer{}.RelOff))
+	tcd.FieldsOffset.Address = addr + uint64(unsafe.Sizeof(RelativeDirectPointer{}.RelOff))*2
+	if err := binary.Read(r, binary.LittleEndian, &tcd.NameOffset.RelOff); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &tcd.AccessFunctionPtr.RelOff); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &tcd.FieldsOffset.RelOff); err != nil {
+		return err
+	}
+	return nil
 }
 
 type TargetAnonymousContextDescriptor struct {

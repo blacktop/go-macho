@@ -1,18 +1,57 @@
 package swift
 
 import (
+	"encoding/binary"
 	"fmt"
+	"io"
 	"strings"
 )
 
 type TargetClassDescriptor struct {
 	TargetTypeContextDescriptor
-	SuperclassType                                       int32
+	SuperclassType                                       RelativeDirectPointer
 	MetadataNegativeSizeInWordsORResilientMetadataBounds uint32
 	MetadataPositiveSizeInWordsORExtraClassFlags         uint32
 	NumImmediateMembers                                  uint32
 	NumFields                                            uint32
 	FieldOffsetVectorOffset                              uint32
+}
+
+func (tcd TargetClassDescriptor) Size() int64 {
+	return int64(
+		int(tcd.TargetTypeContextDescriptor.Size()) +
+			binary.Size(tcd.SuperclassType.RelOff) +
+			binary.Size(tcd.MetadataNegativeSizeInWordsORResilientMetadataBounds) +
+			binary.Size(tcd.MetadataPositiveSizeInWordsORExtraClassFlags) +
+			binary.Size(tcd.NumImmediateMembers) +
+			binary.Size(tcd.NumFields) +
+			binary.Size(tcd.FieldOffsetVectorOffset))
+}
+
+func (c *TargetClassDescriptor) Read(r io.Reader, addr uint64) error {
+	if err := c.TargetTypeContextDescriptor.Read(r, addr); err != nil {
+		return err
+	}
+	c.SuperclassType.Address = addr + uint64(c.TargetTypeContextDescriptor.Size())
+	if err := binary.Read(r, binary.LittleEndian, &c.SuperclassType.RelOff); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &c.MetadataNegativeSizeInWordsORResilientMetadataBounds); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &c.MetadataPositiveSizeInWordsORExtraClassFlags); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &c.NumImmediateMembers); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &c.NumFields); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &c.FieldOffsetVectorOffset); err != nil {
+		return err
+	}
+	return nil
 }
 
 type ExtraClassDescriptorFlags uint32
@@ -58,19 +97,19 @@ type TargetForeignMetadataInitialization struct {
 
 type VTable struct {
 	TargetVTableDescriptorHeader
-	MethodListOffset int64
-	Methods          []Method
+	MethodListAddr int64
+	Methods        []Method
+}
+
+type TargetVTableDescriptorHeader struct {
+	VTableOffset uint32
+	VTableSize   uint32
 }
 
 type Method struct {
 	TargetMethodDescriptor
 	Address uint64
 	Symbol  string
-}
-
-type TargetVTableDescriptorHeader struct {
-	VTableOffset uint32
-	VTableSize   uint32
 }
 
 type TargetMethodDescriptor struct {
@@ -107,9 +146,9 @@ func (f MethodDescriptorFlags) Kind() string {
 	case MDKSetter:
 		return "setter"
 	case MDKModifyCoroutine:
-		return "modify coroutine"
+		return "modify"
 	case MDKReadCoroutine:
-		return "read coroutine"
+		return "read"
 	default:
 		return fmt.Sprintf("unknown kind %d", mdKind(f&0x0F))
 	}
