@@ -534,7 +534,7 @@ func (f *File) readProtocolConformance(addr uint64) (pcd *swift.ConformanceDescr
 		// if err := binary.Read(f.cr, f.ByteOrder, &wt); err != nil {
 		// 	return nil, fmt.Errorf("failed to read witness table pattern: %v", err)
 		// }
-		if ptr != pcd.Address {
+		if ptr != pcd.Address && ptr+f.preferredLoadAddress() != pcd.Address {
 			wtp, err := f.readProtocolConformance(ptr)
 			if err != nil {
 				return nil, fmt.Errorf("failed to read conformance descriptor witness table pattern: %v", err)
