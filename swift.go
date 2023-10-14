@@ -504,8 +504,8 @@ func (f *File) readProtocolConformance(addr uint64) (pcd *swift.ConformanceDescr
 }
 
 // GetSwiftClosures parses all the closure context objects in the __TEXT.__swift5_capture section
-func (f *File) GetSwiftClosures() ([]swift.CaptureDescriptor, error) {
-	var closures []swift.CaptureDescriptor
+func (f *File) GetSwiftClosures() ([]swift.Capture, error) {
+	var closures []swift.Capture
 
 	if sec := f.Section("__TEXT", "__swift5_capture"); sec != nil {
 		f.cr.SeekToAddr(sec.Addr)
@@ -521,17 +521,17 @@ func (f *File) GetSwiftClosures() ([]swift.CaptureDescriptor, error) {
 			currOffset, _ := r.Seek(0, io.SeekCurrent)
 			currAddr := sec.Addr + uint64(currOffset)
 
-			capture := swift.CaptureDescriptor{Address: currAddr}
+			capture := swift.Capture{Address: currAddr}
 
-			if err := binary.Read(r, f.ByteOrder, &capture.CaptureDescriptorHeader); err != nil {
+			if err := binary.Read(r, f.ByteOrder, &capture.CaptureDescriptor); err != nil {
 				if errors.Is(err, io.EOF) {
 					break
 				}
-				return nil, fmt.Errorf("failed to read swift %T: %w", capture.CaptureDescriptorHeader, err)
+				return nil, fmt.Errorf("failed to read swift %T: %w", capture.CaptureDescriptor, err)
 			}
 
 			if capture.NumCaptureTypes > 0 {
-				numCapsAddr := uint64(int64(currAddr) + int64(binary.Size(capture.CaptureDescriptorHeader)))
+				numCapsAddr := uint64(int64(currAddr) + int64(binary.Size(capture.CaptureDescriptor)))
 				captureTypeRecords := make([]swift.CaptureTypeRecord, capture.NumCaptureTypes)
 				if err := binary.Read(r, f.ByteOrder, &captureTypeRecords); err != nil {
 					return nil, fmt.Errorf("failed to read %T: %v", captureTypeRecords, err)

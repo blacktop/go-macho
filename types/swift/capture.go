@@ -8,50 +8,15 @@ import "fmt"
 // Capture descriptors describe the layout of a closure context object.
 // Unlike nominal types, the generic substitutions for a closure context come from the object, and not the metadata.
 
-type CaptureTypeRecord struct {
-	MangledTypeName int32
-}
-
-type MetadataSourceRecord struct {
-	MangledTypeName       int32
-	MangledMetadataSource int32
-}
-
-type MetadataSource struct {
-	MangledType           string
-	MangledMetadataSource string
-}
-
-type NecessaryBindingsKind uint32
-
-const (
-	PartialApply NecessaryBindingsKind = iota
-	AsyncFunction
-)
-
-type NecessaryBindings struct {
-	Kind               NecessaryBindingsKind
-	RequirementsSet    int32
-	RequirementsVector int32
-	Conformances       int32
-}
-
-// ref: include/swift/RemoteInspection/Records.h - CaptureDescriptor
-type CaptureDescriptorHeader struct {
-	NumCaptureTypes    uint32 // The number of captures in the closure and the number of typerefs that immediately follow this struct.
-	NumMetadataSources uint32 // The number of sources of metadata available in the MetadataSourceMap directly following the list of capture's typerefs.
-	NumBindings        uint32 // The number of items in the NecessaryBindings structure at the head of the closure.
-}
-
-type CaptureDescriptor struct {
-	Address uint64
-	CaptureDescriptorHeader
+type Capture struct {
+	CaptureDescriptor
+	Address         uint64
 	CaptureTypes    []string
 	MetadataSources []MetadataSource
 	Bindings        []NecessaryBindings
 }
 
-func (c CaptureDescriptor) String() string {
+func (c Capture) String() string {
 	var captureTypes string
 	if len(c.CaptureTypes) > 0 {
 		captureTypes += "\t/* capture types */\n"
@@ -84,4 +49,42 @@ func (c CaptureDescriptor) String() string {
 		metadataSources,
 		bindings,
 	)
+}
+
+// CaptureDescriptor describe the layout of a closure context
+// object. Unlike nominal types, the generic substitutions for a
+// closure context come from the object, and not the metadata.
+// ref: include/swift/RemoteInspection/Records.h - CaptureDescriptor
+type CaptureDescriptor struct {
+	NumCaptureTypes    uint32 // The number of captures in the closure and the number of typerefs that immediately follow this struct.
+	NumMetadataSources uint32 // The number of sources of metadata available in the MetadataSourceMap directly following the list of capture's typerefs.
+	NumBindings        uint32 // The number of items in the NecessaryBindings structure at the head of the closure.
+}
+
+type CaptureTypeRecord struct {
+	MangledTypeName int32
+}
+
+type MetadataSourceRecord struct {
+	MangledTypeName       int32
+	MangledMetadataSource int32
+}
+
+type MetadataSource struct {
+	MangledType           string
+	MangledMetadataSource string
+}
+
+type NecessaryBindingsKind uint32
+
+const (
+	PartialApply NecessaryBindingsKind = iota
+	AsyncFunction
+)
+
+type NecessaryBindings struct {
+	Kind               NecessaryBindingsKind
+	RequirementsSet    int32
+	RequirementsVector int32
+	Conformances       int32
 }

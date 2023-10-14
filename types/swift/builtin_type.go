@@ -6,6 +6,8 @@ import "fmt"
 // This section contains an array of builtin type descriptors.
 // A builtin type descriptor describes the basic layout information about any builtin types referenced from other sections.
 
+const MaxNumExtraInhabitants = 0x7FFFFFFF
+
 // BuiltinType builtin swift type
 type BuiltinType struct {
 	BuiltinTypeDescriptor
@@ -64,5 +66,3 @@ func (f builtinTypeFlag) IsBitwiseTakable() bool {
 func (f builtinTypeFlag) Alignment() uint16 {
 	return uint16(f & 0xffff)
 }
-
-const MaxNumExtraInhabitants = 0x7FFFFFFF

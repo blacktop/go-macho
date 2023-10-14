@@ -8,6 +8,10 @@ import (
 
 //go:generate stringer -type GenericRequirementKind,ProtocolRequirementKind -linecomment -output protocols_string.go
 
+// ConformanceDescriptor in __TEXT.__swift5_proto
+// This section contains an array of 32-bit signed integers.
+// Each integer is a relative offset that points to a protocol conformance descriptor in the __TEXT.__const section.
+
 // Protocol swift protocol object
 type Protocol struct {
 	TargetProtocolDescriptor
@@ -357,10 +361,6 @@ func (f ConformanceFlags) String() string {
 		f.GetTypeReferenceKind(),
 	)
 }
-
-// ConformanceDescriptor in __TEXT.__swift5_proto
-// This section contains an array of 32-bit signed integers.
-// Each integer is a relative offset that points to a protocol conformance descriptor in the __TEXT.__const section.
 
 type TargetProtocolConformanceDescriptor struct {
 	ProtocolOffsest            RelativeDirectPointer // The protocol being conformed to.
