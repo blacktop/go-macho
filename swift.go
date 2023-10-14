@@ -503,6 +503,337 @@ func (f *File) readProtocolConformance(addr uint64) (pcd *swift.ConformanceDescr
 	return
 }
 
+// GetSwiftClosures parses all the closure context objects in the __TEXT.__swift5_capture section
+func (f *File) GetSwiftClosures() ([]swift.CaptureDescriptor, error) {
+	var closures []swift.CaptureDescriptor
+
+	if sec := f.Section("__TEXT", "__swift5_capture"); sec != nil {
+		f.cr.SeekToAddr(sec.Addr)
+
+		dat := make([]byte, sec.Size)
+		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
+		}
+
+		r := bytes.NewReader(dat)
+
+		for {
+			currOffset, _ := r.Seek(0, io.SeekCurrent)
+			currAddr := sec.Addr + uint64(currOffset)
+
+			capture := swift.CaptureDescriptor{Address: currAddr}
+
+			if err := binary.Read(r, f.ByteOrder, &capture.CaptureDescriptorHeader); err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				return nil, fmt.Errorf("failed to read swift %T: %w", capture.CaptureDescriptorHeader, err)
+			}
+
+			if capture.NumCaptureTypes > 0 {
+				numCapsAddr := uint64(int64(currAddr) + int64(binary.Size(capture.CaptureDescriptorHeader)))
+				captureTypeRecords := make([]swift.CaptureTypeRecord, capture.NumCaptureTypes)
+				if err := binary.Read(r, f.ByteOrder, &captureTypeRecords); err != nil {
+					return nil, fmt.Errorf("failed to read %T: %v", captureTypeRecords, err)
+				}
+				for _, capRecord := range captureTypeRecords {
+					name, err := f.makeSymbolicMangledNameStringRef(uint64(int64(numCapsAddr) + int64(capRecord.MangledTypeName)))
+					if err != nil {
+						return nil, fmt.Errorf("failed to read mangled type name @ %#x: %v", uint64(int64(numCapsAddr)+int64(capRecord.MangledTypeName)), err)
+					}
+					capture.CaptureTypes = append(capture.CaptureTypes, name)
+					numCapsAddr += uint64(binary.Size(capRecord))
+				}
+			}
+
+			if capture.NumMetadataSources > 0 {
+				metadataSourceRecords := make([]swift.MetadataSourceRecord, capture.NumMetadataSources)
+				if err := binary.Read(r, f.ByteOrder, &metadataSourceRecords); err != nil {
+					return nil, fmt.Errorf("failed to read %T: %v", metadataSourceRecords, err)
+				}
+				for idx, metasource := range metadataSourceRecords {
+					currAddr += uint64(idx * binary.Size(swift.MetadataSourceRecord{}))
+					typeName, err := f.makeSymbolicMangledNameStringRef(uint64(int64(currAddr) + int64(metasource.MangledTypeName)))
+					if err != nil {
+						return nil, fmt.Errorf("failed to read mangled type name @ %#x: %v", uint64(int64(currAddr)+int64(metasource.MangledTypeName)), err)
+					}
+					metaSource, err := f.makeSymbolicMangledNameStringRef(uint64(int64(currAddr) + sizeOfInt32 + int64(metasource.MangledMetadataSource)))
+					if err != nil {
+						return nil, fmt.Errorf("failed to read mangled metadata source @ %#x: %v", uint64(int64(currAddr)+sizeOfInt32+int64(metasource.MangledMetadataSource)), err)
+					}
+					capture.MetadataSources = append(capture.MetadataSources, swift.MetadataSource{
+						MangledType:           typeName,
+						MangledMetadataSource: metaSource,
+					})
+				}
+			}
+
+			if capture.NumBindings > 0 {
+				capture.Bindings = make([]swift.NecessaryBindings, capture.NumBindings)
+				if err := binary.Read(r, f.ByteOrder, &capture.Bindings); err != nil {
+					return nil, fmt.Errorf("failed to read %T: %v", capture.Bindings, err)
+				}
+			}
+
+			closures = append(closures, capture)
+		}
+
+		return closures, nil
+	}
+
+	return nil, fmt.Errorf("MachO has no '__swift5_capture' section: %w", ErrSwiftSectionError)
+}
+
+// GetSwiftDynamicReplacementInfo parses the __TEXT.__swift5_replace section
+func (f *File) GetSwiftDynamicReplacementInfo() (*swift.AutomaticDynamicReplacements, error) {
+	if sec := f.Section("__TEXT", "__swift5_replace"); sec != nil {
+		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
+		}
+		f.cr.Seek(int64(off), io.SeekStart)
+
+		dat := make([]byte, sec.Size)
+		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
+		}
+
+		var rep swift.AutomaticDynamicReplacements
+		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &rep); err != nil {
+			return nil, fmt.Errorf("failed to read %T: %v", rep, err)
+		}
+
+		f.cr.Seek(int64(off)+int64(sizeOfInt32*2)+int64(rep.ReplacementScope), io.SeekStart)
+
+		var rscope swift.DynamicReplacementScope
+		if err := binary.Read(f.cr, f.ByteOrder, &rscope); err != nil {
+			return nil, fmt.Errorf("failed to read %T: %v", rscope, err)
+		}
+
+		return &rep, nil
+	}
+
+	return nil, fmt.Errorf("MachO has no '__swift5_replace' section: %w", ErrSwiftSectionError)
+}
+
+// GetSwiftDynamicReplacementInfoForOpaqueTypes parses the __TEXT.__swift5_replac2 section
+func (f *File) GetSwiftDynamicReplacementInfoForOpaqueTypes() (*swift.AutomaticDynamicReplacementsSome, error) {
+	if sec := f.Section("__TEXT", "__swift5_replac2"); sec != nil {
+		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
+		}
+		f.cr.Seek(int64(off), io.SeekStart)
+
+		dat := make([]byte, sec.Size)
+		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
+		}
+
+		var rep2 swift.AutomaticDynamicReplacementsSome
+		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &rep2.Flags); err != nil {
+			return nil, fmt.Errorf("failed to read %T: %v", rep2.Flags, err)
+		}
+		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &rep2.NumReplacements); err != nil {
+			return nil, fmt.Errorf("failed to read %T: %v", rep2.NumReplacements, err)
+		}
+		rep2.Replacements = make([]swift.DynamicReplacementSomeDescriptor, rep2.NumReplacements)
+		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &rep2.Replacements); err != nil {
+			return nil, fmt.Errorf("failed to read %T: %v", rep2.Replacements, err)
+		}
+
+		return &rep2, nil
+	}
+
+	return nil, fmt.Errorf("MachO has no '__swift5_replac2' section: %w", ErrSwiftSectionError)
+}
+
+// GetSwiftAccessibleFunctions parses the __TEXT.__swift5_acfuncs section
+func (f *File) GetSwiftAccessibleFunctions() (*swift.AccessibleFunctionsSection, error) {
+	if sec := f.Section("__TEXT", "__swift5_acfuncs"); sec != nil {
+		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
+		}
+		f.cr.Seek(int64(off), io.SeekStart)
+
+		dat := make([]byte, sec.Size)
+		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
+		}
+
+		var afsec swift.AccessibleFunctionsSection
+		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &afsec); err != nil {
+			return nil, fmt.Errorf("failed to read %T: %v", afsec, err)
+		}
+
+		return &afsec, nil
+	}
+
+	return nil, fmt.Errorf("MachO has no '__swift5_acfuncs' section: %w", ErrSwiftSectionError)
+}
+
+// TODO: I'm not sure we should parse this as it contains a lot of info referenced by swift runtime, but not sure I can sequentially parse itxw
+// GetSwiftTypeRefs parses all the type references in the __TEXT.__swift5_typeref section
+// func (f *File) GetSwiftTypeRefs() (trefs map[uint64]string, err error) {
+// 	trefs = make(map[uint64]string)
+
+// 	if sec := f.Section("__TEXT", "__swift5_typeref"); sec != nil {
+// 		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
+// 		if err != nil {
+// 			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
+// 		}
+// 		f.cr.Seek(int64(off), io.SeekStart)
+
+// 		dat := make([]byte, sec.Size)
+// 		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+// 			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
+// 		}
+
+// 		r := bytes.NewReader(dat)
+
+// 		for {
+// 			curr, _ := r.Seek(0, io.SeekCurrent)
+
+// 			typ, err := f.makeSymbolicMangledNameStringRef(sec.Addr + uint64(curr))
+// 			if err != nil {
+// 				if errors.Is(err, io.EOF) {
+// 					break
+// 				}
+// 				return nil, fmt.Errorf("failed to read swift AssociatedTypeDescriptor: %w", err)
+// 			}
+
+// 			trefs[sec.Addr+uint64(curr)] = typ
+// 		}
+
+// 		return trefs, nil
+// 	}
+
+// 	return nil, fmt.Errorf("MachO has no '__swift5_typeref' section: %w", ErrSwiftSectionError)
+// }
+
+// GetMultiPayloadEnums TODO: finish me
+func (f *File) GetMultiPayloadEnums() (mpenums []swift.MultiPayloadEnum, err error) {
+	if sec := f.Section("__TEXT", "__swift5_mpenum"); sec != nil {
+		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
+		}
+		f.cr.Seek(int64(off), io.SeekStart)
+
+		dat := make([]byte, sec.Size)
+		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
+		}
+
+		r := bytes.NewReader(dat)
+
+		for {
+			curr, _ := r.Seek(0, io.SeekCurrent)
+
+			var mpenum swift.MultiPayloadEnumDescriptor
+			if err := binary.Read(r, f.ByteOrder, &mpenum.TypeName); err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				return nil, fmt.Errorf("failed to read %T: %w", mpenum, err)
+			}
+
+			var sizeFlags swift.MultiPayloadEnumSizeAndFlags
+			if err := binary.Read(r, f.ByteOrder, &sizeFlags); err != nil {
+				return nil, fmt.Errorf("failed to read %T: %w", sizeFlags, err)
+			}
+
+			fmt.Println(sizeFlags.String())
+
+			if sizeFlags.UsesPayloadSpareBits() {
+				var psbmask swift.MultiPayloadEnumPayloadSpareBitMaskByteCount
+				if err := binary.Read(r, f.ByteOrder, &psbmask); err != nil {
+					return nil, fmt.Errorf("failed to read %T: %w", psbmask, err)
+				}
+				fmt.Println(psbmask.String())
+				r.Seek(-int64(binary.Size(sizeFlags)+binary.Size(psbmask)), io.SeekCurrent) // rewind
+			} else {
+				r.Seek(-int64(binary.Size(sizeFlags)), io.SeekCurrent) // rewind
+			}
+
+			mpenum.Contents = make([]uint32, sizeFlags.Size())
+			// mpenumFlags = sizeFlags & 0xffff
+			if err := binary.Read(r, f.ByteOrder, &mpenum.Contents); err != nil {
+				return nil, fmt.Errorf("failed to read mpenum contents: %w", err)
+			}
+
+			addr := int64(sec.Addr) + int64(curr) + int64(mpenum.TypeName)
+			name, err := f.makeSymbolicMangledNameStringRef(uint64(addr))
+			if err != nil {
+				return nil, fmt.Errorf("failed to read mangled type name @ %#x: %v", addr, err)
+			}
+
+			mpenums = append(mpenums, swift.MultiPayloadEnum{
+				Address:  sec.Addr + uint64(curr),
+				Type:     name,
+				Contents: mpenum.Contents,
+			})
+		}
+
+		return mpenums, nil
+	}
+
+	return nil, fmt.Errorf("MachO has no '__swift5_mpenum' section: %w", ErrSwiftSectionError)
+}
+
+// GetColocateTypeDescriptors parses all the colocated type descriptors in the __TEXT.__constg_swiftt section
+func (f *File) GetColocateTypeDescriptors() ([]swift.Type, error) {
+	if sec := f.Section("__TEXT", "__constg_swiftt"); sec != nil {
+		var typs []swift.Type
+
+		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert vmaddr: %w", err)
+		}
+
+		f.cr.Seek(int64(off), io.SeekStart)
+
+		dat := make([]byte, sec.Size)
+		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+			return nil, fmt.Errorf("failed to read %s.%s data: %w", sec.Seg, sec.Name, err)
+		}
+
+		r := bytes.NewReader(dat)
+
+		for {
+			curr, _ := r.Seek(0, io.SeekCurrent)
+
+			typ, err := f.readType(r, sec.Addr+uint64(curr))
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				return nil, fmt.Errorf("failed to read swift colocate type: %w", err)
+			}
+
+			typs = append(typs, *typ)
+		}
+
+		return typs, nil
+	}
+
+	return nil, fmt.Errorf("MachO has no '__constg_swiftt' section: %w", ErrSwiftSectionError)
+}
+
+// GetColocateMetadata parses all the colocated metadata in the __TEXT.__textg_swiftm section
+func (f *File) GetColocateMetadata() ([]swift.ConformanceDescriptor, error) {
+	if sec := f.Section("__TEXT", "__textg_swiftm"); sec != nil {
+		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
+		}
+		f.cr.Seek(int64(off), io.SeekStart)
+		panic("not implimented") // FIXME: finish me
+	}
+	return nil, fmt.Errorf("MachO has no '__textg_swiftm' section: %w", ErrSwiftSectionError)
+}
+
 // GetSwiftTypes parses all the swift in the __TEXT.__swift5_types section
 func (f *File) GetSwiftTypes() (typs []swift.Type, err error) {
 	// if err := f.parseColocateTypeDescriptorSection(); err != nil {
@@ -632,6 +963,10 @@ func (f *File) readType(r io.ReadSeeker, addr uint64) (typ *swift.Type, err erro
 
 	return typ, nil
 }
+
+/***************
+* TYPE PARSERS *
+****************/
 
 func (f *File) parseModule(r io.Reader, typ *swift.Type) (err error) {
 	var desc swift.TargetModuleContextDescriptor
@@ -1033,334 +1368,9 @@ func (f *File) parseEnumDescriptor(r io.Reader, typ *swift.Type) (err error) {
 	return nil
 }
 
-// GetSwiftClosures parses all the closure context objects in the __TEXT.__swift5_capture section
-func (f *File) GetSwiftClosures() ([]swift.CaptureDescriptor, error) {
-	var closures []swift.CaptureDescriptor
-
-	if sec := f.Section("__TEXT", "__swift5_capture"); sec != nil {
-		f.cr.SeekToAddr(sec.Addr)
-
-		dat := make([]byte, sec.Size)
-		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
-			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
-		}
-
-		r := bytes.NewReader(dat)
-
-		for {
-			currOffset, _ := r.Seek(0, io.SeekCurrent)
-			currAddr := sec.Addr + uint64(currOffset)
-
-			capture := swift.CaptureDescriptor{Address: currAddr}
-
-			if err := binary.Read(r, f.ByteOrder, &capture.CaptureDescriptorHeader); err != nil {
-				if errors.Is(err, io.EOF) {
-					break
-				}
-				return nil, fmt.Errorf("failed to read swift %T: %w", capture.CaptureDescriptorHeader, err)
-			}
-
-			if capture.NumCaptureTypes > 0 {
-				numCapsAddr := uint64(int64(currAddr) + int64(binary.Size(capture.CaptureDescriptorHeader)))
-				captureTypeRecords := make([]swift.CaptureTypeRecord, capture.NumCaptureTypes)
-				if err := binary.Read(r, f.ByteOrder, &captureTypeRecords); err != nil {
-					return nil, fmt.Errorf("failed to read %T: %v", captureTypeRecords, err)
-				}
-				for _, capRecord := range captureTypeRecords {
-					name, err := f.makeSymbolicMangledNameStringRef(uint64(int64(numCapsAddr) + int64(capRecord.MangledTypeName)))
-					if err != nil {
-						return nil, fmt.Errorf("failed to read mangled type name @ %#x: %v", uint64(int64(numCapsAddr)+int64(capRecord.MangledTypeName)), err)
-					}
-					capture.CaptureTypes = append(capture.CaptureTypes, name)
-					numCapsAddr += uint64(binary.Size(capRecord))
-				}
-			}
-
-			if capture.NumMetadataSources > 0 {
-				metadataSourceRecords := make([]swift.MetadataSourceRecord, capture.NumMetadataSources)
-				if err := binary.Read(r, f.ByteOrder, &metadataSourceRecords); err != nil {
-					return nil, fmt.Errorf("failed to read %T: %v", metadataSourceRecords, err)
-				}
-				for idx, metasource := range metadataSourceRecords {
-					currAddr += uint64(idx * binary.Size(swift.MetadataSourceRecord{}))
-					typeName, err := f.makeSymbolicMangledNameStringRef(uint64(int64(currAddr) + int64(metasource.MangledTypeName)))
-					if err != nil {
-						return nil, fmt.Errorf("failed to read mangled type name @ %#x: %v", uint64(int64(currAddr)+int64(metasource.MangledTypeName)), err)
-					}
-					metaSource, err := f.makeSymbolicMangledNameStringRef(uint64(int64(currAddr) + sizeOfInt32 + int64(metasource.MangledMetadataSource)))
-					if err != nil {
-						return nil, fmt.Errorf("failed to read mangled metadata source @ %#x: %v", uint64(int64(currAddr)+sizeOfInt32+int64(metasource.MangledMetadataSource)), err)
-					}
-					capture.MetadataSources = append(capture.MetadataSources, swift.MetadataSource{
-						MangledType:           typeName,
-						MangledMetadataSource: metaSource,
-					})
-				}
-			}
-
-			if capture.NumBindings > 0 {
-				capture.Bindings = make([]swift.NecessaryBindings, capture.NumBindings)
-				if err := binary.Read(r, f.ByteOrder, &capture.Bindings); err != nil {
-					return nil, fmt.Errorf("failed to read %T: %v", capture.Bindings, err)
-				}
-			}
-
-			closures = append(closures, capture)
-		}
-
-		return closures, nil
-	}
-
-	return nil, fmt.Errorf("MachO has no '__swift5_capture' section: %w", ErrSwiftSectionError)
-}
-
-// GetSwiftDynamicReplacementInfo parses the __TEXT.__swift5_replace section
-func (f *File) GetSwiftDynamicReplacementInfo() (*swift.AutomaticDynamicReplacements, error) {
-	if sec := f.Section("__TEXT", "__swift5_replace"); sec != nil {
-		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
-		}
-		f.cr.Seek(int64(off), io.SeekStart)
-
-		dat := make([]byte, sec.Size)
-		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
-			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
-		}
-
-		var rep swift.AutomaticDynamicReplacements
-		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &rep); err != nil {
-			return nil, fmt.Errorf("failed to read %T: %v", rep, err)
-		}
-
-		f.cr.Seek(int64(off)+int64(sizeOfInt32*2)+int64(rep.ReplacementScope), io.SeekStart)
-
-		var rscope swift.DynamicReplacementScope
-		if err := binary.Read(f.cr, f.ByteOrder, &rscope); err != nil {
-			return nil, fmt.Errorf("failed to read %T: %v", rscope, err)
-		}
-
-		return &rep, nil
-	}
-
-	return nil, fmt.Errorf("MachO has no '__swift5_replace' section: %w", ErrSwiftSectionError)
-}
-
-// GetSwiftDynamicReplacementInfoForOpaqueTypes parses the __TEXT.__swift5_replac2 section
-func (f *File) GetSwiftDynamicReplacementInfoForOpaqueTypes() (*swift.AutomaticDynamicReplacementsSome, error) {
-	if sec := f.Section("__TEXT", "__swift5_replac2"); sec != nil {
-		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
-		}
-		f.cr.Seek(int64(off), io.SeekStart)
-
-		dat := make([]byte, sec.Size)
-		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
-			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
-		}
-
-		var rep2 swift.AutomaticDynamicReplacementsSome
-		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &rep2.Flags); err != nil {
-			return nil, fmt.Errorf("failed to read %T: %v", rep2.Flags, err)
-		}
-		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &rep2.NumReplacements); err != nil {
-			return nil, fmt.Errorf("failed to read %T: %v", rep2.NumReplacements, err)
-		}
-		rep2.Replacements = make([]swift.DynamicReplacementSomeDescriptor, rep2.NumReplacements)
-		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &rep2.Replacements); err != nil {
-			return nil, fmt.Errorf("failed to read %T: %v", rep2.Replacements, err)
-		}
-
-		return &rep2, nil
-	}
-
-	return nil, fmt.Errorf("MachO has no '__swift5_replac2' section: %w", ErrSwiftSectionError)
-}
-
-// GetSwiftAccessibleFunctions parses the __TEXT.__swift5_acfuncs section
-func (f *File) GetSwiftAccessibleFunctions() (*swift.AccessibleFunctionsSection, error) {
-	if sec := f.Section("__TEXT", "__swift5_acfuncs"); sec != nil {
-		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
-		}
-		f.cr.Seek(int64(off), io.SeekStart)
-
-		dat := make([]byte, sec.Size)
-		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
-			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
-		}
-
-		var afsec swift.AccessibleFunctionsSection
-		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &afsec); err != nil {
-			return nil, fmt.Errorf("failed to read %T: %v", afsec, err)
-		}
-
-		return &afsec, nil
-	}
-
-	return nil, fmt.Errorf("MachO has no '__swift5_acfuncs' section: %w", ErrSwiftSectionError)
-}
-
-// TODO: I'm not sure we should parse this as it contains a lot of info referenced by swift runtime, but not sure I can sequentially parse itxw
-// GetSwiftTypeRefs parses all the type references in the __TEXT.__swift5_typeref section
-// func (f *File) GetSwiftTypeRefs() (trefs map[uint64]string, err error) {
-// 	trefs = make(map[uint64]string)
-
-// 	if sec := f.Section("__TEXT", "__swift5_typeref"); sec != nil {
-// 		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
-// 		if err != nil {
-// 			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
-// 		}
-// 		f.cr.Seek(int64(off), io.SeekStart)
-
-// 		dat := make([]byte, sec.Size)
-// 		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
-// 			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
-// 		}
-
-// 		r := bytes.NewReader(dat)
-
-// 		for {
-// 			curr, _ := r.Seek(0, io.SeekCurrent)
-
-// 			typ, err := f.makeSymbolicMangledNameStringRef(sec.Addr + uint64(curr))
-// 			if err != nil {
-// 				if errors.Is(err, io.EOF) {
-// 					break
-// 				}
-// 				return nil, fmt.Errorf("failed to read swift AssociatedTypeDescriptor: %w", err)
-// 			}
-
-// 			trefs[sec.Addr+uint64(curr)] = typ
-// 		}
-
-// 		return trefs, nil
-// 	}
-
-// 	return nil, fmt.Errorf("MachO has no '__swift5_typeref' section: %w", ErrSwiftSectionError)
-// }
-
-// GetMultiPayloadEnums TODO: finish me
-func (f *File) GetMultiPayloadEnums() (mpenums []swift.MultiPayloadEnum, err error) {
-	if sec := f.Section("__TEXT", "__swift5_mpenum"); sec != nil {
-		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
-		}
-		f.cr.Seek(int64(off), io.SeekStart)
-
-		dat := make([]byte, sec.Size)
-		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
-			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
-		}
-
-		r := bytes.NewReader(dat)
-
-		for {
-			curr, _ := r.Seek(0, io.SeekCurrent)
-
-			var mpenum swift.MultiPayloadEnumDescriptor
-			if err := binary.Read(r, f.ByteOrder, &mpenum.TypeName); err != nil {
-				if errors.Is(err, io.EOF) {
-					break
-				}
-				return nil, fmt.Errorf("failed to read %T: %w", mpenum, err)
-			}
-
-			var sizeFlags swift.MultiPayloadEnumSizeAndFlags
-			if err := binary.Read(r, f.ByteOrder, &sizeFlags); err != nil {
-				return nil, fmt.Errorf("failed to read %T: %w", sizeFlags, err)
-			}
-
-			fmt.Println(sizeFlags.String())
-
-			if sizeFlags.UsesPayloadSpareBits() {
-				var psbmask swift.MultiPayloadEnumPayloadSpareBitMaskByteCount
-				if err := binary.Read(r, f.ByteOrder, &psbmask); err != nil {
-					return nil, fmt.Errorf("failed to read %T: %w", psbmask, err)
-				}
-				fmt.Println(psbmask.String())
-				r.Seek(-int64(binary.Size(sizeFlags)+binary.Size(psbmask)), io.SeekCurrent) // rewind
-			} else {
-				r.Seek(-int64(binary.Size(sizeFlags)), io.SeekCurrent) // rewind
-			}
-
-			mpenum.Contents = make([]uint32, sizeFlags.Size())
-			// mpenumFlags = sizeFlags & 0xffff
-			if err := binary.Read(r, f.ByteOrder, &mpenum.Contents); err != nil {
-				return nil, fmt.Errorf("failed to read mpenum contents: %w", err)
-			}
-
-			addr := int64(sec.Addr) + int64(curr) + int64(mpenum.TypeName)
-			name, err := f.makeSymbolicMangledNameStringRef(uint64(addr))
-			if err != nil {
-				return nil, fmt.Errorf("failed to read mangled type name @ %#x: %v", addr, err)
-			}
-
-			mpenums = append(mpenums, swift.MultiPayloadEnum{
-				Address:  sec.Addr + uint64(curr),
-				Type:     name,
-				Contents: mpenum.Contents,
-			})
-		}
-
-		return mpenums, nil
-	}
-
-	return nil, fmt.Errorf("MachO has no '__swift5_mpenum' section: %w", ErrSwiftSectionError)
-}
-
-func (f *File) GetColocateTypeDescriptors() ([]swift.Type, error) {
-	if sec := f.Section("__TEXT", "__constg_swiftt"); sec != nil {
-		var typs []swift.Type
-
-		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert vmaddr: %w", err)
-		}
-
-		f.cr.Seek(int64(off), io.SeekStart)
-
-		dat := make([]byte, sec.Size)
-		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
-			return nil, fmt.Errorf("failed to read %s.%s data: %w", sec.Seg, sec.Name, err)
-		}
-
-		r := bytes.NewReader(dat)
-
-		for {
-			curr, _ := r.Seek(0, io.SeekCurrent)
-
-			typ, err := f.readType(r, sec.Addr+uint64(curr))
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					break
-				}
-				return nil, fmt.Errorf("failed to read swift colocate type: %w", err)
-			}
-
-			typs = append(typs, *typ)
-		}
-
-		return typs, nil
-	}
-
-	return nil, fmt.Errorf("MachO has no '__constg_swiftt' section: %w", ErrSwiftSectionError)
-}
-
-func (f *File) GetColocateMetadata() ([]swift.ConformanceDescriptor, error) {
-	if sec := f.Section("__TEXT", "__textg_swiftm"); sec != nil {
-		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
-		}
-		f.cr.Seek(int64(off), io.SeekStart)
-		panic("not implimented") // FIXME: finish me
-	}
-	return nil, fmt.Errorf("MachO has no '__textg_swiftm' section: %w", ErrSwiftSectionError)
-}
+/**********
+* HELPERS *
+***********/
 
 func (f *File) getNameStringRef(addr uint64) (string, error) {
 	var err error
