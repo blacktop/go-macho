@@ -674,7 +674,7 @@ func (f *File) GetSwiftAccessibleFunctions() (*swift.AccessibleFunctionsSection,
 }
 
 // TODO: I'm not sure we should parse this as it contains a lot of info referenced by swift runtime, but not sure I can sequentially parse itxw
-// GetSwiftTypeRefs parses all the type references in the __TEXT.__swift5_typeref section
+//// GetSwiftTypeRefs parses all the type references in the __TEXT.__swift5_typeref section
 // func (f *File) GetSwiftTypeRefs() (trefs map[uint64]string, err error) {
 // 	trefs = make(map[uint64]string)
 
