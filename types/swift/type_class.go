@@ -117,10 +117,10 @@ type TargetMethodDescriptor struct {
 	Impl  int32
 }
 
-type mdKind uint8
+type MDKind uint8
 
 const (
-	MDKMethod mdKind = iota
+	MDKMethod MDKind = iota
 	MDKInit
 	MDKGetter
 	MDKSetter
@@ -128,15 +128,8 @@ const (
 	MDKReadCoroutine
 )
 
-const (
-	ExtraDiscriminatorShift = 16
-	ExtraDiscriminatorMask  = 0xFFFF0000
-)
-
-type MethodDescriptorFlags uint32
-
-func (f MethodDescriptorFlags) Kind() string {
-	switch mdKind(f & 0x0F) {
+func (md MDKind) String() string {
+	switch md {
 	case MDKMethod:
 		return "method"
 	case MDKInit:
@@ -150,17 +143,32 @@ func (f MethodDescriptorFlags) Kind() string {
 	case MDKReadCoroutine:
 		return "read"
 	default:
-		return fmt.Sprintf("unknown kind %d", mdKind(f&0x0F))
+		return fmt.Sprintf("unknown kind %d", md)
 	}
 }
+
+type MethodDescriptorFlags uint32
+
+const (
+	KindMask                = 0x0F // 16 kinds should be enough for anybody
+	IsInstanceMask          = 0x10
+	IsDynamicMask           = 0x20
+	IsAsyncMask             = 0x40
+	ExtraDiscriminatorShift = 16
+	ExtraDiscriminatorMask  = 0xFFFF0000
+)
+
+func (f MethodDescriptorFlags) Kind() MDKind {
+	return MDKind(f & KindMask)
+}
 func (f MethodDescriptorFlags) IsInstance() bool {
-	return (f & 0x10) != 0
+	return (f & IsInstanceMask) != 0
 }
 func (f MethodDescriptorFlags) IsDynamic() bool {
-	return (f & 0x20) != 0
+	return (f & IsDynamicMask) != 0
 }
 func (f MethodDescriptorFlags) IsAsync() bool {
-	return (f & 0x40) != 0
+	return (f & IsAsyncMask) != 0
 }
 func (f MethodDescriptorFlags) ExtraDiscriminator() uint16 {
 	return uint16(f >> ExtraDiscriminatorShift)
@@ -180,7 +188,7 @@ func (f MethodDescriptorFlags) String(field string) string {
 		flags = append(flags, fmt.Sprintf("extra discriminator %#x", f.ExtraDiscriminator()))
 	}
 	if len(strings.Join(flags, "|")) == 0 {
-		return f.Kind()
+		return f.Kind().String()
 	}
 	if len(field) > 0 {
 		field += " "

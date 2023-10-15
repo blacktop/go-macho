@@ -1104,8 +1104,20 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 		}
 		for idx, method := range methods { // populate methods with address/sym
 			if method.Flags.IsAsync() {
+				trdp := swift.TargetRelativeDirectPointer{
+					Address: uint64(int64(v.MethodListAddr) +
+						int64(unsafe.Offsetof(method.Impl)) +
+						int64(idx)*int64(binary.Size(swift.TargetMethodDescriptor{}))),
+					RelOff: method.Impl,
+				}
+				f.cr.SeekToAddr(trdp.GetRelPtrAddress())
+				maddr, err := trdp.GetAddress(f.cr)
+				if err != nil {
+					return fmt.Errorf("failed to read targer relative direct pointer: %v", err)
+				}
 				v.Methods = append(v.Methods, swift.Method{
 					TargetMethodDescriptor: method,
+					Address:                maddr,
 				})
 			} else {
 				m := swift.Method{

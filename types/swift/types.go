@@ -92,13 +92,17 @@ func (t Type) dump(verbose bool) string {
 		var meths []string
 		if t.VTable != nil {
 			for _, m := range t.VTable.Methods {
+				var static string
+				if !m.Flags.IsInstance() {
+					static = "static "
+				}
 				sym := m.Symbol
 				if m.Symbol == "" && m.Impl == 0 {
 					sym = fmt.Sprintf("/* <stripped> %s */", m.Flags.String(""))
 				} else if m.Symbol == "" && m.Impl != 0 {
-					sym = fmt.Sprintf("func sub_%x // %s", m.Address, m.Flags.String(""))
+					sym = fmt.Sprintf("%sfunc sub_%x // %s", static, m.Address, m.Flags.String(""))
 				} else {
-					sym = fmt.Sprintf("func %s // %s", sym, m.Flags.String(""))
+					sym = fmt.Sprintf("%sfunc %s // %s", static, sym, m.Flags.String(""))
 				}
 				if verbose {
 					addr = fmt.Sprintf("/* %#x */ ", m.Address)
