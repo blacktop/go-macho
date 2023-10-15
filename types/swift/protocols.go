@@ -126,10 +126,6 @@ const (
 	SpecialProtocolKind_width ProtocolContextDescriptorFlags = 6
 )
 
-// Descriptor in __TEXT.__swift5_protos
-// This section contains an array of 32-bit signed integers.
-// Each integer is a relative offset that points to a protocol descriptor in the __TEXT.__const section.
-
 type GenericRequirementKind uint8
 
 const (
@@ -282,6 +278,117 @@ func (pr *TargetProtocolRequirement) Read(r io.Reader, addr uint64) error {
 	return nil
 }
 
+// Descriptor in __TEXT.__swift5_protos
+// This section contains an array of 32-bit signed integers.
+// Each integer is a relative offset that points to a protocol descriptor in the __TEXT.__const section.
+
+type ConformanceDescriptor struct {
+	TargetProtocolConformanceDescriptor
+	Address                 uint64
+	Protocol                string
+	TypeRef                 *Type
+	Retroactive             *TargetModuleContext // context of a retroactive conformance
+	ConditionalRequirements []TargetGenericRequirement
+	ConditionalPackShapes   []GenericPackShapeDescriptor
+	ResilientWitnesses      []ResilientWitnesses
+	GenericWitnessTable     TargetGenericWitnessTable
+	WitnessTablePattern     string
+}
+
+func (c ConformanceDescriptor) String() string {
+	return c.dump(false)
+}
+func (c ConformanceDescriptor) Verbose() string {
+	return c.dump(true)
+}
+func (c ConformanceDescriptor) dump(verbose bool) string {
+	var addr string
+	var retroactive string
+	if c.Flags.IsRetroactive() {
+		retroactive = fmt.Sprintf(": %s", c.Retroactive.Name)
+	}
+	var reqs string
+	if len(c.ConditionalRequirements) > 0 {
+		reqs = "\n  /* conditional requirements */\n"
+		for _, req := range c.ConditionalRequirements {
+			reqs += fmt.Sprintf("    %s: %s\n", req.Name, req.Kind)
+		}
+	}
+	var resilientWitnesses string
+	if len(c.ResilientWitnesses) > 0 {
+		resilientWitnesses = "\n  /* resilient witnesses */\n"
+		for _, witness := range c.ResilientWitnesses {
+			if verbose {
+				addr = fmt.Sprintf("/* %#x */ ", witness.Implementation)
+			}
+			resilientWitnesses += fmt.Sprintf("    %s%s\n", addr, witness.ProtocolRequirement)
+		}
+	}
+	var accFunc string
+	if verbose {
+		addr = fmt.Sprintf("// %#x\n", c.Address)
+		if c.TypeRef.AccessFunction != 0 {
+			accFunc = fmt.Sprintf(" // %#x", c.TypeRef.AccessFunction)
+		}
+	}
+	var parent string
+	if len(c.TypeRef.Parent.Name) > 0 {
+		parent = c.TypeRef.Parent.Name + "."
+	}
+	return fmt.Sprintf(
+		"%s"+
+			"%s%s {\n"+
+			"    %s %s%s%s\n"+
+			"%s"+
+			"%s"+
+			"}",
+		addr,
+		c.Protocol,
+		retroactive,
+		c.TypeRef.Kind,
+		parent,
+		c.TypeRef.Name,
+		accFunc,
+		reqs,
+		resilientWitnesses,
+	)
+}
+
+// TargetProtocolConformanceDescriptor the structure of a protocol conformance.
+type TargetProtocolConformanceDescriptor struct {
+	ProtocolOffsest            RelativeDirectPointer // The protocol being conformed to.
+	TypeRefOffsest             RelativeDirectPointer // Some description of the type that conforms to the protocol.
+	WitnessTablePatternOffsest RelativeDirectPointer // The witness table pattern, which may also serve as the witness table.
+	Flags                      ConformanceFlags      // Various flags, including the kind of conformance.
+}
+
+func (d TargetProtocolConformanceDescriptor) Size() int64 {
+	return int64(
+		binary.Size(d.ProtocolOffsest.RelOff) +
+			binary.Size(d.TypeRefOffsest.RelOff) +
+			binary.Size(d.WitnessTablePatternOffsest.RelOff) +
+			binary.Size(d.Flags))
+}
+
+func (d *TargetProtocolConformanceDescriptor) Read(r io.Reader, addr uint64) error {
+	d.ProtocolOffsest.Address = addr
+	d.TypeRefOffsest.Address = addr + uint64(binary.Size(d.ProtocolOffsest.RelOff))
+	d.WitnessTablePatternOffsest.Address = addr + uint64(binary.Size(d.ProtocolOffsest.RelOff))*2
+	if err := binary.Read(r, binary.LittleEndian, &d.ProtocolOffsest.RelOff); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &d.TypeRefOffsest.RelOff); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &d.WitnessTablePatternOffsest.RelOff); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &d.Flags); err != nil {
+		return err
+	}
+	return nil
+}
+
 type ConformanceFlags uint32
 
 const (
@@ -359,108 +466,6 @@ func (f ConformanceFlags) String() string {
 		f.HasGenericWitnessTable(),
 		f.NumConditionalPackShapeDescriptors(),
 		f.GetTypeReferenceKind(),
-	)
-}
-
-type TargetProtocolConformanceDescriptor struct {
-	ProtocolOffsest            RelativeDirectPointer // The protocol being conformed to.
-	TypeRefOffsest             RelativeDirectPointer // Some description of the type that conforms to the protocol.
-	WitnessTablePatternOffsest RelativeDirectPointer // The witness table pattern, which may also serve as the witness table.
-	Flags                      ConformanceFlags      // Various flags, including the kind of conformance.
-}
-
-func (c TargetProtocolConformanceDescriptor) Size() int64 {
-	return int64(4 * binary.Size(uint32(0))) // 4 x uint32
-}
-
-type ConformanceDescriptor struct {
-	TargetProtocolConformanceDescriptor
-	Address                 uint64
-	Protocol                string
-	TypeRef                 *Type
-	Retroactive             *TargetModuleContext // context of a retroactive conformance
-	ConditionalRequirements []TargetGenericRequirement
-	ConditionalPackShapes   []GenericPackShapeDescriptor
-	ResilientWitnesses      []ResilientWitnesses
-	GenericWitnessTable     TargetGenericWitnessTable
-	WitnessTablePattern     string
-}
-
-func (c *ConformanceDescriptor) ReadDescriptor(r io.Reader) error {
-	c.TargetProtocolConformanceDescriptor = TargetProtocolConformanceDescriptor{
-		ProtocolOffsest: RelativeDirectPointer{
-			Address: c.Address,
-		},
-		TypeRefOffsest: RelativeDirectPointer{
-			Address: c.Address + uint64(binary.Size(RelativeDirectPointer{}.RelOff)),
-		},
-		WitnessTablePatternOffsest: RelativeDirectPointer{
-			Address: c.Address + uint64(binary.Size(RelativeDirectPointer{}.RelOff))*2,
-		},
-	}
-	if err := binary.Read(r, binary.LittleEndian, &c.TargetProtocolConformanceDescriptor.ProtocolOffsest.RelOff); err != nil {
-		return err
-	}
-	if err := binary.Read(r, binary.LittleEndian, &c.TargetProtocolConformanceDescriptor.TypeRefOffsest.RelOff); err != nil {
-		return err
-	}
-	if err := binary.Read(r, binary.LittleEndian, &c.TargetProtocolConformanceDescriptor.WitnessTablePatternOffsest.RelOff); err != nil {
-		return err
-	}
-	if err := binary.Read(r, binary.LittleEndian, &c.TargetProtocolConformanceDescriptor.Flags); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (c ConformanceDescriptor) String() string {
-	return c.dump(false)
-}
-func (c ConformanceDescriptor) Verbose() string {
-	return c.dump(true)
-}
-func (c ConformanceDescriptor) dump(verbose bool) string {
-	var addr string
-	var retroactive string
-	if c.Flags.IsRetroactive() {
-		retroactive = fmt.Sprintf(": %s", c.Retroactive.Name)
-	}
-	var reqs string
-	if len(c.ConditionalRequirements) > 0 {
-		reqs = "\n  /* conditional requirements */\n"
-		for _, req := range c.ConditionalRequirements {
-			reqs += fmt.Sprintf("    %s: %s\n", req.Name, req.Kind)
-		}
-	}
-	var resilientWitnesses string
-	if len(c.ResilientWitnesses) > 0 {
-		resilientWitnesses = "\n  /* resilient witnesses */\n"
-		for _, witness := range c.ResilientWitnesses {
-			if verbose {
-				addr = fmt.Sprintf("\t// %#x", witness.Implementation)
-			}
-			resilientWitnesses += fmt.Sprintf("    %s%s\n", witness.ProtocolRequirement, addr)
-		}
-	}
-	if verbose {
-		addr = fmt.Sprintf("// %#x\n", c.Address)
-	}
-	return fmt.Sprintf(
-		"%s"+
-			"%s%s {\n"+
-			"    %s %s.%s // %#x\n"+
-			"%s"+
-			"%s"+
-			"}",
-		addr,
-		c.Protocol,
-		retroactive,
-		c.TypeRef.Kind,
-		c.TypeRef.Parent.Name,
-		c.TypeRef.Name,
-		c.TypeRef.AccessFunction,
-		reqs,
-		resilientWitnesses,
 	)
 }
 

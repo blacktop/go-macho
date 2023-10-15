@@ -155,8 +155,10 @@ func (f *File) GetSwiftFields() (fields []swift.Field, err error) {
 }
 
 func (f *File) readField(r io.Reader, addr uint64) (field *swift.Field, err error) {
-	if fd, ok := f.swift[addr]; ok {
-		return fd.(*swift.Field), nil
+	if typ, ok := f.swift[addr]; ok {
+		if _, ok := typ.(*swift.Field); ok {
+			return typ.(*swift.Field), nil
+		}
 	}
 
 	field = &swift.Field{Address: addr}
@@ -348,7 +350,7 @@ func (f *File) readProtocolConformance(addr uint64) (pcd *swift.ConformanceDescr
 
 	pcd = &swift.ConformanceDescriptor{Address: addr}
 
-	if err := pcd.ReadDescriptor(f.cr); err != nil {
+	if err := pcd.TargetProtocolConformanceDescriptor.Read(f.cr, pcd.Address); err != nil {
 		return nil, fmt.Errorf("failed to read swift TargetProtocolConformanceDescriptor: %v", err)
 	}
 
@@ -420,31 +422,6 @@ func (f *File) readProtocolConformance(addr uint64) (pcd *swift.ConformanceDescr
 	if err != nil {
 		return nil, fmt.Errorf("failed to read protocol name: %v", err)
 	}
-	// fmt.Println(pcd.Flags.String())
-	// if pcd.Flags.IsSynthesizedNonUnique() {
-
-	// }
-
-	if pcd.WitnessTablePatternOffsest.RelOff > 0 {
-		ptr, err := f.GetPointerAtAddress(pcd.WitnessTablePatternOffsest.GetAddress())
-		if err != nil {
-			return nil, fmt.Errorf("failed to read witness table pattern pointer: %v", err)
-		}
-		// ptr += f.preferredLoadAddress()
-		// _ = ptr // TODO: use this
-		// f.cr.SeekToAddr(wtpAddr)
-		// var wt swift.TargetWitnessTable
-		// if err := binary.Read(f.cr, f.ByteOrder, &wt); err != nil {
-		// 	return nil, fmt.Errorf("failed to read witness table pattern: %v", err)
-		// }
-		if ptr != pcd.Address && ptr+f.preferredLoadAddress() != pcd.Address {
-			wtp, err := f.readProtocolConformance(ptr)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read conformance descriptor witness table pattern: %v", err)
-			}
-			pcd.WitnessTablePattern = wtp.Protocol
-		}
-	}
 
 	// parse type reference
 	switch pcd.Flags.GetTypeReferenceKind() {
@@ -480,6 +457,10 @@ func (f *File) readProtocolConformance(addr uint64) (pcd *swift.ConformanceDescr
 		pcd.TypeRef = &swift.Type{
 			Address: pcd.TypeRefOffsest.GetAddress(),
 			Name:    name,
+			Kind:    swift.CDKindClass,
+			Parent: &swift.TargetModuleContext{
+				Name: "",
+			},
 		}
 	case swift.IndirectObjCClass:
 		ptr, err := f.GetPointerAtAddress(pcd.TypeRefOffsest.GetAddress())
@@ -493,7 +474,15 @@ func (f *File) readProtocolConformance(addr uint64) (pcd *swift.ConformanceDescr
 		pcd.TypeRef = &swift.Type{
 			Address: pcd.TypeRefOffsest.GetAddress(),
 			Name:    name,
+			Kind:    swift.CDKindClass,
+			Parent: &swift.TargetModuleContext{
+				Name: "",
+			},
 		}
+	}
+
+	if pcd.WitnessTablePatternOffsest.IsSet() {
+		// TODO: ??? (look up symbol at address in printer)
 	}
 
 	if pcd.Flags.IsSynthesizedNonUnique() {
@@ -744,8 +733,6 @@ func (f *File) GetMultiPayloadEnums() (mpenums []swift.MultiPayloadEnum, err err
 				return nil, fmt.Errorf("failed to read %T: %w", sizeFlags, err)
 			}
 
-			fmt.Println(sizeFlags.String())
-
 			if sizeFlags.UsesPayloadSpareBits() {
 				var psbmask swift.MultiPayloadEnumPayloadSpareBitMaskByteCount
 				if err := binary.Read(r, f.ByteOrder, &psbmask); err != nil {
@@ -876,7 +863,9 @@ func (f *File) GetSwiftTypes() (typs []swift.Type, err error) {
 
 func (f *File) readType(r io.ReadSeeker, addr uint64) (typ *swift.Type, err error) {
 	if typ, ok := f.swift[addr]; ok {
-		return typ.(*swift.Type), nil
+		if _, ok := typ.(*swift.Type); ok {
+			return typ.(*swift.Type), nil
+		}
 	}
 
 	var desc swift.TargetContextDescriptor
@@ -1388,9 +1377,16 @@ func (f *File) getNameStringRef(addr uint64) (string, error) {
 
 	if bind, err := f.GetBindName(ptr); err == nil {
 		return bind, nil
-	} else {
-		return f.GetCString(f.vma.Convert(ptr))
+	} else if syms, err := f.FindAddressSymbols(ptr); err == nil {
+		if len(syms) > 0 {
+			for _, s := range syms {
+				if !s.Type.IsDebugSym() {
+					return s.Name, nil
+				}
+			}
+		}
 	}
+	return f.GetCString(f.vma.Convert(ptr))
 }
 
 func (f *File) getContextDesc(addr uint64) (*swift.TargetModuleContext, error) {
