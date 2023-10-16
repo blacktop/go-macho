@@ -229,7 +229,7 @@ func (f *File) GetSwiftAssociatedTypes() (asstypes []swift.AssociatedType, err e
 				Address: sec.Addr + uint64(curr),
 			}
 
-			atyp.AssociatedTypeDescriptor, err = swift.ReadAssociatedTypeDescriptor(r, sec.Addr+uint64(curr))
+			err = atyp.AssociatedTypeDescriptor.Read(r, sec.Addr+uint64(curr))
 			if err != nil {
 				if errors.Is(err, io.EOF) {
 					break
@@ -240,8 +240,7 @@ func (f *File) GetSwiftAssociatedTypes() (asstypes []swift.AssociatedType, err e
 			atyp.TypeRecords = make([]swift.ATRecordType, atyp.NumAssociatedTypes)
 			for i := uint32(0); i < atyp.NumAssociatedTypes; i++ {
 				curr, _ = r.Seek(0, io.SeekCurrent)
-				atyp.TypeRecords[i].AssociatedTypeRecord, err = swift.ReadAssociatedTypeRecord(r, sec.Addr+uint64(curr))
-				if err != nil {
+				if err := atyp.TypeRecords[i].AssociatedTypeRecord.Read(r, sec.Addr+uint64(curr)); err != nil {
 					return nil, fmt.Errorf("failed to read AssociatedTypeRecord: %w", err)
 				}
 			}
@@ -391,23 +390,50 @@ func (f *File) readProtocolConformance(addr uint64) (pcd *swift.ConformanceDescr
 		if err := binary.Read(f.cr, f.ByteOrder, &rwit); err != nil {
 			return nil, fmt.Errorf("failed to read resilient witnesses offset: %v", err)
 		}
-		curr, _ := f.cr.Seek(0, io.SeekCurrent)
-		wits := make([]swift.TargetResilientWitness, rwit.NumWitnesses)
-		if err := binary.Read(f.cr, f.ByteOrder, &wits); err != nil {
-			return nil, fmt.Errorf("failed to read resilient witnesses offset: %v", err)
+		pcd.ResilientWitnesses = make([]swift.ResilientWitnesses, rwit.NumWitnesses)
+		for i := 0; i < int(rwit.NumWitnesses); i++ {
+			curr, _ = f.cr.Seek(0, io.SeekCurrent) // save offset
+			if err := pcd.ResilientWitnesses[i].Read(f.cr, pcd.Address+uint64(curr-off)); err != nil {
+				return nil, fmt.Errorf("failed to read protocols requirements : %v", err)
+			}
 		}
 		end, _ := f.cr.Seek(0, io.SeekCurrent)
-		for idx, wit := range wits {
-			addr := uint64(int64(pcd.Address) + (curr - off) + int64(idx*binary.Size(swift.TargetResilientWitness{})) + int64(wit.Requirement))
-			req, err := f.getNameStringRef(addr)
+		for idx, wit := range pcd.ResilientWitnesses {
+			addr, err := wit.RequirementOff.GetAddress(f.cr, f.GetPointerAtAddress)
 			if err != nil {
-				return nil, fmt.Errorf("failed to read resilient witness requirement: %v", err)
+				return nil, fmt.Errorf("failed to read resilient witness requirement address: %v", err)
 			}
-			impl := uint64(int64(pcd.Address) + (curr - off) + int64(idx*binary.Size(swift.TargetResilientWitness{})) + int64(unsafe.Offsetof(wit.Impl)) + int64(wit.Impl))
-			pcd.ResilientWitnesses = append(pcd.ResilientWitnesses, swift.ResilientWitnesses{
-				Implementation:      impl,
-				ProtocolRequirement: req,
-			})
+			if bind, err := f.GetBindName(addr); err == nil {
+				pcd.ResilientWitnesses[idx].Symbol = bind
+			} else if syms, err := f.FindAddressSymbols(addr); err == nil {
+				if len(syms) > 0 {
+					for _, s := range syms {
+						if !s.Type.IsDebugSym() {
+							pcd.ResilientWitnesses[idx].Symbol = s.Name
+							break
+						}
+					}
+				}
+			} else {
+				if err := f.cr.SeekToAddr(addr); err != nil {
+					return nil, fmt.Errorf("failed to seek to resilient witness requirement address: %v", err)
+				}
+				if err := pcd.ResilientWitnesses[idx].Requirement.Read(f.cr, addr); err != nil {
+					return nil, fmt.Errorf("failed to read target protocol requirement: %v", err)
+				}
+				if wit.ImplOff.IsSet() {
+					if syms, err := f.FindAddressSymbols(wit.ImplOff.GetAddress()); err == nil {
+						if len(syms) > 0 {
+							for _, s := range syms {
+								if !s.Type.IsDebugSym() {
+									pcd.ResilientWitnesses[idx].Symbol = s.Name
+									break
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 		f.cr.Seek(end, io.SeekStart) // reset TODO: fix this, it's dumb
 	}
@@ -417,11 +443,15 @@ func (f *File) readProtocolConformance(addr uint64) (pcd *swift.ConformanceDescr
 			return nil, fmt.Errorf("failed to read generic witness table: %v", err)
 		}
 	}
-
-	pcd.Protocol, err = f.getNameStringRef(pcd.ProtocolOffsest.GetAddress())
+	paddr, err := pcd.ProtocolOffsest.GetAddress(f.cr, f.GetPointerAtAddress)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read protocol offset pointer flags(%s): %v", pcd.Flags.String(), err)
+	}
+	ctx, err := f.getContextDesc(paddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read protocol name: %v", err)
 	}
+	pcd.Protocol = ctx.Name
 
 	// parse type reference
 	switch pcd.Flags.GetTypeReferenceKind() {
@@ -431,12 +461,15 @@ func (f *File) readProtocolConformance(addr uint64) (pcd *swift.ConformanceDescr
 			return nil, fmt.Errorf("failed to read type: %v", err)
 		}
 	case swift.IndirectTypeDescriptor:
-		ptr, err := f.GetPointerAtAddress(pcd.TypeRefOffsest.GetAddress())
+		addr := pcd.TypeRefOffsest.GetAddress()
+		_ = addr
+		addr = addr &^ 1
+		ptr, err := f.GetPointerAtAddress(pcd.TypeRefOffsest.GetAddress() &^ 1)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read type pointer: %v", err)
 		}
 		if ptr == 0 {
-			bind, err := f.GetBindName(pcd.TypeRefOffsest.GetAddress())
+			bind, err := f.GetBindName(addr)
 			if err == nil {
 				pcd.TypeRef = &swift.Type{
 					Address: ptr,
@@ -444,7 +477,8 @@ func (f *File) readProtocolConformance(addr uint64) (pcd *swift.ConformanceDescr
 				}
 			}
 		} else {
-			pcd.TypeRef, err = f.readType(f.cr, f.vma.Convert(ptr))
+			f.cr.SeekToAddr(ptr)
+			pcd.TypeRef, err = f.readType(f.cr, ptr)
 			if err != nil {
 				return nil, fmt.Errorf("failed to read type: %v", err)
 			}
@@ -1055,7 +1089,7 @@ func (f *File) parseProtocol(r io.ReadSeeker, typ *swift.Type) (prot *swift.Prot
 	}
 
 	if prot.AssociatedTypeNamesOffset.IsSet() {
-		prot.AssociatedType, err = f.GetCString(prot.AssociatedTypeNamesOffset.GetAddress())
+		prot.AssociatedTypes, err = f.GetCString(prot.AssociatedTypeNamesOffset.GetAddress())
 		if err != nil {
 			return nil, fmt.Errorf("failed to read protocols assocated type names: %v", err)
 		}
@@ -1441,12 +1475,24 @@ func (f *File) getContextDesc(addr uint64) (*swift.TargetModuleContext, error) {
 	curr, _ := f.cr.Seek(0, io.SeekCurrent)
 	defer f.cr.Seek(curr, io.SeekStart)
 
-	if err := f.cr.SeekToAddr(addr); err != nil {
+	var ptr uint64
+
+	if (addr & 1) == 1 {
+		addr = addr &^ 1
+		ptr, err = f.GetPointerAtAddress(addr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read swift context descriptor pointer @ %#x: %v", addr, err)
+		}
+	} else {
+		ptr = addr
+	}
+
+	if err := f.cr.SeekToAddr(ptr); err != nil {
 		return nil, fmt.Errorf("failed to seek to swift context descriptor parent offset: %w", err)
 	}
 
 	var tmc swift.TargetModuleContext
-	if err := tmc.TargetModuleContextDescriptor.Read(f.cr, addr); err != nil {
+	if err := tmc.TargetModuleContextDescriptor.Read(f.cr, ptr); err != nil {
 		return nil, fmt.Errorf("failed to read swift module context descriptor: %w", err)
 	}
 

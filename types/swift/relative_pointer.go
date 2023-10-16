@@ -35,3 +35,24 @@ func (tr TargetRelativeDirectPointer) GetAddress(r io.Reader) (uint64, error) {
 	}
 	return uint64(int64(tr.Address) + int64(tr.RelOff) + int64(pointerRelOff)), nil
 }
+
+type RelativeIndirectablePointer struct {
+	Address uint64
+	RelOff  int32
+}
+
+func (ri RelativeIndirectablePointer) IsSet() bool {
+	return ri.RelOff != 0
+}
+func (ri RelativeIndirectablePointer) GetRelPtrAddress() uint64 {
+	return uint64(int64(ri.Address) + int64(ri.RelOff))
+}
+func (ri RelativeIndirectablePointer) GetAddress(r io.Reader, readPtr func(uint64) (uint64, error)) (uint64, error) {
+	addr := ri.GetRelPtrAddress()
+	if (addr & 1) == 1 {
+		addr = addr &^ 1
+		return readPtr(addr)
+	} else {
+		return addr, nil
+	}
+}

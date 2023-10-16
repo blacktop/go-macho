@@ -57,28 +57,31 @@ type AssociatedTypeDescriptor struct {
 	AssociatedTypeRecordSize uint32
 }
 
-func ReadAssociatedTypeDescriptor(r io.Reader, addr uint64) (AssociatedTypeDescriptor, error) {
-	atd := AssociatedTypeDescriptor{
-		ConformingTypeNameOffset: RelativeDirectPointer{
-			Address: addr,
-		},
-		ProtocolTypeNameOffset: RelativeDirectPointer{
-			Address: addr + uint64(binary.Size(RelativeDirectPointer{}.RelOff)),
-		},
+func (a AssociatedTypeDescriptor) Size() int64 {
+	return int64(
+		binary.Size(a.ConformingTypeNameOffset.RelOff) +
+			binary.Size(a.ProtocolTypeNameOffset.RelOff) +
+			binary.Size(a.NumAssociatedTypes) +
+			binary.Size(a.AssociatedTypeRecordSize),
+	)
+}
+
+func (a *AssociatedTypeDescriptor) Read(r io.Reader, addr uint64) error {
+	a.ConformingTypeNameOffset.Address = addr
+	a.ProtocolTypeNameOffset.Address = addr + uint64(binary.Size(RelativeDirectPointer{}.RelOff))
+	if err := binary.Read(r, binary.LittleEndian, &a.ConformingTypeNameOffset.RelOff); err != nil {
+		return err
 	}
-	if err := binary.Read(r, binary.LittleEndian, &atd.ConformingTypeNameOffset.RelOff); err != nil {
-		return AssociatedTypeDescriptor{}, err
+	if err := binary.Read(r, binary.LittleEndian, &a.ProtocolTypeNameOffset.RelOff); err != nil {
+		return err
 	}
-	if err := binary.Read(r, binary.LittleEndian, &atd.ProtocolTypeNameOffset.RelOff); err != nil {
-		return AssociatedTypeDescriptor{}, err
+	if err := binary.Read(r, binary.LittleEndian, &a.NumAssociatedTypes); err != nil {
+		return err
 	}
-	if err := binary.Read(r, binary.LittleEndian, &atd.NumAssociatedTypes); err != nil {
-		return AssociatedTypeDescriptor{}, err
+	if err := binary.Read(r, binary.LittleEndian, &a.AssociatedTypeRecordSize); err != nil {
+		return err
 	}
-	if err := binary.Read(r, binary.LittleEndian, &atd.AssociatedTypeRecordSize); err != nil {
-		return AssociatedTypeDescriptor{}, err
-	}
-	return atd, nil
+	return nil
 }
 
 type ATRecordType struct {
@@ -95,20 +98,21 @@ type AssociatedTypeRecord struct {
 	SubstitutedTypeNameOffset RelativeDirectPointer
 }
 
-func ReadAssociatedTypeRecord(r io.Reader, addr uint64) (AssociatedTypeRecord, error) {
-	atr := AssociatedTypeRecord{
-		NameOffset: RelativeDirectPointer{
-			Address: addr,
-		},
-		SubstitutedTypeNameOffset: RelativeDirectPointer{
-			Address: addr + uint64(binary.Size(RelativeDirectPointer{}.RelOff)),
-		},
+func (a AssociatedTypeRecord) Size() int64 {
+	return int64(
+		binary.Size(a.NameOffset.RelOff) +
+			binary.Size(a.SubstitutedTypeNameOffset.RelOff),
+	)
+}
+
+func (a *AssociatedTypeRecord) Read(r io.Reader, addr uint64) error {
+	a.NameOffset.Address = addr
+	a.SubstitutedTypeNameOffset.Address = addr + uint64(binary.Size(RelativeDirectPointer{}.RelOff))
+	if err := binary.Read(r, binary.LittleEndian, &a.NameOffset.RelOff); err != nil {
+		return err
 	}
-	if err := binary.Read(r, binary.LittleEndian, &atr.NameOffset.RelOff); err != nil {
-		return AssociatedTypeRecord{}, err
+	if err := binary.Read(r, binary.LittleEndian, &a.SubstitutedTypeNameOffset.RelOff); err != nil {
+		return err
 	}
-	if err := binary.Read(r, binary.LittleEndian, &atr.SubstitutedTypeNameOffset.RelOff); err != nil {
-		return AssociatedTypeRecord{}, err
-	}
-	return atr, nil
+	return nil
 }

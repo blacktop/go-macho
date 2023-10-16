@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"strings"
 )
 
 //go:generate stringer -type GenericRequirementKind,ProtocolRequirementKind -linecomment -output protocols_string.go
@@ -18,7 +19,7 @@ type Protocol struct {
 	Address               uint64
 	Name                  string
 	Parent                *TargetModuleContext
-	AssociatedType        string
+	AssociatedTypes       string
 	SignatureRequirements []TargetGenericRequirement
 	Requirements          []TargetProtocolRequirement
 }
@@ -32,39 +33,37 @@ func (p Protocol) Verbose() string {
 func (p Protocol) dump(verbose bool) string {
 	var addr string
 	var reqs string
+	var atyps string
 	if len(p.Requirements) > 0 {
 		reqs = "  /* requirements */\n"
 		for _, req := range p.Requirements {
-			var rtyp string
-			switch req.Flags.Kind() {
-			case PRKindMethodc:
-				rtyp = "func"
-			default:
-				rtyp = "var"
-			}
+			var static string
 			if !req.Flags.IsInstance() {
-				rtyp = "static " + rtyp
+				static = "static "
 			}
-			if verbose {
-				addr = " // <stripped>"
-				if req.DefaultImplementation.IsSet() {
-					addr = fmt.Sprintf(" // %#x", req.DefaultImplementation.GetAddress())
-				}
-				if req.Flags.IsSignedWithAddress() && req.Flags.ExtraDiscriminator() != 0 {
-					addr += fmt.Sprintf(" __ptrauth(%#04x)", req.Flags.ExtraDiscriminator())
-				}
+			sub := "<stripped>"
+			if req.DefaultImplementation.IsSet() {
+				sub = fmt.Sprintf("sub_%x", req.DefaultImplementation.GetAddress())
 			}
-			reqs += fmt.Sprintf("    %s {%s}%s\n", rtyp, req.Flags.Kind(), addr)
+			var flags string
+			if req.DefaultImplementation.Address != 0 {
+				flags = fmt.Sprintf(" // %s", req.Flags.String())
+			}
+			reqs += fmt.Sprintf("    %sfunc %s%s\n", static, sub, flags)
 		}
 	}
 	if verbose {
 		addr = fmt.Sprintf("// %#x\n", p.Address)
 	}
+	if len(p.AssociatedTypes) > 0 {
+		atyps = ": " + p.AssociatedTypes
+	}
 	return fmt.Sprintf(
-		"%sprotocol %s.%s {\n%s}",
+		"%sprotocol %s.%s%s {\n%s}",
 		addr,
 		p.Parent.Name,
 		p.Name,
+		atyps,
 		reqs,
 	)
 }
@@ -246,13 +245,23 @@ func (f ProtocolRequirementFlags) IsFunctionImpl() bool {
 	}
 }
 func (f ProtocolRequirementFlags) String() string {
-	return fmt.Sprintf("kind: %s, instance: %t, async: %t, signed_with_addr: %t, extra_discriminator: %x, function_impl: %t",
-		f.Kind(),
-		f.IsInstance(),
-		f.IsAsync(),
-		f.IsSignedWithAddress(),
-		f.ExtraDiscriminator(),
-		f.IsFunctionImpl())
+	var flags []string
+	if f.IsInstance() {
+		flags = append(flags, "instance")
+	}
+	if f.IsAsync() {
+		flags = append(flags, "async")
+	}
+	if f.IsFunctionImpl() {
+		flags = append(flags, "func_impl")
+	}
+	if f.IsSignedWithAddress() && f.ExtraDiscriminator() != 0 {
+		flags = append(flags, fmt.Sprintf("__ptrauth(%#04x)", f.ExtraDiscriminator()))
+	}
+	if len(strings.Join(flags, "|")) == 0 {
+		return f.Kind().String()
+	}
+	return fmt.Sprintf("%s flags: %s", f.Kind(), strings.Join(flags, ", "))
 }
 
 // TargetProtocolRequirement protocol requirement descriptor. This describes a single protocol requirement in a protocol descriptor.
@@ -323,12 +332,28 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 	}
 	var resilientWitnesses string
 	if len(c.ResilientWitnesses) > 0 {
+		var rwFlags string
 		resilientWitnesses = "\n  /* resilient witnesses */\n"
 		for _, witness := range c.ResilientWitnesses {
-			if verbose {
-				addr = fmt.Sprintf("/* %#x */ ", witness.Implementation)
+			var static string
+			if !witness.Requirement.Flags.IsInstance() {
+				static = "static "
 			}
-			resilientWitnesses += fmt.Sprintf("    %s%s\n", addr, witness.ProtocolRequirement)
+			sym := witness.Symbol
+			if witness.Symbol == "" && !witness.ImplOff.IsSet() {
+				sym = "/* <stripped> */"
+			} else if witness.Symbol == "" && witness.ImplOff.IsSet() {
+				sym = fmt.Sprintf("%sfunc sub_%x", static, witness.ImplOff.GetAddress())
+			} else {
+				sym = fmt.Sprintf("%sfunc %s", static, sym)
+			}
+			if verbose {
+				addr = fmt.Sprintf("/* %#x */ ", witness.ImplOff.GetAddress())
+				if witness.Requirement.DefaultImplementation.Address != 0 {
+					rwFlags = fmt.Sprintf(" // %s", witness.Requirement.Flags.String())
+				}
+			}
+			resilientWitnesses += fmt.Sprintf("    %s%s%s\n", addr, sym, rwFlags)
 		}
 	}
 	var witnessTablePattern string
@@ -375,10 +400,10 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 
 // TargetProtocolConformanceDescriptor the structure of a protocol conformance.
 type TargetProtocolConformanceDescriptor struct {
-	ProtocolOffsest            RelativeDirectPointer // The protocol being conformed to.
-	TypeRefOffsest             RelativeDirectPointer // Some description of the type that conforms to the protocol.
-	WitnessTablePatternOffsest RelativeDirectPointer // The witness table pattern, which may also serve as the witness table.
-	Flags                      ConformanceFlags      // Various flags, including the kind of conformance.
+	ProtocolOffsest            RelativeIndirectablePointer // The protocol being conformed to.
+	TypeRefOffsest             RelativeDirectPointer       // Some description of the type that conforms to the protocol.
+	WitnessTablePatternOffsest RelativeDirectPointer       // The witness table pattern, which may also serve as the witness table.
+	Flags                      ConformanceFlags            // Various flags, including the kind of conformance.
 }
 
 func (d TargetProtocolConformanceDescriptor) Size() int64 {
@@ -498,8 +523,9 @@ type TargetWitnessTable struct {
 }
 
 type ResilientWitnesses struct {
-	ProtocolRequirement string
-	Implementation      uint64
+	TargetResilientWitness
+	Symbol      string
+	Requirement TargetProtocolRequirement
 }
 
 // TargetProtocolRecord the structure of a protocol reference record.
@@ -517,8 +543,24 @@ type TargetResilientWitnessesHeader struct {
 // TargetResilientWitness object
 // ref: swift/ABI/Metadata.h - TargetResilientWitness
 type TargetResilientWitness struct {
-	Requirement uint32
-	Impl        int32
+	RequirementOff RelativeIndirectablePointer
+	ImplOff        RelativeDirectPointer
+}
+
+func (rw TargetResilientWitness) Size() int64 {
+	return int64(binary.Size(rw.RequirementOff.RelOff) + binary.Size(rw.ImplOff.RelOff))
+}
+
+func (rw *TargetResilientWitness) Read(r io.Reader, addr uint64) error {
+	rw.RequirementOff.Address = addr
+	rw.ImplOff.Address = addr + uint64(binary.Size(rw.RequirementOff.RelOff))
+	if err := binary.Read(r, binary.LittleEndian, &rw.RequirementOff.RelOff); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &rw.ImplOff.RelOff); err != nil {
+		return err
+	}
+	return nil
 }
 
 // TargetGenericWitnessTable object
