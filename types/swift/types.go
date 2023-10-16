@@ -55,7 +55,7 @@ func (t Type) dump(verbose bool) string {
 		if verbose {
 			addr = fmt.Sprintf("// %#x\n", t.Address)
 		}
-		return fmt.Sprintf("%s%s %s", addr, t.Kind, t.Name)
+		return fmt.Sprintf("%s%s %s.%s", addr, t.Kind, t.Parent.Name, t.Name)
 	case CDKindAnonymous:
 		if verbose {
 			addr = fmt.Sprintf("// %#x\n", t.Address)

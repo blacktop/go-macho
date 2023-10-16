@@ -482,7 +482,27 @@ func (f *File) readProtocolConformance(addr uint64) (pcd *swift.ConformanceDescr
 	}
 
 	if pcd.WitnessTablePatternOffsest.IsSet() {
-		// TODO: ??? (look up symbol at address in printer)
+		ptr, err := f.GetPointerAtAddress(pcd.WitnessTablePatternOffsest.GetAddress())
+		if err != nil {
+			return nil, fmt.Errorf("failed to read witness table pattern address pointer: %v", err)
+		}
+		var wtpname string
+		if ptr != pcd.Address && ptr+f.preferredLoadAddress() != pcd.Address {
+			ctx, err := f.getContextDesc(ptr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read witness table pattern name: %v", err)
+			}
+			wtpname = ctx.Name
+			// f.cr.SeekToAddr(pcd.WitnessTablePatternOffsest.GetAddress())
+			// wtpname, err := f.readType(f.cr, pcd.WitnessTablePatternOffsest.GetAddress())
+			// if err != nil {
+			// 	return nil, fmt.Errorf("failed to read witness table pattern name: %v", err)
+			// }
+		}
+		pcd.WitnessTablePattern = &swift.PCDWitnessTable{
+			Address: pcd.WitnessTablePatternOffsest.GetAddress(),
+			Name:    wtpname,
+		}
 	}
 
 	if pcd.Flags.IsSynthesizedNonUnique() {
@@ -981,16 +1001,15 @@ func (f *File) parseExtension(r io.Reader, typ *swift.Type) (err error) {
 	if err := desc.Read(r, typ.Address); err != nil {
 		return fmt.Errorf("failed to read swift module descriptor: %v", err)
 	}
-	ext, err := f.getContextDesc(desc.ExtendedContext.GetAddress())
-	if err != nil {
-		return fmt.Errorf("failed to read extended context: %v", err)
-	}
-	typ.Name = ext.Name // TODO: should I use more?
 	if desc.ParentOffset.IsSet() {
 		typ.Parent, err = f.getContextDesc(desc.ParentOffset.GetAddress())
 		if err != nil {
 			return fmt.Errorf("failed to get parent: %v", err)
 		}
+	}
+	typ.Name, err = f.getCString(desc.ExtendedContext.GetAddress())
+	if err != nil {
+		return fmt.Errorf("failed to read extended context: %v", err)
 	}
 	typ.Type = &desc
 	return nil
@@ -1351,7 +1370,7 @@ func (f *File) parseEnumDescriptor(r io.Reader, typ *swift.Type) (err error) {
 		}
 	}
 
-	typ.Name, err = f.GetCString(desc.NameOffset.GetAddress())
+	typ.Name, err = f.getCString(desc.NameOffset.GetAddress())
 	if err != nil {
 		return fmt.Errorf("failed to read cstring: %v", err)
 	}
@@ -1372,6 +1391,21 @@ func (f *File) parseEnumDescriptor(r io.Reader, typ *swift.Type) (err error) {
 /**********
 * HELPERS *
 ***********/
+
+func (f *File) getCString(addr uint64) (string, error) {
+	name, err := f.GetCString(addr)
+	if err != nil {
+		return "", fmt.Errorf("failed to read cstring: %v", err)
+	}
+	if strings.HasPrefix(name, "S") || strings.HasPrefix(name, "y") {
+		return "_$s" + name, nil
+	} else if strings.EqualFold(name, "C") {
+		return "_$sS" + name, nil
+	} else if strings.HasPrefix(name, "$s") {
+		return "_" + name, nil
+	}
+	return name, nil
+}
 
 func (f *File) getNameStringRef(addr uint64) (string, error) {
 	var err error
@@ -1398,7 +1432,7 @@ func (f *File) getNameStringRef(addr uint64) (string, error) {
 			}
 		}
 	}
-	return f.GetCString(f.vma.Convert(ptr))
+	return f.getCString(f.vma.Convert(ptr))
 }
 
 func (f *File) getContextDesc(addr uint64) (*swift.TargetModuleContext, error) {
@@ -1417,7 +1451,7 @@ func (f *File) getContextDesc(addr uint64) (*swift.TargetModuleContext, error) {
 	}
 
 	if tmc.Flags.Kind() != swift.CDKindAnonymous {
-		tmc.Name, err = f.GetCString(tmc.NameOffset.GetAddress())
+		tmc.Name, err = f.getCString(tmc.NameOffset.GetAddress())
 		if err != nil {
 			return nil, fmt.Errorf("failed to read swift module context name: %w", err)
 		}
@@ -1453,16 +1487,7 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 		symbolic = true
 		addr = uint64(reference)
 	} else {
-		name, err := f.GetCString(addr)
-		if err != nil {
-			return "", fmt.Errorf("failed to read swift symbolic reference @ %#x: %v", addr, err)
-		}
-		if strings.HasPrefix(name, "S") || strings.HasPrefix(name, "y") {
-			return "_$s" + name, nil
-		} else if strings.HasPrefix(name, "$s") {
-			return "_" + name, nil
-		}
-		return name, nil
+		return f.getCString(addr)
 	}
 
 	f.cr.SeekToAddr(addr)
@@ -1531,7 +1556,7 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 			}
 		}
 	case 3: // Reference points directly to protocol conformance descriptor (NOT IMPLEMENTED)
-		return "", fmt.Errorf("symbolic reference control character %#x is not implemented", controlData[0])
+		fallthrough
 	case 4: // Reference points indirectly to protocol conformance descriptor (NOT IMPLEMENTED)
 		fallthrough
 	case 5: // Reference points directly to associated conformance descriptor (NOT IMPLEMENTED)
@@ -1555,8 +1580,7 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 		// direct = Directness::Direct;
 		fallthrough
 	default:
-		// return "", fmt.Errorf("symbolic reference control character %#x is not implemented", controlData[0])
-		return "(error)", nil
+		return "", fmt.Errorf("symbolic reference control character %#x is not implemented", controlData[0])
 	}
 
 	if symbolic {

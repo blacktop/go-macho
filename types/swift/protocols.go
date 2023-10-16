@@ -292,7 +292,7 @@ type ConformanceDescriptor struct {
 	ConditionalPackShapes   []GenericPackShapeDescriptor
 	ResilientWitnesses      []ResilientWitnesses
 	GenericWitnessTable     TargetGenericWitnessTable
-	WitnessTablePattern     string
+	WitnessTablePattern     *PCDWitnessTable
 }
 
 func (c ConformanceDescriptor) String() string {
@@ -314,6 +314,13 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 			reqs += fmt.Sprintf("    %s: %s\n", req.Name, req.Kind)
 		}
 	}
+	var packShapes string
+	if len(c.ConditionalPackShapes) > 0 {
+		packShapes = "\n  /* conditional pack shapes */\n"
+		for _, shape := range c.ConditionalPackShapes {
+			packShapes += fmt.Sprintf("    %s: %s\n", shape.Kind, shape.ShapeClass)
+		}
+	}
 	var resilientWitnesses string
 	if len(c.ResilientWitnesses) > 0 {
 		resilientWitnesses = "\n  /* resilient witnesses */\n"
@@ -323,6 +330,14 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 			}
 			resilientWitnesses += fmt.Sprintf("    %s%s\n", addr, witness.ProtocolRequirement)
 		}
+	}
+	var witnessTablePattern string
+	if verbose && c.WitnessTablePatternOffsest.IsSet() {
+		if len(c.ResilientWitnesses) > 0 {
+			witnessTablePattern = "\n"
+		}
+		witnessTablePattern += "  /* witness table pattern */\n"
+		witnessTablePattern += fmt.Sprintf("    // %#x\n", c.WitnessTablePatternOffsest.GetAddress())
 	}
 	var accFunc string
 	if verbose {
@@ -341,6 +356,8 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 			"    %s %s%s%s\n"+
 			"%s"+
 			"%s"+
+			"%s"+
+			"%s"+
 			"}",
 		addr,
 		c.Protocol,
@@ -350,7 +367,9 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 		c.TypeRef.Name,
 		accFunc,
 		reqs,
+		packShapes,
 		resilientWitnesses,
+		witnessTablePattern,
 	)
 }
 
@@ -387,6 +406,11 @@ func (d *TargetProtocolConformanceDescriptor) Read(r io.Reader, addr uint64) err
 		return err
 	}
 	return nil
+}
+
+type PCDWitnessTable struct {
+	Address uint64
+	Name    string
 }
 
 type ConformanceFlags uint32
