@@ -550,7 +550,7 @@ func (f *File) readProtocolConformance(addr uint64) (pcd *swift.ConformanceDescr
 		pcd.TypeRef.SuperClass = "_$sSC"
 	}
 
-	return
+	return pcd, nil
 }
 
 // GetSwiftClosures parses all the closure context objects in the __TEXT.__swift5_capture section
