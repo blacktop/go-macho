@@ -19,7 +19,7 @@ type Protocol struct {
 	Address               uint64
 	Name                  string
 	Parent                *TargetModuleContext
-	AssociatedTypes       string
+	AssociatedTypes       []string
 	SignatureRequirements []TargetGenericRequirement
 	Requirements          []TargetProtocolRequirement
 }
@@ -56,7 +56,7 @@ func (p Protocol) dump(verbose bool) string {
 		addr = fmt.Sprintf("// %#x\n", p.Address)
 	}
 	if len(p.AssociatedTypes) > 0 {
-		atyps = ": " + p.AssociatedTypes
+		atyps = ": " + strings.Join(p.AssociatedTypes, ", ")
 	}
 	return fmt.Sprintf(
 		"%sprotocol %s.%s%s {\n%s}",
@@ -92,9 +92,12 @@ func (d *TargetProtocolDescriptor) Read(r io.Reader, addr uint64) error {
 	if err := d.TargetContextDescriptor.Read(r, addr); err != nil {
 		return err
 	}
-	addr += uint64(d.TargetContextDescriptor.Size())
-	d.NameOffset.Address = addr
-	d.AssociatedTypeNamesOffset.Address = addr + uint64(binary.Size(uint32(0)*3))
+	d.NameOffset.Address = addr + uint64(d.TargetContextDescriptor.Size())
+	d.AssociatedTypeNamesOffset.Address = addr +
+		uint64(d.TargetContextDescriptor.Size()) +
+		uint64(binary.Size(d.NameOffset.RelOff)+
+			binary.Size(d.NumRequirementsInSignature)+
+			binary.Size(d.NumRequirements))
 	if err := binary.Read(r, binary.LittleEndian, &d.NameOffset.RelOff); err != nil {
 		return err
 	}
