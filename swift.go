@@ -723,7 +723,7 @@ func (f *File) GetSwiftAccessibleFunctions() (*swift.AccessibleFunctionsSection,
 	return nil, fmt.Errorf("MachO has no '__swift5_acfuncs' section: %w", ErrSwiftSectionError)
 }
 
-// TODO: I'm not sure we should parse this as it contains a lot of info referenced by swift runtime, but not sure I can sequentially parse itxw
+// TODO: I'm not sure we should parse this as it contains a lot of info referenced by swift runtime, but not sure I can sequentially parse it
 //// GetSwiftTypeRefs parses all the type references in the __TEXT.__swift5_typeref section
 // func (f *File) GetSwiftTypeRefs() (trefs map[uint64]string, err error) {
 // 	trefs = make(map[uint64]string)
@@ -876,7 +876,7 @@ func (f *File) GetColocateMetadata() ([]swift.ConformanceDescriptor, error) {
 			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
 		}
 		f.cr.Seek(int64(off), io.SeekStart)
-		panic("not implimented") // FIXME: finish me
+		panic("not implimented") // FIXME: finish me (I can't find any examples of this section in the wild)
 	}
 	return nil, fmt.Errorf("MachO has no '__textg_swiftm' section: %w", ErrSwiftSectionError)
 }
@@ -1056,6 +1056,8 @@ func (f *File) parseExtension(r io.Reader, typ *swift.Type) (err error) {
 }
 
 func (f *File) parseProtocol(r io.ReadSeeker, typ *swift.Type) (prot *swift.Protocol, err error) {
+	off, _ := r.Seek(0, io.SeekCurrent) // save offset
+
 	prot = &swift.Protocol{Address: typ.Address}
 
 	if err := prot.TargetProtocolDescriptor.Read(r, typ.Address); err != nil {
@@ -1065,18 +1067,18 @@ func (f *File) parseProtocol(r io.ReadSeeker, typ *swift.Type) (prot *swift.Prot
 	if prot.NumRequirementsInSignature > 0 {
 		prot.SignatureRequirements = make([]swift.TargetGenericRequirement, prot.NumRequirementsInSignature)
 		for i := 0; i < int(prot.NumRequirementsInSignature); i++ {
-			if err := binary.Read(r, f.ByteOrder, &prot.SignatureRequirements[i].TargetGenericRequirementDescriptor); err != nil {
-				return nil, fmt.Errorf("failed to read protocols requirements in signature : %v", err)
+			curr, _ := r.Seek(0, io.SeekCurrent)
+			if err := prot.SignatureRequirements[i].Read(r, typ.Address+uint64(curr-off)); err != nil {
+				return nil, fmt.Errorf("failed to read protocols signature requirements : %v", err)
 			}
 		}
-		// FIXME: use this
 	}
 
 	if prot.NumRequirements > 0 {
 		prot.Requirements = make([]swift.TargetProtocolRequirement, prot.NumRequirements)
 		for i := 0; i < int(prot.NumRequirements); i++ {
-			curr, _ := r.Seek(0, io.SeekCurrent) // save offset
-			if err := prot.Requirements[i].Read(r, typ.Address+uint64(curr)); err != nil {
+			curr, _ := r.Seek(0, io.SeekCurrent)
+			if err := prot.Requirements[i].Read(r, typ.Address+uint64(curr-off)); err != nil {
 				return nil, fmt.Errorf("failed to read protocols requirements : %v", err)
 			}
 		}
@@ -1103,56 +1105,73 @@ func (f *File) parseProtocol(r io.ReadSeeker, typ *swift.Type) (prot *swift.Prot
 
 	typ.Name = prot.Name
 	typ.Parent = prot.Parent
+
 	typ.Type = &prot
 
-	return
+	return prot, nil
 }
 
 func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error) {
 	off, _ := r.Seek(0, io.SeekCurrent) // save offset
 
-	var desc swift.TargetClassDescriptor
-	if err := desc.Read(r, typ.Address); err != nil {
-		return fmt.Errorf("failed to read %T: %v", desc, err)
+	var class swift.Class
+	if err := class.TargetClassDescriptor.Read(r, typ.Address); err != nil {
+		return fmt.Errorf("failed to read %T: %v", class.TargetClassDescriptor, err)
 	}
 
-	if desc.Flags.IsGeneric() {
-		var g swift.TargetTypeGenericContextDescriptorHeader
-		if err := binary.Read(f.cr, f.ByteOrder, &g); err != nil {
+	if class.Flags.IsGeneric() {
+		class.GenericContext = &swift.GenericContext{}
+		curr, _ := r.Seek(0, io.SeekCurrent)
+		if err := class.GenericContext.TargetTypeGenericContextDescriptorHeader.Read(r, typ.Address+uint64(curr-off)); err != nil {
 			return fmt.Errorf("failed to read generic header: %v", err)
 		}
-		typ.Generic = &g
+		class.GenericContext.Parameters = make([]swift.GenericParamDescriptor, class.GenericContext.Base.NumParams)
+		if err := binary.Read(r, f.ByteOrder, &class.GenericContext.Parameters); err != nil {
+			return fmt.Errorf("failed to read generic params: %v", err)
+		}
+		class.GenericContext.Requirements = make([]swift.TargetGenericRequirementDescriptor, class.GenericContext.Base.NumRequirements)
+		for i := 0; i < int(class.GenericContext.Base.NumRequirements); i++ {
+			curr, _ = r.Seek(0, io.SeekCurrent)
+			if err := class.GenericContext.Requirements[i].Read(r, typ.Address+uint64(curr-off)); err != nil {
+				return fmt.Errorf("failed to read generic requirement: %v", err)
+			}
+		}
+		// args := make([]swift.GenericPackShapeDescriptor, g.Base.NumKeyArguments)
+		// if err := binary.Read(r, f.ByteOrder, &args); err != nil {
+		// 	return fmt.Errorf("failed to read generic key arguments: %v", err)
+		// }
+		// _ = args // TODO: use this
 	}
 
-	if desc.Flags.KindSpecific().HasResilientSuperclass() {
-		extra := swift.ExtraClassDescriptorFlags(desc.MetadataPositiveSizeInWordsORExtraClassFlags)
-		_ = extra // TODO: use this
+	if class.Flags.KindSpecific().HasResilientSuperclass() {
+		curr, _ := r.Seek(0, io.SeekCurrent)
 		var resilient swift.TargetResilientSuperclass
-		if err := binary.Read(r, f.ByteOrder, &resilient); err != nil {
+		if err := resilient.Read(r, typ.Address+uint64(curr-off)); err != nil {
 			return fmt.Errorf("failed to read resilient superclass: %v", err)
 		}
-		_ = resilient // TODO: use this
+		// class.ResilientSuperclass, err = f.makeSymbolicMangledNameStringRef(resilient.Superclass.GetAddress())
+		// if err != nil {
+		// 	return fmt.Errorf("failed to read swift class resilient superclass mangled name: %v", err)
+		// }
 	}
 
-	if desc.Flags.KindSpecific().MetadataInitialization() == swift.MetadataInitForeign {
+	if class.Flags.KindSpecific().MetadataInitialization() == swift.MetadataInitForeign {
+		class.ForeignMetadata = &swift.TargetForeignMetadataInitialization{}
 		curr, _ := r.Seek(0, io.SeekCurrent)
-		var fmd swift.TargetForeignMetadataInitialization
-		if err := fmd.Read(r, typ.Address+uint64(curr)); err != nil {
+		if err := class.ForeignMetadata.Read(r, typ.Address+uint64(curr-off)); err != nil {
 			return fmt.Errorf("failed to read foreign metadata initialization: %v", err)
 		}
-		_ = fmd // TODO: use this (pattern is always null)
 	}
 
-	if desc.Flags.KindSpecific().MetadataInitialization() == swift.MetadataInitSingleton {
+	if class.Flags.KindSpecific().MetadataInitialization() == swift.MetadataInitSingleton {
+		class.SingletonMetadata = &swift.TargetSingletonMetadataInitialization{}
 		curr, _ := r.Seek(0, io.SeekCurrent)
-		var smi swift.TargetSingletonMetadataInitialization
-		if err := smi.Read(r, typ.Address+uint64(curr)); err != nil {
+		if err := class.SingletonMetadata.Read(r, typ.Address+uint64(curr-off)); err != nil {
 			return fmt.Errorf("failed to read singleton metadata initialization: %v", err)
 		}
-		_ = smi // TODO: use this
 	}
 
-	if desc.Flags.KindSpecific().HasVTable() {
+	if class.Flags.KindSpecific().HasVTable() {
 		var v swift.VTable
 		if err := binary.Read(r, f.ByteOrder, &v.TargetVTableDescriptorHeader); err != nil {
 			return fmt.Errorf("failed to read vtable header: %v", err)
@@ -1201,55 +1220,64 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 				v.Methods = append(v.Methods, m)
 			}
 		}
-		typ.VTable = &v
+		class.VTable = &v
 	}
 
-	if desc.Flags.KindSpecific().HasOverrideTable() {
-		var o swift.TargetOverrideTableHeader
-		if err := binary.Read(r, f.ByteOrder, &o); err != nil {
-			return fmt.Errorf("failed to read override table header: %v", err)
+	if class.Flags.KindSpecific().HasOverrideTable() {
+		var ohdr swift.TargetOverrideTableHeader
+		if err := binary.Read(r, f.ByteOrder, &ohdr); err != nil {
+			return fmt.Errorf("failed to read method override table header: %v", err)
 		}
-		entries := make([]swift.TargetMethodOverrideDescriptor, o.NumEntries)
-		if err := binary.Read(r, f.ByteOrder, &entries); err != nil {
-			return fmt.Errorf("failed to read override table entries: %v", err)
+		class.MethodOverrides = make([]swift.TargetMethodOverrideDescriptor, ohdr.NumEntries)
+		for i := uint32(0); i < ohdr.NumEntries; i++ {
+			curr, _ := r.Seek(0, io.SeekCurrent)
+			if err := class.MethodOverrides[i].Read(r, typ.Address+uint64(curr-off)); err != nil {
+				return fmt.Errorf("failed to read method override table entry: %v", err)
+			}
 		}
 	}
 
-	if desc.Flags.KindSpecific().HasResilientSuperclass() {
-		extra := swift.ExtraClassDescriptorFlags(desc.MetadataPositiveSizeInWordsORExtraClassFlags)
+	if class.Flags.KindSpecific().HasResilientSuperclass() {
+		extra := swift.ExtraClassDescriptorFlags(class.MetadataPositiveSizeInWordsORExtraClassFlags)
 		if extra == swift.HasObjCResilientClassStub {
-			var stub swift.TargetObjCResilientClassStubInfo
-			if err := binary.Read(r, f.ByteOrder, &stub); err != nil {
+			curr, _ := r.Seek(0, io.SeekCurrent)
+			if err := class.ObjCResilientClassStubInfo.Read(r, typ.Address+uint64(curr-off)); err != nil {
 				return fmt.Errorf("failed to read objc resilient class stub: %v", err)
 			}
-			_ = stub // TODO: use this
 		}
 	}
 
-	if desc.Flags.KindSpecific().HasCanonicalMetadataPrespecializations() {
+	if class.Flags.KindSpecific().HasCanonicalMetadataPrespecializations() {
 		var lc swift.TargetCanonicalSpecializedMetadatasListCount
 		if err := binary.Read(r, f.ByteOrder, &lc); err != nil {
 			return fmt.Errorf("failed to read canonical metadata prespecialization: %v", err)
 		}
+		class.Metadatas = make([]swift.Metadata, lc.Count)
 		for i := 0; i < int(lc.Count); i++ {
 			curr, _ := r.Seek(0, io.SeekCurrent)
-			var le swift.TargetCanonicalSpecializedMetadatasListEntry
-			if err := le.Read(r, typ.Address+uint64(curr)); err != nil {
+			if err := class.Metadatas[i].TargetCanonicalSpecializedMetadatasListEntry.Read(r, typ.Address+uint64(curr-off)); err != nil {
 				return fmt.Errorf("failed to read canonical metadata list entry: %v", err)
 			}
-			_ = le // TODO: use this
 		}
+		class.CachingOnceToken = &swift.TargetCanonicalSpecializedMetadatasCachingOnceToken{}
 		curr, _ := r.Seek(0, io.SeekCurrent)
-		var cache swift.TargetCanonicalSpecializedMetadatasCachingOnceToken
-		if err := cache.Read(r, typ.Address+uint64(curr)); err != nil {
+		if err := class.CachingOnceToken.Read(r, typ.Address+uint64(curr-off)); err != nil {
 			return fmt.Errorf("failed to read canonical metadata prespecialization: %v", err)
 		}
-		_ = cache // TODO: use this
+		for idx, m := range class.Metadatas {
+			f.cr.SeekToAddr(m.Metadata.GetAddress())
+			if err := binary.Read(f.cr, f.ByteOrder, &class.Metadatas[idx].TargetMetadata); err != nil {
+				return fmt.Errorf("failed to read metadata: %w", err)
+			}
+			class.Metadatas[idx].TargetMetadata.TypeDescriptor = f.vma.Convert(class.Metadatas[idx].TargetMetadata.TypeDescriptor)
+			class.Metadatas[idx].TargetMetadata.TypeMetadataAddress = f.vma.Convert(class.Metadatas[idx].TargetMetadata.TypeMetadataAddress)
+		}
 	}
 
-	if desc.FieldOffsetVectorOffset != 0 {
-		if desc.Flags.KindSpecific().HasResilientSuperclass() {
-			desc.FieldOffsetVectorOffset += desc.MetadataNegativeSizeInWordsORResilientMetadataBounds
+	if class.FieldOffsetVectorOffset != 0 {
+		fmt.Println(class.Flags.String())
+		if class.Flags.KindSpecific().HasResilientSuperclass() {
+			class.FieldOffsetVectorOffset += class.MetadataNegativeSizeInWordsORResilientMetadataBounds
 		}
 		// typ.FieldOffsets = make([]int32, desc.NumFields)
 		// if err := binary.Read(r, f.ByteOrder, &typ.FieldOffsets); err != nil {
@@ -1258,113 +1286,135 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 		// FIXME: what the hell are field offset vectors?
 	}
 
-	if desc.SuperclassType.IsSet() {
-		typ.SuperClass, err = f.makeSymbolicMangledNameStringRef(desc.SuperclassType.GetAddress())
+	if class.SuperclassType.IsSet() {
+		typ.SuperClass, err = f.makeSymbolicMangledNameStringRef(class.SuperclassType.GetAddress())
 		if err != nil {
 			return fmt.Errorf("failed to read swift class superclass mangled name: %v", err)
 		}
 	}
 
-	typ.Name, err = f.GetCString(desc.NameOffset.GetAddress())
+	typ.Name, err = f.GetCString(class.NameOffset.GetAddress())
 	if err != nil {
 		return fmt.Errorf("failed to read cstring: %v", err)
 	}
 
-	if desc.ParentOffset.IsSet() {
-		typ.Parent, err = f.getContextDesc(desc.ParentOffset.GetAddress())
+	if class.ParentOffset.IsSet() {
+		typ.Parent, err = f.getContextDesc(class.ParentOffset.GetAddress())
 		if err != nil {
 			return fmt.Errorf("failed to get parent: %v", err)
 		}
 	}
 
-	if desc.FieldsOffset.IsSet() {
-		fd, err := f.readField(f.cr, desc.FieldsOffset.GetAddress())
+	if class.FieldsOffset.IsSet() {
+		fd, err := f.readField(f.cr, class.FieldsOffset.GetAddress())
 		if err != nil {
 			return fmt.Errorf("failed to read swift field: %w", err)
 		}
 		typ.Fields = append(typ.Fields, *fd)
 	}
 
-	typ.Type = &desc
+	typ.Type = &class
 
 	return nil
 }
 
 func (f *File) parseStructDescriptor(r io.ReadSeeker, typ *swift.Type) (err error) {
-	var desc swift.TargetStructDescriptor
-	if err := desc.Read(r, typ.Address); err != nil {
-		return fmt.Errorf("failed to read %T: %v", desc, err)
+	off, _ := r.Seek(0, io.SeekCurrent) // save offset
+
+	var st swift.Struct
+	if err := st.TargetStructDescriptor.Read(r, typ.Address); err != nil {
+		return fmt.Errorf("failed to read %T: %v", st.TargetStructDescriptor, err)
 	}
 
-	if desc.Flags.IsGeneric() {
-		var g swift.TargetTypeGenericContextDescriptorHeader
-		if err := binary.Read(r, f.ByteOrder, &g); err != nil {
+	if st.Flags.IsGeneric() {
+		st.GenericContext = &swift.GenericContext{}
+		curr, _ := r.Seek(0, io.SeekCurrent)
+		if err := st.GenericContext.TargetTypeGenericContextDescriptorHeader.Read(r, typ.Address+uint64(curr-off)); err != nil {
 			return fmt.Errorf("failed to read generic header: %v", err)
 		}
-		typ.Generic = &g
+		st.GenericContext.Parameters = make([]swift.GenericParamDescriptor, st.GenericContext.Base.NumParams)
+		if err := binary.Read(r, f.ByteOrder, &st.GenericContext.Parameters); err != nil {
+			return fmt.Errorf("failed to read generic params: %v", err)
+		}
+		st.GenericContext.Requirements = make([]swift.TargetGenericRequirementDescriptor, st.GenericContext.Base.NumRequirements)
+		for i := 0; i < int(st.GenericContext.Base.NumRequirements); i++ {
+			curr, _ = r.Seek(0, io.SeekCurrent)
+			if err := st.GenericContext.Requirements[i].Read(r, typ.Address+uint64(curr-off)); err != nil {
+				return fmt.Errorf("failed to read generic requirement: %v", err)
+			}
+		}
+		// args := make([]swift.GenericPackShapeDescriptor, g.Base.NumKeyArguments)
+		// if err := binary.Read(r, f.ByteOrder, &args); err != nil {
+		// 	return fmt.Errorf("failed to read generic key arguments: %v", err)
+		// }
+		// _ = args // TODO: use this
 	}
 
-	if desc.Flags.KindSpecific().MetadataInitialization() == swift.MetadataInitForeign {
+	if st.Flags.KindSpecific().MetadataInitialization() == swift.MetadataInitForeign {
+		st.ForeignMetadata = &swift.TargetForeignMetadataInitialization{}
 		curr, _ := r.Seek(0, io.SeekCurrent)
-		var fmd swift.TargetForeignMetadataInitialization
-		if err := fmd.Read(r, typ.Address+uint64(curr)); err != nil {
+		if err := st.ForeignMetadata.Read(r, typ.Address+uint64(curr-off)); err != nil {
 			return fmt.Errorf("failed to read foreign metadata initialization: %v", err)
 		}
-		_ = fmd // TODO: use this (pattern is always null)
 	}
 
-	if desc.Flags.KindSpecific().MetadataInitialization() == swift.MetadataInitSingleton {
+	if st.Flags.KindSpecific().MetadataInitialization() == swift.MetadataInitSingleton {
+		st.SingletonMetadata = &swift.TargetSingletonMetadataInitialization{}
 		curr, _ := r.Seek(0, io.SeekCurrent)
-		var smi swift.TargetSingletonMetadataInitialization
-		if err := smi.Read(r, typ.Address+uint64(curr)); err != nil {
+		if err := st.SingletonMetadata.Read(r, typ.Address+uint64(curr-off)); err != nil {
 			return fmt.Errorf("failed to read singleton metadata initialization: %v", err)
 		}
-		_ = smi // TODO: use this
 	}
 
-	if desc.Flags.KindSpecific().HasCanonicalMetadataPrespecializations() {
+	if st.Flags.KindSpecific().HasCanonicalMetadataPrespecializations() {
 		var lc swift.TargetCanonicalSpecializedMetadatasListCount
 		if err := binary.Read(r, f.ByteOrder, &lc); err != nil {
 			return fmt.Errorf("failed to read canonical metadata prespecialization: %v", err)
 		}
+		st.Metadatas = make([]swift.Metadata, lc.Count)
 		for i := 0; i < int(lc.Count); i++ {
 			curr, _ := r.Seek(0, io.SeekCurrent)
-			var le swift.TargetCanonicalSpecializedMetadatasListEntry
-			if err := le.Read(r, typ.Address+uint64(curr)); err != nil {
+			if err := st.Metadatas[i].TargetCanonicalSpecializedMetadatasListEntry.Read(r, typ.Address+uint64(curr-off)); err != nil {
 				return fmt.Errorf("failed to read canonical metadata list entry: %v", err)
 			}
-			_ = le // TODO: use this
 		}
+		st.CachingOnceToken = &swift.TargetCanonicalSpecializedMetadatasCachingOnceToken{}
 		curr, _ := r.Seek(0, io.SeekCurrent)
-		var cache swift.TargetCanonicalSpecializedMetadatasCachingOnceToken
-		if err := cache.Read(r, typ.Address+uint64(curr)); err != nil {
+		if err := st.CachingOnceToken.Read(r, typ.Address+uint64(curr-off)); err != nil {
 			return fmt.Errorf("failed to read canonical metadata prespecialization: %v", err)
 		}
-		_ = cache // TODO: use this
+		for idx, m := range st.Metadatas {
+			f.cr.SeekToAddr(m.Metadata.GetAddress())
+			if err := binary.Read(f.cr, f.ByteOrder, &st.Metadatas[idx].TargetMetadata); err != nil {
+				return fmt.Errorf("failed to read metadata: %w", err)
+			}
+			st.Metadatas[idx].TargetMetadata.TypeDescriptor = f.vma.Convert(st.Metadatas[idx].TargetMetadata.TypeDescriptor)
+			st.Metadatas[idx].TargetMetadata.TypeMetadataAddress = f.vma.Convert(st.Metadatas[idx].TargetMetadata.TypeMetadataAddress)
+		}
 	}
 
-	typ.Name, err = f.GetCString(desc.NameOffset.GetAddress())
+	typ.Name, err = f.GetCString(st.NameOffset.GetAddress())
 	if err != nil {
 		return fmt.Errorf("failed to read cstring: %v", err)
 	}
 
-	if desc.ParentOffset.IsSet() {
-		typ.Parent, err = f.getContextDesc(desc.ParentOffset.GetAddress())
+	if st.ParentOffset.IsSet() {
+		typ.Parent, err = f.getContextDesc(st.ParentOffset.GetAddress())
 		if err != nil {
 			return fmt.Errorf("failed to get parent: %v", err)
 		}
 	}
 
-	if desc.FieldsOffset.IsSet() {
-		f.cr.SeekToAddr(desc.FieldsOffset.GetAddress())
-		fd, err := f.readField(f.cr, desc.FieldsOffset.GetAddress())
+	if st.FieldsOffset.IsSet() {
+		f.cr.SeekToAddr(st.FieldsOffset.GetAddress())
+		fd, err := f.readField(f.cr, st.FieldsOffset.GetAddress())
 		if err != nil {
 			return fmt.Errorf("failed to read swift field: %w", err)
 		}
 		typ.Fields = append(typ.Fields, *fd)
 	}
 
-	typ.Type = &desc
+	typ.Type = &st
 
 	return nil
 }
@@ -1674,7 +1724,11 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				out = append(out, "_$sS"+part)
 			default:
 				if regexp.MustCompile("So[0-9]+").MatchString(part) {
-					out = append(out, "_$s"+part)
+					if strings.Contains(part, "OS_dispatch_queue") {
+						out = append(out, "DispatchQueue")
+					} else {
+						out = append(out, "_$s"+part)
+					}
 				} else if regexp.MustCompile("^[0-9]+").MatchString(part) {
 					for i, c := range part {
 						if !unicode.IsNumber(c) {
@@ -1728,9 +1782,6 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				if err != nil {
 					return "", fmt.Errorf("failed to get pointer for indirect context descriptor: %v", err)
 				}
-				if err := f.cr.SeekToAddr(f.vma.Convert(ptr)); err != nil {
-					return "", fmt.Errorf("failed to seek to indirect context descriptor: %v", err)
-				}
 				if f.HasFixups() {
 					if dcf, err := f.DyldChainedFixups(); err == nil {
 						if _, _, ok := dcf.IsBind(ptr); ok {
@@ -1742,6 +1793,9 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 					}
 				}
 				if len(name) == 0 {
+					if err := f.cr.SeekToAddr(f.vma.Convert(ptr)); err != nil {
+						return "", fmt.Errorf("failed to seek to indirect context descriptor: %v", err)
+					}
 					var desc swift.TargetModuleContextDescriptor
 					if err := desc.Read(f.cr, f.vma.Convert(ptr)); err != nil {
 						return "", fmt.Errorf("failed to read swift context descriptor: %v", err)

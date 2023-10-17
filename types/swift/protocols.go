@@ -155,9 +155,9 @@ func (f GenericRequirementFlags) String() string {
 }
 
 type TargetGenericRequirement struct {
+	TargetGenericRequirementDescriptor
 	Name string
 	Kind string
-	TargetGenericRequirementDescriptor
 }
 
 // ref: swift/ABI/Metadata.h - TargetGenericRequirementDescriptor

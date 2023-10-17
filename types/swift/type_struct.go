@@ -5,9 +5,22 @@ import (
 	"io"
 )
 
+type Struct struct {
+	TargetStructDescriptor
+	GenericContext    *GenericContext
+	ForeignMetadata   *TargetForeignMetadataInitialization
+	SingletonMetadata *TargetSingletonMetadataInitialization
+	Metadatas         []Metadata
+	CachingOnceToken  *TargetCanonicalSpecializedMetadatasCachingOnceToken
+}
+
 type TargetStructDescriptor struct {
 	TargetTypeContextDescriptor
-	NumFields               uint32
+	// The number of stored properties in the struct.
+	// If there is a field offset vector, this is its length.
+	NumFields uint32
+	// The offset of the field offset vector for this struct's stored
+	// properties in its metadata, if any. 0 means there is no field offset vector.
 	FieldOffsetVectorOffset uint32
 }
 

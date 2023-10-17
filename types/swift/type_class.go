@@ -7,14 +7,55 @@ import (
 	"strings"
 )
 
+type Class struct {
+	TargetClassDescriptor
+	GenericContext             *GenericContext
+	ForeignMetadata            *TargetForeignMetadataInitialization
+	SingletonMetadata          *TargetSingletonMetadataInitialization
+	VTable                     *VTable
+	ResilientSuperclass        string
+	MethodOverrides            []TargetMethodOverrideDescriptor
+	ObjCResilientClassStubInfo *TargetObjCResilientClassStubInfo
+	Metadatas                  []Metadata
+	CachingOnceToken           *TargetCanonicalSpecializedMetadatasCachingOnceToken
+}
+
 type TargetClassDescriptor struct {
 	TargetTypeContextDescriptor
-	SuperclassType                                       RelativeDirectPointer
-	MetadataNegativeSizeInWordsORResilientMetadataBounds uint32
-	MetadataPositiveSizeInWordsORExtraClassFlags         uint32
-	NumImmediateMembers                                  uint32
-	NumFields                                            uint32
-	FieldOffsetVectorOffset                              uint32
+	// The type of the superclass, expressed as a mangled type name that can
+	// refer to the generic arguments of the subclass type.
+	SuperclassType RelativeDirectPointer
+	// [MetadataNegativeSizeInWords] (uint32)
+	//   If this descriptor does not have a resilient superclass, this is the
+	//   negative size of metadata objects of this class (in words).
+	// [ResilientMetadataBounds] (TargetRelativeDirectPointer)
+	//   If this descriptor has a resilient superclass, this is a reference
+	//   to a cache holding the metadata's extents.
+	MetadataNegativeSizeInWordsORResilientMetadataBounds uint32 // UNION
+	// [MetadataPositiveSizeInWords] (uint32)
+	//   If this descriptor does not have a resilient superclass, this is the
+	//   positive size of metadata objects of this class (in words).
+	// [ExtraClassFlags] (ExtraClassDescriptorFlags)
+	//   Otherwise, these flags are used to do things like indicating
+	//   the presence of an Objective-C resilient class stub.
+	MetadataPositiveSizeInWordsORExtraClassFlags uint32 // UNION
+	// The number of additional members added by this class to the class
+	// metadata.  This data is opaque by default to the runtime, other than
+	// as exposed in other members; it's really just
+	// NumImmediateMembers * sizeof(void*) bytes of data.
+	//
+	// Whether those bytes are added before or after the address point
+	// depends on areImmediateMembersNegative().
+	NumImmediateMembers uint32
+	// The number of stored properties in the class, not including its
+	// superclasses. If there is a field offset vector, this is its length.
+	NumFields uint32
+	// The offset of the field offset vector for this class's stored
+	// properties in its metadata, in words. 0 means there is no field offset vector.
+	//
+	// If this class has a resilient superclass, this offset is relative to
+	// the size of the resilient superclass metadata. Otherwise, it is absolute.
+	FieldOffsetVectorOffset uint32
 }
 
 func (tcd TargetClassDescriptor) Size() int64 {
@@ -60,71 +101,27 @@ const (
 	HasObjCResilientClassStub ExtraClassDescriptorFlags = 0
 )
 
-type TargetOverrideTableHeader struct {
-	NumEntries uint32
-}
-
-type TargetMethodOverrideDescriptor struct {
-	Class  int32
-	Method int32
-	Impl   int32
+func (f ExtraClassDescriptorFlags) HasObjCResilientClassStub() bool {
+	return f == HasObjCResilientClassStub
 }
 
 type TargetResilientSuperclass struct {
-	Superclass int32
+	// The superclass of this class.  This pointer can be interpreted
+	// using the superclass reference kind stored in the type context
+	// descriptor flags.  It is null if the class has no formal superclass.
+	//
+	// Note that SwiftObject, the implicit superclass of all Swift root
+	// classes when building with ObjC compatibility, does not appear here.
+	Superclass TargetRelativeDirectPointer
 }
 
-type TargetObjCResilientClassStubInfo struct {
-	Stub int32 // Objective-C class stub.
+func (t TargetResilientSuperclass) Size() int64 {
+	return int64(binary.Size(t.Superclass.RelOff))
 }
 
-type TargetSingletonMetadataInitialization struct {
-	InitializationCacheOffset TargetRelativeDirectPointer // The initialization cache. Out-of-line because mutable.
-	IncompleteMetadata        TargetRelativeDirectPointer // UNION: The incomplete metadata, for structs, enums and classes without resilient ancestry.
-	// ResilientPattern
-	// If the class descriptor's hasResilientSuperclass() flag is set,
-	// this field instead points at a pattern used to allocate and
-	// initialize metadata for this class, since it's size and contents
-	// is not known at compile time.
-	CompletionFunction TargetRelativeDirectPointer // The completion function. The pattern will always be null, even for a resilient class.
-}
-
-func (s TargetSingletonMetadataInitialization) Size() int64 {
-	return int64(
-		binary.Size(s.InitializationCacheOffset.RelOff) +
-			binary.Size(s.IncompleteMetadata.RelOff) +
-			binary.Size(s.CompletionFunction.RelOff))
-}
-
-func (s *TargetSingletonMetadataInitialization) Read(r io.Reader, addr uint64) error {
-	s.InitializationCacheOffset.Address = addr
-	s.IncompleteMetadata.Address = addr + uint64(binary.Size(s.InitializationCacheOffset.RelOff))
-	s.CompletionFunction.Address = addr + uint64(binary.Size(s.InitializationCacheOffset.RelOff)*2)
-	if err := binary.Read(r, binary.LittleEndian, &s.InitializationCacheOffset.RelOff); err != nil {
-		return err
-	}
-	if err := binary.Read(r, binary.LittleEndian, &s.IncompleteMetadata.RelOff); err != nil {
-		return err
-	}
-	if err := binary.Read(r, binary.LittleEndian, &s.CompletionFunction.RelOff); err != nil {
-		return err
-	}
-	return nil
-}
-
-// TargetForeignMetadataInitialization is the control structure for performing non-trivial initialization of
-// singleton foreign metadata.
-type TargetForeignMetadataInitialization struct {
-	CompletionFunction RelativeDirectPointer // The completion function. The pattern will always be null.
-}
-
-func (f TargetForeignMetadataInitialization) Size() int64 {
-	return int64(binary.Size(f.CompletionFunction.RelOff))
-}
-
-func (f *TargetForeignMetadataInitialization) Read(r io.Reader, addr uint64) error {
-	f.CompletionFunction.Address = addr
-	return binary.Read(r, binary.LittleEndian, &f.CompletionFunction.RelOff)
+func (t *TargetResilientSuperclass) Read(r io.Reader, addr uint64) error {
+	t.Superclass.Address = addr
+	return binary.Read(r, binary.LittleEndian, &t.Superclass.RelOff)
 }
 
 type VTable struct {
@@ -226,4 +223,76 @@ func (f MethodDescriptorFlags) String(field string) string {
 		field += " "
 	}
 	return fmt.Sprintf("%s%s (%s)", field, f.Kind(), strings.Join(flags, "|"))
+}
+
+// Header for a class vtable override descriptor. This is a variable-sized
+// structure that provides implementations for overrides of methods defined
+// in superclasses.
+type TargetOverrideTableHeader struct {
+	// The number of MethodOverrideDescriptor records following the vtable
+	// override header in the class's nominal type descriptor.
+	NumEntries uint32
+}
+
+// An entry in the method override table, referencing a method from one of our
+// ancestor classes, together with an implementation.
+type TargetMethodOverrideDescriptor struct {
+	// The class containing the base method.
+	Class RelativeDirectPointer
+	// The base method.
+	Method RelativeDirectPointer
+	// The implementation of the override.
+	Impl RelativeDirectPointer // UNION
+}
+
+func (mod TargetMethodOverrideDescriptor) Size() int64 {
+	return int64(
+		binary.Size(mod.Class.RelOff) +
+			binary.Size(mod.Method.RelOff) +
+			binary.Size(mod.Impl.RelOff))
+}
+
+func (mod *TargetMethodOverrideDescriptor) Read(r io.Reader, addr uint64) error {
+	mod.Class.Address = addr
+	mod.Method.Address = addr + uint64(binary.Size(mod.Class.RelOff))
+	mod.Impl.Address = addr + uint64(binary.Size(mod.Class.RelOff)+binary.Size(mod.Method.RelOff))
+	if err := binary.Read(r, binary.LittleEndian, &mod.Class.RelOff); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &mod.Method.RelOff); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &mod.Impl.RelOff); err != nil {
+		return err
+	}
+	return nil
+}
+
+// TargetObjCResilientClassStubInfo structure that stores a reference to an Objective-C class stub.
+//
+// This is not the class stub itself; it is part of a class context descriptor.
+type TargetObjCResilientClassStubInfo struct {
+	// A relative pointer to an Objective-C resilient class stub.
+	//
+	// We do not declare a struct type for class stubs since the Swift runtime
+	// does not need to interpret them. The class stub struct is part of
+	// the Objective-C ABI, and is laid out as follows:
+	// - isa pointer, always 1
+	// - an update callback, of type 'Class (*)(Class *, objc_class_stub *)'
+	//
+	// Class stubs are used for two purposes:
+	//
+	// - Objective-C can reference class stubs when calling static methods.
+	// - Objective-C and Swift can reference class stubs when emitting
+	//   categories (in Swift, extensions with @objc members).
+	Stub TargetRelativeDirectPointer
+}
+
+func (t TargetObjCResilientClassStubInfo) Size() int64 {
+	return int64(binary.Size(t.Stub.RelOff))
+}
+
+func (t *TargetObjCResilientClassStubInfo) Read(r io.Reader, addr uint64) error {
+	t.Stub.Address = addr
+	return binary.Read(r, binary.LittleEndian, &t.Stub.RelOff)
 }

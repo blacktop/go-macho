@@ -24,8 +24,6 @@ type Type struct {
 	Kind           ContextDescriptorKind
 	AccessFunction uint64
 	FieldOffsets   []int32
-	Generic        *TargetTypeGenericContextDescriptorHeader
-	VTable         *VTable
 	Fields         []Field
 	Type           any
 }
@@ -90,8 +88,8 @@ func (t Type) dump(verbose bool) string {
 			}
 		}
 		var meths []string
-		if t.VTable != nil {
-			for _, m := range t.VTable.Methods {
+		if t.Type.(*Class).VTable != nil {
+			for _, m := range t.Type.(*Class).VTable.Methods {
 				var static string
 				if !m.Flags.IsInstance() {
 					static = "static "
