@@ -141,7 +141,15 @@ func (t Type) dump(verbose bool) string {
 				if verbose {
 					addr = fmt.Sprintf(" // %#x", t.Address)
 				}
-				fields = append(fields, fmt.Sprintf("    %s %s: %s%s", r.Flags, r.Name, r.MangledType, addr))
+				var typ string
+				if len(r.MangledType) > 0 {
+					if strings.HasPrefix(r.MangledType, "symbolic ") {
+						typ = fmt.Sprintf(" = %s()", r.MangledType[9:])
+					} else {
+						typ = fmt.Sprintf(": %s", r.MangledType)
+					}
+				}
+				fields = append(fields, fmt.Sprintf("    %s %s%s%s", r.Flags, r.Name, typ, addr))
 			}
 		}
 		if verbose {
@@ -413,7 +421,7 @@ type TargetContextDescriptor struct {
 }
 
 func (cd TargetContextDescriptor) Size() int64 {
-	return int64(binary.Size(uint32(0)) * 2)
+	return int64(binary.Size(cd.Flags) + binary.Size(cd.ParentOffset.RelOff))
 }
 
 func (cd *TargetContextDescriptor) Read(r io.Reader, addr uint64) error {
