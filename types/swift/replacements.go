@@ -1,4 +1,4 @@
-package types
+package swift
 
 // __TEXT.__swift5_replace
 // This section contains dynamic replacement information.

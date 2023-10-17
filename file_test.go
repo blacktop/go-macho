@@ -667,58 +667,11 @@ func TestNewFileWithSwift(t *testing.T) {
 		return
 	}
 
-	// if entry, err := got.GetSwiftEntry(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
-	// 	t.Fatalf("GetSwiftReflectionStrings() error = %v", err)
-	// } else {
-	// 	fmt.Printf("%#x: entry\n", entry)
-	// }
-
-	// if refStrs, err := got.GetSwiftTypeRefs(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
-	// 	t.Fatalf("GetSwiftReflectionStrings() error = %v", err)
-	// } else {
-	// 	for addr, refstr := range refStrs {
-	// 		fmt.Printf("%#x: %s\n", addr, refstr)
-	// 	}
-	// }
-
-	// if typs, err := got.GetSwiftTypes(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
-	// 	t.Fatalf("GetSwiftTypes() error = %v", err)
-	// } else {
-	// 	for _, t := range typs {
-	// 		fmt.Println(t)
-	// 	}
-	// }
-
-	// if refStrs, err := got.GetSwiftReflectionStrings(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
-	// 	t.Fatalf("GetSwiftReflectionStrings() error = %v", err)
-	// } else {
-	// 	for addr, refstr := range refStrs {
-	// 		fmt.Printf("%#x: %s\n", addr, refstr)
-	// 	}
-	// }
-
-	if prots, err := got.GetSwiftProtocols(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
-		t.Fatalf("GetSwiftProtocols() error = %v", err)
+	if entry, err := got.GetSwiftEntry(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftEntry() error = %v", err)
 	} else {
-		for _, prot := range prots {
-			fmt.Println(prot)
-		}
-	}
-
-	if protsconfs, err := got.GetSwiftProtocolConformances(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
-		t.Fatalf("GetSwiftProtocolConformances() error = %v", err)
-	} else {
-		for _, prot := range protsconfs {
-			fmt.Printf("%#x: %s\n", prot.Address, prot)
-		}
-	}
-
-	if atyps, err := got.GetSwiftAssociatedTypes(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
-		t.Fatalf("GetSwiftAssociatedTypes() error = %v", err)
-	} else {
-		for _, at := range atyps {
-			fmt.Println(at)
-		}
+		fmt.Println("GetSwiftEntry" + strings.Repeat("-", 80))
+		fmt.Printf("%#x: entry\n", entry)
 	}
 
 	if bins, err := got.GetSwiftBuiltinTypes(); err != nil {
@@ -726,22 +679,105 @@ func TestNewFileWithSwift(t *testing.T) {
 			t.Fatalf("GetSwiftBuiltinTypes() error = %v", err)
 		}
 	} else {
+		fmt.Println("GetSwiftBuiltinTypes" + strings.Repeat("-", 80))
 		for _, bin := range bins {
-			fmt.Println(bin)
+			fmt.Println(bin.Verbose())
+		}
+	}
+
+	if refStrs, err := got.GetSwiftReflectionStrings(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftReflectionStrings() error = %v", err)
+	} else {
+		fmt.Println("GetSwiftReflectionStrings" + strings.Repeat("-", 80))
+		for addr, refstr := range refStrs {
+			fmt.Printf("%#x: %s\n", addr, refstr)
 		}
 	}
 
 	if fds, err := got.GetSwiftFields(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
 		t.Fatalf("GetSwiftFields() error = %v", err)
 	} else {
+		fmt.Println("GetSwiftFields" + strings.Repeat("-", 80))
 		for _, f := range fds {
-			fmt.Println(f)
+			fmt.Println(f.Verbose())
+		}
+	}
+
+	if atyps, err := got.GetSwiftAssociatedTypes(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftAssociatedTypes() error = %v", err)
+	} else {
+		fmt.Println("GetSwiftAssociatedTypes" + strings.Repeat("-", 80))
+		for _, at := range atyps {
+			fmt.Println(at.Verbose())
+		}
+	}
+
+	if typs, err := got.GetColocateTypeDescriptors(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetColocateTypeDescriptors() error = %v", err)
+	} else {
+		fmt.Println("GetColocateTypeDescriptors" + strings.Repeat("-", 80))
+		for _, typ := range typs {
+			fmt.Println(typ.Verbose())
+		}
+	}
+
+	if mdatas, err := got.GetColocateMetadata(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetColocateMetadata() error = %v", err)
+	} else {
+		fmt.Println("GetColocateMetadata" + strings.Repeat("-", 80))
+		for _, mdat := range mdatas {
+			fmt.Println(mdat.Verbose())
+		}
+	}
+
+	// if refStrs, err := got.GetSwiftTypeRefs(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+	// 	t.Fatalf("GetSwiftTypeRefs() error = %v", err)
+	// } else {
+	// 	for addr, refstr := range refStrs {
+	// 		fmt.Printf("%#x: %s\n", addr, refstr)
+	// 	}
+	// }
+
+	if typs, err := got.GetSwiftTypes(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftTypes() error = %v", err)
+	} else {
+		fmt.Println("GetSwiftTypes" + strings.Repeat("-", 80))
+		for _, t := range typs {
+			fmt.Println(t)
+		}
+	}
+
+	if prots, err := got.GetSwiftProtocols(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftProtocols() error = %v", err)
+	} else {
+		fmt.Println("GetSwiftProtocols" + strings.Repeat("-", 80))
+		for _, prot := range prots {
+			fmt.Println(prot.Verbose())
+		}
+	}
+
+	if protsconfs, err := got.GetSwiftProtocolConformances(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftProtocolConformances() error = %v", err)
+	} else {
+		fmt.Println("GetSwiftProtocolConformances" + strings.Repeat("-", 80))
+		for _, prot := range protsconfs {
+			fmt.Println(prot.Verbose())
+		}
+	}
+
+	if mpenums, err := got.GetMultiPayloadEnums(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetMultiPayloadEnums() error = %v", err)
+	} else {
+		fmt.Println("GetMultiPayloadEnums" + strings.Repeat("-", 80))
+		for _, e := range mpenums {
+			fmt.Println(e)
 		}
 	}
 
 	if clos, err := got.GetSwiftClosures(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
 		t.Fatalf("GetSwiftClosures() error = %v", err)
 	} else {
+		fmt.Println("GetSwiftClosures" + strings.Repeat("-", 80))
 		for _, c := range clos {
 			fmt.Println(c)
 		}
@@ -750,8 +786,27 @@ func TestNewFileWithSwift(t *testing.T) {
 	if rep, err := got.GetSwiftDynamicReplacementInfo(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
 		t.Fatalf("GetSwiftDynamicReplacementInfo() error = %v", err)
 	} else {
+		fmt.Println("GetSwiftDynamicReplacementInfo" + strings.Repeat("-", 80))
 		if rep != nil {
 			fmt.Println(rep)
+		}
+	}
+
+	if rep, err := got.GetSwiftDynamicReplacementInfoForOpaqueTypes(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftDynamicReplacementInfoForOpaqueTypes() error = %v", err)
+	} else {
+		fmt.Println("GetSwiftDynamicReplacementInfoForOpaqueTypes" + strings.Repeat("-", 80))
+		if rep != nil {
+			fmt.Println(rep)
+		}
+	}
+
+	if afuncs, err := got.GetSwiftAccessibleFunctions(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftAccessibleFunctions() error = %v", err)
+	} else {
+		fmt.Println("GetSwiftAccessibleFunctions" + strings.Repeat("-", 80))
+		if afuncs != nil {
+			fmt.Println(afuncs)
 		}
 	}
 }

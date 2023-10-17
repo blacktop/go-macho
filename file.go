@@ -129,6 +129,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 	f := new(File)
 
 	f.objc = make(map[uint64]any)
+	f.swift = make(map[uint64]any)
 
 	if config != nil {
 		if config[0].SectionReader != nil {
