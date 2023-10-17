@@ -1,12 +1,15 @@
 package macho
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
+	"unicode"
 	"unsafe"
 
 	"github.com/blacktop/go-macho/types/swift"
@@ -447,15 +450,19 @@ func (f *File) readProtocolConformance(addr uint64) (pcd *swift.ConformanceDescr
 	if err != nil {
 		return nil, fmt.Errorf("failed to read protocol offset pointer flags(%s): %v", pcd.Flags.String(), err)
 	}
-	ctx, err := f.getContextDesc(paddr)
+	pcd.Protocol, err = f.GetBindName(paddr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read protocol name: %v", err)
+		ctx, err := f.getContextDesc(paddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read protocol name: %v", err)
+		}
+		pcd.Protocol = ctx.Name
 	}
-	pcd.Protocol = ctx.Name
 
 	// parse type reference
 	switch pcd.Flags.GetTypeReferenceKind() {
 	case swift.DirectTypeDescriptor:
+		f.cr.SeekToAddr(pcd.TypeRefOffsest.GetAddress())
 		pcd.TypeRef, err = f.readType(f.cr, pcd.TypeRefOffsest.GetAddress())
 		if err != nil {
 			return nil, fmt.Errorf("failed to read type: %v", err)
@@ -792,7 +799,6 @@ func (f *File) GetMultiPayloadEnums() (mpenums []swift.MultiPayloadEnum, err err
 				if err := binary.Read(r, f.ByteOrder, &psbmask); err != nil {
 					return nil, fmt.Errorf("failed to read %T: %w", psbmask, err)
 				}
-				fmt.Println(psbmask.String())
 				r.Seek(-int64(binary.Size(sizeFlags)+binary.Size(psbmask)), io.SeekCurrent) // rewind
 			} else {
 				r.Seek(-int64(binary.Size(sizeFlags)), io.SeekCurrent) // rewind
@@ -1089,9 +1095,9 @@ func (f *File) parseProtocol(r io.ReadSeeker, typ *swift.Type) (prot *swift.Prot
 	}
 
 	if prot.AssociatedTypeNamesOffset.IsSet() {
-		prot.AssociatedTypes, err = f.GetCString(prot.AssociatedTypeNamesOffset.GetAddress())
+		prot.AssociatedTypes, err = f.getAssociatedTypes(prot.AssociatedTypeNamesOffset.GetAddress())
 		if err != nil {
-			return nil, fmt.Errorf("failed to read protocols assocated type names: %v", err)
+			return nil, fmt.Errorf("failed to get associated types: %v", err)
 		}
 	}
 
@@ -1477,14 +1483,29 @@ func (f *File) getCString(addr uint64) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to read cstring: %v", err)
 	}
-	if strings.HasPrefix(name, "S") || strings.HasPrefix(name, "y") {
-		return "_$s" + name, nil
-	} else if strings.EqualFold(name, "C") {
-		return "_$sS" + name, nil
-	} else if strings.HasPrefix(name, "$s") {
-		return "_" + name, nil
+	if strings.HasPrefix(name, "So8") {
+		name = "_$s" + name
 	}
 	return name, nil
+}
+
+func (f *File) getAssociatedTypes(addr uint64) ([]string, error) {
+	var out []string
+
+	if err := f.cr.SeekToAddr(addr); err != nil {
+		return nil, fmt.Errorf("failed to Seek to address %#x: %v", addr, err)
+	}
+
+	s, err := bufio.NewReader(f.cr).ReadString('\x00')
+	if err != nil {
+		return nil, fmt.Errorf("failed to read strubg at address %#x, %v", addr, err)
+	}
+
+	if len(s) > 0 {
+		out = append(out, strings.Split(strings.TrimSuffix(s, "\x00"), " ")...)
+	}
+
+	return out, nil
 }
 
 func (f *File) getNameStringRef(addr uint64) (string, error) {
@@ -1548,7 +1569,6 @@ func (f *File) getContextDesc(addr uint64) (*swift.TargetModuleContext, error) {
 			return nil, fmt.Errorf("failed to read swift module context name: %w", err)
 		}
 	} else {
-		fmt.Println(tmc.Flags.String())
 		parent, err := f.getContextDesc(tmc.ParentOffset.GetAddress())
 		if err != nil {
 			return nil, fmt.Errorf("failed to read swift module context name: %w", err)
@@ -1559,87 +1579,138 @@ func (f *File) getContextDesc(addr uint64) (*swift.TargetModuleContext, error) {
 	return &tmc, nil
 }
 
-// ref: https://github.com/apple/swift/blob/1a7146fb04665e2434d02bada06e6296f966770b/lib/Demangling/Demangler.cpp#L155
+// ref: https://github.com/apple/swift/blob/main/lib/Demangling/Demangler.cpp (demangleSymbolicReference)
 // ref: https://github.com/apple/swift/blob/main/docs/ABI/Mangling.rst#symbolic-references
 func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 
-	var name string
 	var symbolic bool
-
-	f.cr.SeekToAddr(addr)
-
-	controlData := make([]byte, 9)
-	f.cr.Read(controlData)
-
-	if controlData[0] >= 0x01 && controlData[0] <= 0x17 {
-		var reference int32
-		if err := binary.Read(bytes.NewReader(controlData[1:]), f.ByteOrder, &reference); err != nil {
-			return "", fmt.Errorf("failed to read swift symbolic reference: %v", err)
-		}
-		symbolic = true
-		addr += uint64(1 + int64(reference))
-	} else if controlData[0] >= 0x18 && controlData[0] <= 0x1f {
-		var reference uint64
-		if err := binary.Read(bytes.NewReader(controlData[1:]), f.ByteOrder, &reference); err != nil {
-			return "", fmt.Errorf("failed to read swift symbolic reference: %v", err)
-		}
-		symbolic = true
-		addr = uint64(reference)
-	} else {
-		return f.getCString(addr)
+	var rawKind uint8
+	type lookup struct {
+		Kind uint8
+		Addr uint64
 	}
 
-	f.cr.SeekToAddr(addr)
+	parseControlData := func() ([]any, error) {
+		var curr int64
+		var cstring string
+		var elements []any
 
-	switch uint8(controlData[0]) {
-	case 1: // Reference points directly to context descriptor
-		var err error
-		var tDesc swift.TargetModuleContextDescriptor
-		if err := tDesc.Read(f.cr, addr); err != nil {
-			return "", fmt.Errorf("failed to read swift context descriptor: %v", err)
+		seqData := make([]uint8, 1)
+		if err := f.cr.SeekToAddr(addr); err != nil {
+			return nil, fmt.Errorf("failed to seek to swift symbolic mangled name control data addr: %w", err)
 		}
-		name, err = f.GetCString(tDesc.NameOffset.GetAddress())
-		if err != nil {
-			return "", fmt.Errorf("failed to read swift context descriptor descriptor name: %v", err)
+		off, _ := f.cr.Seek(0, io.SeekCurrent)
+		curr, _ = f.cr.Seek(0, io.SeekCurrent)
+		if _, err := f.cr.Read(seqData); err != nil {
+			return nil, fmt.Errorf("failed to read to swift symbolic mangled name control data: %v", err)
 		}
-		if tDesc.ParentOffset.IsSet() {
-			parent, err := f.getContextDesc(tDesc.ParentOffset.GetAddress())
-			if err != nil {
-				return "", fmt.Errorf("failed to read swift context descriptor parent: %v", err)
-			}
-			if len(parent.Name) > 0 {
-				name = parent.Name + "." + name
-			}
-		}
-	case 2: // Reference points indirectly to context descriptor
-		ptr, err := f.GetPointerAtAddress(addr)
-		if err != nil {
-			return "", fmt.Errorf("failed to get pointer for indirect context descriptor: %v", err)
-		}
-		if f.HasFixups() {
-			dcf, err := f.DyldChainedFixups()
-			if err != nil {
-				return "", fmt.Errorf("failed to get dyld chained fixups: %v", err)
-			}
-			if _, _, ok := dcf.IsBind(ptr); ok {
-				name, err = f.GetBindName(ptr)
-				if err != nil {
-					return "", fmt.Errorf("failed to read protocol name: %v", err)
+
+		for {
+			if seqData[0] == 0x00 {
+				if len(cstring) > 0 {
+					elements = append(elements, cstring)
+					cstring = ""
 				}
+				break
+			} else if seqData[0] >= 0x01 && seqData[0] <= 0x17 {
+				if len(cstring) > 0 {
+					elements = append(elements, cstring)
+					cstring = ""
+				}
+				symbolic = true
+				rawKind = seqData[0]
+				var reference int32
+				if err := binary.Read(f.cr, f.ByteOrder, &reference); err != nil {
+					return nil, fmt.Errorf("failed to read swift symbolic reference: %v", err)
+				}
+				elements = append(elements, lookup{
+					Kind: seqData[0],
+					Addr: addr + uint64(curr-off) + uint64(1+int64(reference)),
+				})
+			} else if seqData[0] >= 0x18 && seqData[0] <= 0x1f {
+				if len(cstring) > 0 {
+					elements = append(elements, cstring)
+					cstring = ""
+				}
+				symbolic = true
+				var reference uint64
+				if err := binary.Read(f.cr, f.ByteOrder, &reference); err != nil {
+					return nil, fmt.Errorf("failed to read swift symbolic reference: %v", err)
+				}
+				elements = append(elements, lookup{
+					Kind: seqData[0],
+					Addr: uint64(reference),
+				})
 			} else {
-				if err := f.cr.SeekToAddr(f.vma.Convert(ptr)); err != nil {
-					return "", fmt.Errorf("failed to seek to indirect context descriptor: %v", err)
+				cstring += string(seqData[0])
+			}
+
+			curr, _ = f.cr.Seek(0, io.SeekCurrent)
+			_, err := f.cr.Read(seqData)
+			if err != nil {
+				if err == io.EOF {
+					break
 				}
-				var tmcd swift.TargetModuleContextDescriptor
-				if err := tmcd.Read(f.cr, ptr); err != nil {
+				return nil, fmt.Errorf("failed to read swift symbolic reference control data: %v", err)
+			}
+		}
+		return elements, nil
+	}
+
+	parts, err := parseControlData()
+	if err != nil {
+		return "", fmt.Errorf("failed to parse control data: %v", err)
+	}
+
+	var out []string
+
+	for _, part := range parts {
+		switch part := part.(type) {
+		case string:
+			switch part {
+			case "Sg": // optional
+				out = append(out, "?")
+			case "SSg", "G", "x": // Swift.String?
+				out = append(out, "_$sS"+part)
+			default:
+				if regexp.MustCompile("So[0-9]+").MatchString(part) {
+					out = append(out, "_$s"+part)
+				} else if regexp.MustCompile("^[0-9]+").MatchString(part) {
+					for i, c := range part {
+						if !unicode.IsNumber(c) {
+							out = append(out, part[i:])
+							break
+						}
+					}
+				} else if strings.HasPrefix(part, "$s") {
+					out = append(out, "_"+part)
+				} else {
+					if strings.HasPrefix(part, "S") {
+						out = append(out, "_$s"+part)
+					} else if strings.HasPrefix(part, "y") {
+						out = append(out, "_$sSS"+part)
+					} else {
+						out = append(out, "_$sS"+part)
+					}
+				}
+			}
+		case lookup:
+			switch part.Kind {
+			case 0x01: // DIRECT symbolic reference to a context descriptor
+				var name string
+				if err := f.cr.SeekToAddr(part.Addr); err != nil {
+					return "", fmt.Errorf("failed to seek to swift context descriptor: %v", err)
+				}
+				var desc swift.TargetModuleContextDescriptor
+				if err := desc.Read(f.cr, part.Addr); err != nil {
 					return "", fmt.Errorf("failed to read swift context descriptor: %v", err)
 				}
-				name, err = f.GetCString(tmcd.NameOffset.GetAddress())
+				name, err = f.GetCString(desc.NameOffset.GetAddress())
 				if err != nil {
-					return "", fmt.Errorf("failed to read indirect context descriptor name: %v", err)
+					return "", fmt.Errorf("failed to read swift context descriptor descriptor name: %v", err)
 				}
-				if tmcd.ParentOffset.IsSet() {
-					parent, err := f.getContextDesc(tmcd.ParentOffset.GetAddress())
+				if desc.ParentOffset.IsSet() {
+					parent, err := f.getContextDesc(desc.ParentOffset.GetAddress())
 					if err != nil {
 						return "", fmt.Errorf("failed to read swift context descriptor parent: %v", err)
 					}
@@ -1647,44 +1718,84 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 						name = parent.Name + "." + name
 					}
 				}
+				if symbolic {
+					name += "()"
+				}
+				out = append(out, name)
+			case 0x02: // symbolic reference to a context descriptor
+				var name string
+				ptr, err := f.GetPointerAtAddress(part.Addr)
+				if err != nil {
+					return "", fmt.Errorf("failed to get pointer for indirect context descriptor: %v", err)
+				}
+				if err := f.cr.SeekToAddr(f.vma.Convert(ptr)); err != nil {
+					return "", fmt.Errorf("failed to seek to indirect context descriptor: %v", err)
+				}
+				if f.HasFixups() {
+					if dcf, err := f.DyldChainedFixups(); err == nil {
+						if _, _, ok := dcf.IsBind(ptr); ok {
+							name, err = f.GetBindName(ptr)
+							if err != nil {
+								return "", fmt.Errorf("failed to read protocol name: %v", err)
+							}
+						}
+					}
+				}
+				if len(name) == 0 {
+					var desc swift.TargetModuleContextDescriptor
+					if err := desc.Read(f.cr, f.vma.Convert(ptr)); err != nil {
+						return "", fmt.Errorf("failed to read swift context descriptor: %v", err)
+					}
+					name, err = f.GetCString(desc.NameOffset.GetAddress())
+					if err != nil {
+						return "", fmt.Errorf("failed to read swift context descriptor descriptor name: %v", err)
+					}
+					if desc.ParentOffset.IsSet() {
+						parent, err := f.getContextDesc(desc.ParentOffset.GetAddress())
+						if err != nil {
+							return "", fmt.Errorf("failed to read swift context descriptor parent: %v", err)
+						}
+						if len(parent.Name) > 0 {
+							name = parent.Name + "." + name
+						}
+					}
+				}
+				if symbolic {
+					name += "()"
+				}
+				out = append(out, name)
+			case 0x09: // DIRECT symbolic reference to an accessor function, which can be executed in the process to get a pointer to the referenced entity.
+				// AccessorFunctionReference
+				panic("not implemented")
+			case 0x0a: // DIRECT symbolic reference to a unique extended existential type shape.
+				// UniqueExtendedExistentialTypeShape
+				panic("not implemented")
+			case 0x0b: // DIRECT symbolic reference to a non-unique extended existential type shape.
+				// NonUniqueExtendedExistentialTypeShape
+				panic("not implemented")
+			case 0x0c: // DIRECT symbolic reference to a objective C protocol ref.
+				// ObjectiveCProtocol
+				panic("not implemented")
+			/* These are all currently reserved but unused. */
+			case 0x03: // DIRECT to protocol conformance descriptor
+				fallthrough
+			case 0x04: // indirect to protocol conformance descriptor
+				fallthrough
+			case 0x05: // DIRECT to associated conformance descriptor
+				fallthrough
+			case 0x06: // DIRECT to associated conformance descriptor
+				fallthrough
+			case 0x07: // DIRECT to associated conformance access function
+				fallthrough
+			case 0x08: // indirect to associated conformance access function
+				fallthrough
+			default:
+				return "", fmt.Errorf("symbolic reference control character %#x is not implemented", rawKind)
 			}
-		} else { // TODO: fix this (redundant???)
-			name, err = f.GetCString(f.vma.Convert(ptr))
-			if err != nil {
-				return "", fmt.Errorf("failed to read protocol name: %v", err)
-			}
+		default:
+			return "", fmt.Errorf("unexpected symbolic reference element type %#v", part)
 		}
-	case 3: // Reference points directly to protocol conformance descriptor (NOT IMPLEMENTED)
-		fallthrough
-	case 4: // Reference points indirectly to protocol conformance descriptor (NOT IMPLEMENTED)
-		fallthrough
-	case 5: // Reference points directly to associated conformance descriptor (NOT IMPLEMENTED)
-		fallthrough
-	case 6: // Reference points indirectly to associated conformance descriptor (NOT IMPLEMENTED)
-		fallthrough
-	case 7: // Reference points directly to associated conformance access function relative to the protocol
-		fallthrough
-	case 8: // Reference points indirectly to associated conformance access function relative to the protocol
-		fallthrough
-	case 9: // Reference points directly to metadata access function that can be invoked to produce referenced object
-		// kind = SymbolicReferenceKind::AccessorFunctionReference; TODO: implement
-		// direct = Directness::Direct;
-		fallthrough
-	case 10: // Reference points directly to an ExtendedExistentialTypeShape
-		// kind = SymbolicReferenceKind::UniqueExtendedExistentialTypeShape;  TODO: implement
-		// direct = Directness::Direct;
-		fallthrough
-	case 11: // Reference points directly to a NonUniqueExtendedExistentialTypeShape
-		// kind = SymbolicReferenceKind::NonUniqueExtendedExistentialTypeShape;
-		// direct = Directness::Direct;
-		fallthrough
-	default:
-		return "", fmt.Errorf("symbolic reference control character %#x is not implemented", controlData[0])
 	}
 
-	if symbolic {
-		return "symbolic " + name, nil
-	} else {
-		return name, nil
-	}
+	return strings.Join(out, " "), nil
 }

@@ -77,8 +77,8 @@ func (t Type) dump(verbose bool) string {
 			for _, r := range f.Records {
 				var typ string
 				if len(r.MangledType) > 0 {
-					if strings.HasPrefix(r.MangledType, "symbolic ") {
-						typ = fmt.Sprintf(" = %s()", r.MangledType[9:])
+					if strings.Contains(r.MangledType, "()") {
+						typ = fmt.Sprintf(" = %s", r.MangledType)
 					} else {
 						typ = fmt.Sprintf(": %s", r.MangledType)
 					}
@@ -143,8 +143,8 @@ func (t Type) dump(verbose bool) string {
 				}
 				var typ string
 				if len(r.MangledType) > 0 {
-					if strings.HasPrefix(r.MangledType, "symbolic ") {
-						typ = fmt.Sprintf(" = %s()", r.MangledType[9:])
+					if strings.Contains(r.MangledType, "()") {
+						typ = fmt.Sprintf(" = %s", r.MangledType)
 					} else {
 						typ = fmt.Sprintf(": %s", r.MangledType)
 					}
