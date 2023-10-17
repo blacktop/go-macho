@@ -936,9 +936,9 @@ func (f *File) readType(r io.ReadSeeker, addr uint64) (typ *swift.Type, err erro
 	case swift.MetadataInitNone:
 		metadataInitSize = 0
 	case swift.MetadataInitSingleton:
-		metadataInitSize = binary.Size(swift.TargetSingletonMetadataInitialization{})
+		metadataInitSize = int(swift.TargetSingletonMetadataInitialization{}.Size())
 	case swift.MetadataInitForeign:
-		metadataInitSize = binary.Size(swift.TargetForeignMetadataInitialization{})
+		metadataInitSize = int(swift.TargetForeignMetadataInitialization{}.Size())
 	default:
 		return nil, fmt.Errorf("unknown metadata initialization: %v", desc.Flags.KindSpecific().MetadataInitialization())
 	}
@@ -1129,16 +1129,18 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 	}
 
 	if desc.Flags.KindSpecific().MetadataInitialization() == swift.MetadataInitForeign {
+		curr, _ := r.Seek(0, io.SeekCurrent)
 		var fmd swift.TargetForeignMetadataInitialization
-		if err := binary.Read(r, f.ByteOrder, &fmd); err != nil {
+		if err := fmd.Read(r, typ.Address+uint64(curr)); err != nil {
 			return fmt.Errorf("failed to read foreign metadata initialization: %v", err)
 		}
 		_ = fmd // TODO: use this (pattern is always null)
 	}
 
 	if desc.Flags.KindSpecific().MetadataInitialization() == swift.MetadataInitSingleton {
+		curr, _ := r.Seek(0, io.SeekCurrent)
 		var smi swift.TargetSingletonMetadataInitialization
-		if err := binary.Read(r, f.ByteOrder, &smi); err != nil {
+		if err := smi.Read(r, typ.Address+uint64(curr)); err != nil {
 			return fmt.Errorf("failed to read singleton metadata initialization: %v", err)
 		}
 		_ = smi // TODO: use this
@@ -1219,19 +1221,21 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 	}
 
 	if desc.Flags.KindSpecific().HasCanonicalMetadataPrespecializations() {
-		var md swift.TargetCanonicalSpecializedMetadatasListCount
-		if err := binary.Read(r, f.ByteOrder, &md); err != nil {
+		var lc swift.TargetCanonicalSpecializedMetadatasListCount
+		if err := binary.Read(r, f.ByteOrder, &lc); err != nil {
 			return fmt.Errorf("failed to read canonical metadata prespecialization: %v", err)
 		}
-		for i := 0; i < int(md.Count); i++ {
+		for i := 0; i < int(lc.Count); i++ {
+			curr, _ := r.Seek(0, io.SeekCurrent)
 			var le swift.TargetCanonicalSpecializedMetadatasListEntry
-			if err := binary.Read(r, f.ByteOrder, &le); err != nil {
-				return fmt.Errorf("failed to read canonical metadata prespecialization: %v", err)
+			if err := le.Read(r, typ.Address+uint64(curr)); err != nil {
+				return fmt.Errorf("failed to read canonical metadata list entry: %v", err)
 			}
 			_ = le // TODO: use this
 		}
+		curr, _ := r.Seek(0, io.SeekCurrent)
 		var cache swift.TargetCanonicalSpecializedMetadatasCachingOnceToken
-		if err := binary.Read(r, f.ByteOrder, &cache); err != nil {
+		if err := cache.Read(r, typ.Address+uint64(curr)); err != nil {
 			return fmt.Errorf("failed to read canonical metadata prespecialization: %v", err)
 		}
 		_ = cache // TODO: use this
@@ -1280,7 +1284,7 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 	return nil
 }
 
-func (f *File) parseStructDescriptor(r io.Reader, typ *swift.Type) (err error) {
+func (f *File) parseStructDescriptor(r io.ReadSeeker, typ *swift.Type) (err error) {
 	var desc swift.TargetStructDescriptor
 	if err := desc.Read(r, typ.Address); err != nil {
 		return fmt.Errorf("failed to read %T: %v", desc, err)
@@ -1295,19 +1299,21 @@ func (f *File) parseStructDescriptor(r io.Reader, typ *swift.Type) (err error) {
 	}
 
 	if desc.Flags.KindSpecific().MetadataInitialization() == swift.MetadataInitForeign {
+		curr, _ := r.Seek(0, io.SeekCurrent)
 		var fmd swift.TargetForeignMetadataInitialization
-		if err := binary.Read(r, f.ByteOrder, &fmd); err != nil {
+		if err := fmd.Read(r, typ.Address+uint64(curr)); err != nil {
 			return fmt.Errorf("failed to read foreign metadata initialization: %v", err)
 		}
 		_ = fmd // TODO: use this (pattern is always null)
 	}
 
 	if desc.Flags.KindSpecific().MetadataInitialization() == swift.MetadataInitSingleton {
-		var sing swift.TargetSingletonMetadataInitialization
-		if err := binary.Read(r, f.ByteOrder, &sing); err != nil {
+		curr, _ := r.Seek(0, io.SeekCurrent)
+		var smi swift.TargetSingletonMetadataInitialization
+		if err := smi.Read(r, typ.Address+uint64(curr)); err != nil {
 			return fmt.Errorf("failed to read singleton metadata initialization: %v", err)
 		}
-		_ = sing // TODO: use this
+		_ = smi // TODO: use this
 	}
 
 	if desc.Flags.KindSpecific().HasCanonicalMetadataPrespecializations() {
@@ -1316,12 +1322,19 @@ func (f *File) parseStructDescriptor(r io.Reader, typ *swift.Type) (err error) {
 			return fmt.Errorf("failed to read canonical metadata prespecialization: %v", err)
 		}
 		for i := 0; i < int(lc.Count); i++ {
+			curr, _ := r.Seek(0, io.SeekCurrent)
 			var le swift.TargetCanonicalSpecializedMetadatasListEntry
-			if err := binary.Read(r, f.ByteOrder, &le); err != nil {
-				return fmt.Errorf("failed to read canonical metadata prespecialization: %v", err)
+			if err := le.Read(r, typ.Address+uint64(curr)); err != nil {
+				return fmt.Errorf("failed to read canonical metadata list entry: %v", err)
 			}
 			_ = le // TODO: use this
 		}
+		curr, _ := r.Seek(0, io.SeekCurrent)
+		var cache swift.TargetCanonicalSpecializedMetadatasCachingOnceToken
+		if err := cache.Read(r, typ.Address+uint64(curr)); err != nil {
+			return fmt.Errorf("failed to read canonical metadata prespecialization: %v", err)
+		}
+		_ = cache // TODO: use this
 	}
 
 	typ.Name, err = f.GetCString(desc.NameOffset.GetAddress())
@@ -1337,6 +1350,7 @@ func (f *File) parseStructDescriptor(r io.Reader, typ *swift.Type) (err error) {
 	}
 
 	if desc.FieldsOffset.IsSet() {
+		f.cr.SeekToAddr(desc.FieldsOffset.GetAddress())
 		fd, err := f.readField(f.cr, desc.FieldsOffset.GetAddress())
 		if err != nil {
 			return fmt.Errorf("failed to read swift field: %w", err)
@@ -1349,47 +1363,78 @@ func (f *File) parseStructDescriptor(r io.Reader, typ *swift.Type) (err error) {
 	return nil
 }
 
-func (f *File) parseEnumDescriptor(r io.Reader, typ *swift.Type) (err error) {
-	var desc swift.TargetEnumDescriptor
-	if err := desc.Read(r, typ.Address); err != nil {
-		return fmt.Errorf("failed to read %T: %v", desc, err)
+func (f *File) parseEnumDescriptor(r io.ReadSeeker, typ *swift.Type) (err error) {
+	off, _ := r.Seek(0, io.SeekCurrent) // save offset
+
+	var enum swift.Enum
+	if err := enum.TargetEnumDescriptor.Read(r, typ.Address); err != nil {
+		return fmt.Errorf("failed to read %T: %v", enum.TargetEnumDescriptor, err)
 	}
 
-	if desc.Flags.IsGeneric() {
-		var g swift.TargetTypeGenericContextDescriptorHeader
-		if err := binary.Read(r, f.ByteOrder, &g); err != nil {
+	if enum.Flags.IsGeneric() {
+		enum.GenericContext = &swift.GenericContext{}
+		curr, _ := r.Seek(0, io.SeekCurrent)
+		if err := enum.GenericContext.TargetTypeGenericContextDescriptorHeader.Read(r, typ.Address+uint64(curr-off)); err != nil {
 			return fmt.Errorf("failed to read generic header: %v", err)
 		}
-		typ.Generic = &g
+		enum.GenericContext.Parameters = make([]swift.GenericParamDescriptor, enum.GenericContext.Base.NumParams)
+		if err := binary.Read(r, f.ByteOrder, &enum.GenericContext.Parameters); err != nil {
+			return fmt.Errorf("failed to read generic params: %v", err)
+		}
+		enum.GenericContext.Requirements = make([]swift.TargetGenericRequirementDescriptor, enum.GenericContext.Base.NumRequirements)
+		for i := 0; i < int(enum.GenericContext.Base.NumRequirements); i++ {
+			curr, _ = r.Seek(0, io.SeekCurrent)
+			if err := enum.GenericContext.Requirements[i].Read(r, typ.Address+uint64(curr-off)); err != nil {
+				return fmt.Errorf("failed to read generic requirement: %v", err)
+			}
+		}
+		// args := make([]swift.GenericPackShapeDescriptor, g.Base.NumKeyArguments)
+		// if err := binary.Read(r, f.ByteOrder, &args); err != nil {
+		// 	return fmt.Errorf("failed to read generic key arguments: %v", err)
+		// }
+		// _ = args // TODO: use this
 	}
 
-	if desc.Flags.KindSpecific().MetadataInitialization() == swift.MetadataInitForeign {
-		var fmd swift.TargetForeignMetadataInitialization
-		if err := binary.Read(r, f.ByteOrder, &fmd); err != nil {
+	if enum.Flags.KindSpecific().MetadataInitialization() == swift.MetadataInitForeign {
+		enum.ForeignMetadata = &swift.TargetForeignMetadataInitialization{}
+		curr, _ := r.Seek(0, io.SeekCurrent)
+		if err := enum.ForeignMetadata.Read(r, typ.Address+uint64(curr-off)); err != nil {
 			return fmt.Errorf("failed to read foreign metadata initialization: %v", err)
 		}
-		_ = fmd // TODO: use this (pattern is always null)
 	}
 
-	if desc.Flags.KindSpecific().MetadataInitialization() == swift.MetadataInitSingleton {
-		var sing swift.TargetSingletonMetadataInitialization
-		if err := binary.Read(r, f.ByteOrder, &sing); err != nil {
+	if enum.Flags.KindSpecific().MetadataInitialization() == swift.MetadataInitSingleton {
+		enum.SingletonMetadata = &swift.TargetSingletonMetadataInitialization{}
+		curr, _ := r.Seek(0, io.SeekCurrent)
+		if err := enum.SingletonMetadata.Read(r, typ.Address+uint64(curr-off)); err != nil {
 			return fmt.Errorf("failed to read singleton metadata initialization: %v", err)
 		}
-		_ = sing // TODO: use this
 	}
 
-	if desc.Flags.KindSpecific().HasCanonicalMetadataPrespecializations() {
+	if enum.Flags.KindSpecific().HasCanonicalMetadataPrespecializations() {
 		var lc swift.TargetCanonicalSpecializedMetadatasListCount
 		if err := binary.Read(r, f.ByteOrder, &lc); err != nil {
 			return fmt.Errorf("failed to read canonical metadata prespecialization: %v", err)
 		}
+		enum.Metadatas = make([]swift.Metadata, lc.Count)
 		for i := 0; i < int(lc.Count); i++ {
-			var le swift.TargetCanonicalSpecializedMetadatasListEntry
-			if err := binary.Read(r, f.ByteOrder, &le); err != nil {
-				return fmt.Errorf("failed to read canonical metadata prespecialization: %v", err)
+			curr, _ := r.Seek(0, io.SeekCurrent)
+			if err := enum.Metadatas[i].TargetCanonicalSpecializedMetadatasListEntry.Read(r, typ.Address+uint64(curr-off)); err != nil {
+				return fmt.Errorf("failed to read canonical metadata list entry: %v", err)
 			}
-			_ = le // TODO: use this
+		}
+		enum.CachingOnceToken = &swift.TargetCanonicalSpecializedMetadatasCachingOnceToken{}
+		curr, _ := r.Seek(0, io.SeekCurrent)
+		if err := enum.CachingOnceToken.Read(r, typ.Address+uint64(curr-off)); err != nil {
+			return fmt.Errorf("failed to read canonical metadata prespecialization: %v", err)
+		}
+		for idx, m := range enum.Metadatas {
+			f.cr.SeekToAddr(m.Metadata.GetAddress())
+			if err := binary.Read(f.cr, f.ByteOrder, &enum.Metadatas[idx].TargetMetadata); err != nil {
+				return fmt.Errorf("failed to read metadata: %w", err)
+			}
+			enum.Metadatas[idx].TargetMetadata.TypeDescriptor = f.vma.Convert(enum.Metadatas[idx].TargetMetadata.TypeDescriptor)
+			enum.Metadatas[idx].TargetMetadata.TypeMetadataAddress = f.vma.Convert(enum.Metadatas[idx].TargetMetadata.TypeMetadataAddress)
 		}
 	}
 
@@ -1397,27 +1442,28 @@ func (f *File) parseEnumDescriptor(r io.Reader, typ *swift.Type) (err error) {
 	// 	fmt.Println("NumPayloadCasesAndPayloadSizeOffset: ", desc.NumPayloadCasesAndPayloadSizeOffset)
 	// }
 
-	if desc.ParentOffset.IsSet() {
-		typ.Parent, err = f.getContextDesc(desc.ParentOffset.GetAddress())
+	if enum.ParentOffset.IsSet() {
+		typ.Parent, err = f.getContextDesc(enum.ParentOffset.GetAddress())
 		if err != nil {
 			return fmt.Errorf("failed to get parent: %v", err)
 		}
 	}
 
-	typ.Name, err = f.getCString(desc.NameOffset.GetAddress())
+	typ.Name, err = f.getCString(enum.NameOffset.GetAddress())
 	if err != nil {
 		return fmt.Errorf("failed to read cstring: %v", err)
 	}
 
-	if desc.FieldsOffset.IsSet() {
-		fd, err := f.readField(f.cr, desc.FieldsOffset.GetAddress())
+	if enum.FieldsOffset.IsSet() {
+		f.cr.SeekToAddr(enum.FieldsOffset.GetAddress())
+		fd, err := f.readField(f.cr, enum.FieldsOffset.GetAddress())
 		if err != nil {
 			return fmt.Errorf("failed to read swift field: %w", err)
 		}
 		typ.Fields = append(typ.Fields, *fd)
 	}
 
-	typ.Type = &desc
+	typ.Type = &enum
 
 	return nil
 }
@@ -1501,6 +1547,13 @@ func (f *File) getContextDesc(addr uint64) (*swift.TargetModuleContext, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to read swift module context name: %w", err)
 		}
+	} else {
+		fmt.Println(tmc.Flags.String())
+		parent, err := f.getContextDesc(tmc.ParentOffset.GetAddress())
+		if err != nil {
+			return nil, fmt.Errorf("failed to read swift module context name: %w", err)
+		}
+		tmc.Name = parent.Name
 	}
 
 	return &tmc, nil

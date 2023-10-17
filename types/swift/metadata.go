@@ -1,5 +1,12 @@
 package swift
 
+import (
+	"encoding/binary"
+	"io"
+
+	"github.com/blacktop/go-macho/types"
+)
+
 //go:generate stringer -type MetadataKind -linecomment -output metadata_string.go
 
 const (
@@ -47,3 +54,100 @@ const (
 	// This specific value is not mapped to a valid metadata kind at this time,
 	// however.
 )
+
+type Metadata struct {
+	TargetCanonicalSpecializedMetadatasListEntry
+	TargetMetadata
+}
+
+type TargetCanonicalSpecializedMetadatasListCount struct {
+	Count uint32
+}
+
+type TargetCanonicalSpecializedMetadatasListEntry struct {
+	Metadata RelativeDirectPointer
+}
+
+func (f TargetCanonicalSpecializedMetadatasListEntry) Size() int64 {
+	return int64(binary.Size(f.Metadata.RelOff))
+}
+
+func (f *TargetCanonicalSpecializedMetadatasListEntry) Read(r io.Reader, addr uint64) error {
+	f.Metadata.Address = addr
+	return binary.Read(r, binary.LittleEndian, &f.Metadata.RelOff)
+}
+
+type TargetCanonicalSpecializedMetadatasCachingOnceToken struct {
+	Token TargetRelativeDirectPointer
+}
+
+func (f TargetCanonicalSpecializedMetadatasCachingOnceToken) Size() int64 {
+	return int64(binary.Size(f.Token.RelOff))
+}
+
+func (f *TargetCanonicalSpecializedMetadatasCachingOnceToken) Read(r io.Reader, addr uint64) error {
+	f.Token.Address = addr
+	return binary.Read(r, binary.LittleEndian, &f.Token.RelOff)
+}
+
+// The instantiation cache for generic metadata.  This must be guaranteed
+// to zero-initialized before it is first accessed.  Its contents are private
+// to the runtime.
+type TargetGenericMetadataInstantiationCache struct {
+	// Data that the runtime can use for its own purposes.  It is guaranteed
+	// to be zero-filled by the compiler. Might be null when building with
+	// -disable-preallocated-instantiation-caches.
+	PrivateData [16]byte
+}
+
+type TargetGenericMetadataPattern struct {
+	InstantiationFunction int32
+	CompletionFunction    int32
+	PatternFlags          GenericMetadataPatternFlags
+}
+
+type GenericMetadataPatternFlags uint32
+
+const (
+	// All of these values are bit offsets or widths.
+	// General flags build up from 0.
+	// Kind-specific flags build down from 31.
+
+	/// Does this pattern have an extra-data pattern?
+	HasExtraDataPattern = 0
+
+	/// Do instances of this pattern have a bitset of flags that occur at the
+	/// end of the metadata, after the extra data if there is any?
+	HasTrailingFlags = 1
+
+	// Class-specific flags.
+
+	/// Does this pattern have an immediate-members pattern?
+	Class_HasImmediateMembersPattern = 31
+
+	// Value-specific flags.
+
+	/// For value metadata: the metadata kind of the type.
+	Value_MetadataKind       = 21
+	Value_MetadataKind_width = 11
+)
+
+func (f GenericMetadataPatternFlags) HasExtraDataPattern() bool {
+	return types.ExtractBits(uint64(f), int32(HasExtraDataPattern), 1) != 0
+}
+func (f GenericMetadataPatternFlags) HasTrailingFlags() bool {
+	return types.ExtractBits(uint64(f), int32(HasTrailingFlags), 1) != 0
+}
+func (f GenericMetadataPatternFlags) HasImmediateMembersPattern() bool {
+	return types.ExtractBits(uint64(f), int32(Class_HasImmediateMembersPattern), 1) != 0
+}
+func (f GenericMetadataPatternFlags) MetadataKind() MetadataKind {
+	return MetadataKind(types.ExtractBits(uint64(f), int32(Value_MetadataKind), int32(Value_MetadataKind_width)))
+}
+
+// TargetMetadata the common structure of all type metadata.
+type TargetMetadata struct {
+	Kind                uint64
+	TypeDescriptor      uint64
+	TypeMetadataAddress uint64
+}

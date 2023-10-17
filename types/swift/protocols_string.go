@@ -16,7 +16,7 @@ func _() {
 }
 
 const (
-	_GenericRequirementKind_name_0 = "protocolsame-typebase classsame-conformance"
+	_GenericRequirementKind_name_0 = "protocolsame-typebase-classsame-conformance"
 	_GenericRequirementKind_name_1 = "layout"
 )
 

@@ -130,7 +130,7 @@ type GenericRequirementKind uint8
 const (
 	GRKindProtocol  GenericRequirementKind = 0 // protocol
 	GRKindSameType  GenericRequirementKind = 1 // same-type
-	GRKindBaseClass GenericRequirementKind = 2 // base class
+	GRKindBaseClass GenericRequirementKind = 2 // base-class
 	// implied by a same-type or base-class constraint that binds a parameter with protocol requirements.
 	GRKindSameConformance GenericRequirementKind = 3    // same-conformance
 	GRKindLayout          GenericRequirementKind = 0x1F // layout
@@ -151,17 +151,36 @@ func (f GenericRequirementFlags) String() string {
 	return fmt.Sprintf("key_arg: %t, extra_arg: %t, kind: %s", f.HasKeyArgument(), f.HasExtraArgument(), f.Kind())
 }
 
-// ref: swift/ABI/Metadata.h - TargetGenericRequirementDescriptor
-type TargetGenericRequirementDescriptor struct {
-	Flags                               GenericRequirementFlags
-	Param                               int32 // The type that's constrained, described as a mangled name.
-	TypeOrProtocolOrConformanceOrLayout int32 // UNION: flags determine type
-}
-
 type TargetGenericRequirement struct {
 	Name string
 	Kind string
 	TargetGenericRequirementDescriptor
+}
+
+// ref: swift/ABI/Metadata.h - TargetGenericRequirementDescriptor
+type TargetGenericRequirementDescriptor struct {
+	Flags                               GenericRequirementFlags
+	Param                               RelativeDirectPointer // The type that's constrained, described as a mangled name.
+	TypeOrProtocolOrConformanceOrLayout RelativeDirectPointer // UNION: flags determine type
+}
+
+func (d TargetGenericRequirementDescriptor) Size() int64 {
+	return int64(binary.Size(d.Flags) + binary.Size(d.Param.RelOff) + binary.Size(d.TypeOrProtocolOrConformanceOrLayout.RelOff))
+}
+
+func (d *TargetGenericRequirementDescriptor) Read(r io.Reader, addr uint64) error {
+	d.Param.Address = addr + uint64(binary.Size(d.Flags))
+	d.TypeOrProtocolOrConformanceOrLayout.Address = addr + uint64(binary.Size(d.Flags)) + uint64(binary.Size(d.Param.RelOff))
+	if err := binary.Read(r, binary.LittleEndian, &d.Flags); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &d.Param.RelOff); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &d.TypeOrProtocolOrConformanceOrLayout.RelOff); err != nil {
+		return err
+	}
+	return nil
 }
 
 // GenericPackShapeHeader object
@@ -174,8 +193,8 @@ type GenericPackShapeHeader struct {
 type GenericPackKind uint16
 
 const (
-	Metadata     GenericPackKind = 0
-	WitnessTable GenericPackKind = 1
+	GPKMetadata     GenericPackKind = 0
+	GPKWitnessTable GenericPackKind = 1
 )
 
 // GenericPackShapeDescriptor the GenericPackShapeHeader is followed by an array of these descriptors,

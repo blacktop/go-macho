@@ -5,6 +5,15 @@ import (
 	"io"
 )
 
+type Enum struct {
+	TargetEnumDescriptor
+	GenericContext    *GenericContext
+	ForeignMetadata   *TargetForeignMetadataInitialization
+	SingletonMetadata *TargetSingletonMetadataInitialization
+	Metadatas         []Metadata
+	CachingOnceToken  *TargetCanonicalSpecializedMetadatasCachingOnceToken
+}
+
 type TargetEnumDescriptor struct {
 	TargetTypeContextDescriptor
 	NumPayloadCasesAndPayloadSizeOffset uint32

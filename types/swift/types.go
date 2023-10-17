@@ -470,39 +470,132 @@ type TargetOpaqueTypeDescriptor struct {
 	TargetContextDescriptor
 }
 
-type TargetCanonicalSpecializedMetadatasListCount struct {
-	Count uint32
-}
-
-type TargetCanonicalSpecializedMetadatasListEntry struct {
-	Metadata int32
-}
-
-type TargetCanonicalSpecializedMetadatasCachingOnceToken struct {
-	Token int32
+type GenericContext struct {
+	TargetTypeGenericContextDescriptorHeader
+	Parameters   []GenericParamDescriptor
+	Requirements []TargetGenericRequirementDescriptor
 }
 
 type TargetTypeGenericContextDescriptorHeader struct {
-	InstantiationCache          int32
-	DefaultInstantiationPattern int32
+	InstantiationCache          TargetRelativeDirectPointer
+	DefaultInstantiationPattern TargetRelativeDirectPointer
 	Base                        TargetGenericContextDescriptorHeader
 }
 
-type TargetGenericContextDescriptorHeader struct {
-	NumParams         uint16
-	NumRequirements   uint16
-	NumKeyArguments   uint16
-	NumExtraArguments uint16
+func (h TargetTypeGenericContextDescriptorHeader) Size() int64 {
+	return int64(
+		binary.Size(h.InstantiationCache.RelOff) +
+			binary.Size(h.DefaultInstantiationPattern.RelOff) +
+			binary.Size(h.Base),
+	)
 }
 
-func (g TargetGenericContextDescriptorHeader) GetNumArguments() uint32 {
-	return uint32(g.NumKeyArguments + g.NumExtraArguments)
+func (h *TargetTypeGenericContextDescriptorHeader) Read(r io.Reader, addr uint64) error {
+	h.InstantiationCache.Address = addr
+	h.DefaultInstantiationPattern.Address = addr + uint64(binary.Size(h.InstantiationCache.RelOff))
+	if err := binary.Read(r, binary.LittleEndian, &h.InstantiationCache.RelOff); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &h.DefaultInstantiationPattern.RelOff); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &h.Base); err != nil {
+		return err
+	}
+	return nil
 }
-func (g TargetGenericContextDescriptorHeader) GetArgumentLayoutSizeInWords() uint32 {
-	return g.GetNumArguments()
+
+type GenericContextDescriptorFlags uint16
+
+// HasTypePacks is whether this generic context has at least one type parameter
+// pack, in which case the generic context will have a trailing
+// GenericPackShapeHeader.
+func (f GenericContextDescriptorFlags) HasTypePacks() bool {
+	return (f & 0x01) != 0
+}
+
+// ref: include/swift/ABI/GenericContext.h
+type TargetGenericContextDescriptorHeader struct {
+	// The number of (source-written) generic parameters, and thus
+	// the number of GenericParamDescriptors associated with this
+	// context.  The parameter descriptors appear in the order in
+	// which they were given in the source.
+	//
+	// A GenericParamDescriptor corresponds to a type metadata pointer
+	// in the arguments layout when isKeyArgument() is true.
+	// isKeyArgument() will be false if the parameter has been made
+	// equivalent to a different parameter or a concrete type.
+	NumParams uint16
+	// The number of GenericRequirementDescriptors in this generic
+	// signature.
+	//
+	// A GenericRequirementDescriptor of kind Protocol corresponds
+	// to a witness table pointer in the arguments layout when
+	// isKeyArgument() is true.  isKeyArgument() will be false if
+	// the protocol is an Objective-C protocol.  (Unlike generic
+	// parameters, redundant conformance requirements can simply be
+	// eliminated, and so that case is not impossible.)
+	NumRequirements uint16
+	// The size of the "key" area of the argument layout, in words.
+	// Key arguments include shape classes, generic parameters and
+	// conformance requirements which are part of the identity of
+	// the context.
+	//
+	// The key area of the argument layout consists of:
+	//
+	// - a sequence of pack lengths, in the same order as the parameter
+	//   descriptors which satisfy getKind() == GenericParamKind::TypePack
+	//   and hasKeyArgument();
+	//
+	// - a sequence of metadata or metadata pack pointers, in the same
+	//   order as the parameter descriptors which satisfy hasKeyArgument();
+	//
+	// - a sequence of witness table or witness table pack pointers, in the
+	//   same order as the requirement descriptors which satisfy
+	//   hasKeyArgument().
+	//
+	// The elements above which are packs are precisely those appearing
+	// in the sequence of trailing GenericPackShapeDescriptors.
+	NumKeyArguments uint16
+	// Originally this was the size of the "extra" area of the argument
+	// layout, in words.  The idea was that extra arguments would
+	// include generic parameters and conformances that are not part
+	// of the identity of the context; however, it's unclear why we
+	// would ever want such a thing.  As a result, in pre-5.8 runtimes
+	// this field is always zero.  New flags can only be added as long
+	// as they remains zero in code which must be compatible with
+	// older Swift runtimes.
+	Flags GenericContextDescriptorFlags
+}
+
+func (g TargetGenericContextDescriptorHeader) GetNumArguments() uint16 {
+	return g.NumKeyArguments
 }
 func (g TargetGenericContextDescriptorHeader) HasArguments() bool {
 	return g.GetNumArguments() > 0
+}
+
+type GenericParamKind uint8
+
+const (
+	// A type parameter.
+	GPKType = 0
+	// A type parameter pack.
+	GPKTypePack = 1
+	GPKMax      = 0x3F
+)
+
+type GenericParamDescriptor struct {
+	// Don't set 0x40 for compatibility with pre-Swift 5.8 runtimes
+	Value uint8
+	_     [3]uint8 // alignment padding
+}
+
+func (g GenericParamDescriptor) HasKeyArgument() bool {
+	return (g.Value & 0x80) != 0
+}
+func (g GenericParamDescriptor) GetKind() GenericParamKind {
+	return GenericParamKind(g.Value & 0x3F)
 }
 
 type GenericEnvironmentFlags uint32

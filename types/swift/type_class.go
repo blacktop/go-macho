@@ -79,20 +79,52 @@ type TargetObjCResilientClassStubInfo struct {
 }
 
 type TargetSingletonMetadataInitialization struct {
-	InitializationCacheOffset int32 // The initialization cache. Out-of-line because mutable.
-	IncompleteMetadata        int32 // UNION: The incomplete metadata, for structs, enums and classes without resilient ancestry.
+	InitializationCacheOffset TargetRelativeDirectPointer // The initialization cache. Out-of-line because mutable.
+	IncompleteMetadata        TargetRelativeDirectPointer // UNION: The incomplete metadata, for structs, enums and classes without resilient ancestry.
 	// ResilientPattern
 	// If the class descriptor's hasResilientSuperclass() flag is set,
 	// this field instead points at a pattern used to allocate and
 	// initialize metadata for this class, since it's size and contents
 	// is not known at compile time.
-	CompletionFunction int32 // The completion function. The pattern will always be null, even for a resilient class.
+	CompletionFunction TargetRelativeDirectPointer // The completion function. The pattern will always be null, even for a resilient class.
+}
+
+func (s TargetSingletonMetadataInitialization) Size() int64 {
+	return int64(
+		binary.Size(s.InitializationCacheOffset.RelOff) +
+			binary.Size(s.IncompleteMetadata.RelOff) +
+			binary.Size(s.CompletionFunction.RelOff))
+}
+
+func (s *TargetSingletonMetadataInitialization) Read(r io.Reader, addr uint64) error {
+	s.InitializationCacheOffset.Address = addr
+	s.IncompleteMetadata.Address = addr + uint64(binary.Size(s.InitializationCacheOffset.RelOff))
+	s.CompletionFunction.Address = addr + uint64(binary.Size(s.InitializationCacheOffset.RelOff)*2)
+	if err := binary.Read(r, binary.LittleEndian, &s.InitializationCacheOffset.RelOff); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &s.IncompleteMetadata.RelOff); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &s.CompletionFunction.RelOff); err != nil {
+		return err
+	}
+	return nil
 }
 
 // TargetForeignMetadataInitialization is the control structure for performing non-trivial initialization of
 // singleton foreign metadata.
 type TargetForeignMetadataInitialization struct {
-	CompletionFunction int32 // The completion function. The pattern will always be null.
+	CompletionFunction RelativeDirectPointer // The completion function. The pattern will always be null.
+}
+
+func (f TargetForeignMetadataInitialization) Size() int64 {
+	return int64(binary.Size(f.CompletionFunction.RelOff))
+}
+
+func (f *TargetForeignMetadataInitialization) Read(r io.Reader, addr uint64) error {
+	f.CompletionFunction.Address = addr
+	return binary.Read(r, binary.LittleEndian, &f.CompletionFunction.RelOff)
 }
 
 type VTable struct {
