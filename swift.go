@@ -883,9 +883,6 @@ func (f *File) GetColocateMetadata() ([]swift.ConformanceDescriptor, error) {
 
 // GetSwiftTypes parses all the swift in the __TEXT.__swift5_types section
 func (f *File) GetSwiftTypes() (typs []swift.Type, err error) {
-	// if err := f.parseColocateTypeDescriptorSection(); err != nil {
-	// 	return nil, fmt.Errorf("failed to parse colocated type descriptor section: %v", err)
-	// }
 	if sec := f.Section("__TEXT", "__swift5_types"); sec != nil {
 		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
 		if err != nil {
@@ -936,21 +933,6 @@ func (f *File) readType(r io.ReadSeeker, addr uint64) (typ *swift.Type, err erro
 
 	typ = &swift.Type{Address: addr, Kind: desc.Flags.Kind()}
 
-	var metadataInitSize int
-
-	switch desc.Flags.KindSpecific().MetadataInitialization() {
-	case swift.MetadataInitNone:
-		metadataInitSize = 0
-	case swift.MetadataInitSingleton:
-		metadataInitSize = int(swift.TargetSingletonMetadataInitialization{}.Size())
-	case swift.MetadataInitForeign:
-		metadataInitSize = int(swift.TargetForeignMetadataInitialization{}.Size())
-	default:
-		return nil, fmt.Errorf("unknown metadata initialization: %v", desc.Flags.KindSpecific().MetadataInitialization())
-	}
-	if metadataInitSize != 0 {
-		// fmt.Println("metadataInitSize: ", metadataInitSize) // TODO: use this in size/offset calculations
-	}
 	switch desc.Flags.Kind() {
 	case swift.CDKindModule:
 		if err := f.parseModule(r, typ); err != nil {
@@ -1278,10 +1260,6 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 		if class.Flags.KindSpecific().HasResilientSuperclass() {
 			class.FieldOffsetVectorOffset += class.MetadataNegativeSizeInWordsORResilientMetadataBounds
 		}
-		// typ.FieldOffsets = make([]int32, desc.NumFields)
-		// if err := binary.Read(r, f.ByteOrder, &typ.FieldOffsets); err != nil {
-		// 	return fmt.Errorf("failed to read field offset vector: %v", err)
-		// }
 		// FIXME: what the hell are field offset vectors?
 	}
 
