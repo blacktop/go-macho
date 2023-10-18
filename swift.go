@@ -370,8 +370,9 @@ func (f *File) readProtocolConformance(addr uint64) (pcd *swift.ConformanceDescr
 	if pcd.Flags.GetNumConditionalRequirements() > 0 {
 		pcd.ConditionalRequirements = make([]swift.TargetGenericRequirement, pcd.Flags.GetNumConditionalRequirements())
 		for i := 0; i < pcd.Flags.GetNumConditionalRequirements(); i++ {
-			if err := binary.Read(f.cr, f.ByteOrder, &pcd.ConditionalRequirements[i]); err != nil {
-				return nil, fmt.Errorf("failed to read conditional requirements: %v", err)
+			curr, _ = f.cr.Seek(0, io.SeekCurrent)
+			if err := pcd.ConditionalRequirements[i].Read(f.cr, pcd.Address+uint64(curr-off)); err != nil {
+				return nil, fmt.Errorf("failed to read conditional requirement: %v", err)
 			}
 		}
 	}
@@ -1111,6 +1112,8 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 		if err := binary.Read(r, f.ByteOrder, &class.GenericContext.Parameters); err != nil {
 			return fmt.Errorf("failed to read generic params: %v", err)
 		}
+		curr, _ = r.Seek(0, io.SeekCurrent)
+		r.Seek(int64(Align(uint64(curr), 4)), io.SeekStart)
 		class.GenericContext.Requirements = make([]swift.TargetGenericRequirementDescriptor, class.GenericContext.Base.NumRequirements)
 		for i := 0; i < int(class.GenericContext.Base.NumRequirements); i++ {
 			curr, _ = r.Seek(0, io.SeekCurrent)
@@ -1127,14 +1130,10 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 
 	if class.Flags.KindSpecific().HasResilientSuperclass() {
 		curr, _ := r.Seek(0, io.SeekCurrent)
-		var resilient swift.TargetResilientSuperclass
-		if err := resilient.Read(r, typ.Address+uint64(curr-off)); err != nil {
+		class.ResilientSuperclass = &swift.ResilientSuperclass{}
+		if err := class.ResilientSuperclass.TargetResilientSuperclass.Read(r, typ.Address+uint64(curr-off)); err != nil {
 			return fmt.Errorf("failed to read resilient superclass: %v", err)
 		}
-		// class.ResilientSuperclass, err = f.makeSymbolicMangledNameStringRef(resilient.Superclass.GetAddress())
-		// if err != nil {
-		// 	return fmt.Errorf("failed to read swift class resilient superclass mangled name: %v", err)
-		// }
 	}
 
 	if class.Flags.KindSpecific().MetadataInitialization() == swift.MetadataInitForeign {
@@ -1223,6 +1222,7 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 		extra := swift.ExtraClassDescriptorFlags(class.MetadataPositiveSizeInWordsORExtraClassFlags)
 		if extra == swift.HasObjCResilientClassStub {
 			curr, _ := r.Seek(0, io.SeekCurrent)
+			class.ObjCResilientClassStubInfo = &swift.TargetObjCResilientClassStubInfo{}
 			if err := class.ObjCResilientClassStubInfo.Read(r, typ.Address+uint64(curr-off)); err != nil {
 				return fmt.Errorf("failed to read objc resilient class stub: %v", err)
 			}
@@ -1261,6 +1261,18 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 			class.FieldOffsetVectorOffset += class.MetadataNegativeSizeInWordsORResilientMetadataBounds
 		}
 		// FIXME: what the hell are field offset vectors?
+	}
+
+	if class.ResilientSuperclass != nil {
+		addr, err := class.ResilientSuperclass.Superclass.GetAddress(f.cr)
+		if err != nil {
+			return fmt.Errorf("failed to read superclass address: %v", err)
+		}
+		_ = addr // TODO: use this
+		// class.ResilientSuperclass.Name, err = f.??(addr)
+		// if err != nil {
+		// 	return fmt.Errorf("failed to read swift class resilient superclass mangled name: %v", err)
+		// }
 	}
 
 	if class.SuperclassType.IsSet() {
@@ -1313,6 +1325,8 @@ func (f *File) parseStructDescriptor(r io.ReadSeeker, typ *swift.Type) (err erro
 		if err := binary.Read(r, f.ByteOrder, &st.GenericContext.Parameters); err != nil {
 			return fmt.Errorf("failed to read generic params: %v", err)
 		}
+		curr, _ = r.Seek(0, io.SeekCurrent)
+		r.Seek(int64(Align(uint64(curr), 4)), io.SeekStart)
 		st.GenericContext.Requirements = make([]swift.TargetGenericRequirementDescriptor, st.GenericContext.Base.NumRequirements)
 		for i := 0; i < int(st.GenericContext.Base.NumRequirements); i++ {
 			curr, _ = r.Seek(0, io.SeekCurrent)
@@ -1414,6 +1428,8 @@ func (f *File) parseEnumDescriptor(r io.ReadSeeker, typ *swift.Type) (err error)
 		if err := binary.Read(r, f.ByteOrder, &enum.GenericContext.Parameters); err != nil {
 			return fmt.Errorf("failed to read generic params: %v", err)
 		}
+		curr, _ = r.Seek(0, io.SeekCurrent)
+		r.Seek(int64(Align(uint64(curr), 4)), io.SeekStart)
 		enum.GenericContext.Requirements = make([]swift.TargetGenericRequirementDescriptor, enum.GenericContext.Base.NumRequirements)
 		for i := 0; i < int(enum.GenericContext.Base.NumRequirements); i++ {
 			curr, _ = r.Seek(0, io.SeekCurrent)
@@ -1504,6 +1520,10 @@ func (f *File) parseEnumDescriptor(r io.ReadSeeker, typ *swift.Type) (err error)
 /**********
 * HELPERS *
 ***********/
+
+func Align(addr uint64, align uint64) uint64 {
+	return (addr + align - 1) &^ (align - 1)
+}
 
 func (f *File) getAssociatedTypes(addr uint64) ([]string, error) {
 	var out []string
@@ -1792,8 +1812,32 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				// UniqueExtendedExistentialTypeShape
 				panic("not implemented")
 			case 0x0b: // DIRECT symbolic reference to a non-unique extended existential type shape.
-				// NonUniqueExtendedExistentialTypeShape
-				panic("not implemented")
+				// NonUniqueExtendedExistentialTypeShape // FIXME: this is NOT a TargetNonUniqueExtendedExistentialTypeShape
+				var name string
+				if err := f.cr.SeekToAddr(part.Addr); err != nil {
+					return "", fmt.Errorf("failed to seek to swift context descriptor: %v", err)
+				}
+				var desc swift.TargetModuleContextDescriptor
+				if err := desc.Read(f.cr, part.Addr); err != nil {
+					return "", fmt.Errorf("failed to read swift context descriptor: %v", err)
+				}
+				name, err = f.GetCString(desc.NameOffset.GetAddress())
+				if err != nil {
+					return "", fmt.Errorf("failed to read swift context descriptor descriptor name: %v", err)
+				}
+				// if desc.ParentOffset.IsSet() {
+				// 	parent, err := f.getContextDesc(desc.ParentOffset.GetAddress())
+				// 	if err != nil {
+				// 		return "", fmt.Errorf("failed to read swift context descriptor parent: %v", err)
+				// 	}
+				// 	if len(parent.Name) > 0 {
+				// 		name = parent.Name + "." + name
+				// 	}
+				// }
+				if symbolic {
+					name += "()"
+				}
+				out = append(out, name)
 			case 0x0c: // DIRECT symbolic reference to a objective C protocol ref.
 				// ObjectiveCProtocol
 				panic("not implemented")

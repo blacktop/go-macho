@@ -13,7 +13,7 @@ type Class struct {
 	ForeignMetadata            *TargetForeignMetadataInitialization
 	SingletonMetadata          *TargetSingletonMetadataInitialization
 	VTable                     *VTable
-	ResilientSuperclass        string
+	ResilientSuperclass        *ResilientSuperclass
 	MethodOverrides            []TargetMethodOverrideDescriptor
 	ObjCResilientClassStubInfo *TargetObjCResilientClassStubInfo
 	Metadatas                  []Metadata
@@ -103,6 +103,11 @@ const (
 
 func (f ExtraClassDescriptorFlags) HasObjCResilientClassStub() bool {
 	return f == HasObjCResilientClassStub
+}
+
+type ResilientSuperclass struct {
+	TargetResilientSuperclass
+	Name string
 }
 
 type TargetResilientSuperclass struct {

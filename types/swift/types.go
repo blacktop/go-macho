@@ -591,17 +591,14 @@ const (
 	GPKMax      = 0x3F
 )
 
-type GenericParamDescriptor struct {
-	// Don't set 0x40 for compatibility with pre-Swift 5.8 runtimes
-	Value uint8
-	_     [3]uint8 // alignment padding
-}
+// Don't set 0x40 for compatibility with pre-Swift 5.8 runtimes (4 byte align)
+type GenericParamDescriptor uint8
 
 func (g GenericParamDescriptor) HasKeyArgument() bool {
-	return (g.Value & 0x80) != 0
+	return (g & 0x80) != 0
 }
 func (g GenericParamDescriptor) GetKind() GenericParamKind {
-	return GenericParamKind(g.Value & 0x3F)
+	return GenericParamKind(g & 0x3F)
 }
 
 type GenericEnvironmentFlags uint32
@@ -615,4 +612,16 @@ func (f GenericEnvironmentFlags) GetNumGenericRequirements() uint32 {
 
 type TargetGenericEnvironment struct {
 	Flags GenericEnvironmentFlags
+}
+
+// A descriptor for an extended existential type descriptor which
+// needs to be uniqued at runtime.
+//
+// Uniquing is perf
+type TargetNonUniqueExtendedExistentialTypeShape struct {
+	// A reference to memory that can be used to cache a globally-unique
+	// descriptor for this existential shape.
+	UniqueCache int32 // TargetExtendedExistentialTypeShape
+	// The local copy of the existential shape descriptor.
+	LocalCopy int32
 }
