@@ -1047,7 +1047,7 @@ func (f *File) parseExtension(r io.Reader, typ *swift.Type) (err error) {
 			return fmt.Errorf("failed to get parent: %v", err)
 		}
 	}
-	typ.Name, err = f.getCString(desc.ExtendedContext.GetAddress())
+	typ.Name, err = f.GetCString(desc.ExtendedContext.GetAddress())
 	if err != nil {
 		return fmt.Errorf("failed to read extended context: %v", err)
 	}
@@ -1504,7 +1504,7 @@ func (f *File) parseEnumDescriptor(r io.ReadSeeker, typ *swift.Type) (err error)
 		}
 	}
 
-	typ.Name, err = f.getCString(enum.NameOffset.GetAddress())
+	typ.Name, err = f.GetCString(enum.NameOffset.GetAddress())
 	if err != nil {
 		return fmt.Errorf("failed to read cstring: %v", err)
 	}
@@ -1526,17 +1526,6 @@ func (f *File) parseEnumDescriptor(r io.ReadSeeker, typ *swift.Type) (err error)
 /**********
 * HELPERS *
 ***********/
-
-func (f *File) getCString(addr uint64) (string, error) {
-	name, err := f.GetCString(addr)
-	if err != nil {
-		return "", fmt.Errorf("failed to read cstring: %v", err)
-	}
-	if strings.HasPrefix(name, "So8") {
-		name = "_$s" + name
-	}
-	return name, nil
-}
 
 func (f *File) getAssociatedTypes(addr uint64) ([]string, error) {
 	var out []string
@@ -1582,7 +1571,7 @@ func (f *File) getNameStringRef(addr uint64) (string, error) {
 			}
 		}
 	}
-	return f.getCString(f.vma.Convert(ptr))
+	return f.GetCString(f.vma.Convert(ptr))
 }
 
 func (f *File) getContextDesc(addr uint64) (*swift.TargetModuleContext, error) {
@@ -1613,7 +1602,7 @@ func (f *File) getContextDesc(addr uint64) (*swift.TargetModuleContext, error) {
 	}
 
 	if tmc.Flags.Kind() != swift.CDKindAnonymous {
-		tmc.Name, err = f.getCString(tmc.NameOffset.GetAddress())
+		tmc.Name, err = f.GetCString(tmc.NameOffset.GetAddress())
 		if err != nil {
 			return nil, fmt.Errorf("failed to read swift module context name: %w", err)
 		}
@@ -1729,6 +1718,7 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 						out = append(out, "_$s"+part)
 					}
 				} else if regexp.MustCompile("^[0-9]+").MatchString(part) {
+					// remove leading numbers
 					for i, c := range part {
 						if !unicode.IsNumber(c) {
 							out = append(out, part[i:])
