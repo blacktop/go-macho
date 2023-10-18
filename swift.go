@@ -1275,7 +1275,6 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 	}
 
 	if class.FieldOffsetVectorOffset != 0 {
-		fmt.Println(class.Flags.String())
 		if class.Flags.KindSpecific().HasResilientSuperclass() {
 			class.FieldOffsetVectorOffset += class.MetadataNegativeSizeInWordsORResilientMetadataBounds
 		}
