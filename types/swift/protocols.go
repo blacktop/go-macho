@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-//go:generate stringer -type GenericRequirementKind,ProtocolRequirementKind -linecomment -output protocols_string.go
+//go:generate stringer -type GenericRequirementKind,ProtocolRequirementKind,GenericPackKind -linecomment -output protocols_string.go
 
 // ConformanceDescriptor in __TEXT.__swift5_proto
 // This section contains an array of 32-bit signed integers.
@@ -55,13 +55,17 @@ func (p Protocol) dump(verbose bool) string {
 	if verbose {
 		addr = fmt.Sprintf("// %#x\n", p.Address)
 	}
+	var parent string
+	if p.Parent != nil && len(p.Parent.Name) > 0 {
+		parent = p.Parent.Name + "."
+	}
 	if len(p.AssociatedTypes) > 0 {
 		atyps = ": " + strings.Join(p.AssociatedTypes, ", ")
 	}
 	return fmt.Sprintf(
-		"%sprotocol %s.%s%s {\n%s}",
+		"%sprotocol %s%s%s {\n%s}",
 		addr,
-		p.Parent.Name,
+		parent,
 		p.Name,
 		atyps,
 		reqs,
@@ -196,8 +200,8 @@ type GenericPackShapeHeader struct {
 type GenericPackKind uint16
 
 const (
-	GPKMetadata     GenericPackKind = 0
-	GPKWitnessTable GenericPackKind = 1
+	GPKMetadata     GenericPackKind = 0 // metadata
+	GPKWitnessTable GenericPackKind = 1 // witness-table
 )
 
 // GenericPackShapeDescriptor the GenericPackShapeHeader is followed by an array of these descriptors,
@@ -318,11 +322,11 @@ type ConformanceDescriptor struct {
 	Address                 uint64
 	Protocol                string
 	TypeRef                 *Type
-	Retroactive             *TargetModuleContext // context of a retroactive conformance
+	Retroactive             *RelativeString // context of a retroactive conformance
 	ConditionalRequirements []TargetGenericRequirement
 	ConditionalPackShapes   []GenericPackShapeDescriptor
 	ResilientWitnesses      []ResilientWitnesses
-	GenericWitnessTable     TargetGenericWitnessTable
+	GenericWitnessTable     *TargetGenericWitnessTable
 	WitnessTablePattern     *PCDWitnessTable
 }
 
@@ -349,7 +353,7 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 	if len(c.ConditionalPackShapes) > 0 {
 		packShapes = "\n  /* conditional pack shapes */\n"
 		for _, shape := range c.ConditionalPackShapes {
-			packShapes += fmt.Sprintf("    %s: %s\n", shape.Kind, shape.ShapeClass)
+			packShapes += fmt.Sprintf("    %s: %d\n", shape.Kind, shape.ShapeClass)
 		}
 	}
 	var resilientWitnesses string
@@ -394,7 +398,7 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 		}
 	}
 	var parent string
-	if len(c.TypeRef.Parent.Name) > 0 {
+	if c.TypeRef.Parent != nil && len(c.TypeRef.Parent.Name) > 0 {
 		parent = c.TypeRef.Parent.Name + "."
 	}
 	return fmt.Sprintf(
@@ -423,7 +427,7 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 // TargetProtocolConformanceDescriptor the structure of a protocol conformance.
 type TargetProtocolConformanceDescriptor struct {
 	ProtocolOffsest            RelativeIndirectablePointer // The protocol being conformed to.
-	TypeRefOffsest             RelativeDirectPointer       // Some description of the type that conforms to the protocol.
+	TypeRefOffsest             RelativeIndirectablePointer // Some description of the type that conforms to the protocol.
 	WitnessTablePatternOffsest RelativeDirectPointer       // The witness table pattern, which may also serve as the witness table.
 	Flags                      ConformanceFlags            // Various flags, including the kind of conformance.
 }

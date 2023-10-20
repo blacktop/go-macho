@@ -10,7 +10,7 @@ import (
 	"github.com/blacktop/go-macho/types"
 )
 
-//go:generate stringer -type ContextDescriptorKind,TypeReferenceKind,MetadataInitializationKind -linecomment -output types_string.go
+//go:generate stringer -type ContextDescriptorKind,TypeReferenceKind,MetadataInitializationKind,SpecialKind -linecomment -output types_string.go
 
 // __TEXT.__swift5_types
 // This section contains an array of 32-bit signed integers.
@@ -18,14 +18,13 @@ import (
 
 type Type struct {
 	Address        uint64
-	Parent         *TargetModuleContext
+	Parent         *Type
 	Name           string
-	SuperClass     string
 	Kind           ContextDescriptorKind
 	AccessFunction uint64
-	FieldOffsets   []int32
 	Fields         []Field
 	Type           any
+	Size           int64
 }
 
 func (t Type) IsCImportedModuleName() bool {
@@ -53,7 +52,11 @@ func (t Type) dump(verbose bool) string {
 		if verbose {
 			addr = fmt.Sprintf("// %#x\n", t.Address)
 		}
-		return fmt.Sprintf("%s%s %s.%s", addr, t.Kind, t.Parent.Name, t.Name)
+		var parent string
+		if t.Parent != nil && t.Parent.Name != "" {
+			parent = fmt.Sprintf("%s.", t.Parent.Name)
+		}
+		return fmt.Sprintf("%s%s %s%s", addr, t.Kind, parent, t.Name)
 	case CDKindAnonymous:
 		if verbose {
 			addr = fmt.Sprintf("// %#x\n", t.Address)
@@ -88,17 +91,17 @@ func (t Type) dump(verbose bool) string {
 			}
 		}
 		var meths []string
-		if t.Type.(*Class).VTable != nil {
-			for _, m := range t.Type.(*Class).VTable.Methods {
+		if t.Type.(Class).VTable != nil {
+			for _, m := range t.Type.(Class).VTable.Methods {
 				var static string
 				if !m.Flags.IsInstance() {
 					static = "static "
 				}
 				sym := m.Symbol
-				if m.Symbol == "" && m.Impl == 0 {
+				if m.Symbol == "" && !m.Impl.IsSet() {
 					sym = fmt.Sprintf("/* <stripped> %s */", m.Flags.String(""))
-				} else if m.Symbol == "" && m.Impl != 0 {
-					sym = fmt.Sprintf("%sfunc sub_%x // %s", static, m.Address, m.Flags.String(""))
+				} else if m.Symbol == "" && m.Impl.IsSet() {
+					sym = fmt.Sprintf("%sfunc sub_%x // %s", static, m.Impl.GetAddress(), m.Flags.String(""))
 				} else {
 					sym = fmt.Sprintf("%sfunc %s // %s", static, sym, m.Flags.String(""))
 				}
@@ -108,11 +111,15 @@ func (t Type) dump(verbose bool) string {
 				meths = append(meths, fmt.Sprintf("    %s%s", addr, sym))
 			}
 		}
+		var parent string
+		if t.Parent != nil && t.Parent.Name != "" {
+			parent = fmt.Sprintf("%s.", t.Parent.Name)
+		}
 		if len(fields) == 0 && len(meths) == 0 {
 			if verbose {
 				addr = fmt.Sprintf(" // %#x", t.Address)
 			}
-			return fmt.Sprintf("%s %s.%s {}%s\n", t.Kind, t.Parent.Name, t.Name, addr)
+			return fmt.Sprintf("%s %s%s {}%s\n", t.Kind, parent, t.Name, addr)
 		}
 		if len(fields) > 0 {
 			fields = append([]string{"  /* fields */"}, fields...)
@@ -125,13 +132,14 @@ func (t Type) dump(verbose bool) string {
 			}
 		}
 		var superClass string
-		if t.SuperClass != "" {
-			superClass = fmt.Sprintf(": %s", t.SuperClass)
+		if t.Type.(Class).SuperClass != "" {
+			superClass = fmt.Sprintf(": %s", t.Type.(Class).SuperClass)
 		}
 		if verbose {
 			addr = fmt.Sprintf("// %#x\n", t.Address)
 		}
-		return fmt.Sprintf("%s%s %s.%s%s {\n%s%s\n}", addr, t.Kind, t.Parent.Name, t.Name, superClass, strings.Join(fields, "\n"), strings.Join(meths, "\n"))
+
+		return fmt.Sprintf("%s%s %s%s%s {\n%s%s\n}", addr, t.Kind, parent, t.Name, superClass, strings.Join(fields, "\n"), strings.Join(meths, "\n"))
 	case CDKindStruct:
 		var fields []string
 		for _, f := range t.Fields {
@@ -153,10 +161,14 @@ func (t Type) dump(verbose bool) string {
 		if verbose {
 			addr = fmt.Sprintf("// %#x\n", t.Address)
 		}
-		if len(fields) == 0 {
-			return fmt.Sprintf("%s%s %s.%s {}", addr, t.Kind, t.Parent.Name, t.Name)
+		var parent string
+		if t.Parent != nil && t.Parent.Name != "" {
+			parent = fmt.Sprintf("%s.", t.Parent.Name)
 		}
-		return fmt.Sprintf("%s%s %s.%s {\n%s\n}", addr, t.Kind, t.Parent.Name, t.Name, strings.Join(fields, "\n"))
+		if len(fields) == 0 {
+			return fmt.Sprintf("%s%s %s%s {}", addr, t.Kind, parent, t.Name)
+		}
+		return fmt.Sprintf("%s%s %s%s {\n%s\n}", addr, t.Kind, parent, t.Name, strings.Join(fields, "\n"))
 	case CDKindEnum:
 		var fields []string
 		for _, f := range t.Fields {
@@ -178,10 +190,14 @@ func (t Type) dump(verbose bool) string {
 		if verbose {
 			addr = fmt.Sprintf("// %#x\n", t.Address)
 		}
-		if len(fields) == 0 {
-			return fmt.Sprintf("%s%s %s.%s {}", addr, t.Kind, t.Parent.Name, t.Name)
+		var parent string
+		if t.Parent != nil && t.Parent.Name != "" {
+			parent = fmt.Sprintf("%s.", t.Parent.Name)
 		}
-		return fmt.Sprintf("%s%s %s.%s {\n%s\n}", addr, t.Kind, t.Parent.Name, t.Name, strings.Join(fields, "\n"))
+		if len(fields) == 0 {
+			return fmt.Sprintf("%s%s %s%s {}", addr, t.Kind, parent, t.Name)
+		}
+		return fmt.Sprintf("%s%s %s%s {\n%s\n}", addr, t.Kind, parent, t.Name, strings.Join(fields, "\n"))
 	default:
 		return fmt.Sprintf("unknown type %s", t.Name)
 	}
@@ -468,15 +484,47 @@ func (tcd *TargetTypeContextDescriptor) Read(r io.Reader, addr uint64) error {
 	return nil
 }
 
-type TargetAnonymousContextDescriptor struct {
-	TargetContextDescriptor
+type TargetMangledContextName struct {
+	Name TargetRelativeDirectPointer
 }
 
+func (m TargetMangledContextName) Size() int64 {
+	return int64(binary.Size(m.Name.RelOff))
+}
+func (m *TargetMangledContextName) Read(r io.Reader, addr uint64) error {
+	m.Name.Address = addr
+	if err := binary.Read(r, binary.LittleEndian, &m.Name.RelOff); err != nil {
+		return err
+	}
+	return nil
+}
+
+type OpaqueType struct {
+	TargetOpaqueTypeDescriptor
+	GenericContext *GenericContext
+	TypeArgs       []RelativeDirectPointer
+}
+
+// TargetOpaqueTypeDescriptor the descriptor for an opaque type.
 type TargetOpaqueTypeDescriptor struct {
 	TargetContextDescriptor
 }
 
+func (otd TargetOpaqueTypeDescriptor) Size() int64 {
+	return otd.TargetContextDescriptor.Size()
+}
+
+func (otd *TargetOpaqueTypeDescriptor) Read(r io.Reader, addr uint64) error {
+	return otd.TargetContextDescriptor.Read(r, addr)
+}
+
 type GenericContext struct {
+	TargetGenericContextDescriptorHeader
+	Parameters   []GenericParamDescriptor
+	Requirements []TargetGenericRequirementDescriptor
+}
+
+type TypeGenericContext struct {
 	TargetTypeGenericContextDescriptorHeader
 	Parameters   []GenericParamDescriptor
 	Requirements []TargetGenericRequirementDescriptor
@@ -614,14 +662,207 @@ type TargetGenericEnvironment struct {
 	Flags GenericEnvironmentFlags
 }
 
-// A descriptor for an extended existential type descriptor which
+// TargetNonUniqueExtendedExistentialTypeShape a descriptor for an extended existential type descriptor which
 // needs to be uniqued at runtime.
-//
-// Uniquing is perf
 type TargetNonUniqueExtendedExistentialTypeShape struct {
 	// A reference to memory that can be used to cache a globally-unique
 	// descriptor for this existential shape.
-	UniqueCache int32 // TargetExtendedExistentialTypeShape
+	UniqueCache RelativeDirectPointer // TargetExtendedExistentialTypeShape
 	// The local copy of the existential shape descriptor.
-	LocalCopy int32
+	LocalCopy TargetExtendedExistentialTypeShape // TargetExtendedExistentialTypeShape
+}
+
+func (t TargetNonUniqueExtendedExistentialTypeShape) Size() int64 {
+	return int64(binary.Size(t.UniqueCache.RelOff)) + int64(binary.Size(t.LocalCopy))
+}
+
+func (t *TargetNonUniqueExtendedExistentialTypeShape) Read(r io.Reader, addr uint64) error {
+	t.UniqueCache.Address = addr
+	if err := binary.Read(r, binary.LittleEndian, &t.UniqueCache.RelOff); err != nil {
+		return err
+	}
+	if err := t.LocalCopy.Read(r, addr+uint64(binary.Size(t.UniqueCache.RelOff))); err != nil {
+		return err
+	}
+	return nil
+}
+
+type SpecialKind uint32
+
+const (
+	SKNone SpecialKind = 0 // none
+	// The existential has a class constraint.
+	// The inline storage is sizeof(void*) / alignof(void*),
+	// the value is always stored inline, the value is reference-
+	// counted (using unknown reference counting), and the
+	// type metadata for the requirement generic parameters are
+	// not stored in the existential container because they can
+	// be recovered from the instance type of the class.
+	SKClass SpecialKind = 1 // class
+	// The existential has a metatype constraint.
+	// The inline storage is sizeof(void*) / alignof(void*),
+	// the value is always stored inline, the value is a Metadata*,
+	// and the type metadata for the requirement generic parameters
+	// are not stored in the existential container because they can
+	// be recovered from the stored metatype.
+	SKMetatype SpecialKind = 2 // metatype
+	// The inline value storage has a non-storage layout.  The shape
+	// must include a value witness table.  Type metadata for the
+	// requirement generic parameters are still stored in the existential
+	// container.
+	SKExplicitLayout SpecialKind = 3 // explicit layout
+	// 255 is the maximum
+)
+
+type ExtendedExistentialTypeShapeFlags uint32
+
+const (
+	SpecialKindMask            = 0x000000FF
+	SpecialKindShift           = 0
+	HasGeneralizationSignature = 0x00000100
+	HasTypeExpression          = 0x00000200
+	HasSuggestedValueWitnesses = 0x00000400
+	HasImplicitReqSigParams    = 0x00000800
+	HasImplicitGenSigParams    = 0x00001000
+	HasTypePacks               = 0x00002000
+)
+
+func (f ExtendedExistentialTypeShapeFlags) GetSpecialKind() SpecialKind {
+	return SpecialKind((f & SpecialKindMask) >> SpecialKindShift)
+}
+func (f ExtendedExistentialTypeShapeFlags) IsOpaque() bool {
+	return f.GetSpecialKind() == SKNone
+}
+func (f ExtendedExistentialTypeShapeFlags) IsClassConstrained() bool {
+	return f.GetSpecialKind() == SKClass
+}
+func (f ExtendedExistentialTypeShapeFlags) IsMetatypeConstrained() bool {
+	return f.GetSpecialKind() == SKMetatype
+}
+func (f ExtendedExistentialTypeShapeFlags) HasGeneralizationSignature() bool {
+	return (f & HasGeneralizationSignature) != 0
+}
+func (f ExtendedExistentialTypeShapeFlags) HasTypeExpression() bool {
+	return (f & HasTypeExpression) != 0
+}
+func (f ExtendedExistentialTypeShapeFlags) HasSuggestedValueWitnesses() bool {
+	return (f & HasSuggestedValueWitnesses) != 0
+}
+
+// The parameters of the requirement signature are not stored
+// explicitly in the shape.
+//
+// In order to enable this, there must be no more than
+// MaxNumImplicitGenericParamDescriptors generic parameters, and
+// they must match GenericParamDescriptor::implicit().
+func (f ExtendedExistentialTypeShapeFlags) HasImplicitReqSigParams() bool {
+	return (f & HasImplicitReqSigParams) != 0
+}
+
+// The parameters of the generalization signature are not stored
+// explicitly in the shape.
+//
+// In order to enable this, there must be no more than
+// MaxNumImplicitGenericParamDescriptors generic parameters, and
+// they must match GenericParamDescriptor::implicit().
+func (f ExtendedExistentialTypeShapeFlags) HasImplicitGenSigParams() bool {
+	return (f & HasImplicitGenSigParams) != 0
+}
+
+// Whether the generic context has type parameter packs. This
+// occurs when the existential has a superclass requirement
+// whose class declaration has a type parameter pack, eg
+// `any P & C<...>` with `class C<each T> {}`.
+func (f ExtendedExistentialTypeShapeFlags) HasTypePacks() bool {
+	return (f & HasTypePacks) != 0
+}
+func (f ExtendedExistentialTypeShapeFlags) String() string {
+	var out []string
+	out = append(out, fmt.Sprintf("kind:%s", f.GetSpecialKind()))
+	if f.IsOpaque() {
+		out = append(out, "opaque")
+	}
+	if f.IsClassConstrained() {
+		out = append(out, "class_constrained")
+	}
+	if f.IsMetatypeConstrained() {
+		out = append(out, "metatype_constrained")
+	}
+	if f.HasGeneralizationSignature() {
+		out = append(out, "has_generalization_signature")
+	}
+	if f.HasTypeExpression() {
+		out = append(out, "has_type_expression")
+	}
+	if f.HasSuggestedValueWitnesses() {
+		out = append(out, "has_suggested_value_witnesses")
+	}
+	if f.HasImplicitReqSigParams() {
+		out = append(out, "has_implicit_req_sig_params")
+	}
+	if f.HasImplicitGenSigParams() {
+		out = append(out, "has_implicit_gen_sig_params")
+	}
+	if f.HasTypePacks() {
+		out = append(out, "has_type_packs")
+	}
+	return strings.Join(out, "|")
+}
+
+// TargetExtendedExistentialTypeShape a description of the shape of an existential type.
+type TargetExtendedExistentialTypeShape struct {
+	// Flags for the existential shape.
+	Flags ExtendedExistentialTypeShapeFlags
+	// The mangling of the generalized existential type, expressed
+	// (if necessary) in terms of the type parameters of the
+	// generalization signature.
+	//
+	// If this shape is non-unique, this is always a flat string, not a
+	// "symbolic" mangling which can contain relative references.  This
+	// allows uniquing to simply compare the string content.
+	//
+	// In principle, the content of the requirement signature and type
+	// expression are derivable from this type.  We store them separately
+	// so that code which only needs to work with the logical content of
+	// the type doesn't have to break down the existential type string.
+	// This both (1) allows those operations to work substantially more
+	// efficiently (and without needing code to produce a requirement
+	// signature from an existential type to exist in the runtime) and
+	// (2) potentially allows old runtimes to support new existential
+	// types without as much invasive code.
+	//
+	// The content of this string is *not* necessarily derivable from
+	// the requirement signature.  This is because there may be multiple
+	// existential types that have equivalent logical content but which
+	// we nonetheless distinguish at compile time.  Storing this also
+	// allows us to far more easily produce a formal type from this
+	// shape reflectively.
+	ExistentialType RelativeDirectPointer
+	// The header describing the requirement signature of the existential.
+	ReqSigHeader RelativeDirectPointer // TargetGenericContextDescriptorHeader
+}
+
+func (t TargetExtendedExistentialTypeShape) String() string {
+	return fmt.Sprintf("flags:%s, existential_type:%#x, req_sig_header:%#x", t.Flags, t.ExistentialType.GetAddress(), t.ReqSigHeader.GetAddress())
+}
+
+func (t TargetExtendedExistentialTypeShape) Size() int64 {
+	return int64(binary.Size(t.Flags)) +
+		int64(binary.Size(t.ExistentialType.RelOff)) +
+		int64(binary.Size(t.ReqSigHeader.RelOff))
+}
+
+func (t *TargetExtendedExistentialTypeShape) Read(r io.Reader, addr uint64) error {
+	t.ExistentialType.Address = addr + uint64(binary.Size(t.Flags))
+	t.ReqSigHeader.Address = addr + uint64(binary.Size(t.Flags)) + uint64(binary.Size(t.ExistentialType.RelOff))
+	if err := binary.Read(r, binary.LittleEndian, &t.Flags); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &t.ExistentialType.RelOff); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &t.ReqSigHeader.RelOff); err != nil {
+		return err
+	}
+	return nil
 }

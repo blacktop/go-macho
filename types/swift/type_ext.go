@@ -5,6 +5,11 @@ import (
 	"io"
 )
 
+type Extension struct {
+	TargetExtensionContextDescriptor
+	GenericContext *GenericContext
+}
+
 type TargetExtensionContextDescriptor struct {
 	TargetContextDescriptor
 	// A mangling of the `Self` type context that the extension extends.

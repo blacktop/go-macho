@@ -7,7 +7,8 @@ import (
 
 type TargetModuleContext struct {
 	TargetModuleContextDescriptor
-	Name string
+	Name   string
+	Parent string
 }
 
 type TargetModuleContextDescriptor struct {

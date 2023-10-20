@@ -7,7 +7,7 @@ import (
 
 type Struct struct {
 	TargetStructDescriptor
-	GenericContext    *GenericContext
+	GenericContext    *TypeGenericContext
 	ForeignMetadata   *TargetForeignMetadataInitialization
 	SingletonMetadata *TargetSingletonMetadataInitialization
 	Metadatas         []Metadata

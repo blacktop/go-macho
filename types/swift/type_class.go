@@ -9,7 +9,8 @@ import (
 
 type Class struct {
 	TargetClassDescriptor
-	GenericContext             *GenericContext
+	SuperClass                 string
+	GenericContext             *TypeGenericContext
 	ForeignMetadata            *TargetForeignMetadataInitialization
 	SingletonMetadata          *TargetSingletonMetadataInitialization
 	VTable                     *VTable
@@ -131,8 +132,7 @@ func (t *TargetResilientSuperclass) Read(r io.Reader, addr uint64) error {
 
 type VTable struct {
 	TargetVTableDescriptorHeader
-	MethodListAddr int64
-	Methods        []Method
+	Methods []Method
 }
 
 type TargetVTableDescriptorHeader struct {
@@ -148,7 +148,22 @@ type Method struct {
 
 type TargetMethodDescriptor struct {
 	Flags MethodDescriptorFlags
-	Impl  int32
+	Impl  RelativeDirectPointer
+}
+
+func (md TargetMethodDescriptor) Size() int64 {
+	return int64(binary.Size(md.Flags) + binary.Size(md.Impl.RelOff))
+}
+
+func (md *TargetMethodDescriptor) Read(r io.Reader, addr uint64) error {
+	md.Impl.Address = addr + uint64(binary.Size(md.Flags))
+	if err := binary.Read(r, binary.LittleEndian, &md.Flags); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &md.Impl.RelOff); err != nil {
+		return err
+	}
+	return nil
 }
 
 type MDKind uint8
@@ -248,6 +263,10 @@ type TargetMethodOverrideDescriptor struct {
 	Method RelativeDirectPointer
 	// The implementation of the override.
 	Impl RelativeDirectPointer // UNION
+}
+
+func (mod TargetMethodOverrideDescriptor) String() string {
+	return fmt.Sprintf("class %#x method %#x impl %#x", mod.Class.GetAddress(), mod.Method.GetAddress(), mod.Impl.GetAddress())
 }
 
 func (mod TargetMethodOverrideDescriptor) Size() int64 {

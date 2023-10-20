@@ -2,12 +2,13 @@ package swift
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 )
 
 type Enum struct {
 	TargetEnumDescriptor
-	GenericContext    *GenericContext
+	GenericContext    *TypeGenericContext
 	ForeignMetadata   *TargetForeignMetadataInitialization
 	SingletonMetadata *TargetSingletonMetadataInitialization
 	Metadatas         []Metadata
@@ -48,4 +49,11 @@ func (e TargetEnumDescriptor) GetNumCases() uint32 {
 }
 func (e TargetEnumDescriptor) GetPayloadSizeOffset() uint32 {
 	return (e.NumPayloadCasesAndPayloadSizeOffset & 0xFF000000) >> 24
+}
+func (e TargetEnumDescriptor) String() string {
+	return fmt.Sprintf("num_payload_cases %d, num_cases %d, num_empty_cases %d, payload_size_offset %d",
+		e.GetNumPayloadCases(),
+		e.GetNumCases(),
+		e.NumEmptyCases,
+		e.GetPayloadSizeOffset())
 }
