@@ -376,9 +376,7 @@ func (f *File) GetSwiftProtocolConformances() (protoConfDescs []swift.Conformanc
 }
 
 // GetSwiftClosures parses all the closure context objects in the __TEXT.__swift5_capture section
-func (f *File) GetSwiftClosures() ([]swift.Capture, error) {
-	var closures []swift.Capture
-
+func (f *File) GetSwiftClosures() (closures []swift.Capture, err error) {
 	if sec := f.Section("__TEXT", "__swift5_capture"); sec != nil {
 		f.cr.SeekToAddr(sec.Addr)
 
@@ -390,10 +388,9 @@ func (f *File) GetSwiftClosures() ([]swift.Capture, error) {
 		r := bytes.NewReader(dat)
 
 		for {
-			currOffset, _ := r.Seek(0, io.SeekCurrent)
-			currAddr := sec.Addr + uint64(currOffset)
+			off, _ := r.Seek(0, io.SeekCurrent)
 
-			capture := swift.Capture{Address: currAddr}
+			capture := swift.Capture{Address: sec.Addr + uint64(off)}
 
 			if err := binary.Read(r, f.ByteOrder, &capture.CaptureDescriptor); err != nil {
 				if errors.Is(err, io.EOF) {
@@ -403,47 +400,48 @@ func (f *File) GetSwiftClosures() ([]swift.Capture, error) {
 			}
 
 			if capture.NumCaptureTypes > 0 {
-				numCapsAddr := uint64(int64(currAddr) + int64(binary.Size(capture.CaptureDescriptor)))
-				captureTypeRecords := make([]swift.CaptureTypeRecord, capture.NumCaptureTypes)
-				if err := binary.Read(r, f.ByteOrder, &captureTypeRecords); err != nil {
-					return nil, fmt.Errorf("failed to read %T: %v", captureTypeRecords, err)
-				}
-				for _, capRecord := range captureTypeRecords {
-					name, err := f.makeSymbolicMangledNameStringRef(uint64(int64(numCapsAddr) + int64(capRecord.MangledTypeName)))
-					if err != nil {
-						return nil, fmt.Errorf("failed to read mangled type name @ %#x: %v", uint64(int64(numCapsAddr)+int64(capRecord.MangledTypeName)), err)
+				capture.CaptureTypes = make([]swift.CaptureType, capture.NumCaptureTypes)
+				for i := uint32(0); i < capture.NumCaptureTypes; i++ {
+					curr, _ := r.Seek(0, io.SeekCurrent)
+					if err := capture.CaptureTypes[i].CaptureTypeRecord.Read(r, capture.Address+uint64(curr-off)); err != nil {
+						return nil, fmt.Errorf("failed to read swift %T: %v", capture.CaptureTypes[i].CaptureTypeRecord, err)
 					}
-					capture.CaptureTypes = append(capture.CaptureTypes, name)
-					numCapsAddr += uint64(binary.Size(capRecord))
+				}
+				for idx, ctype := range capture.CaptureTypes {
+					capture.CaptureTypes[idx].TypeName, err = f.makeSymbolicMangledNameStringRef(ctype.MangledTypeName.GetAddress())
+					if err != nil {
+						return nil, fmt.Errorf("failed to read mangled type name at address %#x: %v", ctype.MangledTypeName.GetAddress(), err)
+					}
 				}
 			}
 
 			if capture.NumMetadataSources > 0 {
-				metadataSourceRecords := make([]swift.MetadataSourceRecord, capture.NumMetadataSources)
-				if err := binary.Read(r, f.ByteOrder, &metadataSourceRecords); err != nil {
-					return nil, fmt.Errorf("failed to read %T: %v", metadataSourceRecords, err)
+				capture.MetadataSources = make([]swift.MetadataSource, capture.NumMetadataSources)
+				for i := uint32(0); i < capture.NumMetadataSources; i++ {
+					curr, _ := r.Seek(0, io.SeekCurrent)
+					if err := capture.MetadataSources[i].MetadataSourceRecord.Read(r, capture.Address+uint64(curr-off)); err != nil {
+						return nil, fmt.Errorf("failed to read swift %T: %v", capture.MetadataSources[i].MetadataSourceRecord, err)
+					}
 				}
-				for idx, metasource := range metadataSourceRecords {
-					currAddr += uint64(idx * binary.Size(swift.MetadataSourceRecord{}))
-					typeName, err := f.makeSymbolicMangledNameStringRef(uint64(int64(currAddr) + int64(metasource.MangledTypeName)))
+				for idx, msrc := range capture.MetadataSources {
+					capture.MetadataSources[idx].MangledType, err = f.makeSymbolicMangledNameStringRef(msrc.MangledTypeNameOff.GetAddress())
 					if err != nil {
-						return nil, fmt.Errorf("failed to read mangled type name @ %#x: %v", uint64(int64(currAddr)+int64(metasource.MangledTypeName)), err)
+						return nil, fmt.Errorf("failed to read mangled type name at address %#x: %v", msrc.MangledTypeNameOff.GetAddress(), err)
 					}
-					metaSource, err := f.makeSymbolicMangledNameStringRef(uint64(int64(currAddr) + sizeOfInt32 + int64(metasource.MangledMetadataSource)))
+					capture.MetadataSources[idx].MangledMetadataSource, err = f.makeSymbolicMangledNameStringRef(msrc.MangledMetadataSourceOff.GetAddress())
 					if err != nil {
-						return nil, fmt.Errorf("failed to read mangled metadata source @ %#x: %v", uint64(int64(currAddr)+sizeOfInt32+int64(metasource.MangledMetadataSource)), err)
+						return nil, fmt.Errorf("failed to read mangled metadata source at address %#x: %v", msrc.MangledMetadataSourceOff.GetAddress(), err)
 					}
-					capture.MetadataSources = append(capture.MetadataSources, swift.MetadataSource{
-						MangledType:           typeName,
-						MangledMetadataSource: metaSource,
-					})
 				}
 			}
 
 			if capture.NumBindings > 0 {
 				capture.Bindings = make([]swift.NecessaryBindings, capture.NumBindings)
-				if err := binary.Read(r, f.ByteOrder, &capture.Bindings); err != nil {
-					return nil, fmt.Errorf("failed to read %T: %v", capture.Bindings, err)
+				for i := uint32(0); i < capture.NumBindings; i++ {
+					curr, _ := r.Seek(0, io.SeekCurrent)
+					if err := capture.Bindings[i].Read(r, capture.Address+uint64(curr-off)); err != nil {
+						return nil, fmt.Errorf("failed to read swift %T: %v", capture.Bindings[i], err)
+					}
 				}
 			}
 
@@ -1878,11 +1876,16 @@ func (f *File) getContextDesc(addr uint64) (ctx *swift.TargetModuleContext, err 
 		if err != nil {
 			return nil, fmt.Errorf("failed to read swift context descriptor pointer @ %#x: %v", addr, err)
 		}
+		ptr = f.vma.Convert(ptr)
 	} else {
 		ptr = addr
 	}
 
 	if err := f.cr.SeekToAddr(ptr); err != nil {
+		bind, err := f.GetBindName(ptr)
+		if err == nil {
+			return &swift.TargetModuleContext{Name: bind}, nil
+		}
 		return nil, fmt.Errorf("failed to seek to swift context descriptor parent offset: %w", err)
 	}
 
@@ -2060,23 +2063,27 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				if err != nil {
 					return "", fmt.Errorf("failed to get pointer for indirect context descriptor: %v", err)
 				}
-				if ptr == 0 {
-					name, err = f.symbolLookup(addr)
-					if err != nil {
-						name = "(private)"
-					}
-				}
-				if len(name) == 0 {
-					if err := f.cr.SeekToAddr(f.vma.Convert(ptr)); err != nil {
-						return "", fmt.Errorf("failed to seek to indirect context descriptor: %v", err)
-					}
-					ctx, err := f.getContextDesc(f.vma.Convert(ptr))
-					if err != nil {
-						return "", fmt.Errorf("failed to read indirect context descriptor: %v", err)
-					}
-					name = ctx.Name
-					if len(ctx.Parent) > 0 {
-						name = ctx.Parent + "." + name
+				ptr = f.vma.Convert(ptr)
+				if bind, err := f.GetBindName(ptr); err == nil {
+					name = bind
+				} else {
+					if ptr == 0 {
+						name, err = f.symbolLookup(addr)
+						if err != nil {
+							name = "(private)"
+						}
+					} else {
+						if err := f.cr.SeekToAddr(f.vma.Convert(ptr)); err != nil {
+							return "", fmt.Errorf("failed to seek to indirect context descriptor: %v", err)
+						}
+						ctx, err := f.getContextDesc(f.vma.Convert(ptr))
+						if err != nil {
+							return "", fmt.Errorf("failed to read indirect context descriptor: %v", err)
+						}
+						name = ctx.Name
+						if len(ctx.Parent) > 0 {
+							name = ctx.Parent + "." + name
+						}
 					}
 				}
 				if symbolic {

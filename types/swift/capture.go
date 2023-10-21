@@ -1,6 +1,10 @@
 package swift
 
-import "fmt"
+import (
+	"encoding/binary"
+	"fmt"
+	"io"
+)
 
 //go:generate stringer -type NecessaryBindingsKind -output capture_string.go
 
@@ -11,7 +15,7 @@ import "fmt"
 type Capture struct {
 	CaptureDescriptor
 	Address         uint64
-	CaptureTypes    []string
+	CaptureTypes    []CaptureType
 	MetadataSources []MetadataSource
 	Bindings        []NecessaryBindings
 }
@@ -21,7 +25,7 @@ func (c Capture) String() string {
 	if len(c.CaptureTypes) > 0 {
 		captureTypes += "\t/* capture types */\n"
 		for _, t := range c.CaptureTypes {
-			captureTypes += fmt.Sprintf("\t%s\n", t)
+			captureTypes += fmt.Sprintf("\t%s\n", t.TypeName)
 		}
 	}
 	var metadataSources string
@@ -61,16 +65,51 @@ type CaptureDescriptor struct {
 	NumBindings        uint32 // The number of items in the NecessaryBindings structure at the head of the closure.
 }
 
+type CaptureType struct {
+	CaptureTypeRecord
+	TypeName string
+}
+
 type CaptureTypeRecord struct {
-	MangledTypeName int32
+	MangledTypeName RelativeDirectPointer
+}
+
+func (ctr CaptureTypeRecord) Size() int64 {
+	return int64(binary.Size(ctr.MangledTypeName.RelOff))
+}
+
+func (ctr *CaptureTypeRecord) Read(r io.Reader, addr uint64) error {
+	ctr.MangledTypeName.Address = addr
+	if err := binary.Read(r, binary.LittleEndian, &ctr.MangledTypeName.RelOff); err != nil {
+		return err
+	}
+	return nil
 }
 
 type MetadataSourceRecord struct {
-	MangledTypeName       int32
-	MangledMetadataSource int32
+	MangledTypeNameOff       RelativeDirectPointer
+	MangledMetadataSourceOff RelativeDirectPointer
+}
+
+func (msr MetadataSourceRecord) Size() int64 {
+	return int64(binary.Size(msr.MangledTypeNameOff.RelOff) + binary.Size(msr.MangledMetadataSourceOff.RelOff))
+}
+
+func (msr *MetadataSourceRecord) Read(r io.Reader, addr uint64) error {
+	msr.MangledTypeNameOff.Address = addr
+	if err := binary.Read(r, binary.LittleEndian, &msr.MangledTypeNameOff.RelOff); err != nil {
+		return err
+	}
+	addr += uint64(binary.Size(msr.MangledTypeNameOff.RelOff))
+	msr.MangledMetadataSourceOff.Address = addr
+	if err := binary.Read(r, binary.LittleEndian, &msr.MangledMetadataSourceOff.RelOff); err != nil {
+		return err
+	}
+	return nil
 }
 
 type MetadataSource struct {
+	MetadataSourceRecord
 	MangledType           string
 	MangledMetadataSource string
 }
@@ -84,7 +123,29 @@ const (
 
 type NecessaryBindings struct {
 	Kind               NecessaryBindingsKind
-	RequirementsSet    int32
-	RequirementsVector int32
-	Conformances       int32
+	RequirementsSet    RelativeDirectPointer
+	RequirementsVector RelativeDirectPointer
+	Conformances       RelativeDirectPointer
+}
+
+func (nb NecessaryBindings) Size() int64 {
+	return int64(binary.Size(nb.RequirementsSet.RelOff) + binary.Size(nb.RequirementsVector.RelOff) + binary.Size(nb.Conformances.RelOff))
+}
+
+func (nb *NecessaryBindings) Read(r io.Reader, addr uint64) error {
+	nb.RequirementsSet.Address = addr
+	if err := binary.Read(r, binary.LittleEndian, &nb.RequirementsSet.RelOff); err != nil {
+		return err
+	}
+	addr += uint64(binary.Size(nb.RequirementsSet.RelOff))
+	nb.RequirementsVector.Address = addr
+	if err := binary.Read(r, binary.LittleEndian, &nb.RequirementsVector.RelOff); err != nil {
+		return err
+	}
+	addr += uint64(binary.Size(nb.RequirementsVector.RelOff))
+	nb.Conformances.Address = addr
+	if err := binary.Read(r, binary.LittleEndian, &nb.Conformances.RelOff); err != nil {
+		return err
+	}
+	return nil
 }
