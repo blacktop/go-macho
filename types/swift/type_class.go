@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/blacktop/go-macho/types"
 )
 
 type Class struct {
@@ -18,6 +20,7 @@ type Class struct {
 	MethodOverrides            []TargetMethodOverrideDescriptor
 	ObjCResilientClassStubInfo *TargetObjCResilientClassStubInfo
 	Metadatas                  []Metadata
+	MetadataAccessors          []TargetCanonicalSpecializedMetadataAccessorsListEntry
 	CachingOnceToken           *TargetCanonicalSpecializedMetadatasCachingOnceToken
 }
 
@@ -96,14 +99,28 @@ func (c *TargetClassDescriptor) Read(r io.Reader, addr uint64) error {
 	return nil
 }
 
+func (c TargetClassDescriptor) HasObjCResilientClassStub() bool {
+	if !c.Flags.KindSpecific().HasResilientSuperclass() {
+		return false
+	}
+	return ExtraClassDescriptorFlags(c.MetadataPositiveSizeInWordsORExtraClassFlags).HasObjCResilientClassStub()
+}
+
+// Extra flags for resilient classes, since we need more than 16 bits of flags there.
 type ExtraClassDescriptorFlags uint32
 
 const (
-	HasObjCResilientClassStub ExtraClassDescriptorFlags = 0
+	// Set if the context descriptor includes a pointer to an Objective-C
+	// resilient class stub structure. See the description of
+	// TargetObjCResilientClassStubInfo in Metadata.h for details.
+	//
+	// Only meaningful for class descriptors when Objective-C interop is
+	// enabled.
+	HasObjCResilientClassStub = 0
 )
 
 func (f ExtraClassDescriptorFlags) HasObjCResilientClassStub() bool {
-	return f == HasObjCResilientClassStub
+	return types.ExtractBits(uint64(f), HasObjCResilientClassStub, 1) != 0
 }
 
 type ResilientSuperclass struct {

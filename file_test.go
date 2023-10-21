@@ -712,7 +712,7 @@ func TestNewFileWithSwift(t *testing.T) {
 		}
 	}
 
-	if typs, err := got.GetColocateTypeDescriptors(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+	if typs, err := got.GetSwiftColocateTypeDescriptors(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
 		t.Fatalf("GetColocateTypeDescriptors() error = %v", err)
 	} else {
 		fmt.Println("GetColocateTypeDescriptors" + strings.Repeat("-", 80))
@@ -721,7 +721,7 @@ func TestNewFileWithSwift(t *testing.T) {
 		}
 	}
 
-	if mdatas, err := got.GetColocateMetadata(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+	if mdatas, err := got.GetSwiftColocateMetadata(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
 		t.Fatalf("GetColocateMetadata() error = %v", err)
 	} else {
 		fmt.Println("GetColocateMetadata" + strings.Repeat("-", 80))
@@ -765,7 +765,7 @@ func TestNewFileWithSwift(t *testing.T) {
 		}
 	}
 
-	if mpenums, err := got.GetMultiPayloadEnums(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+	if mpenums, err := got.GetSwiftMultiPayloadEnums(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
 		t.Fatalf("GetMultiPayloadEnums() error = %v", err)
 	} else {
 		fmt.Println("GetMultiPayloadEnums" + strings.Repeat("-", 80))

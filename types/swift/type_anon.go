@@ -1,6 +1,10 @@
 package swift
 
-import "io"
+import (
+	"io"
+
+	"github.com/blacktop/go-macho/types"
+)
 
 // Flags for anonymous type context descriptors. These values are used as the
 // kindSpecificFlags of the ContextDescriptorFlags for the anonymous context.
@@ -9,8 +13,12 @@ type AnonymousContextDescriptorFlags uint16
 const (
 	// Whether this anonymous context descriptor is followed by its
 	// mangled name, which can be used to match the descriptor at runtime.
-	HasMangledName AnonymousContextDescriptorFlags = 0
+	HasMangledName = 0
 )
+
+func (f AnonymousContextDescriptorFlags) HasMangledName() bool {
+	return types.ExtractBits(uint64(f), HasMangledName, 1) != 0
+}
 
 type Anonymous struct {
 	TargetAnonymousContextDescriptor
@@ -20,6 +28,10 @@ type Anonymous struct {
 
 type TargetAnonymousContextDescriptor struct {
 	TargetContextDescriptor
+}
+
+func (tacd TargetAnonymousContextDescriptor) HasMangledName() bool {
+	return AnonymousContextDescriptorFlags(tacd.Flags.KindSpecific()).HasMangledName()
 }
 
 func (tacd TargetAnonymousContextDescriptor) Size() int64 {

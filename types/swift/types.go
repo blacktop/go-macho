@@ -68,10 +68,22 @@ func (t Type) dump(verbose bool) string {
 		}
 		return fmt.Sprintf("%s%s %s", addr, t.Kind, t.Name)
 	case CDKindOpaqueType:
+		var typargs []string
+		if len(t.Type.(OpaqueType).TypeArgs) > 0 {
+			typargs = append(typargs, "")
+			typargs = append(typargs, "  /* type args */")
+			for _, a := range t.Type.(OpaqueType).TypeArgs {
+				if verbose {
+					addr = fmt.Sprintf("/* %#x */ ", a.GetAddress())
+				}
+				typargs = append(typargs, fmt.Sprintf("    %s%s", addr, a.Name))
+			}
+			typargs = append(typargs, "")
+		}
 		if verbose {
 			addr = fmt.Sprintf("// %#x\n", t.Address)
 		}
-		return fmt.Sprintf("%s%s %s", addr, t.Kind, t.Name)
+		return fmt.Sprintf("%s%s {%s}", addr, t.Kind, strings.Join(typargs, "\n"))
 	case CDKindClass:
 		var fields []string
 		for _, f := range t.Fields {
@@ -485,7 +497,7 @@ func (tcd *TargetTypeContextDescriptor) Read(r io.Reader, addr uint64) error {
 }
 
 type TargetMangledContextName struct {
-	Name TargetRelativeDirectPointer
+	Name RelativeDirectPointer
 }
 
 func (m TargetMangledContextName) Size() int64 {
@@ -502,7 +514,7 @@ func (m *TargetMangledContextName) Read(r io.Reader, addr uint64) error {
 type OpaqueType struct {
 	TargetOpaqueTypeDescriptor
 	GenericContext *GenericContext
-	TypeArgs       []RelativeDirectPointer
+	TypeArgs       []RelativeString
 }
 
 // TargetOpaqueTypeDescriptor the descriptor for an opaque type.
