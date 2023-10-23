@@ -31,7 +31,10 @@ func (a AssociatedType) dump(verbose bool) string {
 	var addr string
 	var vars []string
 	for _, v := range a.TypeRecords {
-		vars = append(vars, fmt.Sprintf("    %s: %s", v.Name, v.SubstitutedTypeName))
+		if verbose {
+			addr = fmt.Sprintf("/* %#x */ ", v.NameOffset.GetAddress())
+		}
+		vars = append(vars, fmt.Sprintf("    %s%s: %s", addr, v.Name, v.SubstitutedTypeName))
 	}
 	if verbose {
 		addr = fmt.Sprintf("// %#x\n", a.Address)
@@ -88,7 +91,6 @@ type ATRecordType struct {
 	AssociatedTypeRecord
 	Name                string
 	SubstitutedTypeName string
-	SubstitutedTypeAddr uint64
 }
 
 // AssociatedTypeRecord type records describe the mapping from an associated type to the type witness of a conformance.

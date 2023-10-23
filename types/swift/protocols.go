@@ -427,12 +427,8 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 		witnessTablePattern += "  /* witness table pattern */\n"
 		witnessTablePattern += fmt.Sprintf("    /* %#x */\n", c.WitnessTablePatternOffsest.GetAddress())
 	}
-	var accFunc string
 	if verbose {
 		addr = fmt.Sprintf("// %#x\n", c.Address)
-		if c.TypeRef.AccessFunction != 0 {
-			accFunc = fmt.Sprintf(" // %#x", c.TypeRef.AccessFunction)
-		}
 	}
 	var parent string
 	if c.TypeRef.Parent != nil && len(c.TypeRef.Parent.Name) > 0 {
@@ -441,7 +437,7 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 	return fmt.Sprintf(
 		"%s"+
 			"%s%s {\n"+
-			"    %s %s%s%s\n"+
+			"    %s %s%s\n"+
 			"%s"+
 			"%s"+
 			"%s"+
@@ -453,7 +449,6 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 		c.TypeRef.Kind,
 		parent,
 		c.TypeRef.Name,
-		accFunc,
 		reqs,
 		packShapes,
 		resilientWitnesses,

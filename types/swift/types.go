@@ -132,8 +132,12 @@ func (t Type) dump(verbose bool) string {
 				meths = append(meths, fmt.Sprintf("    %s%s", maddr, sym))
 			}
 		}
+		var accessor string
 		if verbose {
 			addr = fmt.Sprintf("// %#x\n", t.Address)
+			if t.Type.(Class).AccessFunctionPtr.IsSet() {
+				accessor = fmt.Sprintf(" // accessor %#x", t.Type.(Class).AccessFunctionPtr.GetAddress())
+			}
 		}
 		var parent string
 		if t.Parent != nil && t.Parent.Name != "" {
@@ -144,7 +148,7 @@ func (t Type) dump(verbose bool) string {
 			superClass = fmt.Sprintf(": %s", t.Type.(Class).SuperClass)
 		}
 		if len(fields) == 0 && len(meths) == 0 {
-			return fmt.Sprintf("%s%s %s%s%s {}", addr, t.Kind, parent, t.Name, superClass)
+			return fmt.Sprintf("%s%s %s%s%s {}%s", addr, t.Kind, parent, t.Name, superClass, accessor)
 		}
 		if len(fields) > 0 {
 			fields = append([]string{"  /* fields */"}, fields...)
@@ -156,7 +160,7 @@ func (t Type) dump(verbose bool) string {
 				meths = append([]string{"  /* methods */"}, meths...)
 			}
 		}
-		return fmt.Sprintf("%s%s %s%s%s {\n%s%s\n}", addr, t.Kind, parent, t.Name, superClass, strings.Join(fields, "\n"), strings.Join(meths, "\n"))
+		return fmt.Sprintf("%s%s %s%s%s {%s\n%s%s\n}", addr, t.Kind, parent, t.Name, superClass, accessor, strings.Join(fields, "\n"), strings.Join(meths, "\n"))
 	case CDKindStruct:
 		var fields []string
 		if t.Fields != nil {
@@ -176,17 +180,21 @@ func (t Type) dump(verbose bool) string {
 				fields = append(fields, fmt.Sprintf("    %s%s %s%s", faddr, r.Flags, r.Name, typ))
 			}
 		}
+		var accessor string
 		if verbose {
 			addr = fmt.Sprintf("// %#x\n", t.Address)
+			if t.Type.(Struct).AccessFunctionPtr.IsSet() {
+				accessor = fmt.Sprintf(" // accessor %#x", t.Type.(Struct).AccessFunctionPtr.GetAddress())
+			}
 		}
 		var parent string
 		if t.Parent != nil && t.Parent.Name != "" {
 			parent = fmt.Sprintf("%s.", t.Parent.Name)
 		}
 		if len(fields) == 0 {
-			return fmt.Sprintf("%s%s %s%s {}", addr, t.Kind, parent, t.Name)
+			return fmt.Sprintf("%s%s %s%s {}%s", addr, t.Kind, parent, t.Name, accessor)
 		}
-		return fmt.Sprintf("%s%s %s%s {\n%s\n}", addr, t.Kind, parent, t.Name, strings.Join(fields, "\n"))
+		return fmt.Sprintf("%s%s %s%s {%s\n%s\n}", addr, t.Kind, parent, t.Name, accessor, strings.Join(fields, "\n"))
 	case CDKindEnum:
 		var fields []string
 		if t.Fields != nil {
@@ -210,13 +218,17 @@ func (t Type) dump(verbose bool) string {
 		if t.Parent != nil && t.Parent.Name != "" {
 			parent = fmt.Sprintf("%s.", t.Parent.Name)
 		}
+		var accessor string
 		if verbose {
 			addr = fmt.Sprintf("// %#x\n", t.Address)
+			if t.Type.(Enum).AccessFunctionPtr.IsSet() {
+				accessor = fmt.Sprintf(" // accessor %#x", t.Type.(Enum).AccessFunctionPtr.GetAddress())
+			}
 		}
 		if len(fields) == 0 {
-			return fmt.Sprintf("%s%s %s%s {}", addr, t.Kind, parent, t.Name)
+			return fmt.Sprintf("%s%s %s%s {}%s", addr, t.Kind, parent, t.Name, accessor)
 		}
-		return fmt.Sprintf("%s%s %s%s {\n%s\n}", addr, t.Kind, parent, t.Name, strings.Join(fields, "\n"))
+		return fmt.Sprintf("%s%s %s%s {%s\n%s\n}", addr, t.Kind, parent, t.Name, accessor, strings.Join(fields, "\n"))
 	default:
 		return fmt.Sprintf("unknown type %s", t.Name)
 	}
