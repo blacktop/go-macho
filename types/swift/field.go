@@ -32,6 +32,9 @@ func (f Field) IsClass() bool {
 func (f Field) IsProtocol() bool {
 	return f.Kind == FDKindProtocol || f.Kind == FDKindClassProtocol || f.Kind == FDKindObjCProtocol
 }
+func (f Field) IsStruct() bool {
+	return f.Kind == FDKindStruct
+}
 func (f Field) String() string {
 	return f.dump(false)
 }
@@ -190,18 +193,28 @@ const (
 	IsArtificial FieldRecordFlags = 0x4
 )
 
+func (f FieldRecordFlags) IsIndirectCase() bool {
+	return (f & IsIndirectCase) == IsIndirectCase
+}
+func (f FieldRecordFlags) IsVar() bool {
+	return (f & IsVar) == IsVar
+}
+func (f FieldRecordFlags) IsArtificial() bool {
+	return (f & IsArtificial) == IsArtificial
+}
+
 func (f FieldRecordFlags) String() string { // TODO: this is dumb (does ind or anon ever happen?)
 	var out string
-	if (f & IsIndirectCase) == IsIndirectCase {
+	if f.IsIndirectCase() {
 		out = "indirect case"
 	}
-	if (f & IsArtificial) == IsArtificial {
+	if f.IsArtificial() {
 		if len(out) > 0 {
 			out += " | "
 		}
 		out += "artificial"
 	}
-	if (f & IsVar) == IsVar {
+	if f.IsVar() {
 		out = "var"
 	} else {
 		out = "let"
