@@ -23,23 +23,23 @@ type Capture struct {
 func (c Capture) String() string {
 	var captureTypes string
 	if len(c.CaptureTypes) > 0 {
-		captureTypes += "\t/* capture types */\n"
+		captureTypes += "  /* capture types */\n"
 		for _, t := range c.CaptureTypes {
-			captureTypes += fmt.Sprintf("\t%s\n", t.TypeName)
+			captureTypes += fmt.Sprintf("    %s\n", t.TypeName)
 		}
 	}
 	var metadataSources string
 	if len(c.MetadataSources) > 0 {
-		metadataSources += "\t/* metadata sources */\n"
+		metadataSources += "  /* metadata sources */\n"
 		for _, m := range c.MetadataSources {
-			metadataSources += fmt.Sprintf("\t%s: %s\n", m.MangledType, m.MangledMetadataSource)
+			metadataSources += fmt.Sprintf("    %s: %s\n", m.MangledType, m.MangledMetadataSource)
 		}
 	}
 	var bindings string
 	if len(c.Bindings) > 0 {
-		bindings += "\t/* necessary bindings */\n"
+		bindings += "  /* necessary bindings */\n"
 		for _, b := range c.Bindings {
-			bindings += fmt.Sprintf("\t// Kind: %d, RequirementsSet: %d, RequirementsVector: %d, Conformances: %d\n", b.Kind, b.RequirementsSet, b.RequirementsVector, b.Conformances)
+			bindings += fmt.Sprintf("    // Kind: %d, RequirementsSet: %d, RequirementsVector: %d, Conformances: %d\n", b.Kind, b.RequirementsSet, b.RequirementsVector, b.Conformances)
 		}
 	}
 	return fmt.Sprintf(
