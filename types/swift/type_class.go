@@ -192,6 +192,7 @@ const (
 	MDKSetter
 	MDKModifyCoroutine
 	MDKReadCoroutine
+	MDKMax
 )
 
 func (md MDKind) String() string {

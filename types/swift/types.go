@@ -22,7 +22,7 @@ type Type struct {
 	Name           string
 	Kind           ContextDescriptorKind
 	AccessFunction uint64
-	Fields         []Field
+	Fields         *Field
 	Type           any
 	Size           int64
 }
@@ -86,24 +86,27 @@ func (t Type) dump(verbose bool) string {
 		return fmt.Sprintf("%s%s {%s}", addr, t.Kind, strings.Join(typargs, "\n"))
 	case CDKindClass:
 		var fields []string
-		for _, f := range t.Fields {
-			for _, r := range f.Records {
+		if t.Fields != nil {
+			var faddr string
+			for _, r := range t.Fields.Records {
 				var typ string
 				if len(r.MangledType) > 0 {
 					if strings.Contains(r.MangledType, "()") {
-						typ = fmt.Sprintf(" = %s", r.MangledType)
+						typ = " = " + r.MangledType
+						typ = strings.Replace(typ, "() ?", "()?", 1)
 					} else {
-						typ = fmt.Sprintf(": %s", r.MangledType)
+						typ = ": " + r.MangledType
 					}
 				}
 				if verbose {
-					addr = fmt.Sprintf("/* %#x */ ", f.Address)
+					faddr = fmt.Sprintf("/* %#x */ ", r.FieldNameOffset.Address)
 				}
-				fields = append(fields, fmt.Sprintf("    %s%s %s%s", addr, r.Flags, strings.Replace(r.Name, "$__lazy_storage_$_", "lazy ", 1), typ))
+				fields = append(fields, fmt.Sprintf("    %s%s %s%s", faddr, r.Flags, strings.Replace(r.Name, "$__lazy_storage_$_", "lazy ", 1), typ))
 			}
 		}
 		var meths []string
 		if t.Type.(Class).VTable != nil {
+			var maddr string
 			for _, m := range t.Type.(Class).VTable.Methods {
 				var static string
 				if !m.Flags.IsInstance() {
@@ -115,12 +118,16 @@ func (t Type) dump(verbose bool) string {
 				} else if m.Symbol == "" && m.Impl.IsSet() {
 					sym = fmt.Sprintf("%sfunc sub_%x // %s", static, m.Impl.GetAddress(), m.Flags.String(""))
 				} else {
-					sym = fmt.Sprintf("%sfunc %s // %s", static, sym, m.Flags.String(""))
+					if m.Impl.IsSet() {
+						sym = fmt.Sprintf("%sfunc %s // %s", static, sym, m.Flags.String(""))
+					} else {
+						sym = fmt.Sprintf("/* <stripped> %sfunc %s - %s */", static, sym, m.Flags.String(""))
+					}
 				}
-				if verbose {
-					addr = fmt.Sprintf("/* %#x */ ", m.Address)
+				if verbose && m.Address != 0 {
+					maddr = fmt.Sprintf("/* %#x */ ", m.Address)
 				}
-				meths = append(meths, fmt.Sprintf("    %s%s", addr, sym))
+				meths = append(meths, fmt.Sprintf("    %s%s", maddr, sym))
 			}
 		}
 		var parent string
@@ -154,11 +161,8 @@ func (t Type) dump(verbose bool) string {
 		return fmt.Sprintf("%s%s %s%s%s {\n%s%s\n}", addr, t.Kind, parent, t.Name, superClass, strings.Join(fields, "\n"), strings.Join(meths, "\n"))
 	case CDKindStruct:
 		var fields []string
-		for _, f := range t.Fields {
-			for _, r := range f.Records {
-				if verbose {
-					addr = fmt.Sprintf(" // %#x", t.Address)
-				}
+		if t.Fields != nil {
+			for _, r := range t.Fields.Records {
 				var typ string
 				if len(r.MangledType) > 0 {
 					if strings.Contains(r.MangledType, "()") {
@@ -167,7 +171,10 @@ func (t Type) dump(verbose bool) string {
 						typ = fmt.Sprintf(": %s", r.MangledType)
 					}
 				}
-				fields = append(fields, fmt.Sprintf("    %s %s%s%s", r.Flags, r.Name, typ, addr))
+				if verbose {
+					addr = fmt.Sprintf("/* %#x */ ", r.FieldNameOffset.Address)
+				}
+				fields = append(fields, fmt.Sprintf("    %s%s %s%s", addr, r.Flags, r.Name, typ))
 			}
 		}
 		if verbose {
@@ -183,8 +190,8 @@ func (t Type) dump(verbose bool) string {
 		return fmt.Sprintf("%s%s %s%s {\n%s\n}", addr, t.Kind, parent, t.Name, strings.Join(fields, "\n"))
 	case CDKindEnum:
 		var fields []string
-		for _, f := range t.Fields {
-			for _, r := range f.Records {
+		if t.Fields != nil {
+			for _, r := range t.Fields.Records {
 				cs := "case"
 				if r.Flags.String() == "indirect case" {
 					cs = "indirect case"
@@ -194,9 +201,9 @@ func (t Type) dump(verbose bool) string {
 					typ = fmt.Sprintf(": %s", r.MangledType)
 				}
 				if verbose {
-					addr = fmt.Sprintf(" // %#x", f.Address)
+					addr = fmt.Sprintf("/* %#x */ ", r.FieldNameOffset.Address)
 				}
-				fields = append(fields, fmt.Sprintf("    %s %s%s%s", cs, r.Name, typ, addr))
+				fields = append(fields, fmt.Sprintf("    %s%s %s%s", addr, cs, r.Name, typ))
 			}
 		}
 		if verbose {

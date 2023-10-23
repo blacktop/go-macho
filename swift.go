@@ -156,12 +156,8 @@ func (f *File) GetSwiftFields() (fields []swift.Field, err error) {
 	return nil, fmt.Errorf("MachO has no '__swift5_fieldmd' section: %w", ErrSwiftSectionError)
 }
 
-func (f *File) readField(r io.Reader, addr uint64) (field *swift.Field, err error) {
-	if typ, ok := f.swift[addr]; ok { // check cache
-		if _, ok := typ.(*swift.Field); ok {
-			return typ.(*swift.Field), nil
-		}
-	}
+func (f *File) readField(r io.ReadSeeker, addr uint64) (field *swift.Field, err error) {
+	off, _ := r.Seek(0, io.SeekCurrent) // save offset
 
 	field = &swift.Field{Address: addr}
 
@@ -169,15 +165,13 @@ func (f *File) readField(r io.Reader, addr uint64) (field *swift.Field, err erro
 		return nil, fmt.Errorf("failed to read swift field descriptor string: %w", err)
 	}
 
-	addr += field.FieldDescriptor.Size()
-
 	field.Records = make([]swift.FieldRecord, field.NumFields)
 
 	for i := 0; i < int(field.NumFields); i++ {
-		if err := field.Records[i].FieldRecordDescriptor.Read(r, addr); err != nil {
+		curr, _ := r.Seek(0, io.SeekCurrent)
+		if err := field.Records[i].FieldRecordDescriptor.Read(r, field.Address+uint64(curr-off)); err != nil {
 			return nil, fmt.Errorf("failed to read swift FieldRecordDescriptor: %v", err)
 		}
-		addr += field.Records[i].FieldRecordDescriptor.Size()
 	}
 
 	if field.MangledTypeNameOffset.IsSet() {
@@ -1496,7 +1490,109 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 		}
 	}
 
+	typ.Name, err = f.GetCString(class.NameOffset.GetAddress())
+	if err != nil {
+		return fmt.Errorf("failed to read cstring: %v", err)
+	}
+
+	if class.ParentOffset.IsSet() {
+		f.cr.SeekToAddr(class.ParentOffset.GetAddress())
+		ctx, err := f.getContextDesc(class.ParentOffset.GetAddress())
+		if err != nil {
+			return fmt.Errorf("failed to get parent: %v", err)
+		}
+		typ.Parent = &swift.Type{
+			Address: class.ParentOffset.GetAddress(),
+			Name:    ctx.Name,
+			Parent: &swift.Type{
+				Name: ctx.Parent,
+			},
+		}
+	}
+
+	if class.FieldsOffset.IsSet() {
+		if item, ok := f.swift[class.FieldsOffset.GetAddress()]; ok { // check cache
+			if fd, ok := item.(*swift.Field); ok {
+				typ.Fields = fd
+			}
+		} else {
+			f.cr.SeekToAddr(class.FieldsOffset.GetAddress())
+			fd, err := f.readField(f.cr, class.FieldsOffset.GetAddress())
+			if err != nil {
+				return fmt.Errorf("failed to read swift field: %w", err)
+			}
+			typ.Fields = fd
+		}
+	}
+
 	if class.VTable != nil {
+		for idx, method := range class.VTable.Methods {
+			// set address
+			if method.Flags.IsAsync() {
+				class.VTable.Methods[idx].Address = method.Impl.GetAddress()
+			} else {
+				class.VTable.Methods[idx].Address = method.Impl.GetAddress()
+			}
+			// set symbol
+			if syms, err := f.FindAddressSymbols(class.VTable.Methods[idx].Address); err == nil {
+				if len(syms) > 0 {
+					for _, s := range syms {
+						if !s.Type.IsDebugSym() {
+							class.VTable.Methods[idx].Symbol = s.Name
+							break
+						}
+					}
+				}
+			}
+		}
+		// collect vars
+		var vars []swift.FieldRecord
+		for _, f := range typ.Fields.Records {
+			if f.Flags.IsVar() {
+				vars = append(vars, f)
+			}
+		}
+		// map vars to getter/setter/modify methods
+		if len(vars) > 0 && len(vars)*3 <= len(class.VTable.Methods) {
+			fidx := 0
+			prev := swift.MDKMax
+			var mindexes []int
+			for idx, method := range class.VTable.Methods {
+				switch method.Flags.Kind() {
+				case swift.MDKGetter:
+					if prev == swift.MDKMax {
+						mindexes = append(mindexes, idx)
+					} else {
+						prev = swift.MDKMax
+						mindexes = []int{}
+						mindexes = append(mindexes, idx)
+					}
+				case swift.MDKSetter:
+					if prev == swift.MDKGetter {
+						mindexes = append(mindexes, idx)
+					} else {
+						prev = swift.MDKMax
+						mindexes = []int{}
+					}
+				case swift.MDKModifyCoroutine:
+					if prev == swift.MDKSetter {
+						mindexes = append(mindexes, idx)
+						for _, m := range mindexes {
+							if fidx < len(vars) {
+								if class.VTable.Methods[m].Symbol == "" {
+									class.VTable.Methods[m].Symbol = fmt.Sprintf("%s.%s", strings.TrimPrefix(vars[fidx].Name, "$__lazy_storage_$_"), class.VTable.Methods[m].Flags.Kind())
+								}
+							}
+						}
+						fidx++
+					} else {
+						prev = swift.MDKMax
+						mindexes = []int{}
+					}
+				}
+				prev = method.Flags.Kind()
+			}
+		}
 		for _, method := range class.VTable.Methods { // populate methods with address/sym
 			if method.Flags.IsAsync() {
 				// f.cr.SeekToAddr(trdp.GetRelPtrAddress())
@@ -1529,34 +1625,6 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 				// v.Methods = append(v.Methods, m)
 			}
 		}
-	}
-
-	typ.Name, err = f.GetCString(class.NameOffset.GetAddress())
-	if err != nil {
-		return fmt.Errorf("failed to read cstring: %v", err)
-	}
-
-	if class.ParentOffset.IsSet() {
-		f.cr.SeekToAddr(class.ParentOffset.GetAddress())
-		ctx, err := f.getContextDesc(class.ParentOffset.GetAddress())
-		if err != nil {
-			return fmt.Errorf("failed to get parent: %v", err)
-		}
-		typ.Parent = &swift.Type{
-			Address: class.ParentOffset.GetAddress(),
-			Name:    ctx.Name,
-			Parent: &swift.Type{
-				Name: ctx.Parent,
-			},
-		}
-	}
-
-	if class.FieldsOffset.IsSet() {
-		fd, err := f.readField(f.cr, class.FieldsOffset.GetAddress())
-		if err != nil {
-			return fmt.Errorf("failed to read swift field: %w", err)
-		}
-		typ.Fields = append(typ.Fields, *fd)
 	}
 
 	curr, _ := r.Seek(0, io.SeekCurrent)
@@ -1664,12 +1732,18 @@ func (f *File) parseStructDescriptor(r io.ReadSeeker, typ *swift.Type) (err erro
 	}
 
 	if st.FieldsOffset.IsSet() {
-		f.cr.SeekToAddr(st.FieldsOffset.GetAddress())
-		fd, err := f.readField(f.cr, st.FieldsOffset.GetAddress())
-		if err != nil {
-			return fmt.Errorf("failed to read swift field: %w", err)
+		if item, ok := f.swift[st.FieldsOffset.GetAddress()]; ok { // check cache
+			if fd, ok := item.(*swift.Field); ok {
+				typ.Fields = fd
+			}
+		} else {
+			f.cr.SeekToAddr(st.FieldsOffset.GetAddress())
+			fd, err := f.readField(f.cr, st.FieldsOffset.GetAddress())
+			if err != nil {
+				return fmt.Errorf("failed to read swift field: %w", err)
+			}
+			typ.Fields = fd
 		}
-		typ.Fields = append(typ.Fields, *fd)
 	}
 
 	curr, _ := r.Seek(0, io.SeekCurrent)
@@ -1781,12 +1855,18 @@ func (f *File) parseEnumDescriptor(r io.ReadSeeker, typ *swift.Type) (err error)
 	}
 
 	if enum.FieldsOffset.IsSet() {
-		f.cr.SeekToAddr(enum.FieldsOffset.GetAddress())
-		fd, err := f.readField(f.cr, enum.FieldsOffset.GetAddress())
-		if err != nil {
-			return fmt.Errorf("failed to read swift field: %w", err)
+		if item, ok := f.swift[enum.FieldsOffset.GetAddress()]; ok { // check cache
+			if fd, ok := item.(*swift.Field); ok {
+				typ.Fields = fd
+			}
+		} else {
+			f.cr.SeekToAddr(enum.FieldsOffset.GetAddress())
+			fd, err := f.readField(f.cr, enum.FieldsOffset.GetAddress())
+			if err != nil {
+				return fmt.Errorf("failed to read swift field: %w", err)
+			}
+			typ.Fields = fd
 		}
-		typ.Fields = append(typ.Fields, *fd)
 	}
 
 	curr, _ := r.Seek(0, io.SeekCurrent)
