@@ -1523,13 +1523,17 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 		}
 	}
 
-	if class.VTable != nil {
+	if class.VTable != nil { // enrich vtable
 		for idx, method := range class.VTable.Methods {
 			// set address
 			if method.Flags.IsAsync() {
-				class.VTable.Methods[idx].Address = method.Impl.GetAddress()
+				f.cr.SeekToAddr(method.Impl.GetRelPtrAddress())
+				class.VTable.Methods[idx].Address, err = method.Impl.GetAddress(f.cr)
+				if err != nil {
+					return fmt.Errorf("failed to read targer relative direct pointer: %v", err)
+				}
 			} else {
-				class.VTable.Methods[idx].Address = method.Impl.GetAddress()
+				class.VTable.Methods[idx].Address = method.Impl.GetRelPtrAddress()
 			}
 			// set symbol
 			if syms, err := f.FindAddressSymbols(class.VTable.Methods[idx].Address); err == nil {
@@ -1578,7 +1582,11 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 						for _, m := range mindexes {
 							if fidx < len(vars) {
 								if class.VTable.Methods[m].Symbol == "" {
-									class.VTable.Methods[m].Symbol = fmt.Sprintf("%s.%s", strings.TrimPrefix(vars[fidx].Name, "$__lazy_storage_$_"), class.VTable.Methods[m].Flags.Kind())
+									if class.VTable.Methods[m].Impl.IsSet() {
+										class.VTable.Methods[m].Symbol = fmt.Sprintf("%s.%s.sub_%x", strings.TrimPrefix(vars[fidx].Name, "$__lazy_storage_$_"), class.VTable.Methods[m].Flags.Kind(), class.VTable.Methods[m].Address)
+									} else {
+										class.VTable.Methods[m].Symbol = fmt.Sprintf("%s.%s", strings.TrimPrefix(vars[fidx].Name, "$__lazy_storage_$_"), class.VTable.Methods[m].Flags.Kind())
+									}
 								}
 							}
 						}
@@ -1589,38 +1597,6 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 					}
 				}
 				prev = method.Flags.Kind()
-			}
-		}
-		for _, method := range class.VTable.Methods { // populate methods with address/sym
-			if method.Flags.IsAsync() {
-				// f.cr.SeekToAddr(trdp.GetRelPtrAddress())
-				// maddr, err := trdp.GetAddress(f.cr)
-				// if err != nil {
-				// 	return fmt.Errorf("failed to read targer relative direct pointer: %v", err)
-				// }
-				// v.Methods = append(v.Methods, swift.Method{
-				// 	TargetMethodDescriptor: method,
-				// 	Address:                maddr,
-				// })
-			} else {
-				// m := swift.Method{
-				// 	TargetMethodDescriptor: method,
-				// 	Address: uint64(int64(v.MethodListAddr) +
-				// 		int64(method.Impl) +
-				// 		int64(idx)*int64(binary.Size(swift.TargetMethodDescriptor{})) +
-				// 		int64(unsafe.Offsetof(method.Impl))),
-				// }
-				// if syms, err := f.FindAddressSymbols(m.Address); err == nil {
-				// 	if len(syms) > 0 {
-				// 		for _, s := range syms {
-				// 			if !s.Type.IsDebugSym() {
-				// 				m.Symbol = s.Name
-				// 				break
-				// 			}
-				// 		}
-				// 	}
-				// }
-				// v.Methods = append(v.Methods, m)
 			}
 		}
 	}

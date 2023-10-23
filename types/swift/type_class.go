@@ -165,7 +165,7 @@ type Method struct {
 
 type TargetMethodDescriptor struct {
 	Flags MethodDescriptorFlags
-	Impl  RelativeDirectPointer
+	Impl  TargetRelativeDirectPointer
 }
 
 func (md TargetMethodDescriptor) Size() int64 {

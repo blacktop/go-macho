@@ -115,7 +115,7 @@ func (t Type) dump(verbose bool) string {
 				sym := m.Symbol
 				if m.Impl.IsSet() {
 					if m.Symbol == "" {
-						sym = fmt.Sprintf("%sfunc sub_%x // %s", static, m.Impl.GetAddress(), m.Flags.Verbose())
+						sym = fmt.Sprintf("%sfunc sub_%x // %s", static, m.Address, m.Flags.Verbose())
 					} else {
 						sym = fmt.Sprintf("%sfunc %s // %s", static, sym, m.Flags)
 					}
@@ -127,7 +127,7 @@ func (t Type) dump(verbose bool) string {
 					}
 				}
 				if verbose && m.Address != 0 {
-					maddr = fmt.Sprintf("/* %#x */ ", m.Address)
+					maddr = fmt.Sprintf("/* %#x */ ", m.Impl.Address-4) // minus 4 to get to the start of the TargetMethodDescriptor
 				}
 				meths = append(meths, fmt.Sprintf("    %s%s", maddr, sym))
 			}
@@ -160,6 +160,7 @@ func (t Type) dump(verbose bool) string {
 	case CDKindStruct:
 		var fields []string
 		if t.Fields != nil {
+			var faddr string
 			for _, r := range t.Fields.Records {
 				var typ string
 				if len(r.MangledType) > 0 {
@@ -170,9 +171,9 @@ func (t Type) dump(verbose bool) string {
 					}
 				}
 				if verbose {
-					addr = fmt.Sprintf("/* %#x */ ", r.FieldNameOffset.Address)
+					faddr = fmt.Sprintf("/* %#x */ ", r.FieldNameOffset.Address)
 				}
-				fields = append(fields, fmt.Sprintf("    %s%s %s%s", addr, r.Flags, r.Name, typ))
+				fields = append(fields, fmt.Sprintf("    %s%s %s%s", faddr, r.Flags, r.Name, typ))
 			}
 		}
 		if verbose {
