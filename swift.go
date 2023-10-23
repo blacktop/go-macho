@@ -19,6 +19,40 @@ const sizeOfInt64 = 8
 
 var ErrSwiftSectionError = fmt.Errorf("missing swift section")
 
+// HasSwift checks if the MachO has swift info
+func (f *File) HasSwift() bool {
+	if info, err := f.GetObjCImageInfo(); err == nil {
+		if info != nil && info.HasSwift() {
+			return true
+		}
+	}
+	return false
+}
+
+// GetSwiftTOC returns a table of contents of the Swift objects in the MachO
+func (f *File) GetSwiftTOC() swift.TOC {
+	var toc swift.TOC
+	for _, sec := range f.Sections {
+		switch sec.Name {
+		case "__swift5_builtin":
+			toc.Builtins = int(sec.Size) / binary.Size(swift.BuiltinTypeDescriptor{})
+		// case "__swift5_fieldmd":
+		// 	toc.Fields = sec.Size / f.pointerSize()
+		case "__swift5_types":
+			toc.Types += int(sec.Size / sizeOfInt32)
+		case "__swift5_types2":
+			toc.Types += int(sec.Size / sizeOfInt32)
+		// case "__swift5_assocty":
+		// 	toc.AssociatedTypes = sec.Size / f.pointerSize()
+		case "__swift5_protos":
+			toc.Protocols = int(sec.Size / sizeOfInt32)
+		case "__swift5_proto":
+			toc.ProtocolConformances = int(sec.Size / sizeOfInt32)
+		}
+	}
+	return toc
+}
+
 // GetSwiftEntry parses the __TEXT.__swift5_entry section
 func (f *File) GetSwiftEntry() (uint64, error) {
 	if sec := f.Section("__TEXT", "__swift5_entry"); sec != nil {

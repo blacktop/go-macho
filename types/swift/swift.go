@@ -1,5 +1,7 @@
 package swift
 
+import "fmt"
+
 //go:generate stringer -type SpecialPointerAuthDiscriminators -trimprefix=Disc -output swift_string.go
 
 const (
@@ -181,3 +183,25 @@ const (
 	/// Functions accessible at runtime (i.e. distributed method accessors).
 	DiscAccessibleFunctionRecord SpecialPointerAuthDiscriminators = 0x438c // = 17292
 )
+
+// TOC is a table of contents for Swift contents.
+type TOC struct {
+	Builtins             int
+	Fields               int
+	Types                int
+	AssociatedTypes      int
+	Protocols            int
+	ProtocolConformances int
+}
+
+func (t TOC) String() string {
+	return fmt.Sprintf(
+		"Swift TOC\n"+
+			"--------\n"+
+			"  __swift5_builtin  = %d\n"+
+			"  __swift5_types(2) = %d\n"+
+			"  __swift5_protos   = %d\n"+
+			"  __swift5_proto    = %d\n",
+		t.Builtins, t.Types, t.Protocols, t.ProtocolConformances,
+	)
+}
