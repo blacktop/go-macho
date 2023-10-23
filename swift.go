@@ -513,7 +513,7 @@ func (f *File) GetSwiftDynamicReplacementInfoForOpaqueTypes() (*swift.AutomaticD
 }
 
 // GetSwiftAccessibleFunctions parses the __TEXT.__swift5_acfuncs section
-func (f *File) GetSwiftAccessibleFunctions() (*swift.AccessibleFunctionsSection, error) {
+func (f *File) GetSwiftAccessibleFunctions() (funcs []swift.TargetAccessibleFunctionRecord, err error) {
 	if sec := f.Section("__TEXT", "__swift5_acfuncs"); sec != nil {
 		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
 		if err != nil {
@@ -526,12 +526,21 @@ func (f *File) GetSwiftAccessibleFunctions() (*swift.AccessibleFunctionsSection,
 			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 		}
 
-		var afsec swift.AccessibleFunctionsSection
-		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &afsec); err != nil {
-			return nil, fmt.Errorf("failed to read %T: %v", afsec, err)
+		r := bytes.NewReader(dat)
+
+		for {
+			curr, _ := r.Seek(0, io.SeekCurrent)
+			var afr swift.TargetAccessibleFunctionRecord
+			if err := afr.Read(r, sec.Addr+uint64(curr)); err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				return nil, fmt.Errorf("failed to read swift %T: %w", afr, err)
+			}
+			funcs = append(funcs, afr)
 		}
 
-		return &afsec, nil
+		return funcs, nil
 	}
 
 	return nil, fmt.Errorf("MachO has no '__swift5_acfuncs' section: %w", ErrSwiftSectionError)
