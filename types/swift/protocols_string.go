@@ -39,7 +39,7 @@ func _() {
 	// Re-run the stringer command to generate them again.
 	var x [1]struct{}
 	_ = x[PRKindBaseProtocol-0]
-	_ = x[PRKindMethodc-1]
+	_ = x[PRKindMethod-1]
 	_ = x[PRKindInit-2]
 	_ = x[PRKindGetter-3]
 	_ = x[PRKindSetter-4]

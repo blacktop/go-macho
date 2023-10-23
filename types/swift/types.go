@@ -114,14 +114,14 @@ func (t Type) dump(verbose bool) string {
 				}
 				sym := m.Symbol
 				if m.Symbol == "" && !m.Impl.IsSet() {
-					sym = fmt.Sprintf("/* <stripped> %s */", m.Flags.String(""))
+					sym = fmt.Sprintf("// <stripped> %s", m.Flags.Verbose())
 				} else if m.Symbol == "" && m.Impl.IsSet() {
-					sym = fmt.Sprintf("%sfunc sub_%x // %s", static, m.Impl.GetAddress(), m.Flags.String(""))
+					sym = fmt.Sprintf("%sfunc sub_%x // %s", static, m.Impl.GetAddress(), m.Flags.Verbose())
 				} else {
 					if m.Impl.IsSet() {
-						sym = fmt.Sprintf("%sfunc %s // %s", static, sym, m.Flags.String(""))
+						sym = fmt.Sprintf("%sfunc %s // %s", static, sym, m.Flags)
 					} else {
-						sym = fmt.Sprintf("/* <stripped> %sfunc %s - %s */", static, sym, m.Flags.String(""))
+						sym = fmt.Sprintf("// <stripped> %sfunc %s %s", static, sym, m.Flags)
 					}
 				}
 				if verbose && m.Address != 0 {
@@ -130,15 +130,19 @@ func (t Type) dump(verbose bool) string {
 				meths = append(meths, fmt.Sprintf("    %s%s", maddr, sym))
 			}
 		}
+		if verbose {
+			addr = fmt.Sprintf("// %#x\n", t.Address)
+		}
 		var parent string
 		if t.Parent != nil && t.Parent.Name != "" {
 			parent = fmt.Sprintf("%s.", t.Parent.Name)
 		}
+		var superClass string
+		if t.Type.(Class).SuperClass != "" {
+			superClass = fmt.Sprintf(": %s", t.Type.(Class).SuperClass)
+		}
 		if len(fields) == 0 && len(meths) == 0 {
-			if verbose {
-				addr = fmt.Sprintf(" // %#x", t.Address)
-			}
-			return fmt.Sprintf("%s %s%s {}%s\n", t.Kind, parent, t.Name, addr)
+			return fmt.Sprintf("%s%s %s%s%s {}", addr, t.Kind, parent, t.Name, superClass)
 		}
 		if len(fields) > 0 {
 			fields = append([]string{"  /* fields */"}, fields...)
@@ -150,14 +154,6 @@ func (t Type) dump(verbose bool) string {
 				meths = append([]string{"  /* methods */"}, meths...)
 			}
 		}
-		var superClass string
-		if t.Type.(Class).SuperClass != "" {
-			superClass = fmt.Sprintf(": %s", t.Type.(Class).SuperClass)
-		}
-		if verbose {
-			addr = fmt.Sprintf("// %#x\n", t.Address)
-		}
-
 		return fmt.Sprintf("%s%s %s%s%s {\n%s%s\n}", addr, t.Kind, parent, t.Name, superClass, strings.Join(fields, "\n"), strings.Join(meths, "\n"))
 	case CDKindStruct:
 		var fields []string
@@ -191,6 +187,7 @@ func (t Type) dump(verbose bool) string {
 	case CDKindEnum:
 		var fields []string
 		if t.Fields != nil {
+			var faddr string
 			for _, r := range t.Fields.Records {
 				cs := "case"
 				if r.Flags.String() == "indirect case" {
@@ -201,17 +198,17 @@ func (t Type) dump(verbose bool) string {
 					typ = fmt.Sprintf(": %s", r.MangledType)
 				}
 				if verbose {
-					addr = fmt.Sprintf("/* %#x */ ", r.FieldNameOffset.Address)
+					faddr = fmt.Sprintf("/* %#x */ ", r.FieldNameOffset.Address)
 				}
-				fields = append(fields, fmt.Sprintf("    %s%s %s%s", addr, cs, r.Name, typ))
+				fields = append(fields, fmt.Sprintf("    %s%s %s%s", faddr, cs, r.Name, typ))
 			}
-		}
-		if verbose {
-			addr = fmt.Sprintf("// %#x\n", t.Address)
 		}
 		var parent string
 		if t.Parent != nil && t.Parent.Name != "" {
 			parent = fmt.Sprintf("%s.", t.Parent.Name)
+		}
+		if verbose {
+			addr = fmt.Sprintf("// %#x\n", t.Address)
 		}
 		if len(fields) == 0 {
 			return fmt.Sprintf("%s%s %s%s {}", addr, t.Kind, parent, t.Name)

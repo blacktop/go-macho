@@ -35,21 +35,32 @@ func (p Protocol) dump(verbose bool) string {
 	var reqs string
 	var atyps string
 	if len(p.Requirements) > 0 {
+		var raddr string
 		reqs = "  /* requirements */\n"
 		for _, req := range p.Requirements {
 			var static string
 			if !req.Flags.IsInstance() {
 				static = "static "
 			}
-			sub := "<stripped>"
-			if req.DefaultImplementation.IsSet() {
-				sub = fmt.Sprintf("sub_%x", req.DefaultImplementation.GetAddress())
+			var sym string
+			switch req.Flags.Kind() {
+			case PRKindMethod, PRKindInit, PRKindGetter, PRKindSetter, PRKindReadCoroutine, PRKindModifyCoroutine:
+				if req.DefaultImplementation.IsSet() {
+					sym = fmt.Sprintf("%sfunc sub_%x // %s", static, req.DefaultImplementation.GetAddress(), req.Flags)
+				} else {
+					sym = fmt.Sprintf("// <stripped> %sfunc %s", static, req.Flags.Verbose())
+				}
+			default:
+				if req.DefaultImplementation.IsSet() {
+					sym = fmt.Sprintf("%s // %s", req.Flags.Kind(), req.Flags.Verbose())
+				} else {
+					sym = fmt.Sprintf("// <stripped> %s", req.Flags.Verbose())
+				}
 			}
-			var flags string
-			if req.DefaultImplementation.Address != 0 {
-				flags = fmt.Sprintf(" // %s", req.Flags.String())
+			if verbose && req.DefaultImplementation.IsSet() {
+				raddr = fmt.Sprintf("/* %#x */ ", req.DefaultImplementation.GetAddress())
 			}
-			reqs += fmt.Sprintf("    %sfunc %s%s\n", static, sub, flags)
+			reqs += fmt.Sprintf("    %s%s\n", raddr, sym)
 		}
 	}
 	if verbose {
@@ -235,7 +246,7 @@ type ProtocolRequirementKind uint8
 
 const (
 	PRKindBaseProtocol                        ProtocolRequirementKind = iota // base protocol
-	PRKindMethodc                                                            // method
+	PRKindMethod                                                             // method
 	PRKindInit                                                               // initializer
 	PRKindGetter                                                             // getter
 	PRKindSetter                                                             // setter
@@ -264,13 +275,30 @@ func (f ProtocolRequirementFlags) ExtraDiscriminator() uint16 {
 }
 func (f ProtocolRequirementFlags) IsFunctionImpl() bool {
 	switch f.Kind() {
-	case PRKindMethodc, PRKindInit, PRKindGetter, PRKindSetter, PRKindReadCoroutine, PRKindModifyCoroutine:
+	case PRKindMethod, PRKindInit, PRKindGetter, PRKindSetter, PRKindReadCoroutine, PRKindModifyCoroutine:
 		return !f.IsAsync()
 	default:
 		return false
 	}
 }
 func (f ProtocolRequirementFlags) String() string {
+	var flags []string
+	if f.IsAsync() {
+		flags = append(flags, "async")
+	}
+	if f.IsFunctionImpl() {
+		flags = append(flags, "func_impl")
+	}
+	var extra string
+	if f.IsSignedWithAddress() && f.ExtraDiscriminator() != 0 {
+		extra = fmt.Sprintf("__ptrauth(%04x)", f.ExtraDiscriminator())
+	}
+	if len(flags) == 0 {
+		return extra
+	}
+	return fmt.Sprintf("%s (%s)", extra, strings.Join(flags, "|"))
+}
+func (f ProtocolRequirementFlags) Verbose() string {
 	var flags []string
 	if f.IsInstance() {
 		flags = append(flags, "instance")
@@ -281,13 +309,14 @@ func (f ProtocolRequirementFlags) String() string {
 	if f.IsFunctionImpl() {
 		flags = append(flags, "func_impl")
 	}
+	var extra string
 	if f.IsSignedWithAddress() && f.ExtraDiscriminator() != 0 {
-		flags = append(flags, fmt.Sprintf("__ptrauth(%#04x)", f.ExtraDiscriminator()))
+		extra = fmt.Sprintf(" __ptrauth(%04x)", f.ExtraDiscriminator())
 	}
-	if len(strings.Join(flags, "|")) == 0 {
-		return f.Kind().String()
+	if len(flags) == 0 {
+		return fmt.Sprintf("%s%s", f.Kind(), extra)
 	}
-	return fmt.Sprintf("%s flags: %s", f.Kind(), strings.Join(flags, ", "))
+	return fmt.Sprintf("%s%s (%s)", f.Kind(), extra, strings.Join(flags, "|"))
 }
 
 // TargetProtocolRequirement protocol requirement descriptor. This describes a single protocol requirement in a protocol descriptor.
@@ -358,7 +387,7 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 	}
 	var resilientWitnesses string
 	if len(c.ResilientWitnesses) > 0 {
-		var rwFlags string
+		var raddr string
 		resilientWitnesses = "\n  /* resilient witnesses */\n"
 		for _, witness := range c.ResilientWitnesses {
 			var static string
@@ -366,20 +395,28 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 				static = "static "
 			}
 			sym := witness.Symbol
-			if witness.Symbol == "" && !witness.ImplOff.IsSet() {
-				sym = "/* <stripped> */"
-			} else if witness.Symbol == "" && witness.ImplOff.IsSet() {
-				sym = fmt.Sprintf("%sfunc sub_%x", static, witness.ImplOff.GetAddress())
-			} else {
-				sym = fmt.Sprintf("%sfunc %s", static, sym)
-			}
-			if verbose {
-				addr = fmt.Sprintf("/* %#x */ ", witness.ImplOff.GetAddress())
-				if witness.Requirement.DefaultImplementation.Address != 0 {
-					rwFlags = fmt.Sprintf(" // %s", witness.Requirement.Flags.String())
+			switch witness.Requirement.Flags.Kind() {
+			case PRKindMethod, PRKindInit, PRKindGetter, PRKindSetter, PRKindReadCoroutine, PRKindModifyCoroutine:
+				if witness.ImplOff.IsSet() {
+					if sym == "" {
+						sym = fmt.Sprintf("%sfunc sub_%x // %s", static, witness.ImplOff.GetAddress(), witness.Requirement.Flags.Verbose())
+					}
+				} else {
+					sym = fmt.Sprintf("// <stripped> %sfunc %s", static, witness.Requirement.Flags.Verbose())
+				}
+			default:
+				if witness.ImplOff.IsSet() {
+					if sym == "" {
+						sym = fmt.Sprintf("%s // %s", witness.Requirement.Flags.Kind(), witness.Requirement.Flags.Verbose())
+					}
+				} else {
+					sym = fmt.Sprintf("// <stripped> %s", witness.Requirement.Flags.Verbose())
 				}
 			}
-			resilientWitnesses += fmt.Sprintf("    %s%s%s\n", addr, sym, rwFlags)
+			if verbose && witness.ImplOff.IsSet() {
+				raddr = fmt.Sprintf("/* %#x */ ", witness.ImplOff.GetAddress())
+			}
+			resilientWitnesses += fmt.Sprintf("    %s%s\n", raddr, sym)
 		}
 	}
 	var witnessTablePattern string
@@ -388,7 +425,7 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 			witnessTablePattern = "\n"
 		}
 		witnessTablePattern += "  /* witness table pattern */\n"
-		witnessTablePattern += fmt.Sprintf("    // %#x\n", c.WitnessTablePatternOffsest.GetAddress())
+		witnessTablePattern += fmt.Sprintf("    /* %#x */\n", c.WitnessTablePatternOffsest.GetAddress())
 	}
 	var accFunc string
 	if verbose {

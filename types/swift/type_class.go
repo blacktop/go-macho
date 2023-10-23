@@ -240,7 +240,24 @@ func (f MethodDescriptorFlags) IsAsync() bool {
 func (f MethodDescriptorFlags) ExtraDiscriminator() uint16 {
 	return uint16(f >> ExtraDiscriminatorShift)
 }
-func (f MethodDescriptorFlags) String(field string) string {
+func (f MethodDescriptorFlags) String() string {
+	var flags []string
+	if f.IsDynamic() {
+		flags = append(flags, "dynamic")
+	}
+	if f.IsAsync() {
+		flags = append(flags, "async")
+	}
+	var extra string
+	if f.ExtraDiscriminator() != 0 {
+		extra = fmt.Sprintf("__ptrauth(%04x)", f.ExtraDiscriminator())
+	}
+	if len(flags) == 0 {
+		return extra
+	}
+	return fmt.Sprintf("%s (%s)", extra, strings.Join(flags, "|"))
+}
+func (f MethodDescriptorFlags) Verbose() string {
 	var flags []string
 	if f.IsInstance() {
 		flags = append(flags, "instance")
@@ -251,16 +268,14 @@ func (f MethodDescriptorFlags) String(field string) string {
 	if f.IsAsync() {
 		flags = append(flags, "async")
 	}
+	var extra string
 	if f.ExtraDiscriminator() != 0 {
-		flags = append(flags, fmt.Sprintf("extra discriminator %#x", f.ExtraDiscriminator()))
+		extra = fmt.Sprintf(" __ptrauth(%04x)", f.ExtraDiscriminator())
 	}
-	if len(strings.Join(flags, "|")) == 0 {
-		return f.Kind().String()
+	if len(flags) == 0 {
+		return fmt.Sprintf("%s%s", f.Kind(), extra)
 	}
-	if len(field) > 0 {
-		field += " "
-	}
-	return fmt.Sprintf("%s%s (%s)", field, f.Kind(), strings.Join(flags, "|"))
+	return fmt.Sprintf("%s%s (%s)", f.Kind(), extra, strings.Join(flags, "|"))
 }
 
 // Header for a class vtable override descriptor. This is a variable-sized

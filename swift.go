@@ -999,15 +999,15 @@ func (f *File) parseProtocol(r io.ReadSeeker, typ *swift.Type) (prot *swift.Prot
 
 	if prot.ParentOffset.IsSet() {
 		f.cr.SeekToAddr(prot.ParentOffset.GetAddress())
-		ctx, err := f.getContextDesc(prot.ParentOffset.GetAddress())
+		prot.Parent, err = f.getContextDesc(prot.ParentOffset.GetAddress())
 		if err != nil {
 			return nil, fmt.Errorf("failed to get parent: %v", err)
 		}
 		typ.Parent = &swift.Type{
 			Address: prot.ParentOffset.GetAddress(),
-			Name:    ctx.Name,
+			Name:    prot.Parent.Name,
 			Parent: &swift.Type{
-				Name: ctx.Parent,
+				Name: prot.Parent.Parent,
 			},
 		}
 	}
@@ -1016,6 +1016,7 @@ func (f *File) parseProtocol(r io.ReadSeeker, typ *swift.Type) (prot *swift.Prot
 	if err != nil {
 		return nil, fmt.Errorf("failed to read cstring: %v", err)
 	}
+	typ.Name = prot.Name
 
 	if prot.AssociatedTypeNamesOffset.IsSet() {
 		prot.AssociatedTypes, err = f.getAssociatedTypes(prot.AssociatedTypeNamesOffset.GetAddress())
@@ -1026,9 +1027,6 @@ func (f *File) parseProtocol(r io.ReadSeeker, typ *swift.Type) (prot *swift.Prot
 
 	curr, _ := r.Seek(0, io.SeekCurrent)
 	typ.Size = int64(curr - off)
-	typ.Name = prot.Name
-	// typ.Parent = prot.Parent
-
 	typ.Type = *prot
 
 	return prot, nil
