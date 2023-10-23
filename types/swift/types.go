@@ -113,13 +113,15 @@ func (t Type) dump(verbose bool) string {
 					static = "static "
 				}
 				sym := m.Symbol
-				if m.Symbol == "" && !m.Impl.IsSet() {
-					sym = fmt.Sprintf("// <stripped> %s", m.Flags.Verbose())
-				} else if m.Symbol == "" && m.Impl.IsSet() {
-					sym = fmt.Sprintf("%sfunc sub_%x // %s", static, m.Impl.GetAddress(), m.Flags.Verbose())
-				} else {
-					if m.Impl.IsSet() {
+				if m.Impl.IsSet() {
+					if m.Symbol == "" {
+						sym = fmt.Sprintf("%sfunc sub_%x // %s", static, m.Impl.GetAddress(), m.Flags.Verbose())
+					} else {
 						sym = fmt.Sprintf("%sfunc %s // %s", static, sym, m.Flags)
+					}
+				} else {
+					if m.Symbol == "" {
+						sym = fmt.Sprintf("// <stripped> %sfunc %s", static, m.Flags.Verbose())
 					} else {
 						sym = fmt.Sprintf("// <stripped> %sfunc %s %s", static, sym, m.Flags)
 					}
