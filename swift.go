@@ -633,6 +633,8 @@ func (f *File) GetSwiftMultiPayloadEnums() (mpenums []swift.MultiPayloadEnum, er
 				return nil, fmt.Errorf("failed to read mpenum contents: %w", err)
 			}
 
+			// TODO: understand and use the large bit-mask
+
 			addr := int64(sec.Addr) + int64(curr) + int64(mpenum.TypeName)
 			name, err := f.makeSymbolicMangledNameStringRef(uint64(addr))
 			if err != nil {

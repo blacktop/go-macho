@@ -2,6 +2,22 @@ package swift
 
 import "fmt"
 
+type MultiPayloadEnum struct {
+	Address  uint64
+	Type     string
+	Contents []uint32
+}
+
+func (e MultiPayloadEnum) String() string {
+	return fmt.Sprintf("// %#x (multi-payload)\nenum %s {}", e.Address, e.Type)
+}
+
+// ref: include/swift/RemoteInspection/Records.h
+type MultiPayloadEnumDescriptor struct {
+	TypeName int32
+	Contents []uint32
+}
+
 type MultiPayloadEnumSizeAndFlags uint32
 
 func (f MultiPayloadEnumSizeAndFlags) Size() uint16 {
@@ -27,20 +43,4 @@ func (f MultiPayloadEnumPayloadSpareBitMaskByteCount) ByteCount() uint16 {
 }
 func (f MultiPayloadEnumPayloadSpareBitMaskByteCount) String() string {
 	return fmt.Sprintf("byte_offset: %d, byte_count: %d", f.ByteOffset(), f.ByteCount())
-}
-
-// ref: include/swift/RemoteInspection/Records.h
-type MultiPayloadEnumDescriptor struct {
-	TypeName int32
-	Contents []uint32
-}
-
-type MultiPayloadEnum struct {
-	Address  uint64
-	Type     string
-	Contents []uint32
-}
-
-func (e MultiPayloadEnum) String() string {
-	return fmt.Sprintf("// %#x (multi-payload)\nenum %s {}", e.Address, e.Type)
 }
