@@ -88,25 +88,26 @@ func (f *File) GetSwiftBuiltinTypes() (builtins []swift.BuiltinType, err error) 
 			return nil, fmt.Errorf("failed to read %s.%s data: %w", sec.Seg, sec.Name, err)
 		}
 
-		btypes := make([]swift.BuiltinTypeDescriptor, int(sec.Size)/binary.Size(swift.BuiltinTypeDescriptor{}))
+		r := bytes.NewReader(dat)
 
-		if err := binary.Read(bytes.NewReader(dat), f.ByteOrder, &btypes); err != nil {
-			return nil, fmt.Errorf("failed to read []swift.BuiltinTypeDescriptor: %w", err)
-		}
+		for {
+			curr, _ := r.Seek(0, io.SeekCurrent)
 
-		for idx, btype := range btypes {
-			currAddr := sec.Addr + uint64(idx*binary.Size(swift.BuiltinTypeDescriptor{}))
-
-			name, err := f.makeSymbolicMangledNameStringRef(uint64(int64(currAddr) + int64(btype.TypeName)))
+			var bi swift.BuiltinType
+			err := bi.BuiltinTypeDescriptor.Read(r, sec.Addr+uint64(curr))
 			if err != nil {
-				return nil, fmt.Errorf("failed to read builtin type name: %w", err)
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				return nil, fmt.Errorf("failed to read swift builtin type descriptor at address %#x: %w", sec.Addr+uint64(curr), err)
 			}
 
-			builtins = append(builtins, swift.BuiltinType{
-				BuiltinTypeDescriptor: btype,
-				Address:               currAddr,
-				Name:                  name,
-			})
+			bi.Name, err = f.makeSymbolicMangledNameStringRef(bi.TypeName.GetAddress())
+			if err != nil {
+				return nil, fmt.Errorf("failed to read swift builtin type name at address %#x: %w", bi.TypeName.GetAddress(), err)
+			}
+
+			builtins = append(builtins, bi)
 		}
 
 		return builtins, nil
@@ -2003,7 +2004,11 @@ func (f *File) getContextDesc(addr uint64) (ctx *swift.TargetModuleContext, err 
 		if err != nil {
 			return nil, fmt.Errorf("failed to read swift module context name: %w", err)
 		}
-		ctx.Parent = parent.Name
+		if parent.Parent != "" {
+			ctx.Parent = parent.Parent + "." + parent.Name
+		} else {
+			ctx.Parent = parent.Name
+		}
 	}
 
 	switch ctx.Flags.Kind() {
