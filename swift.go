@@ -463,15 +463,15 @@ func (f *File) GetSwiftClosures() (closures []swift.Capture, err error) {
 				}
 			}
 
-			if capture.NumBindings > 0 {
-				capture.Bindings = make([]swift.NecessaryBindings, capture.NumBindings)
-				for i := uint32(0); i < capture.NumBindings; i++ {
-					curr, _ := r.Seek(0, io.SeekCurrent)
-					if err := capture.Bindings[i].Read(r, capture.Address+uint64(curr-off)); err != nil {
-						return nil, fmt.Errorf("failed to read swift %T: %v", capture.Bindings[i], err)
-					}
-				}
-			}
+			// if capture.NumBindings > 0 {
+			// 	capture.Bindings = make([]swift.NecessaryBindings, capture.NumBindings)
+			// 	for i := uint32(0); i < capture.NumBindings; i++ {
+			// 		curr, _ := r.Seek(0, io.SeekCurrent)
+			// 		if err := capture.Bindings[i].Read(r, capture.Address+uint64(curr-off)); err != nil {
+			// 			return nil, fmt.Errorf("failed to read swift %T: %v", capture.Bindings[i], err)
+			// 		}
+			// 	}
+			// }
 
 			closures = append(closures, capture)
 		}
@@ -1895,13 +1895,18 @@ func (f *File) parseEnumDescriptor(r io.ReadSeeker, typ *swift.Type) (err error)
 	return nil
 }
 
-// PreCache will precache all swift fields and types (to hopefully improve performance)
+// PreCache will precache all swift fields, types and built-in types (to hopefully improve performance)
 func (f *File) PreCache() error {
 	if _, err := f.GetSwiftFields(); err != nil {
 		if !errors.Is(err, ErrSwiftSectionError) {
 			return fmt.Errorf("failed to precache swift fields: %w", err)
 		}
 	}
+	// if _, err := f.GetSwiftBuiltinTypes(); err != nil {
+	// 	if !errors.Is(err, ErrSwiftSectionError) {
+	// 		return fmt.Errorf("failed to precache swift builtin types: %w", err)
+	// 	}
+	// }
 	if _, err := f.GetSwiftColocateTypeDescriptors(); err != nil {
 		if !errors.Is(err, ErrSwiftSectionError) {
 			return fmt.Errorf("failed to precache swift types: %w", err)
