@@ -913,10 +913,16 @@ func (f *File) parseExtension(r io.ReadSeeker, typ *swift.Type) (err error) {
 				return fmt.Errorf("failed to read generic requirement: %v", err)
 			}
 		}
-		// ext.GenericContext.KeyArguments = make([]swift.GenericPackShapeDescriptor, ext.GenericContext.NumKeyArguments)
-		// if err := binary.Read(r, f.ByteOrder, &ext.GenericContext.KeyArguments); err != nil {
-		// 	return fmt.Errorf("failed to read generic key arguments: %v", err)
-		// }
+		if ext.GenericContext.Flags.HasTypePacks() {
+			var hdr swift.GenericPackShapeHeader
+			if err := binary.Read(r, f.ByteOrder, &hdr); err != nil {
+				return fmt.Errorf("failed to read generic pack shape header: %v", err)
+			}
+			ext.GenericContext.TypePacks = make([]swift.GenericPackShapeDescriptor, hdr.NumPacks)
+			if err := binary.Read(r, f.ByteOrder, &ext.GenericContext.TypePacks); err != nil {
+				return fmt.Errorf("failed to read generic pack shape descriptors: %v", err)
+			}
+		}
 	}
 
 	if ext.ParentOffset.IsSet() {
@@ -972,11 +978,16 @@ func (f *File) parseAnonymous(r io.ReadSeeker, typ *swift.Type) (err error) {
 				return fmt.Errorf("failed to read generic requirement: %v", err)
 			}
 		}
-		// args := make([]swift.GenericPackShapeDescriptor, g.Base.NumKeyArguments)
-		// if err := binary.Read(r, f.ByteOrder, &args); err != nil {
-		// 	return fmt.Errorf("failed to read generic key arguments: %v", err)
-		// }
-		// _ = args // TODO: use this
+		if anon.GenericContext.Flags.HasTypePacks() {
+			var hdr swift.GenericPackShapeHeader
+			if err := binary.Read(r, f.ByteOrder, &hdr); err != nil {
+				return fmt.Errorf("failed to read generic pack shape header: %v", err)
+			}
+			anon.GenericContext.TypePacks = make([]swift.GenericPackShapeDescriptor, hdr.NumPacks)
+			if err := binary.Read(r, f.ByteOrder, &anon.GenericContext.TypePacks); err != nil {
+				return fmt.Errorf("failed to read generic pack shape descriptors: %v", err)
+			}
+		}
 	}
 
 	if anon.HasMangledName() {
@@ -1333,6 +1344,16 @@ func (f *File) parseOpaqueType(r io.ReadSeeker, typ *swift.Type) (err error) {
 				return fmt.Errorf("failed to read generic requirement: %v", err)
 			}
 		}
+		if ot.GenericContext.Flags.HasTypePacks() {
+			var hdr swift.GenericPackShapeHeader
+			if err := binary.Read(r, f.ByteOrder, &hdr); err != nil {
+				return fmt.Errorf("failed to read generic pack shape header: %v", err)
+			}
+			ot.GenericContext.TypePacks = make([]swift.GenericPackShapeDescriptor, hdr.NumPacks)
+			if err := binary.Read(r, f.ByteOrder, &ot.GenericContext.TypePacks); err != nil {
+				return fmt.Errorf("failed to read generic pack shape descriptors: %v", err)
+			}
+		}
 	}
 
 	if uint32(ot.Flags.KindSpecific()) > 0 { // TypeArgs
@@ -1407,11 +1428,16 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 				return fmt.Errorf("failed to read generic requirement: %v", err)
 			}
 		}
-		// args := make([]swift.GenericPackShapeDescriptor, g.Base.NumKeyArguments)
-		// if err := binary.Read(r, f.ByteOrder, &args); err != nil {
-		// 	return fmt.Errorf("failed to read generic key arguments: %v", err)
-		// }
-		// _ = args // TODO: use this
+		if class.GenericContext.Base.Flags.HasTypePacks() {
+			var hdr swift.GenericPackShapeHeader
+			if err := binary.Read(r, f.ByteOrder, &hdr); err != nil {
+				return fmt.Errorf("failed to read generic pack shape header: %v", err)
+			}
+			class.GenericContext.TypePacks = make([]swift.GenericPackShapeDescriptor, hdr.NumPacks)
+			if err := binary.Read(r, f.ByteOrder, &class.GenericContext.TypePacks); err != nil {
+				return fmt.Errorf("failed to read generic pack shape descriptors: %v", err)
+			}
+		}
 	}
 
 	if class.Flags.KindSpecific().HasResilientSuperclass() {
@@ -1681,11 +1707,16 @@ func (f *File) parseStructDescriptor(r io.ReadSeeker, typ *swift.Type) (err erro
 				return fmt.Errorf("failed to read generic requirement: %v", err)
 			}
 		}
-		// args := make([]swift.GenericPackShapeDescriptor, g.Base.NumKeyArguments)
-		// if err := binary.Read(r, f.ByteOrder, &args); err != nil {
-		// 	return fmt.Errorf("failed to read generic key arguments: %v", err)
-		// }
-		// _ = args // TODO: use this
+		if st.GenericContext.Base.Flags.HasTypePacks() {
+			var hdr swift.GenericPackShapeHeader
+			if err := binary.Read(r, f.ByteOrder, &hdr); err != nil {
+				return fmt.Errorf("failed to read generic pack shape header: %v", err)
+			}
+			st.GenericContext.TypePacks = make([]swift.GenericPackShapeDescriptor, hdr.NumPacks)
+			if err := binary.Read(r, f.ByteOrder, &st.GenericContext.TypePacks); err != nil {
+				return fmt.Errorf("failed to read generic pack shape descriptors: %v", err)
+			}
+		}
 	}
 
 	if st.Flags.KindSpecific().MetadataInitialization() == swift.MetadataInitForeign {
@@ -1800,11 +1831,16 @@ func (f *File) parseEnumDescriptor(r io.ReadSeeker, typ *swift.Type) (err error)
 				return fmt.Errorf("failed to read generic requirement: %v", err)
 			}
 		}
-		// args := make([]swift.GenericPackShapeDescriptor, g.Base.NumKeyArguments)
-		// if err := binary.Read(r, f.ByteOrder, &args); err != nil {
-		// 	return fmt.Errorf("failed to read generic key arguments: %v", err)
-		// }
-		// _ = args // TODO: use this
+		if enum.GenericContext.Base.Flags.HasTypePacks() {
+			var hdr swift.GenericPackShapeHeader
+			if err := binary.Read(r, f.ByteOrder, &hdr); err != nil {
+				return fmt.Errorf("failed to read generic pack shape header: %v", err)
+			}
+			enum.GenericContext.TypePacks = make([]swift.GenericPackShapeDescriptor, hdr.NumPacks)
+			if err := binary.Read(r, f.ByteOrder, &enum.GenericContext.TypePacks); err != nil {
+				return fmt.Errorf("failed to read generic pack shape descriptors: %v", err)
+			}
+		}
 	}
 
 	if enum.Flags.KindSpecific().MetadataInitialization() == swift.MetadataInitForeign {
@@ -1979,7 +2015,7 @@ func (f *File) getContextDesc(addr uint64) (ctx *swift.TargetModuleContext, err 
 		addr = addr &^ 1
 		ptr, err = f.GetPointerAtAddress(addr)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read swift context descriptor pointer @ %#x: %v", addr, err)
+			return nil, fmt.Errorf("failed to read swift context descriptor pointer at address %#x: %v", addr, err)
 		}
 		ptr = f.vma.Convert(ptr)
 	} else {
@@ -1987,25 +2023,35 @@ func (f *File) getContextDesc(addr uint64) (ctx *swift.TargetModuleContext, err 
 	}
 
 	if err := f.cr.SeekToAddr(ptr); err != nil {
-		bind, err := f.GetBindName(ptr)
-		if err == nil {
+		if bind, err := f.GetBindName(ptr); err == nil {
 			return &swift.TargetModuleContext{Name: bind}, nil
+		} else if syms, err := f.FindAddressSymbols(ptr); err == nil {
+			if len(syms) > 0 {
+				for _, s := range syms {
+					if !s.Type.IsDebugSym() {
+						return &swift.TargetModuleContext{Name: s.Name}, nil
+					}
+				}
+			}
 		}
-		return nil, fmt.Errorf("failed to seek to swift context descriptor parent offset: %w", err)
 	}
 
 	ctx = &swift.TargetModuleContext{}
 	if err := ctx.TargetModuleContextDescriptor.Read(f.cr, ptr); err != nil {
-		return nil, fmt.Errorf("failed to read swift module context descriptor: %w", err)
+		return nil, fmt.Errorf("failed to read swift context descriptor: %w", err)
 	}
 
 	if ctx.ParentOffset.IsSet() {
 		parent, err := f.getContextDesc(ctx.ParentOffset.GetAddress())
 		if err != nil {
-			return nil, fmt.Errorf("failed to read swift module context name: %w", err)
+			return nil, fmt.Errorf("failed to read swift context descriptor parent context: %w", err)
 		}
 		if parent.Parent != "" {
-			ctx.Parent = parent.Parent + "." + parent.Name
+			if parent.Name != "" {
+				ctx.Parent = parent.Parent + "." + parent.Name
+			} else {
+				ctx.Parent = parent.Parent
+			}
 		} else {
 			ctx.Parent = parent.Name
 		}
@@ -2110,40 +2156,52 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 		return "", fmt.Errorf("failed to parse control data: %v", err)
 	}
 
+	var isBoundGeneric bool
 	var out []string
 
-	for _, part := range parts {
+	for idx, part := range parts {
 		switch part := part.(type) {
 		case string:
-			switch part {
-			case "Sg": // optional
-				out = append(out, "?")
-			case "SSg", "G", "x": // Swift.String?
-				out = append(out, "_$sS"+part)
-			default:
-				if regexp.MustCompile("So[0-9]+").MatchString(part) {
-					if strings.Contains(part, "OS_dispatch_queue") {
-						out = append(out, "DispatchQueue")
-					} else {
-						out = append(out, "_$s"+part)
-					}
-				} else if regexp.MustCompile("^[0-9]+").MatchString(part) {
-					// remove leading numbers
-					for i, c := range part {
-						if !unicode.IsNumber(c) {
-							out = append(out, part[i:])
-							break
-						}
-					}
-				} else if strings.HasPrefix(part, "$s") {
-					out = append(out, "_"+part)
+			if len(parts) > 1 {
+				// ref - https://github.com/apple/swift/blob/main/docs/ABI/Mangling.rst#types
+				// bound-generic-type ::= type 'y' (type* '_')* type* retroactive-conformance* 'G'   // one type-list per nesting level of type
+				// bound-generic-type ::= substitution
+				if strings.HasSuffix(part, "y") { //&& idx == 0 {
+					isBoundGeneric = true
+					part = strings.TrimSuffix(part, "y")
+				} else if part == "G" && idx == len(parts)-1 {
+					continue // end of bound-generic-type
+				}
+			}
+			if regexp.MustCompile("So[0-9]+").MatchString(part) {
+				if strings.Contains(part, "OS_dispatch_queue") {
+					out = append(out, "DispatchQueue")
 				} else {
-					if strings.HasPrefix(part, "S") {
-						out = append(out, "_$s"+part)
-					} else if strings.HasPrefix(part, "y") {
-						out = append(out, "_$sSS"+part)
+					out = append(out, "_$s"+part)
+				}
+			} else if regexp.MustCompile("^[0-9]+").MatchString(part) {
+				// remove leading numbers
+				for i, c := range part {
+					if !unicode.IsNumber(c) {
+						out = append(out, part[i:])
+						break
+					}
+				}
+			} else if strings.HasPrefix(part, "$s") {
+				out = append(out, "_"+part)
+			} else {
+				if demangled, ok := swift.MangledType[part]; ok {
+					out = append(out, demangled)
+				} else if strings.HasPrefix(part, "s") {
+					if demangled, ok := swift.MangledKnownTypeKind[part[1:]]; ok {
+						out = append(out, demangled)
+					}
+				} else {
+					if isBoundGeneric {
+						out = append(out, []string{"_$s" + part, "->"}...)
+						isBoundGeneric = false
 					} else {
-						out = append(out, "_$sS"+part)
+						out = append(out, "_$s"+part)
 					}
 				}
 			}

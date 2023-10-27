@@ -10,7 +10,7 @@ import (
 	"github.com/blacktop/go-macho/types"
 )
 
-//go:generate stringer -type ContextDescriptorKind,TypeReferenceKind,MetadataInitializationKind,SpecialKind -linecomment -output types_string.go
+//go:generate stringer -type ContextDescriptorKind,TypeReferenceKind,MetadataInitializationKind,SpecialKind,GenericParamKind -linecomment -output types_string.go
 
 // __TEXT.__swift5_types
 // This section contains an array of 32-bit signed integers.
@@ -553,12 +553,14 @@ type GenericContext struct {
 	TargetGenericContextDescriptorHeader
 	Parameters   []GenericParamDescriptor
 	Requirements []TargetGenericRequirementDescriptor
+	TypePacks    []GenericPackShapeDescriptor
 }
 
 type TypeGenericContext struct {
 	TargetTypeGenericContextDescriptorHeader
 	Parameters   []GenericParamDescriptor
 	Requirements []TargetGenericRequirementDescriptor
+	TypePacks    []GenericPackShapeDescriptor
 }
 
 type TargetTypeGenericContextDescriptorHeader struct {
@@ -664,10 +666,10 @@ type GenericParamKind uint8
 
 const (
 	// A type parameter.
-	GPKType = 0
+	GPKType GenericParamKind = 0 // type
 	// A type parameter pack.
-	GPKTypePack = 1
-	GPKMax      = 0x3F
+	GPKTypePack GenericParamKind = 1    // type_pack
+	GPKMax      GenericParamKind = 0x3F // max
 )
 
 // Don't set 0x40 for compatibility with pre-Swift 5.8 runtimes (4 byte align)
@@ -678,6 +680,9 @@ func (g GenericParamDescriptor) HasKeyArgument() bool {
 }
 func (g GenericParamDescriptor) GetKind() GenericParamKind {
 	return GenericParamKind(g & 0x3F)
+}
+func (g GenericParamDescriptor) String() string {
+	return fmt.Sprintf("has_key_arg: %t, kind: %s", g.HasKeyArgument(), g.GetKind())
 }
 
 type GenericEnvironmentFlags uint32
