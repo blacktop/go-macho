@@ -2,6 +2,7 @@ package swift
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 )
 
@@ -20,6 +21,10 @@ func (r RelativeDirectPointer) GetAddress() uint64 {
 }
 func (r RelativeDirectPointer) IsSet() bool {
 	return r.RelOff != 0
+}
+func (p *RelativeDirectPointer) Read(r io.Reader, addr uint64) error {
+	p.Address = addr
+	return binary.Read(r, binary.LittleEndian, &p.RelOff)
 }
 
 type TargetRelativeDirectPointer struct {
@@ -60,4 +65,34 @@ func (ri RelativeIndirectablePointer) GetAddress(readPtr func(uint64) (uint64, e
 	} else {
 		return addr, nil
 	}
+}
+
+type RelativeTargetProtocolDescriptorPointer struct {
+	Address uint64
+	RelOff  int32
+}
+
+func (r RelativeTargetProtocolDescriptorPointer) IsSet() bool {
+	return r.RelOff != 0
+}
+func (r RelativeTargetProtocolDescriptorPointer) mask() uint64 {
+	return uint64(4-1) &^ 1
+}
+func (r RelativeTargetProtocolDescriptorPointer) IsObjC() bool {
+	return uint64(int64(r.Address)+int64(r.RelOff))&r.mask()>>1 == 1
+}
+func (r RelativeTargetProtocolDescriptorPointer) GetRelPtrAddress() uint64 {
+	return uint64(int64(r.Address)+int64(r.RelOff)) &^ r.mask()
+}
+func (r RelativeTargetProtocolDescriptorPointer) GetAddress(readPtr func(uint64) (uint64, error)) (uint64, error) {
+	addr := r.GetRelPtrAddress()
+	if (addr & 1) == 1 {
+		addr = addr &^ 1
+		return readPtr(addr)
+	} else {
+		return addr, nil
+	}
+}
+func (r RelativeTargetProtocolDescriptorPointer) String() string {
+	return fmt.Sprintf("addr: %#x, off: %d, mask: %#x, objc: %t -> %#x", r.Address, r.RelOff, r.mask(), r.IsObjC(), r.GetRelPtrAddress())
 }

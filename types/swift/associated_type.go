@@ -34,7 +34,7 @@ func (a AssociatedType) dump(verbose bool) string {
 		if verbose {
 			addr = fmt.Sprintf("/* %#x */ ", v.NameOffset.GetAddress())
 		}
-		vars = append(vars, fmt.Sprintf("    %s%s: %s", addr, v.Name, v.SubstitutedTypeName))
+		vars = append(vars, fmt.Sprintf("    %stypealias %s = %s", addr, v.Name, v.SubstitutedTypeName))
 	}
 	if verbose {
 		addr = fmt.Sprintf("// %#x\n", a.Address)

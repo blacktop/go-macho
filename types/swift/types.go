@@ -10,7 +10,7 @@ import (
 	"github.com/blacktop/go-macho/types"
 )
 
-//go:generate stringer -type ContextDescriptorKind,TypeReferenceKind,MetadataInitializationKind,SpecialKind,GenericParamKind -linecomment -output types_string.go
+//go:generate stringer -type ContextDescriptorKind,TypeReferenceKind,MetadataInitializationKind,SpecialKind,GenericParamKind,GenericRequirementLayoutKind -linecomment -output types_string.go
 
 // __TEXT.__swift5_types
 // This section contains an array of 32-bit signed integers.
@@ -20,6 +20,7 @@ type Type struct {
 	Address        uint64
 	Parent         *Type
 	Name           string
+	ImportInfo     string
 	Kind           ContextDescriptorKind
 	AccessFunction uint64
 	Fields         *Field
@@ -53,8 +54,13 @@ func (t Type) dump(verbose bool) string {
 			addr = fmt.Sprintf("// %#x\n", t.Address)
 		}
 		var parent string
-		if t.Parent != nil && t.Parent.Name != "" {
-			parent = fmt.Sprintf("%s.", t.Parent.Name)
+		if t.Parent != nil && (t.Parent.Name != "" || t.Parent.Parent.Name != "") {
+			if t.Parent.Parent.Name != "" {
+				parent += t.Parent.Parent.Name + "."
+			}
+			if t.Parent.Name != "" {
+				parent += t.Parent.Name + "."
+			}
 		}
 		return fmt.Sprintf("%s%s %s%s", addr, t.Kind, parent, t.Name)
 	case CDKindAnonymous:
@@ -140,15 +146,49 @@ func (t Type) dump(verbose bool) string {
 			}
 		}
 		var parent string
-		if t.Parent != nil && t.Parent.Name != "" {
-			parent = fmt.Sprintf("%s.", t.Parent.Name)
+		if t.Parent != nil && (t.Parent.Name != "" || t.Parent.Parent.Name != "") {
+			if t.Parent.Parent.Name != "" {
+				parent += t.Parent.Parent.Name + "."
+			}
+			if t.Parent.Name != "" {
+				parent += t.Parent.Name + "."
+			}
 		}
 		var superClass string
 		if t.Type.(Class).SuperClass != "" {
 			superClass = fmt.Sprintf(": %s", t.Type.(Class).SuperClass)
 		}
+		if t.Type.(Class).Flags.KindSpecific().HasResilientSuperclass() {
+			superClass = t.Type.(Class).ResilientSuperclass.Type.Name
+			if t.Type.(Class).ResilientSuperclass.Type.Parent.Name != "" {
+				superClass += t.Type.(Class).ResilientSuperclass.Type.Parent.Name + "." + superClass
+			}
+		}
+		var impinf string
+		if t.ImportInfo != "" {
+			impinf = fmt.Sprintf("typealias %s %s\n", t.ImportInfo, t.Name)
+			t.Name = t.ImportInfo
+		}
+		var ctx string
+		var size string
+		if t.Type.(Class).GenericContext != nil {
+			if len(t.Type.(Class).GenericContext.Requirements) > 0 {
+				var parts []string
+				for _, req := range t.Type.(Class).GenericContext.Requirements {
+					parts = append(parts, fmt.Sprintf("%s: %s", req.Param, req.Kind))
+				}
+				if len(parts) > 0 {
+					ctx = fmt.Sprintf("<%s>", strings.Join(parts, ", "))
+				}
+			}
+			if t.Type.(Class).GenericContext.GenericMetadataPattern != nil && t.Type.(Class).GenericContext.GenericMetadataPattern.ValueWitnessTable != nil {
+				if t.Type.(Class).GenericContext.GenericMetadataPattern.ValueWitnessTable.Size > 0 {
+					size = fmt.Sprintf(", size: %d", t.Type.(Class).GenericContext.GenericMetadataPattern.ValueWitnessTable.Size)
+				}
+			}
+		}
 		if len(fields) == 0 && len(meths) == 0 {
-			return fmt.Sprintf("%s%s %s%s%s {}%s", addr, t.Kind, parent, t.Name, superClass, accessor)
+			return fmt.Sprintf("%s%s%s %s%s%s%s {}%s%s", addr, impinf, t.Kind, parent, t.Name, superClass, ctx, accessor, size)
 		}
 		if len(fields) > 0 {
 			fields = append([]string{"  /* fields */"}, fields...)
@@ -160,7 +200,7 @@ func (t Type) dump(verbose bool) string {
 				meths = append([]string{"  /* methods */"}, meths...)
 			}
 		}
-		return fmt.Sprintf("%s%s %s%s%s {%s\n%s%s\n}", addr, t.Kind, parent, t.Name, superClass, accessor, strings.Join(fields, "\n"), strings.Join(meths, "\n"))
+		return fmt.Sprintf("%s%s%s %s%s%s%s {%s%s\n%s%s\n}", addr, impinf, t.Kind, parent, t.Name, superClass, ctx, accessor, size, strings.Join(fields, "\n"), strings.Join(meths, "\n"))
 	case CDKindStruct:
 		var fields []string
 		if t.Fields != nil {
@@ -188,13 +228,41 @@ func (t Type) dump(verbose bool) string {
 			}
 		}
 		var parent string
-		if t.Parent != nil && t.Parent.Name != "" {
-			parent = fmt.Sprintf("%s.", t.Parent.Name)
+		if t.Parent != nil && (t.Parent.Name != "" || t.Parent.Parent.Name != "") {
+			if t.Parent.Parent.Name != "" {
+				parent += t.Parent.Parent.Name + "."
+			}
+			if t.Parent.Name != "" {
+				parent += t.Parent.Name + "."
+			}
+		}
+		var impinf string
+		if t.ImportInfo != "" {
+			impinf = fmt.Sprintf("typealias %s %s\n", t.ImportInfo, t.Name)
+			t.Name = t.ImportInfo
+		}
+		var ctx string
+		var size string
+		if t.Type.(Struct).GenericContext != nil {
+			if len(t.Type.(Struct).GenericContext.Requirements) > 0 {
+				var parts []string
+				for _, req := range t.Type.(Struct).GenericContext.Requirements {
+					parts = append(parts, fmt.Sprintf("%s: %s", req.Param, req.Kind))
+				}
+				if len(parts) > 0 {
+					ctx = fmt.Sprintf("<%s>", strings.Join(parts, ", "))
+				}
+			}
+			if t.Type.(Struct).GenericContext.GenericMetadataPattern != nil && t.Type.(Struct).GenericContext.GenericMetadataPattern.ValueWitnessTable != nil {
+				if t.Type.(Struct).GenericContext.GenericMetadataPattern.ValueWitnessTable.Size > 0 {
+					size = fmt.Sprintf(", size: %d", t.Type.(Struct).GenericContext.GenericMetadataPattern.ValueWitnessTable.Size)
+				}
+			}
 		}
 		if len(fields) == 0 {
-			return fmt.Sprintf("%s%s %s%s {}%s", addr, t.Kind, parent, t.Name, accessor)
+			return fmt.Sprintf("%s%s%s %s%s%s {}%s%s", addr, impinf, t.Kind, parent, t.Name, ctx, accessor, size)
 		}
-		return fmt.Sprintf("%s%s %s%s {%s\n%s\n}", addr, t.Kind, parent, t.Name, accessor, strings.Join(fields, "\n"))
+		return fmt.Sprintf("%s%s%s %s%s%s {%s%s\n%s\n}", addr, impinf, t.Kind, parent, t.Name, ctx, accessor, size, strings.Join(fields, "\n"))
 	case CDKindEnum:
 		var fields []string
 		if t.Fields != nil {
@@ -215,8 +283,18 @@ func (t Type) dump(verbose bool) string {
 			}
 		}
 		var parent string
-		if t.Parent != nil && t.Parent.Name != "" {
-			parent = fmt.Sprintf("%s.", t.Parent.Name)
+		if t.Parent != nil && (t.Parent.Name != "" || t.Parent.Parent.Name != "") {
+			if t.Parent.Parent.Name != "" {
+				parent += t.Parent.Parent.Name + "."
+			}
+			if t.Parent.Name != "" {
+				parent += t.Parent.Name + "."
+			}
+		}
+		var impinf string
+		if t.ImportInfo != "" {
+			impinf = fmt.Sprintf("typealias %s %s\n", t.ImportInfo, t.Name)
+			t.Name = t.ImportInfo
 		}
 		var accessor string
 		if verbose {
@@ -225,10 +303,28 @@ func (t Type) dump(verbose bool) string {
 				accessor = fmt.Sprintf(" // accessor %#x", t.Type.(Enum).AccessFunctionPtr.GetAddress())
 			}
 		}
-		if len(fields) == 0 {
-			return fmt.Sprintf("%s%s %s%s {}%s", addr, t.Kind, parent, t.Name, accessor)
+		var ctx string
+		var size string
+		if t.Type.(Enum).GenericContext != nil {
+			if len(t.Type.(Enum).GenericContext.Requirements) > 0 {
+				var parts []string
+				for _, req := range t.Type.(Enum).GenericContext.Requirements {
+					parts = append(parts, fmt.Sprintf("%s: %s", req.Param, req.Kind))
+				}
+				if len(parts) > 0 {
+					ctx = fmt.Sprintf("<%s>", strings.Join(parts, ", "))
+				}
+			}
+			if t.Type.(Enum).GenericContext.GenericMetadataPattern != nil && t.Type.(Enum).GenericContext.GenericMetadataPattern.ValueWitnessTable != nil {
+				if t.Type.(Enum).GenericContext.GenericMetadataPattern.ValueWitnessTable.Size > 0 {
+					size = fmt.Sprintf(", size: %d", t.Type.(Enum).GenericContext.GenericMetadataPattern.ValueWitnessTable.Size)
+				}
+			}
 		}
-		return fmt.Sprintf("%s%s %s%s {%s\n%s\n}", addr, t.Kind, parent, t.Name, accessor, strings.Join(fields, "\n"))
+		if len(fields) == 0 {
+			return fmt.Sprintf("%s%s%s %s%s%s {}%s%s", addr, impinf, t.Kind, parent, t.Name, ctx, accessor, size)
+		}
+		return fmt.Sprintf("%s%s%s %s%s%s {%s%s\n%s\n}", addr, impinf, t.Kind, parent, t.Name, ctx, accessor, size, strings.Join(fields, "\n"))
 	default:
 		return fmt.Sprintf("unknown type %s", t.Name)
 	}
@@ -274,17 +370,17 @@ type TypeReferenceKind uint8
 
 const (
 	//The conformance is for a nominal type referenced directly; getTypeDescriptor() points to the type context descriptor.
-	DirectTypeDescriptor TypeReferenceKind = 0x00
+	DirectTypeDescriptor TypeReferenceKind = 0x00 // direct
 	// The conformance is for a nominal type referenced indirectly; getTypeDescriptor() points to the type context descriptor.
-	IndirectTypeDescriptor TypeReferenceKind = 0x01
+	IndirectTypeDescriptor TypeReferenceKind = 0x01 // indirect
 	// The conformance is for an Objective-C class that should be looked up by class name.
-	DirectObjCClassName TypeReferenceKind = 0x02
+	DirectObjCClassName TypeReferenceKind = 0x02 // direct_objc_class
 	// The conformance is for an Objective-C class that has no nominal type descriptor.
 	// getIndirectObjCClass() points to a variable that contains the pointer to
 	// the class object, which then requires a runtime call to get metadata.
 	//
 	// On platforms without Objective-C interoperability, this case is unused.
-	IndirectObjCClass TypeReferenceKind = 0x03
+	IndirectObjCClass TypeReferenceKind = 0x03 // indirect_objc_class
 	// We only reserve three bits for this in the various places we store it.
 	FirstKind = DirectTypeDescriptor
 	LastKind  = IndirectObjCClass
@@ -303,6 +399,16 @@ const (
 	// We only have two bits here, so if you add a third special kind, include more flag bits in its out-of-line storage.
 )
 
+func (k MetadataInitializationKind) None() bool {
+	return k == MetadataInitNone
+}
+func (k MetadataInitializationKind) Singleton() bool {
+	return k == MetadataInitSingleton
+}
+func (k MetadataInitializationKind) Foreign() bool {
+	return k == MetadataInitForeign
+}
+
 type TypeContextDescriptorFlags uint16
 
 const (
@@ -314,8 +420,8 @@ const (
 	/// initialized.
 	///
 	/// Meaningful for all type-descriptor kinds.
-	MetadataInitialization       TypeContextDescriptorFlags = 0
-	MetadataInitialization_width TypeContextDescriptorFlags = 2
+	MetadataInitialization       = 0
+	MetadataInitialization_width = 2
 
 	/// Set if the type has extended import information.
 	///
@@ -325,18 +431,21 @@ const (
 	/// these strings and the order in which they appear.
 	///
 	/// Meaningful for all type-descriptor kinds.
-	HasImportInfo TypeContextDescriptorFlags = 2
+	HasImportInfo = 2
 
 	/// Set if the type descriptor has a pointer to a list of canonical
 	/// prespecializations.
-	HasCanonicalMetadataPrespecializations TypeContextDescriptorFlags = 3
+	HasCanonicalMetadataPrespecializations = 3
+
+	/// Set if the metadata contains a pointer to a layout string
+	HasLayoutString = 4
 
 	// Type-specific flags:
 
 	/// Set if the class is an actor.
 	///
 	/// Only meaningful for class descriptors.
-	Class_IsActor TypeContextDescriptorFlags = 7
+	Class_IsActor = 7
 
 	/// Set if the class is a default actor class.  Note that this is
 	/// based on the best knowledge available to the class; actor
@@ -344,72 +453,81 @@ const (
 	/// without knowing it.
 	///
 	/// Only meaningful for class descriptors.
-	Class_IsDefaultActor TypeContextDescriptorFlags = 8
+	Class_IsDefaultActor = 8
 
 	/// The kind of reference that this class makes to its resilient superclass
 	/// descriptor.  A TypeReferenceKind.
 	///
 	/// Only meaningful for class descriptors.
-	Class_ResilientSuperclassReferenceKind       TypeContextDescriptorFlags = 9
-	Class_ResilientSuperclassReferenceKind_width TypeContextDescriptorFlags = 3
+	Class_ResilientSuperclassReferenceKind       = 9
+	Class_ResilientSuperclassReferenceKind_width = 3
 
 	/// Whether the immediate class members in this metadata are allocated
 	/// at negative offsets.  For now, we don't use this.
-	Class_AreImmediateMembersNegative TypeContextDescriptorFlags = 12
+	Class_AreImmediateMembersNegative = 12
 
 	/// Set if the context descriptor is for a class with resilient ancestry.
 	///
 	/// Only meaningful for class descriptors.
-	Class_HasResilientSuperclass TypeContextDescriptorFlags = 13
+	Class_HasResilientSuperclass = 13
 
 	/// Set if the context descriptor includes metadata for dynamically
 	/// installing method overrides at metadata instantiation time.
-	Class_HasOverrideTable TypeContextDescriptorFlags = 14
+	Class_HasOverrideTable = 14
 
 	/// Set if the context descriptor includes metadata for dynamically
 	/// constructing a class's vtables at metadata instantiation time.
 	///
 	/// Only meaningful for class descriptors.
-	Class_HasVTable TypeContextDescriptorFlags = 15
+	Class_HasVTable = 15
 )
 
 func (f TypeContextDescriptorFlags) MetadataInitialization() MetadataInitializationKind {
-	return MetadataInitializationKind(types.ExtractBits(uint64(f), int32(MetadataInitialization), int32(MetadataInitialization_width)))
+	return MetadataInitializationKind(types.ExtractBits(uint64(f), MetadataInitialization, MetadataInitialization_width))
 }
 func (f TypeContextDescriptorFlags) HasImportInfo() bool {
-	return types.ExtractBits(uint64(f), int32(HasImportInfo), 1) != 0
+	return types.ExtractBits(uint64(f), HasImportInfo, 1) != 0
 }
 func (f TypeContextDescriptorFlags) HasCanonicalMetadataPrespecializations() bool {
-	return types.ExtractBits(uint64(f), int32(HasCanonicalMetadataPrespecializations), 1) != 0
+	return types.ExtractBits(uint64(f), HasCanonicalMetadataPrespecializations, 1) != 0
+}
+func (f TypeContextDescriptorFlags) HasLayoutString() bool {
+	return types.ExtractBits(uint64(f), HasLayoutString, 1) != 0
 }
 func (f TypeContextDescriptorFlags) IsActor() bool {
-	return types.ExtractBits(uint64(f), int32(Class_IsActor), 1) != 0
+	return types.ExtractBits(uint64(f), Class_IsActor, 1) != 0
 }
 func (f TypeContextDescriptorFlags) IsDefaultActor() bool {
-	return types.ExtractBits(uint64(f), int32(Class_IsDefaultActor), 1) != 0
+	return types.ExtractBits(uint64(f), Class_IsDefaultActor, 1) != 0
 }
 func (f TypeContextDescriptorFlags) ResilientSuperclassReferenceKind() TypeReferenceKind {
-	return TypeReferenceKind(types.ExtractBits(uint64(f), int32(Class_ResilientSuperclassReferenceKind), int32(Class_ResilientSuperclassReferenceKind_width)))
+	return TypeReferenceKind(types.ExtractBits(uint64(f), Class_ResilientSuperclassReferenceKind, Class_ResilientSuperclassReferenceKind_width))
 }
 func (f TypeContextDescriptorFlags) AreImmediateMembersNegative() bool {
-	return types.ExtractBits(uint64(f), int32(Class_AreImmediateMembersNegative), 1) != 0
+	return types.ExtractBits(uint64(f), Class_AreImmediateMembersNegative, 1) != 0
 }
 func (f TypeContextDescriptorFlags) HasResilientSuperclass() bool {
-	return types.ExtractBits(uint64(f), int32(Class_HasResilientSuperclass), 1) != 0
+	return types.ExtractBits(uint64(f), Class_HasResilientSuperclass, 1) != 0
 }
 func (f TypeContextDescriptorFlags) HasOverrideTable() bool {
-	return types.ExtractBits(uint64(f), int32(Class_HasOverrideTable), 1) != 0
+	return types.ExtractBits(uint64(f), Class_HasOverrideTable, 1) != 0
 }
 func (f TypeContextDescriptorFlags) HasVTable() bool {
-	return types.ExtractBits(uint64(f), int32(Class_HasVTable), 1) != 0
+	return types.ExtractBits(uint64(f), Class_HasVTable, 1) != 0
 }
 func (f TypeContextDescriptorFlags) String() string {
 	var flags []string
-	if f.MetadataInitialization() != MetadataInitNone {
+	if !f.MetadataInitialization().None() {
 		flags = append(flags, fmt.Sprintf("metadata_init:%s", f.MetadataInitialization()))
 	}
 	if f.HasImportInfo() {
 		flags = append(flags, "import_info")
+	}
+	if f.HasCanonicalMetadataPrespecializations() {
+		flags = append(flags, "canonical_metadata_prespecializations")
+	}
+	if f.HasLayoutString() {
+		flags = append(flags, "layout_string")
 	}
 	if f.IsActor() {
 		flags = append(flags, "actor")
@@ -451,12 +569,20 @@ func (f ContextDescriptorFlags) KindSpecific() TypeContextDescriptorFlags {
 	return TypeContextDescriptorFlags((f >> 16) & 0xFFFF)
 }
 func (f ContextDescriptorFlags) String() string {
-	return fmt.Sprintf("kind: %s, generic: %t, unique: %t, version: %d, kind_flags: %s",
+	var kindFlags string
+	if len(f.KindSpecific().String()) > 0 {
+		if f.Kind() == CDKindProtocol {
+			kindFlags = fmt.Sprintf(", proto_flags: %s", ProtocolContextDescriptorFlags(f.KindSpecific()))
+		} else {
+			kindFlags = fmt.Sprintf(", kind_flags: %s", f.KindSpecific())
+		}
+	}
+	return fmt.Sprintf("kind: %-11s generic: %t, unique: %t, version: %d%s",
 		f.Kind(),
 		f.IsGeneric(),
 		f.IsUnique(),
 		f.Version(),
-		f.KindSpecific())
+		kindFlags)
 }
 
 // TargetContextDescriptor base class for all context descriptors.
@@ -558,14 +684,15 @@ type GenericContext struct {
 
 type TypeGenericContext struct {
 	TargetTypeGenericContextDescriptorHeader
-	Parameters   []GenericParamDescriptor
-	Requirements []TargetGenericRequirementDescriptor
-	TypePacks    []GenericPackShapeDescriptor
+	GenericMetadataPattern *GenericMetadataPattern
+	Parameters             []GenericParamDescriptor
+	Requirements           []TargetGenericRequirement
+	TypePacks              []GenericPackShapeDescriptor
 }
 
 type TargetTypeGenericContextDescriptorHeader struct {
-	InstantiationCache          TargetRelativeDirectPointer
-	DefaultInstantiationPattern TargetRelativeDirectPointer
+	InstantiationCache          RelativeDirectPointer
+	DefaultInstantiationPattern RelativeDirectPointer
 	Base                        TargetGenericContextDescriptorHeader
 }
 
@@ -902,3 +1029,116 @@ func (t *TargetExtendedExistentialTypeShape) Read(r io.Reader, addr uint64) erro
 	}
 	return nil
 }
+
+type ValueWitnessTable struct {
+	RelativeDirectPointer
+	TargetValueWitnessTable
+	EnumWitnessTable *TargetEnumValueWitnessTable
+}
+
+// TargetValueWitnessTable a value-witness table.  A value witness table is built around the
+// requirements of some specific type.  The information in a value-witness table is intended
+// to be sufficient to lay out and manipulate values of an arbitrary type.
+type TargetValueWitnessTable struct {
+	InitializeBufferWithCopyOfBufferFn uint64
+	DestroyFn                          uint64
+	InitializeWithCopyFn               uint64
+	AssignWithCopyFn                   uint64
+	InitializeWithTakeFn               uint64
+	AssignWithTakeFn                   uint64
+	GetEnumTagSinglePayloadFn          uint64
+	StoreEnumTagSinglePayloadFn        uint64
+	Size                               uint64 // the size of this type.  Unlike in C, this has not been padded up to the alignment; that value is maintained as 'stride'.
+	Stride                             uint64 //  This is the size rounded up to be a multiple of the alignment.
+	WitnessFlags                       TargetValueWitnessFlags
+	ExtraInhabitantCount               uint32 // The number of extra inhabitants, that is, bit patterns that do not form valid values of the type, in this type's binary representation.
+}
+
+func (t *TargetValueWitnessTable) Fixup(fix func(uint64) uint64) {
+	t.InitializeBufferWithCopyOfBufferFn = fix(t.InitializeBufferWithCopyOfBufferFn)
+	t.DestroyFn = fix(t.DestroyFn)
+	t.InitializeWithCopyFn = fix(t.InitializeWithCopyFn)
+	t.AssignWithCopyFn = fix(t.AssignWithCopyFn)
+	t.InitializeWithTakeFn = fix(t.InitializeWithTakeFn)
+	t.AssignWithTakeFn = fix(t.AssignWithTakeFn)
+	t.GetEnumTagSinglePayloadFn = fix(t.GetEnumTagSinglePayloadFn)
+	t.StoreEnumTagSinglePayloadFn = fix(t.StoreEnumTagSinglePayloadFn)
+}
+
+func (t TargetValueWitnessTable) IsIncomplete() bool {
+	return (t.WitnessFlags & Incomplete) != 0
+}
+func (t TargetValueWitnessTable) HasEnumWitnesses() bool {
+	return (t.WitnessFlags & HasEnumWitnesses) != 0
+}
+func (t TargetValueWitnessTable) IsValueInline() bool {
+	return (t.WitnessFlags & HasEnumWitnesses) != 0
+}
+func (t TargetValueWitnessTable) IsInlineStorage() bool {
+	return (t.WitnessFlags & IsNonInline) != 1
+}
+func (t TargetValueWitnessTable) IsPOD() bool {
+	return (t.WitnessFlags & IsNonPOD) != 1
+}
+func (t TargetValueWitnessTable) IsCopyable() bool {
+	return (t.WitnessFlags & IsNonCopyable) != 1
+}
+func (t TargetValueWitnessTable) IsBitwiseTakable() bool {
+	return (t.WitnessFlags & IsNonBitwiseTakable) != 0
+}
+func (t TargetValueWitnessTable) GetAlignment() uint32 {
+	return uint32((t.WitnessFlags & AlignmentMask) + 1)
+}
+func (t TargetValueWitnessTable) Flags() string {
+	return fmt.Sprintf("alignment:%d, is_pod:%t, is_inline_storage:%t, is_value_inline:%t, has_enum_witnesses:%t, is_incomplete:%t, is_bitwise_takable:%t, is_copyable:%t",
+		t.GetAlignment(),
+		t.IsPOD(),
+		t.IsInlineStorage(),
+		t.IsValueInline(),
+		t.HasEnumWitnesses(),
+		t.IsIncomplete(),
+		t.IsBitwiseTakable(),
+		t.IsCopyable(),
+	)
+}
+
+// TargetValueWitnessFlags flags stored in the value-witness table.
+type TargetValueWitnessFlags uint32
+
+// The polarity of these bits is chosen so that, when doing struct layout, the
+// flags of the field types can be mostly bitwise-or'ed together to derive the
+// flags for the struct. (The "non-inline" and "has-extra-inhabitants" bits
+// still require additional fixup.)
+const (
+	AlignmentMask TargetValueWitnessFlags = 0x000000FF
+	// unused             0x0000FF00
+	IsNonPOD    TargetValueWitnessFlags = 0x00010000
+	IsNonInline TargetValueWitnessFlags = 0x00020000
+	// unused             0x00040000
+	HasSpareBits        TargetValueWitnessFlags = 0x00080000
+	IsNonBitwiseTakable TargetValueWitnessFlags = 0x00100000
+	HasEnumWitnesses    TargetValueWitnessFlags = 0x00200000
+	Incomplete          TargetValueWitnessFlags = 0x00400000
+	IsNonCopyable       TargetValueWitnessFlags = 0x00800000
+	// unused             0xFF000000
+	TVWFMaxNumExtraInhabitants = 0x7FFFFFFF
+)
+
+type TargetEnumValueWitnessTable struct {
+	GetEnumTagFn                 uint64
+	DestructiveProjectEnumDataFn uint64
+	DestructiveInjectEnumTagFn   uint64
+}
+
+func (ew *TargetEnumValueWitnessTable) Fixup(fix func(uint64) uint64) {
+	ew.GetEnumTagFn = fix(ew.GetEnumTagFn)
+	ew.DestructiveProjectEnumDataFn = fix(ew.DestructiveProjectEnumDataFn)
+	ew.DestructiveInjectEnumTagFn = fix(ew.DestructiveInjectEnumTagFn)
+}
+
+type GenericRequirementLayoutKind uint32
+
+const (
+	// A class constraint.
+	GRLKClass GenericRequirementLayoutKind = 0 // class
+)

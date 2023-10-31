@@ -125,7 +125,7 @@ func (f ExtraClassDescriptorFlags) HasObjCResilientClassStub() bool {
 
 type ResilientSuperclass struct {
 	TargetResilientSuperclass
-	Name string
+	Type *Type
 }
 
 type TargetResilientSuperclass struct {
@@ -135,7 +135,7 @@ type TargetResilientSuperclass struct {
 	//
 	// Note that SwiftObject, the implicit superclass of all Swift root
 	// classes when building with ObjC compatibility, does not appear here.
-	Superclass TargetRelativeDirectPointer
+	Superclass RelativeDirectPointer
 }
 
 func (t TargetResilientSuperclass) Size() int64 {

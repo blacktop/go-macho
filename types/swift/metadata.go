@@ -2,6 +2,7 @@ package swift
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 
 	"github.com/blacktop/go-macho/types"
@@ -46,7 +47,7 @@ const (
 	TaskMetadataKind                     MetadataKind = 2 | MetadataKindIsNonType | MetadataKindIsRuntimePrivate // task
 	JobMetadataKind                      MetadataKind = 3 | MetadataKindIsNonType | MetadataKindIsRuntimePrivate // job
 	// The largest possible non-isa-pointer metadata kind value.
-	LastEnumerated MetadataKind = 0x7FF
+	LastEnumerated = 0x7FF
 	// This is included in the enumeration to prevent against attempts to
 	// exhaustively match metadata kinds. Future Swift runtimes or compilers
 	// may introduce new metadata kinds, so for forward compatibility, the
@@ -65,7 +66,7 @@ type TargetCanonicalSpecializedMetadatasListCount struct {
 }
 
 type TargetCanonicalSpecializedMetadatasListEntry struct {
-	Metadata RelativeDirectPointer
+	Metadata RelativeDirectPointer // TargetMetadata
 }
 
 func (f TargetCanonicalSpecializedMetadatasListEntry) Size() int64 {
@@ -113,10 +114,28 @@ type TargetGenericMetadataInstantiationCache struct {
 	PrivateData [16]byte
 }
 
+type GenericMetadataPattern struct {
+	TargetGenericMetadataPattern
+	ValueWitnessTable *ValueWitnessTable
+	ExtraDataPattern  *TargetGenericMetadataPartialPattern
+}
+
 type TargetGenericMetadataPattern struct {
-	InstantiationFunction int32
-	CompletionFunction    int32
+	InstantiationFunction RelativeDirectPointer
+	CompletionFunction    RelativeDirectPointer
 	PatternFlags          GenericMetadataPatternFlags
+}
+
+func (p *TargetGenericMetadataPattern) Read(r io.Reader, addr uint64) error {
+	p.InstantiationFunction.Address = addr
+	if err := binary.Read(r, binary.LittleEndian, &p.InstantiationFunction.RelOff); err != nil {
+		return err
+	}
+	p.CompletionFunction.Address = addr + uint64(binary.Size(p.InstantiationFunction.RelOff))
+	if err := binary.Read(r, binary.LittleEndian, &p.CompletionFunction.RelOff); err != nil {
+		return err
+	}
+	return binary.Read(r, binary.LittleEndian, &p.PatternFlags)
 }
 
 type GenericMetadataPatternFlags uint32
@@ -146,16 +165,82 @@ const (
 )
 
 func (f GenericMetadataPatternFlags) HasExtraDataPattern() bool {
-	return types.ExtractBits(uint64(f), int32(HasExtraDataPattern), 1) != 0
+	return types.ExtractBits(uint64(f), HasExtraDataPattern, 1) != 0
 }
 func (f GenericMetadataPatternFlags) HasTrailingFlags() bool {
-	return types.ExtractBits(uint64(f), int32(HasTrailingFlags), 1) != 0
+	return types.ExtractBits(uint64(f), HasTrailingFlags, 1) != 0
 }
-func (f GenericMetadataPatternFlags) HasImmediateMembersPattern() bool {
-	return types.ExtractBits(uint64(f), int32(Class_HasImmediateMembersPattern), 1) != 0
+func (f GenericMetadataPatternFlags) HasClassImmediateMembersPattern() bool {
+	return types.ExtractBits(uint64(f), Class_HasImmediateMembersPattern, 1) != 0
 }
 func (f GenericMetadataPatternFlags) MetadataKind() MetadataKind {
-	return MetadataKind(types.ExtractBits(uint64(f), int32(Value_MetadataKind), int32(Value_MetadataKind_width)))
+	return MetadataKind(types.ExtractBits(uint64(f), Value_MetadataKind, Value_MetadataKind_width))
+}
+func (f GenericMetadataPatternFlags) String() string {
+	return fmt.Sprintf("HasExtraDataPattern: %t, HasTrailingFlags: %t, HasClassImmediateMembersPattern: %t, MetadataKind: %s",
+		f.HasExtraDataPattern(), f.HasTrailingFlags(), f.HasClassImmediateMembersPattern(), f.MetadataKind())
+}
+
+// TargetGenericMetadataPartialPattern part of a generic metadata instantiation pattern.
+type TargetGenericMetadataPartialPattern struct {
+	Pattern       TargetRelativeDirectPointer // A reference to the pattern.  The pattern must always be at least word-aligned.
+	OffsetInWords uint16                      // The offset into the section into which to copy this pattern, in words.
+	SizeInWords   uint16                      // The size of the pattern in words.
+}
+
+func (p *TargetGenericMetadataPartialPattern) Read(r io.Reader, addr uint64) error {
+	p.Pattern.Address = addr
+	if err := binary.Read(r, binary.LittleEndian, &p.Pattern.RelOff); err != nil {
+		return err
+	}
+	if err := binary.Read(r, binary.LittleEndian, &p.OffsetInWords); err != nil {
+		return err
+	}
+	return binary.Read(r, binary.LittleEndian, &p.SizeInWords)
+}
+
+// An instantiation pattern for generic class metadata.
+type TargetGenericClassMetadataPattern struct {
+	Destroy       int32      // The heap-destructor function.
+	IVarDestroyer int32      // The ivar-destructor function.
+	Flags         ClassFlags // The class flags.
+	// The following fields are only present in ObjC interop.
+	ClassRODataOffset     uint16 // The offset of the class RO-data within the extra data pattern, in words.
+	MetaclassObjectOffset uint16 // The offset of the metaclass object within the extra data pattern, in words.
+	MetaclassRODataOffset uint16 // The offset of the metaclass RO-data within the extra data pattern, in words.
+	Reserved              uint16
+}
+
+type ClassFlags uint32
+
+const (
+	/// Is this a Swift class from the Darwin pre-stable ABI?
+	/// This bit is clear in stable ABI Swift classes.
+	/// The Objective-C runtime also reads this bit.
+	IsSwiftPreStableABI ClassFlags = 0x1
+	/// Does this class use Swift refcounting?
+	UsesSwiftRefcounting ClassFlags = 0x2
+	/// Has this class a custom name, specified with the @objc attribute?
+	HasCustomObjCName ClassFlags = 0x4
+	/// Whether this metadata is a specialization of a generic metadata pattern
+	/// which was created during compilation.
+	IsStaticSpecialization ClassFlags = 0x8
+	/// Whether this metadata is a specialization of a generic metadata pattern
+	/// which was created during compilation and made to be canonical by
+	/// modifying the metadata accessor.
+	IsCanonicalStaticSpecialization ClassFlags = 0x10
+)
+
+// An instantiation pattern for generic value metadata.
+type TargetGenericValueMetadataPattern struct {
+	/// The value-witness table.  Indirectable so that we can re-use tables
+	/// from other libraries if that seems wise.
+	ValueWitnesses RelativeIndirectablePointer
+}
+
+type TargetTypeMetadataHeader struct {
+	LayoutString   uint64
+	ValueWitnesses uint64
 }
 
 // TargetMetadata the common structure of all type metadata.
@@ -164,6 +249,19 @@ type TargetMetadata struct {
 	TypeDescriptor      uint64
 	TypeMetadataAddress uint64
 }
+
+func (m TargetMetadata) GetKind() MetadataKind {
+	if m.Kind > LastEnumerated {
+		return ClassMetadataKind
+	}
+	return MetadataKind(m.Kind)
+}
+
+type TargetValueMetadata struct {
+	Description uint64 // An out-of-line description of the type. (signed pointer to TargetValueTypeDescriptor)
+}
+
+type TargetValueTypeDescriptor TargetTypeContextDescriptor
 
 type TargetSingletonMetadataInitialization struct {
 	InitializationCacheOffset TargetRelativeDirectPointer // The initialization cache. Out-of-line because mutable.
@@ -212,4 +310,35 @@ func (f TargetForeignMetadataInitialization) Size() int64 {
 func (f *TargetForeignMetadataInitialization) Read(r io.Reader, addr uint64) error {
 	f.CompletionFunction.Address = addr
 	return binary.Read(r, binary.LittleEndian, &f.CompletionFunction.RelOff)
+}
+
+// An instantiation pattern for non-generic resilient class metadata.
+//
+// Used for classes with resilient ancestry, that is, where at least one
+// ancestor is defined in a different resilience domain.
+//
+// The hasResilientSuperclass() flag in the class context descriptor is
+// set in this case, and hasSingletonMetadataInitialization() must be
+// set as well.
+//
+// The pattern is referenced from the SingletonMetadataInitialization
+// record in the class context descriptor.
+type TargetResilientClassMetadataPattern struct {
+	/// A function that allocates metadata with the correct size at runtime.
+	///
+	/// If this is null, the runtime instead calls swift_relocateClassMetadata(),
+	/// passing in the class descriptor and this pattern.
+	RelocationFunction int32
+	/// The heap-destructor function.
+	Destroy int32
+	/// The ivar-destructor function.
+	IVarDestroyer int32
+	// The class flags.
+	Flags ClassFlags
+	// The following fields are only present in ObjC interop.
+
+	/// Our ClassROData.
+	Data int32
+	/// Our metaclass.
+	Metaclass int32
 }

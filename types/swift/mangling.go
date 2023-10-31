@@ -97,7 +97,9 @@ var MangledType = map[string]string{
 	"Sg":        "?", // shortcut for: type 'ySqG'
 	"ySqG":      "?", // optional type
 	"GSg":       "?",
+	"_pSg":      "?",
 	"SgSg":      "??",
+	"ypG":       "Any",
 	"SSG":       "String",
 	"SSGSg":     "String?",
 	"SSSgG":     "String?",
@@ -116,4 +118,7 @@ var MangledType = map[string]string{
 	"Xm":        "existential metatype with representation",
 	"Xe":        "(error)",
 	"x":         "A", // generic param, depth=0, idx=0
+	"q_":        "B", // dependent generic parameter
+	"yxq_G":     "<A, B>",
+	"Sb":        "Swift.Bool",
 }

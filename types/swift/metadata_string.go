@@ -27,7 +27,6 @@ func _() {
 	_ = x[ErrorObjectMetadataKind-1281]
 	_ = x[TaskMetadataKind-1282]
 	_ = x[JobMetadataKind-1283]
-	_ = x[LastEnumerated-2047]
 }
 
 const (
@@ -36,7 +35,6 @@ const (
 	_MetadataKind_name_2 = "opaquetuplefunctionexistentialmetatypeobjc class wrapperexistential metatypeextended existential type"
 	_MetadataKind_name_3 = "heap local variable"
 	_MetadataKind_name_4 = "heap generic local variableerror objecttaskjob"
-	_MetadataKind_name_5 = "LastEnumerated"
 )
 
 var (
@@ -60,8 +58,6 @@ func (i MetadataKind) String() string {
 	case 1280 <= i && i <= 1283:
 		i -= 1280
 		return _MetadataKind_name_4[_MetadataKind_index_4[i]:_MetadataKind_index_4[i+1]]
-	case i == 2047:
-		return _MetadataKind_name_5
 	default:
 		return "MetadataKind(" + strconv.FormatInt(int64(i), 10) + ")"
 	}

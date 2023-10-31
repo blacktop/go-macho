@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/blacktop/go-macho/types"
 )
 
-//go:generate stringer -type GenericRequirementKind,ProtocolRequirementKind,GenericPackKind -linecomment -output protocols_string.go
+//go:generate stringer -type GenericRequirementKind,ProtocolRequirementKind,GenericPackKind,SpecialProtocol -linecomment -output protocols_string.go
 
 // ConformanceDescriptor in __TEXT.__swift5_proto
 // This section contains an array of 32-bit signed integers.
@@ -128,30 +130,74 @@ func (d *TargetProtocolDescriptor) Read(r io.Reader, addr uint64) error {
 	return nil
 }
 
+// / Identifiers for protocols with special meaning to the Swift runtime.
+type SpecialProtocol uint8
+
+const (
+	/// Not a special protocol.
+	///
+	/// This must be 0 for ABI compatibility with Objective-C protocol_t records.
+	None SpecialProtocol = 0 // none
+	/// The Error protocol.
+	Error SpecialProtocol = 1 // error
+)
+
 // ProtocolContextDescriptorFlags flags for protocol context descriptors.
 // These values are used as the kindSpecificFlags of the ContextDescriptorFlags for the protocol.
 type ProtocolContextDescriptorFlags uint16
 
 const (
 	/// Whether this protocol is class-constrained.
-	HasClassConstraint       ProtocolContextDescriptorFlags = 0
-	HasClassConstraint_width ProtocolContextDescriptorFlags = 1
+	HasClassConstraint       = 0
+	HasClassConstraint_width = 1
 	/// Whether this protocol is resilient.
-	IsResilient ProtocolContextDescriptorFlags = 1
+	IsResilient = 1
 	/// Special protocol value.
-	SpecialProtocolKind       ProtocolContextDescriptorFlags = 2
-	SpecialProtocolKind_width ProtocolContextDescriptorFlags = 6
+	SpecialProtocolKind       = 2
+	SpecialProtocolKind_width = 6
 )
+
+func (f ProtocolContextDescriptorFlags) IsClassConstrained() bool {
+	return types.ExtractBits(uint64(f), HasClassConstraint, HasClassConstraint_width) != 0
+}
+func (f ProtocolContextDescriptorFlags) IsResilient() bool {
+	return types.ExtractBits(uint64(f), IsResilient, 1) != 0
+}
+func (f ProtocolContextDescriptorFlags) SpecialProtocol() SpecialProtocol {
+	return SpecialProtocol(types.ExtractBits(uint64(f), SpecialProtocolKind, SpecialProtocolKind_width))
+}
+func (f ProtocolContextDescriptorFlags) String() string {
+	var flags []string
+	if f.IsClassConstrained() {
+		flags = append(flags, "class_constrained")
+	}
+	if f.IsResilient() {
+		flags = append(flags, "resilient")
+	}
+	if f.SpecialProtocol() != None {
+		flags = append(flags, fmt.Sprintf("special_protocol: %s", f.SpecialProtocol()))
+	}
+	if len(flags) == 0 {
+		return "none"
+	}
+	return strings.Join(flags, "|")
+}
 
 type GenericRequirementKind uint8
 
 const (
-	GRKindProtocol  GenericRequirementKind = 0 // protocol
-	GRKindSameType  GenericRequirementKind = 1 // same-type
+	// A protocol requirement.
+	GRKindProtocol GenericRequirementKind = 0 // protocol
+	// A same-type requirement.
+	GRKindSameType GenericRequirementKind = 1 // same-type
+	// A base class requirement.
 	GRKindBaseClass GenericRequirementKind = 2 // base-class
-	// implied by a same-type or base-class constraint that binds a parameter with protocol requirements.
-	GRKindSameConformance GenericRequirementKind = 3    // same-conformance
-	GRKindLayout          GenericRequirementKind = 0x1F // layout
+	// A "same-conformance" requirement, implied by a same-type or base-class constraint that binds a parameter with protocol requirements.
+	GRKindSameConformance GenericRequirementKind = 3 // same-conformance
+	// A same-shape requirement between generic parameter packs.
+	GRKSameShape GenericRequirementKind = 4 // same-shape
+	// A layout requirement.
+	GRKindLayout GenericRequirementKind = 0x1F // layout
 )
 
 type GenericRequirementFlags uint32
@@ -171,31 +217,31 @@ func (f GenericRequirementFlags) String() string {
 
 type TargetGenericRequirement struct {
 	TargetGenericRequirementDescriptor
-	Name string
-	Kind string
+	Param string
+	Kind  string
 }
 
 // ref: swift/ABI/Metadata.h - TargetGenericRequirementDescriptor
 type TargetGenericRequirementDescriptor struct {
-	Flags                               GenericRequirementFlags
-	Param                               RelativeDirectPointer // The type that's constrained, described as a mangled name.
-	TypeOrProtocolOrConformanceOrLayout RelativeDirectPointer // UNION: flags determine type
+	Flags                                  GenericRequirementFlags
+	ParamOff                               RelativeDirectPointer       // The type that's constrained, described as a mangled name.
+	TypeOrProtocolOrConformanceOrLayoutOff RelativeIndirectablePointer // UNION: flags determine type
 }
 
 func (d TargetGenericRequirementDescriptor) Size() int64 {
-	return int64(binary.Size(d.Flags) + binary.Size(d.Param.RelOff) + binary.Size(d.TypeOrProtocolOrConformanceOrLayout.RelOff))
+	return int64(binary.Size(d.Flags) + binary.Size(d.ParamOff.RelOff) + binary.Size(d.TypeOrProtocolOrConformanceOrLayoutOff.RelOff))
 }
 
 func (d *TargetGenericRequirementDescriptor) Read(r io.Reader, addr uint64) error {
-	d.Param.Address = addr + uint64(binary.Size(d.Flags))
-	d.TypeOrProtocolOrConformanceOrLayout.Address = addr + uint64(binary.Size(d.Flags)) + uint64(binary.Size(d.Param.RelOff))
+	d.ParamOff.Address = addr + uint64(binary.Size(d.Flags))
+	d.TypeOrProtocolOrConformanceOrLayoutOff.Address = addr + uint64(binary.Size(d.Flags)) + uint64(binary.Size(d.ParamOff.RelOff))
 	if err := binary.Read(r, binary.LittleEndian, &d.Flags); err != nil {
 		return err
 	}
-	if err := binary.Read(r, binary.LittleEndian, &d.Param.RelOff); err != nil {
+	if err := binary.Read(r, binary.LittleEndian, &d.ParamOff.RelOff); err != nil {
 		return err
 	}
-	if err := binary.Read(r, binary.LittleEndian, &d.TypeOrProtocolOrConformanceOrLayout.RelOff); err != nil {
+	if err := binary.Read(r, binary.LittleEndian, &d.TypeOrProtocolOrConformanceOrLayoutOff.RelOff); err != nil {
 		return err
 	}
 	return nil
@@ -375,7 +421,7 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 	if len(c.ConditionalRequirements) > 0 {
 		reqs = "\n  /* conditional requirements */\n"
 		for _, req := range c.ConditionalRequirements {
-			reqs += fmt.Sprintf("    %s: %s\n", req.Name, req.Kind)
+			reqs += fmt.Sprintf("    %s: %s\n", req.Param, req.Kind)
 		}
 	}
 	var packShapes string
