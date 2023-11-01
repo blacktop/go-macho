@@ -123,7 +123,10 @@ func (t Type) dump(verbose bool) string {
 					if m.Symbol == "" {
 						sym = fmt.Sprintf("%sfunc sub_%x // %s", static, m.Address, m.Flags.Verbose())
 					} else {
-						sym = fmt.Sprintf("%sfunc %s // %s", static, sym, m.Flags)
+						sym = fmt.Sprintf("%sfunc %s", static, sym)
+						if len(m.Flags.String()) > 0 {
+							sym += " // " + m.Flags.String()
+						}
 					}
 				} else {
 					if m.Symbol == "" {

@@ -2399,6 +2399,9 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 					part = strings.TrimSuffix(part, "G")
 				}
 			}
+			if part == "" {
+				continue
+			}
 			if regexp.MustCompile("So[0-9]+").MatchString(part) {
 				if strings.Contains(part, "OS_dispatch_queue") {
 					out = append(out, "DispatchQueue")
