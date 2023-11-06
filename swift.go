@@ -1084,9 +1084,6 @@ func (f *File) parseProtocol(r io.ReadSeeker, typ *swift.Type) (prot *swift.Prot
 
 	if len(prot.SignatureRequirements) > 0 {
 		for idx, req := range prot.SignatureRequirements {
-			if req.Flags.HasExtraArgument() {
-				fmt.Println("has extra argument")
-			}
 			prot.SignatureRequirements[idx].Param, err = f.makeSymbolicMangledNameStringRef(req.ParamOff.GetAddress())
 			if err != nil {
 				return nil, fmt.Errorf("failed to get signature requirement param name: %v", err)
@@ -1308,6 +1305,69 @@ func (f *File) readProtocolConformance(r io.ReadSeeker, addr uint64) (pcd *swift
 			Name:    name,
 			Kind:    swift.CDKindClass,
 			Parent:  nil,
+		}
+	}
+
+	for idx, req := range pcd.ConditionalRequirements {
+		pcd.ConditionalRequirements[idx].Param, err = f.makeSymbolicMangledNameStringRef(req.ParamOff.GetAddress())
+		if err != nil {
+			return nil, fmt.Errorf("failed to get conditional requirement param name: %v", err)
+		}
+		fmt.Println(req.Flags.String())
+		switch req.Flags.Kind() {
+		case swift.GRKindProtocol:
+			protPtr := swift.RelativeTargetProtocolDescriptorPointer{
+				Address: req.TypeOrProtocolOrConformanceOrLayoutOff.Address,
+				RelOff:  req.TypeOrProtocolOrConformanceOrLayoutOff.RelOff,
+			}
+			if protPtr.IsObjC() {
+				ptr, err := protPtr.GetAddress(f.GetPointerAtAddress)
+				if err != nil {
+					return nil, fmt.Errorf("failed to read conditional requirement objc protocol pointer: %v", err)
+				}
+				ptr, err = f.GetPointerAtAddress(ptr + 8)
+				if err != nil {
+					return nil, fmt.Errorf("failed to read conditional requirement objc protocol name pointer: %v", err)
+				}
+				pcd.ConditionalRequirements[idx].Kind, err = f.GetCString(ptr)
+				if err != nil {
+					return nil, fmt.Errorf("failed to read conditional requirement objc protocol name: %v", err)
+				}
+			} else {
+				ptr, err := req.TypeOrProtocolOrConformanceOrLayoutOff.GetAddress(f.GetPointerAtAddress)
+				if err != nil {
+					return nil, fmt.Errorf("failed to read conditional requirement protocol pointer: %v", err)
+				}
+				f.cr.SeekToAddr(ptr)
+				pc, err := f.getContextDesc(ptr)
+				if err != nil {
+					return nil, fmt.Errorf("failed to read conditional requirement protocol: %v", err)
+				}
+				if pc.Parent != "" {
+					pcd.ConditionalRequirements[idx].Kind = fmt.Sprintf("%s.%s", pc.Parent, pc.Name)
+				} else {
+					pcd.ConditionalRequirements[idx].Kind = pc.Name
+				}
+			}
+		case swift.GRKindSameType, swift.GRKindBaseClass, swift.GRKSameShape:
+			pcd.ConditionalRequirements[idx].Kind, err = f.makeSymbolicMangledNameStringRef(req.TypeOrProtocolOrConformanceOrLayoutOff.GetRelPtrAddress())
+			if err != nil {
+				return nil, fmt.Errorf("failed to read conditional requirement type mangled name: %v", err)
+			}
+		case swift.GRKindSameConformance:
+			f.cr.SeekToAddr(req.TypeOrProtocolOrConformanceOrLayoutOff.GetRelPtrAddress())
+			var pc swift.TargetProtocolConformanceDescriptor
+			if err := pc.Read(f.cr, req.TypeOrProtocolOrConformanceOrLayoutOff.GetRelPtrAddress()); err != nil {
+				return nil, fmt.Errorf("failed to read conditional requirement protocol conformance descriptor: %v", err)
+			}
+			pcd.ConditionalRequirements[idx].Kind, err = f.GetCString(pc.ProtocolOffsest.GetRelPtrAddress())
+			if err != nil {
+				return nil, fmt.Errorf("failed to read conditional requirement protocol conformance descriptor: %v", err)
+			}
+		case swift.GRKindLayout:
+			pcd.ConditionalRequirements[idx].Kind = swift.GenericRequirementLayoutKind(req.TypeOrProtocolOrConformanceOrLayoutOff.RelOff).String()
+		default:
+			return nil, fmt.Errorf("unknown conditional requirement kind: %v", req.Flags.Kind())
 		}
 	}
 

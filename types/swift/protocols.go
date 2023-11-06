@@ -432,9 +432,11 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 	var reqs string
 	if len(c.ConditionalRequirements) > 0 {
 		reqs = "  /* conditional requirements */\n"
+		var conds []string
 		for _, req := range c.ConditionalRequirements {
-			reqs += fmt.Sprintf("    %s: %s\n", req.Param, req.Kind)
+			conds = append(conds, fmt.Sprintf("%s: %s", req.Param, req.Kind))
 		}
+		reqs += fmt.Sprintf("   < where %s >", strings.Join(conds, ", "))
 	}
 	var packShapes string
 	if len(c.ConditionalPackShapes) > 0 {
