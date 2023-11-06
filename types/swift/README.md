@@ -2,6 +2,8 @@
 
 ## TODO
 
+### Sections
+
 - [x] `__swift5_entry`
 - [x] `__swift5_builtin`
 - [x] `__swift5_reflstr`
@@ -19,3 +21,20 @@
 - [ ] `__swift5_mpenum` ?? check Foundation
 - [x] `__constg_swiftt`
 - [ ] `__textg_swiftm`
+
+### Protocol Conformances
+
+- [ ] parse witness tables *(I got the patterns, but there's data after the description ptr (looks like func ptrs))*
+
+### Protocols
+
+- [ ] properly represent signature requirements *(I believe if they are key_args they belong in PROT<A: proto, A: proto> etc)*
+
+### Metadata
+
+- [ ] parse all the different type's metatdata
+
+### Demangle *(hard)*
+
+- [ ] pure Go Swift demangler
+- [ ] symbolic mangled type algorithm + demangler
