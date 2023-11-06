@@ -1082,6 +1082,73 @@ func (f *File) parseProtocol(r io.ReadSeeker, typ *swift.Type) (prot *swift.Prot
 		}
 	}
 
+	if len(prot.SignatureRequirements) > 0 {
+		for idx, req := range prot.SignatureRequirements {
+			if req.Flags.HasExtraArgument() {
+				fmt.Println("has extra argument")
+			}
+			prot.SignatureRequirements[idx].Param, err = f.makeSymbolicMangledNameStringRef(req.ParamOff.GetAddress())
+			if err != nil {
+				return nil, fmt.Errorf("failed to get signature requirement param name: %v", err)
+			}
+			switch req.Flags.Kind() {
+			case swift.GRKindProtocol:
+				protPtr := swift.RelativeTargetProtocolDescriptorPointer{
+					Address: req.TypeOrProtocolOrConformanceOrLayoutOff.Address,
+					RelOff:  req.TypeOrProtocolOrConformanceOrLayoutOff.RelOff,
+				}
+				if protPtr.IsObjC() {
+					ptr, err := protPtr.GetAddress(f.GetPointerAtAddress)
+					if err != nil {
+						return nil, fmt.Errorf("failed to read signature requirement objc protocol pointer: %v", err)
+					}
+					ptr, err = f.GetPointerAtAddress(ptr + 8)
+					if err != nil {
+						return nil, fmt.Errorf("failed to read signature requirement objc protocol name pointer: %v", err)
+					}
+					prot.SignatureRequirements[idx].Kind, err = f.GetCString(ptr)
+					if err != nil {
+						return nil, fmt.Errorf("failed to read signature requirement objc protocol name: %v", err)
+					}
+				} else {
+					ptr, err := req.TypeOrProtocolOrConformanceOrLayoutOff.GetAddress(f.GetPointerAtAddress)
+					if err != nil {
+						return nil, fmt.Errorf("failed to read signature requirement protocol pointer: %v", err)
+					}
+					f.cr.SeekToAddr(ptr)
+					pc, err := f.getContextDesc(ptr)
+					if err != nil {
+						return nil, fmt.Errorf("failed to read signature requirement protocol: %v", err)
+					}
+					if pc.Parent != "" {
+						prot.SignatureRequirements[idx].Kind = fmt.Sprintf("%s.%s", pc.Parent, pc.Name)
+					} else {
+						prot.SignatureRequirements[idx].Kind = pc.Name
+					}
+				}
+			case swift.GRKindSameType, swift.GRKindBaseClass, swift.GRKSameShape:
+				prot.SignatureRequirements[idx].Kind, err = f.makeSymbolicMangledNameStringRef(req.TypeOrProtocolOrConformanceOrLayoutOff.GetRelPtrAddress())
+				if err != nil {
+					return nil, fmt.Errorf("failed to read signature requirement type mangled name: %v", err)
+				}
+			case swift.GRKindSameConformance:
+				f.cr.SeekToAddr(req.TypeOrProtocolOrConformanceOrLayoutOff.GetRelPtrAddress())
+				var pc swift.TargetProtocolConformanceDescriptor
+				if err := pc.Read(f.cr, req.TypeOrProtocolOrConformanceOrLayoutOff.GetRelPtrAddress()); err != nil {
+					return nil, fmt.Errorf("failed to read signature requirement protocol conformance descriptor: %v", err)
+				}
+				prot.SignatureRequirements[idx].Kind, err = f.GetCString(pc.ProtocolOffsest.GetRelPtrAddress())
+				if err != nil {
+					return nil, fmt.Errorf("failed to read signature requirement protocol conformance descriptor: %v", err)
+				}
+			case swift.GRKindLayout:
+				prot.SignatureRequirements[idx].Kind = swift.GenericRequirementLayoutKind(req.TypeOrProtocolOrConformanceOrLayoutOff.RelOff).String()
+			default:
+				return nil, fmt.Errorf("unknown signature requirement kind: %v", req.Flags.Kind())
+			}
+		}
+	}
+
 	curr, _ := r.Seek(0, io.SeekCurrent)
 	typ.Size = int64(curr - off)
 	typ.Type = *prot
@@ -1165,6 +1232,9 @@ func (f *File) readProtocolConformance(r io.ReadSeeker, addr uint64) (pcd *swift
 			return nil, fmt.Errorf("failed to read protocol name: %v", err)
 		}
 		pcd.Protocol = ctx.Name
+		if len(ctx.Parent) > 0 {
+			pcd.Protocol = ctx.Parent + "." + pcd.Protocol
+		}
 	}
 
 	// parse type reference
