@@ -34,6 +34,13 @@ func (p Protocol) Verbose() string {
 }
 func (p Protocol) dump(verbose bool) string {
 	var addr string
+	var sigReqs string
+	if len(p.SignatureRequirements) > 0 {
+		sigReqs = "  /* signature requirements */\n"
+		for _, req := range p.SignatureRequirements {
+			sigReqs += fmt.Sprintf("    %s: %s // %s\n", req.Param, req.Kind, req.Flags)
+		}
+	}
 	var reqs string
 	var atyps string
 	if len(p.Requirements) > 0 {
@@ -75,12 +82,17 @@ func (p Protocol) dump(verbose bool) string {
 	if len(p.AssociatedTypes) > 0 {
 		atyps = ": " + strings.Join(p.AssociatedTypes, ", ")
 	}
+	if sigReqs == "" && reqs == "" {
+		return fmt.Sprintf("%sprotocol %s%s%s {}", addr, parent, p.Name, atyps)
+	}
 	return fmt.Sprintf(
-		"%sprotocol %s%s%s {\n%s}",
+		"%s"+
+			"protocol %s%s%s {\n%s%s}",
 		addr,
 		parent,
 		p.Name,
 		atyps,
+		sigReqs,
 		reqs,
 	)
 }
@@ -419,14 +431,17 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 	}
 	var reqs string
 	if len(c.ConditionalRequirements) > 0 {
-		reqs = "\n  /* conditional requirements */\n"
+		reqs = "  /* conditional requirements */\n"
 		for _, req := range c.ConditionalRequirements {
 			reqs += fmt.Sprintf("    %s: %s\n", req.Param, req.Kind)
 		}
 	}
 	var packShapes string
 	if len(c.ConditionalPackShapes) > 0 {
-		packShapes = "\n  /* conditional pack shapes */\n"
+		if reqs != "" {
+			packShapes = "\n"
+		}
+		packShapes += "  /* conditional pack shapes */\n"
 		for _, shape := range c.ConditionalPackShapes {
 			packShapes += fmt.Sprintf("    %s: %d\n", shape.Kind, shape.ShapeClass)
 		}
@@ -434,7 +449,10 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 	var resilientWitnesses string
 	if len(c.ResilientWitnesses) > 0 {
 		var raddr string
-		resilientWitnesses = "\n  /* resilient witnesses */\n"
+		if reqs != "" || packShapes != "" {
+			resilientWitnesses = "\n"
+		}
+		resilientWitnesses += "  /* resilient witnesses */\n"
 		for _, witness := range c.ResilientWitnesses {
 			var static string
 			if !witness.Requirement.Flags.IsInstance() {
@@ -467,7 +485,7 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 	}
 	var witnessTablePattern string
 	if verbose && c.WitnessTablePatternOffsest.IsSet() {
-		if len(c.ResilientWitnesses) > 0 {
+		if reqs != "" || packShapes != "" || resilientWitnesses != "" {
 			witnessTablePattern = "\n"
 		}
 		witnessTablePattern += "  /* witness table pattern */\n"
@@ -482,19 +500,17 @@ func (c ConformanceDescriptor) dump(verbose bool) string {
 	}
 	return fmt.Sprintf(
 		"%s"+
-			"%s%s {\n"+
-			"    %s %s%s\n"+
+			"protocol conformance %s%s : %s%s {\n"+
 			"%s"+
 			"%s"+
 			"%s"+
 			"%s"+
 			"}",
 		addr,
-		c.Protocol,
-		retroactive,
-		c.TypeRef.Kind,
 		parent,
 		c.TypeRef.Name,
+		c.Protocol,
+		retroactive,
 		reqs,
 		packShapes,
 		resilientWitnesses,
@@ -622,7 +638,14 @@ func (f ConformanceFlags) String() string {
 	)
 }
 
+// A witness table for a protocol.
+//
+// With the exception of the initial protocol conformance descriptor,
+// the layout of a witness table is dependent on the protocol being
+// represented.
 type TargetWitnessTable struct {
+	/// The protocol conformance descriptor from which this witness table
+	/// was generated.
 	Description int32
 }
 
