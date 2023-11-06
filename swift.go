@@ -1313,7 +1313,6 @@ func (f *File) readProtocolConformance(r io.ReadSeeker, addr uint64) (pcd *swift
 		if err != nil {
 			return nil, fmt.Errorf("failed to get conditional requirement param name: %v", err)
 		}
-		fmt.Println(req.Flags.String())
 		switch req.Flags.Kind() {
 		case swift.GRKindProtocol:
 			protPtr := swift.RelativeTargetProtocolDescriptorPointer{
