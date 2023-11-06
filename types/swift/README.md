@@ -26,6 +26,10 @@
 
 - [ ] parse witness tables *(I got the patterns, but there's data after the description ptr (looks like func ptrs))*
 
+### Type *(Conformances)*
+
+- [ ] add type's protocol conformances to their output *(will require caching/looking up type names etc)*
+
 ### Protocols
 
 - [ ] properly represent signature requirements *(I believe if they are key_args they belong in PROT<A: proto, A: proto> etc)*
