@@ -2527,8 +2527,21 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				} else if strings.HasPrefix(part, "y") && strings.HasSuffix(part, "G") {
 					// part = fmt.Sprintf("<%s>", strings.TrimSuffix(strings.TrimPrefix(part, "y"), "G"))
 					part = strings.TrimSuffix(strings.TrimPrefix(part, "y"), "G")
-				} else if strings.HasSuffix(part, "G") && idx == len(parts)-1 {
-					part = strings.TrimSuffix(part, "G")
+				} else if idx == len(parts)-1 { // last part
+					if strings.HasSuffix(part, "G") {
+						part = strings.TrimSuffix(part, "G")
+					}
+					if part == "G" {
+						continue
+					}
+					if strings.HasPrefix(part, "_p") { // I believe this just means that it's a protocol
+						part = strings.TrimPrefix(part, "_p")
+					}
+					if (part == "Qz" || part == "Qy_" || part == "Qy0_") && len(out) == 2 {
+						tmp := out[0]
+						out[0] = out[1] + "." + tmp
+						out = out[:1]
+					}
 				}
 			}
 			if part == "" {

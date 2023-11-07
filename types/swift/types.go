@@ -176,12 +176,27 @@ func (t Type) dump(verbose bool) string {
 		var size string
 		if t.Type.(Class).GenericContext != nil {
 			if len(t.Type.(Class).GenericContext.Requirements) > 0 {
-				var parts []string
+				var keyargs []string
+				var where []string
 				for _, req := range t.Type.(Class).GenericContext.Requirements {
-					parts = append(parts, fmt.Sprintf("%s: %s", req.Param, req.Kind))
+					if req.Flags.HasKeyArgument() {
+						keyargs = append(keyargs, fmt.Sprintf("%s: %s", req.Param, req.Kind))
+					} else {
+						switch req.Flags.Kind() {
+						case GRKindBaseClass:
+							keyargs = append(keyargs, fmt.Sprintf("%s: %s, B", req.Param, req.Kind))
+						case GRKindSameType:
+							where = append(where, fmt.Sprintf("%s %s", req.Param, req.Kind))
+						default:
+							fmt.Println(req.Flags.String())
+						}
+					}
 				}
-				if len(parts) > 0 {
-					ctx = fmt.Sprintf("<%s>", strings.Join(parts, ", "))
+				if len(keyargs) > 0 {
+					ctx = fmt.Sprintf("<%s>", strings.Join(keyargs, ", "))
+				}
+				if len(where) > 0 {
+					ctx += fmt.Sprintf("\n  where %s", strings.Join(where, ", "))
 				}
 			}
 			if t.Type.(Class).GenericContext.GenericMetadataPattern != nil && t.Type.(Class).GenericContext.GenericMetadataPattern.ValueWitnessTable != nil {
@@ -248,12 +263,27 @@ func (t Type) dump(verbose bool) string {
 		var size string
 		if t.Type.(Struct).GenericContext != nil {
 			if len(t.Type.(Struct).GenericContext.Requirements) > 0 {
-				var parts []string
+				var keyargs []string
+				var where []string
 				for _, req := range t.Type.(Struct).GenericContext.Requirements {
-					parts = append(parts, fmt.Sprintf("%s: %s", req.Param, req.Kind))
+					if req.Flags.HasKeyArgument() {
+						keyargs = append(keyargs, fmt.Sprintf("%s: %s", req.Param, req.Kind))
+					} else {
+						switch req.Flags.Kind() {
+						case GRKindBaseClass:
+							keyargs = append(keyargs, fmt.Sprintf("%s: %s, B", req.Param, req.Kind))
+						case GRKindSameType:
+							where = append(where, fmt.Sprintf("%s %s", req.Param, req.Kind))
+						default:
+							fmt.Println(req.Flags.String())
+						}
+					}
 				}
-				if len(parts) > 0 {
-					ctx = fmt.Sprintf("<%s>", strings.Join(parts, ", "))
+				if len(keyargs) > 0 {
+					ctx = fmt.Sprintf("<%s>", strings.Join(keyargs, ", "))
+				}
+				if len(where) > 0 {
+					ctx += fmt.Sprintf("\n  where %s", strings.Join(where, ", "))
 				}
 			}
 			if t.Type.(Struct).GenericContext.GenericMetadataPattern != nil && t.Type.(Struct).GenericContext.GenericMetadataPattern.ValueWitnessTable != nil {

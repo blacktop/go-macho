@@ -100,6 +100,7 @@ var MangledType = map[string]string{
 	"_pSg":      "?",
 	"SgSg":      "??",
 	"ypG":       "Any",
+	"p":         "Any",
 	"SSG":       "String",
 	"SSGSg":     "String?",
 	"SSSgG":     "String?",
@@ -120,5 +121,10 @@ var MangledType = map[string]string{
 	"x":         "A", // generic param, depth=0, idx=0
 	"q_":        "B", // dependent generic parameter
 	"yxq_G":     "<A, B>",
+	"xq_":       "<A, B>",
 	"Sb":        "Swift.Bool",
+	"Qz":        "==",
+	"Qy_":       "==",
+	"Qy0_":      "==",
+	"SgXw":      "?",
 }
