@@ -1112,15 +1112,18 @@ func (f *File) parseProtocol(r io.ReadSeeker, typ *swift.Type) (prot *swift.Prot
 					if err != nil {
 						return nil, fmt.Errorf("failed to read signature requirement protocol pointer: %v", err)
 					}
-					f.cr.SeekToAddr(ptr)
-					pc, err := f.getContextDesc(ptr)
+					prot.SignatureRequirements[idx].Kind, err = f.GetBindName(ptr)
 					if err != nil {
-						return nil, fmt.Errorf("failed to read signature requirement protocol: %v", err)
-					}
-					if pc.Parent != "" {
-						prot.SignatureRequirements[idx].Kind = fmt.Sprintf("%s.%s", pc.Parent, pc.Name)
-					} else {
-						prot.SignatureRequirements[idx].Kind = pc.Name
+						f.cr.SeekToAddr(ptr)
+						pc, err := f.getContextDesc(ptr)
+						if err != nil {
+							return nil, fmt.Errorf("failed to read signature requirement protocol: %v", err)
+						}
+						if pc.Parent != "" {
+							prot.SignatureRequirements[idx].Kind = fmt.Sprintf("%s.%s", pc.Parent, pc.Name)
+						} else {
+							prot.SignatureRequirements[idx].Kind = pc.Name
+						}
 					}
 				}
 			case swift.GRKindSameType, swift.GRKindBaseClass, swift.GRKSameShape:
