@@ -274,6 +274,8 @@ func (t Type) dump(verbose bool) string {
 							keyargs = append(keyargs, fmt.Sprintf("%s: %s, B", req.Param, req.Kind))
 						case GRKindSameType:
 							where = append(where, fmt.Sprintf("%s %s", req.Param, req.Kind))
+						case GRKindProtocol, GRKindLayout:
+							keyargs = append(keyargs, fmt.Sprintf("%s: %s", req.Param, req.Kind))
 						default:
 							fmt.Println(req.Flags.String())
 						}

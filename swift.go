@@ -1221,11 +1221,11 @@ func (f *File) readProtocolConformance(r io.ReadSeeker, addr uint64) (pcd *swift
 	if err != nil {
 		return nil, fmt.Errorf("failed to read protocol offset pointer flags(%s): %v", pcd.Flags.String(), err)
 	}
+	paddr = f.vma.Convert(paddr)
 	if paddr == 0 {
-		pcd.Protocol, err = f.GetBindName(paddr)
-		if err != nil {
-			pcd.Protocol = "<stripped>"
-		}
+		pcd.Protocol = "<stripped>"
+	} else if bind, err := f.GetBindName(paddr); err == nil {
+		pcd.Protocol = bind
 	} else {
 		ctx, err := f.getContextDesc(pcd.ProtocolOffsest.GetRelPtrAddress())
 		if err != nil {
@@ -1255,13 +1255,10 @@ func (f *File) readProtocolConformance(r io.ReadSeeker, addr uint64) (pcd *swift
 			return nil, fmt.Errorf("failed to get indirect type descriptor pointer: %v", err)
 		}
 		ptr = f.vma.Convert(ptr)
-		if ptr == 0 {
-			bind, err := f.GetBindName(addr)
-			if err == nil {
-				pcd.TypeRef = &swift.Type{
-					Address: ptr,
-					Name:    bind,
-				}
+		if bind, err := f.GetBindName(ptr); err == nil {
+			pcd.TypeRef = &swift.Type{
+				Address: ptr,
+				Name:    bind,
 			}
 		} else {
 			f.cr.SeekToAddr(ptr)
@@ -1340,15 +1337,20 @@ func (f *File) readProtocolConformance(r io.ReadSeeker, addr uint64) (pcd *swift
 				if err != nil {
 					return nil, fmt.Errorf("failed to read conditional requirement protocol pointer: %v", err)
 				}
-				f.cr.SeekToAddr(ptr)
-				pc, err := f.getContextDesc(ptr)
-				if err != nil {
-					return nil, fmt.Errorf("failed to read conditional requirement protocol: %v", err)
-				}
-				if pc.Parent != "" {
-					pcd.ConditionalRequirements[idx].Kind = fmt.Sprintf("%s.%s", pc.Parent, pc.Name)
+				ptr = f.vma.Convert(ptr)
+				if bind, err := f.GetBindName(ptr); err == nil {
+					pcd.ConditionalRequirements[idx].Kind = bind
 				} else {
-					pcd.ConditionalRequirements[idx].Kind = pc.Name
+					f.cr.SeekToAddr(ptr)
+					pc, err := f.getContextDesc(ptr)
+					if err != nil {
+						return nil, fmt.Errorf("failed to read conditional requirement protocol: %v", err)
+					}
+					if pc.Parent != "" {
+						pcd.ConditionalRequirements[idx].Kind = fmt.Sprintf("%s.%s", pc.Parent, pc.Name)
+					} else {
+						pcd.ConditionalRequirements[idx].Kind = pc.Name
+					}
 				}
 			}
 		case swift.GRKindSameType, swift.GRKindBaseClass, swift.GRKSameShape:
@@ -1685,16 +1687,27 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 				return fmt.Errorf("failed to read targer relative direct pointer: %v", err)
 			}
 		}
-		rsc, err := f.getContextDesc(addr)
-		if err != nil {
-			return fmt.Errorf("failed to get parent: %v", err)
-		}
-		class.ResilientSuperclass.Type = &swift.Type{
-			Address: class.ParentOffset.GetAddress(),
-			Name:    rsc.Name,
-			Parent: &swift.Type{
-				Name: rsc.Parent,
-			},
+		addr = f.vma.Convert(addr)
+		if bind, err := f.GetBindName(addr); err == nil {
+			class.ResilientSuperclass.Type = &swift.Type{
+				Address: class.ParentOffset.GetAddress(),
+				Name:    bind,
+				Parent: &swift.Type{
+					Name: "",
+				},
+			}
+		} else {
+			rsc, err := f.getContextDesc(addr)
+			if err != nil {
+				return fmt.Errorf("failed to get parent: %v", err)
+			}
+			class.ResilientSuperclass.Type = &swift.Type{
+				Address: class.ParentOffset.GetAddress(),
+				Name:    rsc.Name,
+				Parent: &swift.Type{
+					Name: rsc.Parent,
+				},
+			}
 		}
 	}
 
@@ -2141,24 +2154,25 @@ func (f *File) parseGenericContext(ctx *swift.TypeGenericContext) (err error) {
 				return fmt.Errorf("failed to read generic metadata pattern extra data: %v", err)
 			}
 		}
+		// TODO: put this back in when I know when to expect it
 		// read value witness table
-		if ctx.GenericMetadataPattern.ValueWitnessTable.IsSet() {
-			if err := f.cr.SeekToAddr(ctx.GenericMetadataPattern.ValueWitnessTable.GetAddress()); err != nil {
-				return fmt.Errorf("failed to seek to generic metadata pattern value witness table: %v", err)
-			}
-			if err := binary.Read(f.cr, f.ByteOrder, &ctx.GenericMetadataPattern.ValueWitnessTable.TargetValueWitnessTable); err != nil {
-				return fmt.Errorf("failed to read generic metadata pattern: %v", err)
-			}
-			ctx.GenericMetadataPattern.ValueWitnessTable.TargetValueWitnessTable.Fixup(f.vma.Convert)
-			// fmt.Printf("enum value witness table flags: %s\n", ctx.GenericMetadataPattern.ValueWitnessTable.Flags())
-			if ctx.GenericMetadataPattern.ValueWitnessTable.HasEnumWitnesses() {
-				ctx.GenericMetadataPattern.ValueWitnessTable.EnumWitnessTable = &swift.TargetEnumValueWitnessTable{}
-				if err := binary.Read(f.cr, f.ByteOrder, ctx.GenericMetadataPattern.ValueWitnessTable.EnumWitnessTable); err != nil {
-					return fmt.Errorf("failed to read generic enum witness table: %v", err)
-				}
-				ctx.GenericMetadataPattern.ValueWitnessTable.EnumWitnessTable.Fixup(f.vma.Convert)
-			}
-		}
+		// if ctx.GenericMetadataPattern.ValueWitnessTable.IsSet() {
+		// 	if err := f.cr.SeekToAddr(ctx.GenericMetadataPattern.ValueWitnessTable.GetAddress()); err != nil {
+		// 		return fmt.Errorf("failed to seek to generic metadata pattern value witness table: %v", err)
+		// 	}
+		// 	if err := binary.Read(f.cr, f.ByteOrder, &ctx.GenericMetadataPattern.ValueWitnessTable.TargetValueWitnessTable); err != nil {
+		// 		return fmt.Errorf("failed to read generic metadata pattern: %v", err)
+		// 	}
+		// 	ctx.GenericMetadataPattern.ValueWitnessTable.TargetValueWitnessTable.Fixup(f.vma.Convert)
+		// 	// fmt.Printf("enum value witness table flags: %s\n", ctx.GenericMetadataPattern.ValueWitnessTable.Flags())
+		// 	if ctx.GenericMetadataPattern.ValueWitnessTable.HasEnumWitnesses() {
+		// 		ctx.GenericMetadataPattern.ValueWitnessTable.EnumWitnessTable = &swift.TargetEnumValueWitnessTable{}
+		// 		if err := binary.Read(f.cr, f.ByteOrder, ctx.GenericMetadataPattern.ValueWitnessTable.EnumWitnessTable); err != nil {
+		// 			return fmt.Errorf("failed to read generic enum witness table: %v", err)
+		// 		}
+		// 		ctx.GenericMetadataPattern.ValueWitnessTable.EnumWitnessTable.Fixup(f.vma.Convert)
+		// 	}
+		// }
 	}
 	if ctx.Base.NumRequirements > 0 {
 		// read requirements
@@ -2191,15 +2205,20 @@ func (f *File) parseGenericContext(ctx *swift.TypeGenericContext) (err error) {
 					if err != nil {
 						return fmt.Errorf("failed to read generic requirement param protocol pointer: %v", err)
 					}
-					f.cr.SeekToAddr(ptr)
-					pc, err := f.getContextDesc(ptr)
-					if err != nil {
-						return fmt.Errorf("failed to read generic context requirement protocol: %v", err)
-					}
-					if pc.Parent != "" {
-						ctx.Requirements[idx].Kind = fmt.Sprintf("%s.%s", pc.Parent, pc.Name)
+					ptr = f.vma.Convert(ptr)
+					if bind, err := f.GetBindName(ptr); err == nil {
+						ctx.Requirements[idx].Kind = bind
 					} else {
-						ctx.Requirements[idx].Kind = pc.Name
+						f.cr.SeekToAddr(ptr)
+						pc, err := f.getContextDesc(ptr)
+						if err != nil {
+							return fmt.Errorf("failed to read generic context requirement protocol: %v", err)
+						}
+						if pc.Parent != "" {
+							ctx.Requirements[idx].Kind = fmt.Sprintf("%s.%s", pc.Parent, pc.Name)
+						} else {
+							ctx.Requirements[idx].Kind = pc.Name
+						}
 					}
 				}
 			case swift.GRKindSameType, swift.GRKindBaseClass, swift.GRKSameShape:
