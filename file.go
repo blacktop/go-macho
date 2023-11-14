@@ -1476,9 +1476,22 @@ func (f *File) convertToVMAddr(value uint64) uint64 {
 	}
 
 	if f.HasFixups() {
-		dcf, err := f.DyldChainedFixups()
-		if err != nil {
-			return value
+		if dcf, err := f.DyldChainedFixups(); err == nil {
+			if target, ok := dcf.IsRebase(value, f.GetBaseAddress()); ok {
+				return target + f.preferredLoadAddress()
+			} else if bind, addend, ok := dcf.IsBind(value); ok {
+				if bind.Import.LibOrdinal() == types.BIND_SPECIAL_DYLIB_SELF {
+					symAddr, err := f.FindSymbolAddress(bind.Name)
+					if err != nil {
+						return 0
+					}
+					return uint64(int64(symAddr) + addend)
+				}
+			}
+		}
+		// TODO: fix this dumb hack for SUPPORT_OLD_ARM64E_FORMAT
+		dcf := fixupchains.DyldChainedFixups{
+			PointerFormat: fixupchains.DYLD_CHAINED_PTR_ARM64E,
 		}
 		if target, ok := dcf.IsRebase(value, f.GetBaseAddress()); ok {
 			return target + f.preferredLoadAddress()
@@ -1498,33 +1511,36 @@ func (f *File) convertToVMAddr(value uint64) uint64 {
 
 // GetBindName returns the import name for a given dyld chained pointer
 func (f *File) GetBindName(pointer uint64) (string, error) {
-	var err error
 	if f.HasFixups() {
-		if f.dcf == nil {
-			f.dcf, err = f.DyldChainedFixups()
-			if err != nil {
-				return "", fmt.Errorf("failed to parse dyld chained fixups: %v", err)
+		if f.HasDyldChainedFixups() {
+			if f.dcf == nil {
+				var err error
+				f.dcf, err = f.DyldChainedFixups()
+				if err != nil {
+					return "", fmt.Errorf("failed to parse dyld chained fixups: %v", err)
+				}
 			}
-		}
-		if len(f.dcf.Imports) > 0 {
-			if bind, _, ok := f.dcf.IsBind(pointer); ok {
-				return bind.Name, nil
+			if len(f.dcf.Imports) > 0 {
+				if bind, _, ok := f.dcf.IsBind(pointer); ok {
+					return bind.Name, nil
+				}
+				return "", fmt.Errorf("pointer %#x is not a bind", pointer)
+			}
+			return "", fmt.Errorf("MachO does not contain dyld chained fixups importts")
+		} else if f.HasDyldInfoOnly() {
+			binds, err := f.GetBindInfo()
+			if err != nil {
+				return "", fmt.Errorf("failed to parse LC_DYLD_INFO_ONLY bind info: %v", err)
+			}
+			for _, bind := range binds {
+				if bind.Value == pointer {
+					return bind.Name, nil
+				}
 			}
 			return "", fmt.Errorf("pointer %#x is not a bind", pointer)
 		}
-		return "", fmt.Errorf("MachO does not contain dyld chained fixups importts")
-	} else {
-		binds, err := f.GetBindInfo()
-		if err != nil {
-			return "", fmt.Errorf("failed to parse LC_DYLD_INFO_ONLY bind info: %v", err)
-		}
-		for _, bind := range binds {
-			if (bind.Start + bind.Offset) == pointer {
-				return bind.Name, nil
-			}
-		}
-		return "", fmt.Errorf("pointer %#x is not a bind", pointer)
 	}
+	return "", fmt.Errorf("macho does not contain fixups")
 }
 
 // GetCString returns a c-string at a given virtual address in the MachO
@@ -1935,8 +1951,20 @@ func (f *File) DyldExports() ([]trie.TrieExport, error) {
 
 // HasFixups does macho contain a LC_DYLD_CHAINED_FIXUPS load command
 func (f *File) HasFixups() bool {
+	return f.HasDyldChainedFixups() || f.HasDyldInfoOnly()
+}
+
+func (f *File) HasDyldChainedFixups() bool {
 	for _, l := range f.Loads {
 		if _, ok := l.(*DyldChainedFixups); ok {
+			return true
+		}
+	}
+	return false
+}
+func (f *File) HasDyldInfoOnly() bool {
+	for _, l := range f.Loads {
+		if _, ok := l.(*DyldInfoOnly); ok {
 			return true
 		}
 	}
