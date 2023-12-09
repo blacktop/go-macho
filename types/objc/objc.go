@@ -1,10 +1,8 @@
 package objc
 
 import (
-	"bytes"
 	"fmt"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/blacktop/go-macho/types"
 )
@@ -377,237 +375,6 @@ type Property struct {
 	Attributes string
 }
 
-type CategoryT struct {
-	NameVMAddr               uint64
-	ClsVMAddr                uint64
-	InstanceMethodsVMAddr    uint64
-	ClassMethodsVMAddr       uint64
-	ProtocolsVMAddr          uint64
-	InstancePropertiesVMAddr uint64
-}
-
-type Category struct {
-	Name            string
-	VMAddr          uint64
-	Class           *Class
-	Protocols       []Protocol
-	ClassMethods    []Method
-	InstanceMethods []Method
-	Properties      []Property
-	CategoryT
-}
-
-func (c *Category) dump(verbose bool) string {
-	var cMethods string
-	var iMethods string
-	var isSwift string
-
-	var protos string
-	if len(c.Protocols) > 0 {
-		var prots []string
-		for _, prot := range c.Protocols {
-			prots = append(prots, prot.Name)
-		}
-		protos += fmt.Sprintf(" <%s>", strings.Join(prots, ", "))
-	}
-
-	var className string
-	if c.Class != nil {
-		className = c.Class.Name + " "
-		if c.Class.IsSwift() {
-			isSwift = " (Swift)"
-		}
-	}
-
-	var cat string
-	if verbose {
-		cat = fmt.Sprintf("@interface %s(%s)%s // %#x%s", className, c.Name, protos, c.VMAddr, isSwift)
-	} else {
-		cat = fmt.Sprintf("@interface %s(%s)%s", className, c.Name, protos)
-	}
-
-	if len(c.ClassMethods) > 0 {
-		s := bytes.NewBufferString("/* class methods */\n")
-		w := tabwriter.NewWriter(s, 0, 0, 1, ' ', 0)
-		for _, meth := range c.ClassMethods {
-			if verbose {
-				rtype, args := decodeMethodTypes(meth.Types)
-				// fmt.Fprintf(w, "+ %s;\t// %#x\n", getMethodWithArgs(meth.Name, rtype, args), meth.ImpVMAddr)
-				s.WriteString(fmt.Sprintf("// %#x\n", meth.ImpVMAddr))
-				s.WriteString(fmt.Sprintf("+ %s\n", getMethodWithArgs(meth.Name, rtype, args)))
-				// s.WriteString(fmt.Sprintf("+ %-80s // %#x\n", getMethodWithArgs(meth.Name, rtype, args), meth.ImpVMAddr))
-			} else {
-				fmt.Fprintf(w, "+[%s %s];\n", c.Name, meth.Name)
-				// s.WriteString(fmt.Sprintf("+[%s %s]; %-40s\n", c.Name, meth.Name, fmt.Sprintf("// %#x", meth.ImpVMAddr)))
-			}
-		}
-		w.Flush()
-		cMethods = s.String()
-	}
-	if len(c.InstanceMethods) > 0 {
-		var s *bytes.Buffer
-		if len(c.ClassMethods) > 0 {
-			s = bytes.NewBufferString("\n/* instance methods */\n\n")
-		} else {
-			s = bytes.NewBufferString("/* instance methods */\n\n")
-		}
-		w := tabwriter.NewWriter(s, 0, 0, 1, ' ', 0)
-		for _, meth := range c.InstanceMethods {
-			if verbose {
-				rtype, args := decodeMethodTypes(meth.Types)
-				// fmt.Fprintf(w, "- %s;\t// %#x\n", getMethodWithArgs(meth.Name, rtype, args), meth.ImpVMAddr)
-				s.WriteString(fmt.Sprintf("// %#x\n", meth.ImpVMAddr))
-				s.WriteString(fmt.Sprintf("- %s\n", getMethodWithArgs(meth.Name, rtype, args)))
-				// s.WriteString(fmt.Sprintf("- %-80s // %#x\n", getMethodWithArgs(meth.Name, rtype, args), meth.ImpVMAddr))
-			} else {
-				fmt.Fprintf(w, "-[%s %s];\n", c.Name, meth.Name)
-				// s.WriteString(fmt.Sprintf("-[%s %s]; %-40sn", c.Name, meth.Name, fmt.Sprintf("// %#x", meth.ImpVMAddr)))
-			}
-		}
-		w.Flush()
-		iMethods = s.String()
-	}
-
-	return fmt.Sprintf(
-		"%s\n%s%s@end\n",
-		cat,
-		cMethods,
-		iMethods)
-}
-
-func (c *Category) String() string {
-	return c.dump(false)
-}
-
-func (c *Category) Verbose() string {
-	return c.dump(true)
-}
-
-const (
-	// Values for protocol_t->flags
-	PROTOCOL_FIXED_UP_2   = (1 << 31) // must never be set by compiler
-	PROTOCOL_FIXED_UP_1   = (1 << 30) // must never be set by compiler
-	PROTOCOL_IS_CANONICAL = (1 << 29) // must never be set by compiler
-	// Bits 0..15 are reserved for Swift's use.
-	PROTOCOL_FIXED_UP_MASK = (PROTOCOL_FIXED_UP_1 | PROTOCOL_FIXED_UP_2)
-)
-
-type ProtocolList struct {
-	Count     uint64
-	Protocols []uint64
-}
-
-type ProtocolT struct {
-	IsaVMAddr                     uint64
-	NameVMAddr                    uint64
-	ProtocolsVMAddr               uint64
-	InstanceMethodsVMAddr         uint64
-	ClassMethodsVMAddr            uint64
-	OptionalInstanceMethodsVMAddr uint64
-	OptionalClassMethodsVMAddr    uint64
-	InstancePropertiesVMAddr      uint64
-	Size                          uint32
-	Flags                         uint32
-	// Fields below this point are not always present on disk.
-	ExtendedMethodTypesVMAddr uint64
-	DemangledNameVMAddr       uint64
-	ClassPropertiesVMAddr     uint64
-}
-
-type Protocol struct {
-	Name                    string
-	Ptr                     uint64
-	Isa                     *Class
-	Prots                   []Protocol
-	InstanceMethods         []Method
-	InstanceProperties      []Property
-	ClassMethods            []Method
-	OptionalInstanceMethods []Method
-	OptionalClassMethods    []Method
-	ExtendedMethodTypes     string
-	DemangledName           string
-	ProtocolT
-}
-
-func (p *Protocol) dump(verbose bool) string {
-	var props string
-	var cMethods string
-	var iMethods string
-	var optMethods string
-
-	protocol := fmt.Sprintf("@protocol %s ", p.Name)
-
-	if len(p.Prots) > 0 {
-		var subProts []string
-		for _, prot := range p.Prots {
-			subProts = append(subProts, prot.Name)
-		}
-		protocol += fmt.Sprintf("<%s>", strings.Join(subProts, ", "))
-	}
-	if verbose {
-		protocol += fmt.Sprintf(" // %#x", p.Ptr)
-	}
-	if len(p.InstanceProperties) > 0 {
-		for _, prop := range p.InstanceProperties {
-			if verbose {
-				props += fmt.Sprintf("@property %s%s;\n", getPropertyAttributeTypes(prop.Attributes), prop.Name)
-			} else {
-				props += fmt.Sprintf("@property (%s) %s;\n", prop.Attributes, prop.Name)
-			}
-		}
-	}
-	if len(p.ClassMethods) > 0 {
-		cMethods = "/* class methods */\n"
-		for _, meth := range p.ClassMethods {
-			if verbose {
-				rtype, args := decodeMethodTypes(meth.Types)
-				cMethods += fmt.Sprintf("+ %s\n", getMethodWithArgs(meth.Name, rtype, args))
-			} else {
-				cMethods += fmt.Sprintf("+[%s %s];\n", p.Name, meth.Name)
-			}
-		}
-	}
-	if len(p.InstanceMethods) > 0 {
-		iMethods = "/* instance methods */\n"
-		for _, meth := range p.InstanceMethods {
-			if verbose {
-				rtype, args := decodeMethodTypes(meth.Types)
-				iMethods += fmt.Sprintf("- %s\n", getMethodWithArgs(meth.Name, rtype, args))
-			} else {
-				iMethods += fmt.Sprintf("-[%s %s];\n", p.Name, meth.Name)
-			}
-		}
-	}
-	if len(p.OptionalInstanceMethods) > 0 {
-		optMethods = "@optional\n/* instance methods */\n"
-		for _, meth := range p.OptionalInstanceMethods {
-			if verbose {
-				rtype, args := decodeMethodTypes(meth.Types)
-				optMethods += fmt.Sprintf("- %s\n", getMethodWithArgs(meth.Name, rtype, args))
-			} else {
-				optMethods += fmt.Sprintf("-[%s %s];\n", p.Name, meth.Name)
-			}
-		}
-	}
-	return fmt.Sprintf(
-		"%s\n"+
-			"%s%s%s%s"+
-			"@end\n",
-		protocol,
-		props,
-		cMethods,
-		iMethods,
-		optMethods,
-	)
-}
-
-func (p *Protocol) String() string {
-	return p.dump(false)
-}
-func (p *Protocol) Verbose() string {
-	return p.dump(true)
-}
-
 // CFString object in a 64-bit MachO file
 type CFString struct {
 	Name    string
@@ -623,161 +390,6 @@ type CFString64Type struct {
 	Info      uint64 // flag bits
 	Data      uint64 // char * (64-bit pointer)
 	Length    uint64 // number of non-NULL characters in above
-}
-
-type Class struct {
-	Name                  string
-	SuperClass            string
-	Isa                   string
-	InstanceMethods       []Method
-	ClassMethods          []Method
-	Ivars                 []Ivar
-	Props                 []Property
-	Protocols             []Protocol
-	ClassPtr              uint64
-	IsaVMAddr             uint64
-	SuperclassVMAddr      uint64
-	MethodCacheBuckets    uint64
-	MethodCacheProperties uint64
-	DataVMAddr            uint64
-	IsSwiftLegacy         bool
-	IsSwiftStable         bool
-	ReadOnlyData          ClassRO64
-}
-
-func (c *Class) dump(verbose bool) string {
-	var iVars string
-	var props string
-	var isSwift string
-	var cMethods string
-	var iMethods string
-
-	var subClass string
-	if c.ReadOnlyData.Flags.IsRoot() {
-		subClass = "<ROOT>"
-	} else if len(c.SuperClass) > 0 {
-		subClass = c.SuperClass
-	}
-
-	if c.IsSwift() {
-		isSwift = " (Swift)"
-	}
-
-	class := fmt.Sprintf("@interface %s : %s", c.Name, subClass)
-
-	if len(c.Protocols) > 0 {
-		var subProts []string
-		for _, prot := range c.Protocols {
-			subProts = append(subProts, prot.Name)
-		}
-		class += fmt.Sprintf("<%s>", strings.Join(subProts, ", "))
-	}
-	class += fmt.Sprintf(" {")
-	if verbose {
-		class += fmt.Sprintf(" // %#x%s", c.ClassPtr, isSwift)
-	}
-	if len(c.Ivars) > 0 {
-		s := bytes.NewBufferString("")
-		w := tabwriter.NewWriter(s, 0, 0, 1, ' ', 0)
-		fmt.Fprintf(w, "\n  /* instance variables */\t// +size   offset\n")
-		// s.WriteString(fmt.Sprintf(" { // %#x\n  // instance variables\t   +size   offset\n", c.ClassPtr))
-		for _, ivar := range c.Ivars {
-			if verbose {
-				fmt.Fprintf(w, "  %s\n", ivar.Verbose())
-				// s.WriteString(fmt.Sprintf("  %s\n", ivar.Verbose()))
-			} else {
-				fmt.Fprintf(w, "  %s\n", &ivar)
-				// s.WriteString(fmt.Sprintf("  %s\n", &ivar))
-			}
-		}
-		w.Flush()
-		s.WriteString("}\n\n")
-		iVars = s.String()
-	} else {
-		iVars = fmt.Sprintf("\n")
-	}
-	if len(c.Props) > 0 {
-		for _, prop := range c.Props {
-			if verbose {
-				props += fmt.Sprintf("@property %s%s;\n", getPropertyAttributeTypes(prop.Attributes), prop.Name)
-			} else {
-				props += fmt.Sprintf("@property (%s) %s;\n", prop.Attributes, prop.Name)
-			}
-		}
-		props += "\n"
-	}
-	if len(c.ClassMethods) > 0 {
-		s := bytes.NewBufferString("/* class methods */\n")
-		w := tabwriter.NewWriter(s, 0, 0, 1, ' ', 0)
-		for _, meth := range c.ClassMethods {
-			if verbose {
-				rtype, args := decodeMethodTypes(meth.Types)
-				// fmt.Fprintf(w, "+ %s;\t// %#x\n", getMethodWithArgs(meth.Name, rtype, args), meth.ImpVMAddr)
-				s.WriteString(fmt.Sprintf("// %#x\n", meth.ImpVMAddr))
-				s.WriteString(fmt.Sprintf("+ %s\n", getMethodWithArgs(meth.Name, rtype, args)))
-				// s.WriteString(fmt.Sprintf("+ %-80s // %#x\n", getMethodWithArgs(meth.Name, rtype, args), meth.ImpVMAddr))
-			} else {
-				fmt.Fprintf(w, "+[%s %s];\n", c.Name, meth.Name)
-				// s.WriteString(fmt.Sprintf("+[%s %s]; %-40s\n", c.Name, meth.Name, fmt.Sprintf("// %#x", meth.ImpVMAddr)))
-			}
-		}
-		w.Flush()
-		cMethods = s.String()
-	}
-	if len(c.InstanceMethods) > 0 {
-		var s *bytes.Buffer
-		if len(c.ClassMethods) > 0 {
-			s = bytes.NewBufferString("\n/* instance methods */\n")
-		} else {
-			s = bytes.NewBufferString("/* instance methods */\n")
-		}
-		w := tabwriter.NewWriter(s, 0, 0, 1, ' ', 0)
-		for _, meth := range c.InstanceMethods {
-			if verbose {
-				rtype, args := decodeMethodTypes(meth.Types)
-				// fmt.Fprintf(w, "- %s;\t// %#x\n", getMethodWithArgs(meth.Name, rtype, args), meth.ImpVMAddr)
-				s.WriteString(fmt.Sprintf("// %#x\n", meth.ImpVMAddr))
-				s.WriteString(fmt.Sprintf("- %s\n", getMethodWithArgs(meth.Name, rtype, args)))
-				// s.WriteString(fmt.Sprintf("- %-80s // %#x\n", getMethodWithArgs(meth.Name, rtype, args), meth.ImpVMAddr))
-			} else {
-				fmt.Fprintf(w, "-[%s %s];\n", c.Name, meth.Name)
-				// s.WriteString(fmt.Sprintf("-[%s %s]; %-40s\n", c.Name, meth.Name, fmt.Sprintf("// %#x", meth.ImpVMAddr)))
-			}
-		}
-		w.Flush()
-		iMethods = s.String()
-	}
-
-	return fmt.Sprintf(
-		"%s%s%s%s%s@end\n",
-		class,
-		iVars,
-		props,
-		cMethods,
-		iMethods)
-}
-
-func (c *Class) IsSwift() bool {
-	return c.IsSwiftLegacy || c.IsSwiftStable
-}
-func (c *Class) String() string {
-	return c.dump(false)
-}
-func (c *Class) Verbose() string {
-	return c.dump(true)
-}
-
-type ObjcClassT struct {
-	IsaVMAddr              uint32
-	SuperclassVMAddr       uint32
-	MethodCacheBuckets     uint32
-	MethodCacheProperties  uint32
-	DataVMAddrAndFastFlags uint32
-}
-
-type SwiftClassMetadata struct {
-	ObjcClassT
-	SwiftClassFlags uint32
 }
 
 const (
@@ -796,94 +408,6 @@ const (
 	FAST_FLAGS_MASK64       = 0x0000000000000007
 	FAST_IS_RW_POINTER64    = 0x8000000000000000
 )
-
-type ClassRoFlags uint32
-
-const (
-	// class is a metaclass
-	RO_META ClassRoFlags = (1 << 0)
-	// class is a root class
-	RO_ROOT ClassRoFlags = (1 << 1)
-	// class has .cxx_construct/destruct implementations
-	RO_HAS_CXX_STRUCTORS ClassRoFlags = (1 << 2)
-	// class has +load implementation
-	RO_HAS_LOAD_METHOD ClassRoFlags = (1 << 3)
-	// class has visibility=hidden set
-	RO_HIDDEN ClassRoFlags = (1 << 4)
-	// class has attributeClassRoFlags = (objc_exception): OBJC_EHTYPE_$_ThisClass is non-weak
-	RO_EXCEPTION ClassRoFlags = (1 << 5)
-	// class has ro field for Swift metadata initializer callback
-	RO_HAS_SWIFT_INITIALIZER ClassRoFlags = (1 << 6)
-	// class compiled with ARC
-	RO_IS_ARC ClassRoFlags = (1 << 7)
-	// class has .cxx_destruct but no .cxx_construct ClassRoFlags = (with RO_HAS_CXX_STRUCTORS)
-	RO_HAS_CXX_DTOR_ONLY ClassRoFlags = (1 << 8)
-	// class is not ARC but has ARC-style weak ivar layout
-	RO_HAS_WEAK_WITHOUT_ARC ClassRoFlags = (1 << 9)
-	// class does not allow associated objects on instances
-	RO_FORBIDS_ASSOCIATED_OBJECTS ClassRoFlags = (1 << 10)
-
-	// class is in an unloadable bundle - must never be set by compiler
-	RO_FROM_BUNDLE ClassRoFlags = (1 << 29)
-	// class is unrealized future class - must never be set by compiler
-	RO_FUTURE ClassRoFlags = (1 << 30)
-	// class is realized - must never be set by compiler
-	RO_REALIZED ClassRoFlags = (1 << 31)
-)
-
-func (f ClassRoFlags) IsMeta() bool {
-	return (f & RO_META) != 0
-}
-func (f ClassRoFlags) IsRoot() bool {
-	return (f & RO_ROOT) != 0
-}
-func (f ClassRoFlags) HasCxxStructors() bool {
-	return (f & RO_HAS_CXX_STRUCTORS) != 0
-}
-func (f ClassRoFlags) HasFuture() bool {
-	return (f & RO_FUTURE) != 0
-}
-
-type ClassRO struct {
-	Flags                ClassRoFlags
-	InstanceStart        uint32
-	InstanceSize         uint32
-	_                    uint32
-	IvarLayoutVMAddr     uint32
-	NameVMAddr           uint32
-	BaseMethodsVMAddr    uint32
-	BaseProtocolsVMAddr  uint32
-	IvarsVMAddr          uint32
-	WeakIvarLayoutVMAddr uint32
-	BasePropertiesVMAddr uint32
-}
-
-type ObjcClass64 struct {
-	IsaVMAddr              uint64
-	SuperclassVMAddr       uint64
-	MethodCacheBuckets     uint64
-	MethodCacheProperties  uint64
-	DataVMAddrAndFastFlags uint64
-}
-
-type SwiftClassMetadata64 struct {
-	ObjcClass64
-	SwiftClassFlags uint64
-}
-
-type ClassRO64 struct {
-	Flags         ClassRoFlags
-	InstanceStart uint32
-	InstanceSize  uint64
-	// _                    uint32
-	IvarLayoutVMAddr     uint64
-	NameVMAddr           uint64
-	BaseMethodsVMAddr    uint64
-	BaseProtocolsVMAddr  uint64
-	IvarsVMAddr          uint64
-	WeakIvarLayoutVMAddr uint64
-	BasePropertiesVMAddr uint64
-}
 
 type IvarList struct {
 	EntSize uint32
@@ -905,23 +429,30 @@ type Ivar struct {
 	IvarT
 }
 
-func (i *Ivar) dump(verbose bool) string {
+func (i *Ivar) dump(verbose, addrs bool) string {
+	var addr string
+	if addrs {
+		addr = fmt.Sprintf("\t// %-7s %#x", fmt.Sprintf("+%#x", i.Size), i.Offset)
+	}
 	if verbose {
 		ivtype := getIVarType(i.Type)
 		if strings.ContainsAny(ivtype, "[]") { // array special case
 			ivtype = strings.TrimSpace(strings.Replace(ivtype, "x", i.Name, 1))
-			return fmt.Sprintf("%s;\t// %-7s %#x", ivtype, fmt.Sprintf("+%#x", i.Size), i.Offset)
+			return fmt.Sprintf("%s;%s", ivtype, addr)
 		}
-		return fmt.Sprintf("%s%s;\t// %-7s %#x", ivtype, i.Name, fmt.Sprintf("+%#x", i.Size), i.Offset)
+		return fmt.Sprintf("%s%s;%s", ivtype, i.Name, addr)
 	}
-	return fmt.Sprintf("%s %s;\t// %-7s %#x", i.Type, i.Name, fmt.Sprintf("+%#x", i.Size), i.Offset)
+	return fmt.Sprintf("%s %s;%s", i.Type, i.Name, addr)
 }
 
 func (i *Ivar) String() string {
-	return i.dump(false)
+	return i.dump(false, false)
 }
 func (i *Ivar) Verbose() string {
-	return i.dump(true)
+	return i.dump(true, false)
+}
+func (i *Ivar) WithAddrs() string {
+	return i.dump(true, true)
 }
 
 type Selector struct {
