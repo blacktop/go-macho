@@ -3,6 +3,7 @@ package objc
 import (
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 // ref - https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ObjCRuntimeGuide/Articles/ocrtTypeEncodings.html
@@ -105,10 +106,25 @@ func decodeMethodTypes(encodedTypes string) (string, []string) {
 		case 1:
 			argTypes = append(argTypes, fmt.Sprintf("(%s)id", arg.DecType))
 		default:
-			argTypes = append(argTypes, fmt.Sprintf("(%s)arg%d", arg.DecType, idx-1))
+			argTypes = append(argTypes, fmt.Sprintf("(%s)", arg.DecType))
 		}
 	}
 	return getReturnType(encodedTypes), argTypes
+}
+
+func getLastCapitalizedPart(s string) string {
+	start := len(s)
+	for i := len(s) - 1; i >= 0; i-- {
+		if unicode.IsUpper(rune(s[i])) {
+			start = i
+		} else if start != len(s) {
+			break
+		}
+	}
+	if start == len(s) {
+		return s
+	}
+	return strings.ToLower(s[start:])
 }
 
 func getMethodWithArgs(method, returnType string, args []string) string {
@@ -122,10 +138,11 @@ func getMethodWithArgs(method, returnType string, args []string) string {
 	var methodStr string
 	if len(parts) > 1 { // method has arguments based on SEL having ':'
 		for idx, part := range parts {
+			argName := getLastCapitalizedPart(part)
 			if len(part) == 0 || idx >= len(args) {
 				break
 			}
-			methodStr += fmt.Sprintf("%s:%s ", part, args[idx])
+			methodStr += fmt.Sprintf("%s:%s ", part, args[idx]+argName)
 		}
 		return fmt.Sprintf("(%s)%s;", returnType, strings.TrimSpace(methodStr))
 	}

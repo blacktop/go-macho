@@ -202,6 +202,9 @@ func (c *Class) dump(verbose, addrs bool) string {
 		s := bytes.NewBufferString("/* class methods */\n")
 		w := tabwriter.NewWriter(s, 0, 0, 1, ' ', 0)
 		for _, meth := range c.ClassMethods {
+			if !addrs && strings.HasPrefix(meth.Name, ".cxx_") {
+				continue
+			}
 			if verbose {
 				rtype, args := decodeMethodTypes(meth.Types)
 				if addrs {
@@ -223,6 +226,9 @@ func (c *Class) dump(verbose, addrs bool) string {
 			s = bytes.NewBufferString("/* instance methods */\n")
 		}
 		for _, meth := range c.InstanceMethods {
+			if !addrs && strings.HasPrefix(meth.Name, ".cxx_") {
+				continue
+			}
 			if verbose {
 				rtype, args := decodeMethodTypes(meth.Types)
 				if addrs {

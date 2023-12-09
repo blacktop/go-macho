@@ -66,6 +66,9 @@ func (c *Category) dump(verbose, addrs bool) string {
 	if len(c.ClassMethods) > 0 {
 		s := bytes.NewBufferString("/* class methods */\n")
 		for _, meth := range c.ClassMethods {
+			if !addrs && strings.HasPrefix(meth.Name, ".cxx_") {
+				continue
+			}
 			if verbose {
 				rtype, args := decodeMethodTypes(meth.Types)
 				if addrs {
@@ -86,6 +89,9 @@ func (c *Category) dump(verbose, addrs bool) string {
 			s = bytes.NewBufferString("/* instance methods */\n\n")
 		}
 		for _, meth := range c.InstanceMethods {
+			if !addrs && strings.HasPrefix(meth.Name, ".cxx_") {
+				continue
+			}
 			if verbose {
 				rtype, args := decodeMethodTypes(meth.Types)
 				if addrs {
