@@ -2044,8 +2044,9 @@ func (b *BuildVersion) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 func (b *BuildVersion) String() string {
 	if b.NumTools > 0 {
 		if b.NumTools == 1 {
-			return fmt.Sprintf("Platform: %s, SDK: %s, Tool: %s (%s)",
+			return fmt.Sprintf("Platform: %s, MinOS: %s, SDK: %s, Tool: %s (%s)",
 				b.Platform,
+				b.Minos,
 				b.Sdk,
 				b.Tools[0].Tool,
 				b.Tools[0].Version)
@@ -2054,8 +2055,9 @@ func (b *BuildVersion) String() string {
 			for _, t := range b.Tools {
 				tools = append(tools, fmt.Sprintf("%s (%s)", t.Tool, t.Version))
 			}
-			return fmt.Sprintf("Platform: %s, SDK: %s, Tools: [%s]",
+			return fmt.Sprintf("Platform: %s, MinOS: %s, SDK: %s, Tools: [%s]",
 				b.Platform,
+				b.Minos,
 				b.Sdk,
 				strings.Join(tools, ", "))
 		}
