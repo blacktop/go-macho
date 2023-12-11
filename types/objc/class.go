@@ -189,6 +189,9 @@ func (c *Class) dump(verbose, addrs bool) string {
 		iVars = fmt.Sprintf("\n")
 	}
 	if len(c.Props) > 0 {
+		if len(c.Ivars) == 0 {
+			props += "\n"
+		}
 		for _, prop := range c.Props {
 			if verbose {
 				props += fmt.Sprintf("@property %s%s;\n", getPropertyAttributeTypes(prop.Attributes), prop.Name)
