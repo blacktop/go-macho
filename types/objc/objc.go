@@ -371,8 +371,15 @@ type PropertyT struct {
 
 type Property struct {
 	PropertyT
-	Name       string
-	Attributes string
+	Name              string
+	EncodedAttributes string
+}
+
+func (p *Property) Type() string {
+	return getPropertyType(p.EncodedAttributes)
+}
+func (p *Property) Attributes() string {
+	return getPropertyAttributeTypes(p.EncodedAttributes)
 }
 
 // CFString object in a 64-bit MachO file

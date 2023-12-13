@@ -72,9 +72,9 @@ func (p *Protocol) dump(verbose, addrs bool) string {
 	if len(p.InstanceProperties) > 0 {
 		for _, prop := range p.InstanceProperties {
 			if verbose {
-				props += fmt.Sprintf("@property %s%s;\n", getPropertyAttributeTypes(prop.Attributes), prop.Name)
+				props += fmt.Sprintf("@property %s%s%s;\n", prop.Attributes(), prop.Type(), prop.Name)
 			} else {
-				props += fmt.Sprintf("@property (%s) %s;\n", prop.Attributes, prop.Name)
+				props += fmt.Sprintf("@property (%s) %s;\n", prop.EncodedAttributes, prop.Name)
 			}
 		}
 	}

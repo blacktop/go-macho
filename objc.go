@@ -1268,9 +1268,9 @@ func (f *File) GetObjCProperties(vmaddr uint64) ([]objc.Property, error) {
 			return nil, fmt.Errorf("failed to read prop attributes cstring: %v", err)
 		}
 		objcProperties = append(objcProperties, objc.Property{
-			PropertyT:  prop,
-			Name:       name,
-			Attributes: attrib,
+			PropertyT:         prop,
+			Name:              name,
+			EncodedAttributes: attrib,
 		})
 	}
 

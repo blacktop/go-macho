@@ -150,54 +150,63 @@ func getMethodWithArgs(method, returnType string, args []string) string {
 	return fmt.Sprintf("(%s)%s;", returnType, method)
 }
 
-func getPropertyAttributeTypes(attrs string) string {
-	// var ivarStr string
-	var typeStr string
-	var attrsStr string
-	var attrsList []string
+func getPropertyType(attrs string) string {
+	var typ string
 
 	for _, attr := range strings.Split(attrs, ",") {
 		if strings.HasPrefix(attr, propertyType) {
 			attr = strings.TrimPrefix(attr, propertyType)
 			if strings.HasPrefix(attr, "@\"") {
-				typeStr = strings.Trim(attr, "@\"") + " *"
+				typ = strings.Trim(attr, "@\"") + " *"
 			} else {
 				if val, ok := typeEncoding[attr]; ok {
-					typeStr = val + " "
+					typ = val + " "
 				}
 			}
-		} else if strings.HasPrefix(attr, propertyIVar) {
+			break
+		}
+	}
+
+	return typ
+}
+
+func getPropertyAttributeTypes(attrs string) string {
+	// var ivarStr string
+	var attrsStr string
+	var attrsList []string
+
+	for _, attr := range strings.Split(attrs, ",") {
+		if strings.HasPrefix(attr, propertyIVar) {
 			// found ivar name
 			// ivarStr = strings.TrimPrefix(attr, propertyIVar)
 			continue
-		} else {
-			// TODO: handle the following cases
-			// @property struct YorkshireTeaStruct structDefault; ==> T{YorkshireTeaStruct="pot"i"lady"c},VstructDefault
-			// @property int (*functionPointerDefault)(char *);   ==> T^?,VfunctionPointerDefault
-			switch attr {
-			case propertyGetter:
-				attr = strings.TrimPrefix(attr, propertyGetter)
-				attrsList = append(attrsList, fmt.Sprintf("getter=%s", attr))
-			case propertySetter:
-				attr = strings.TrimPrefix(attr, propertySetter)
-				attrsList = append(attrsList, fmt.Sprintf("setter=%s", attr))
-			case propertyReadOnly:
-				attrsList = append(attrsList, "readonly")
-			case propertyNonAtomic:
-				attrsList = append(attrsList, "nonatomic")
-			case propertyAtomic:
-				attrsList = append(attrsList, "atomic")
-			case propertyBycopy:
-				attrsList = append(attrsList, "copy")
-			case propertyByref:
-				attrsList = append(attrsList, "retain")
-			case propertyWeak:
-				attrsList = append(attrsList, "weak")
-			case propertyDynamic:
-				attrsList = append(attrsList, "dynamic")
-			case propertyStrong:
-				attrsList = append(attrsList, "collectable")
-			}
+		}
+		// TODO: handle the following cases
+		// @property struct YorkshireTeaStruct structDefault; ==> T{YorkshireTeaStruct="pot"i"lady"c},VstructDefault
+		// @property int (*functionPointerDefault)(char *);   ==> T^?,VfunctionPointerDefault
+		switch attr {
+		case propertyGetter:
+			attr = strings.TrimPrefix(attr, propertyGetter)
+			attrsList = append(attrsList, fmt.Sprintf("getter=%s", attr))
+		case propertySetter:
+			attr = strings.TrimPrefix(attr, propertySetter)
+			attrsList = append(attrsList, fmt.Sprintf("setter=%s", attr))
+		case propertyReadOnly:
+			attrsList = append(attrsList, "readonly")
+		case propertyNonAtomic:
+			attrsList = append(attrsList, "nonatomic")
+		case propertyAtomic:
+			attrsList = append(attrsList, "atomic")
+		case propertyBycopy:
+			attrsList = append(attrsList, "copy")
+		case propertyByref:
+			attrsList = append(attrsList, "retain")
+		case propertyWeak:
+			attrsList = append(attrsList, "weak")
+		case propertyDynamic:
+			attrsList = append(attrsList, "dynamic")
+		case propertyStrong:
+			attrsList = append(attrsList, "collectable")
 		}
 	}
 
@@ -205,7 +214,7 @@ func getPropertyAttributeTypes(attrs string) string {
 		attrsStr = fmt.Sprintf("(%s) ", strings.Join(attrsList, ", "))
 	}
 
-	return fmt.Sprintf("%s%s", attrsStr, typeStr)
+	return attrsStr
 }
 
 func getIVarType(ivType string) string {
