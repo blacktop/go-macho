@@ -150,7 +150,9 @@ func (c *Class) dump(verbose, addrs bool) string {
 		}
 		class += fmt.Sprintf("<%s>", strings.Join(subProts, ", "))
 	}
-	class += fmt.Sprintf(" {")
+	if len(c.Ivars) > 0 {
+		class += fmt.Sprintf(" {")
+	}
 	if verbose {
 		var comment string
 		if addrs {
