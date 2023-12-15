@@ -472,6 +472,7 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 		if !info.Flags.IsMeta() {
 			if c, ok := f.GetObjC(classPtr.IsaVMAddr); ok {
 				isaClass = c.(*objc.Class)
+				cMethods = isaClass.InstanceMethods
 			} else {
 				isaClass, err = f.GetObjCClass(classPtr.IsaVMAddr)
 				if err != nil {
@@ -630,6 +631,7 @@ func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 		if !info.Flags.IsMeta() {
 			if c, ok := f.GetObjC(classPtr.IsaVMAddr); ok {
 				isaClass = c.(*objc.Class)
+				cMethods = isaClass.InstanceMethods
 			} else {
 				isaClass, err = f.GetObjCClass(classPtr.IsaVMAddr)
 				if err != nil {
