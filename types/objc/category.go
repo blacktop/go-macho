@@ -84,9 +84,9 @@ func (c *Category) dump(verbose, addrs bool) string {
 	if len(c.InstanceMethods) > 0 {
 		var s *bytes.Buffer
 		if len(c.ClassMethods) > 0 {
-			s = bytes.NewBufferString("\n/* instance methods */\n\n")
+			s = bytes.NewBufferString("\n/* instance methods */\n")
 		} else {
-			s = bytes.NewBufferString("/* instance methods */\n\n")
+			s = bytes.NewBufferString("/* instance methods */\n")
 		}
 		for _, meth := range c.InstanceMethods {
 			if !addrs && strings.HasPrefix(meth.Name, ".cxx_") {
