@@ -70,6 +70,7 @@ func (p *Protocol) dump(verbose, addrs bool) string {
 		protocol += fmt.Sprintf(" // %#x", p.Ptr)
 	}
 	if len(p.InstanceProperties) > 0 {
+		props += "\n"
 		for _, prop := range p.InstanceProperties {
 			if verbose {
 				props += fmt.Sprintf("@property %s%s%s;\n", prop.Attributes(), prop.Type(), prop.Name)
@@ -77,6 +78,7 @@ func (p *Protocol) dump(verbose, addrs bool) string {
 				props += fmt.Sprintf("@property (%s) %s;\n", prop.EncodedAttributes, prop.Name)
 			}
 		}
+		props += "\n"
 	}
 	if len(p.ClassMethods) > 0 {
 		cMethods = "/* class methods */\n"

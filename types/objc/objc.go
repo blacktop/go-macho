@@ -2,6 +2,7 @@ package objc
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/blacktop/go-macho/types"
@@ -436,6 +437,13 @@ type Ivar struct {
 	IvarT
 }
 
+func replaceLast(s, old, new string) string {
+	if i := strings.LastIndex(s, old); i != -1 {
+		return s[:i] + new + s[i+len(old):]
+	}
+	return s
+}
+
 func (i *Ivar) dump(verbose, addrs bool) string {
 	var addr string
 	if addrs {
@@ -443,8 +451,8 @@ func (i *Ivar) dump(verbose, addrs bool) string {
 	}
 	if verbose {
 		ivtype := getIVarType(i.Type)
-		if strings.ContainsAny(ivtype, "[]") { // array special case
-			ivtype = strings.TrimSpace(strings.Replace(ivtype, "x", i.Name, 1))
+		if regexp.MustCompile(`x\[[0-9]+\] $`).MatchString(ivtype) { // array special case
+			ivtype = strings.TrimSpace(replaceLast(ivtype, "x", i.Name))
 			return fmt.Sprintf("%s;%s", ivtype, addr)
 		}
 		return fmt.Sprintf("%s%s;%s", ivtype, i.Name, addr)
