@@ -1487,6 +1487,7 @@ func (f *File) convertToVMAddr(value uint64) uint64 {
 					}
 					return uint64(int64(symAddr) + addend)
 				}
+				return value
 			}
 		}
 		// TODO: fix this dumb hack for SUPPORT_OLD_ARM64E_FORMAT

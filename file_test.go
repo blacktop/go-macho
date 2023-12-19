@@ -844,7 +844,9 @@ func TestNewFileWithObjC(t *testing.T) {
 				fmt.Printf("%#x: %#v\n", cfstr.Address, cfstr.Name)
 			}
 		} else {
-			t.Errorf(err.Error())
+			if !errors.Is(err, ErrObjcSectionNotFound) {
+				t.Fatalf(err.Error())
+			}
 		}
 
 		if meths, err := got.GetObjCMethodLists(); err == nil {
@@ -854,7 +856,9 @@ func TestNewFileWithObjC(t *testing.T) {
 				fmt.Printf("%#x: (%s) %s [%d]\n", m.ImpVMAddr, m.ReturnType(), m.Name, m.NumberOfArguments())
 			}
 		} else {
-			t.Errorf(err.Error())
+			if !errors.Is(err, ErrObjcSectionNotFound) {
+				t.Fatalf(err.Error())
+			}
 		}
 
 		if protos, err := got.GetObjCProtocols(); err == nil {
@@ -862,7 +866,9 @@ func TestNewFileWithObjC(t *testing.T) {
 				fmt.Println(proto.String())
 			}
 		} else {
-			t.Errorf(err.Error())
+			if !errors.Is(err, ErrObjcSectionNotFound) {
+				t.Fatalf(err.Error())
+			}
 		}
 
 		if classes, err := got.GetObjCClasses(); err == nil {
@@ -870,7 +876,9 @@ func TestNewFileWithObjC(t *testing.T) {
 				fmt.Println(class.Verbose())
 			}
 		} else {
-			t.Errorf(err.Error())
+			if !errors.Is(err, ErrObjcSectionNotFound) {
+				t.Fatalf(err.Error())
+			}
 		}
 
 		if nlclasses, err := got.GetObjCNonLazyClasses(); err == nil {
@@ -878,7 +886,7 @@ func TestNewFileWithObjC(t *testing.T) {
 				fmt.Println(class.String())
 			}
 		} else {
-			t.Errorf(err.Error())
+			t.Fatalf(err.Error())
 		}
 
 		if cats, err := got.GetObjCCategories(); err == nil {
@@ -886,7 +894,7 @@ func TestNewFileWithObjC(t *testing.T) {
 				fmt.Println(cat.String())
 			}
 		} else {
-			t.Errorf(err.Error())
+			t.Fatalf(err.Error())
 		}
 
 		if nlcats, err := got.GetObjCNonLazyCategories(); err == nil {
@@ -894,7 +902,7 @@ func TestNewFileWithObjC(t *testing.T) {
 				fmt.Println(cat.String())
 			}
 		} else {
-			t.Errorf(err.Error())
+			t.Fatalf(err.Error())
 		}
 
 		if selRefs, err := got.GetObjCProtoReferences(); err == nil {
@@ -903,7 +911,7 @@ func TestNewFileWithObjC(t *testing.T) {
 				fmt.Printf("%#x -> %#x: %s\n", off, prot.Ptr, prot.Name)
 			}
 		} else {
-			t.Errorf(err.Error())
+			t.Fatalf(err.Error())
 		}
 		if selRefs, err := got.GetObjCClassReferences(); err == nil {
 			fmt.Println("@class refs")
@@ -911,7 +919,7 @@ func TestNewFileWithObjC(t *testing.T) {
 				fmt.Printf("%#x -> %#x: %s\n", off, sel.ClassPtr, sel.Name)
 			}
 		} else {
-			t.Errorf(err.Error())
+			t.Fatalf(err.Error())
 		}
 		if selRefs, err := got.GetObjCSuperReferences(); err == nil {
 			fmt.Println("@super refs")
@@ -919,7 +927,7 @@ func TestNewFileWithObjC(t *testing.T) {
 				fmt.Printf("%#x -> %#x: %s\n", off, sel.ClassPtr, sel.SuperClass)
 			}
 		} else {
-			t.Errorf(err.Error())
+			t.Fatalf(err.Error())
 		}
 		if selRefs, err := got.GetObjCSelectorReferences(); err == nil {
 			fmt.Println("@selectors refs")
@@ -927,7 +935,7 @@ func TestNewFileWithObjC(t *testing.T) {
 				fmt.Printf("%#x -> %#x: %s\n", off, sel.VMAddr, sel.Name)
 			}
 		} else {
-			t.Errorf(err.Error())
+			t.Fatalf(err.Error())
 		}
 		if methods, err := got.GetObjCMethodNames(); err == nil {
 			fmt.Printf("\n@methods\n")
@@ -935,7 +943,7 @@ func TestNewFileWithObjC(t *testing.T) {
 				fmt.Printf("%#x: %s\n", vmaddr, method)
 			}
 		} else {
-			t.Errorf(err.Error())
+			t.Fatalf(err.Error())
 		}
 	}
 }

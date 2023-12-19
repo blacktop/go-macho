@@ -194,10 +194,17 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 			if err := binary.Read(dcf.sr, dcf.bo, &dcPtr64); err != nil {
 				return err
 			}
-			dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, DyldChainedPtr64RebaseOffset{
-				Pointer: dcPtr64,
-				Fixup:   fixupLocation,
-			})
+			// NOTE: the fixup-chains.h seems to indicate that DYLD_CHAINED_PTR_64_OFFSET is a rebase, but can also be a bind
+			if Generic64IsBind(dcPtr64) {
+				bind := DyldChainedPtr64Bind{Pointer: dcPtr64, Fixup: fixupLocation}
+				bind.Import = dcf.Imports[bind.Ordinal()].Name
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, bind)
+			} else {
+				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, DyldChainedPtr64RebaseOffset{
+					Pointer: dcPtr64,
+					Fixup:   fixupLocation,
+				})
+			}
 			if Generic64Next(dcPtr64) == 0 {
 				chainEnd = true
 			}

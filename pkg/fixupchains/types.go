@@ -20,6 +20,9 @@ type DyldChainedFixups struct {
 
 type Fixup interface {
 	Offset() uint64
+	IsRebase() bool
+	IsBind() bool
+	Raw() uint64
 	String(baseAddr ...uint64) string
 }
 
@@ -210,6 +213,12 @@ type DyldChainedPtrArm64eRebase struct {
 	Pointer uint64
 }
 
+func (d DyldChainedPtrArm64eRebase) IsRebase() bool {
+	return d.Bind() == 0
+}
+func (d DyldChainedPtrArm64eRebase) IsBind() bool {
+	return d.Bind() != 0
+}
 func (d DyldChainedPtrArm64eRebase) Offset() uint64 {
 	return d.Fixup
 }
@@ -258,6 +267,12 @@ type DyldChainedPtrArm64eBind struct {
 	Import  string
 }
 
+func (d DyldChainedPtrArm64eBind) IsRebase() bool {
+	return d.Bind() == 0
+}
+func (d DyldChainedPtrArm64eBind) IsBind() bool {
+	return d.Bind() != 0
+}
 func (d DyldChainedPtrArm64eBind) Offset() uint64 {
 	return d.Fixup
 }
@@ -315,6 +330,12 @@ type DyldChainedPtrArm64eAuthRebase struct {
 	Pointer uint64
 }
 
+func (d DyldChainedPtrArm64eAuthRebase) IsRebase() bool {
+	return d.Bind() == 0
+}
+func (d DyldChainedPtrArm64eAuthRebase) IsBind() bool {
+	return d.Bind() != 0
+}
 func (d DyldChainedPtrArm64eAuthRebase) Offset() uint64 {
 	return d.Fixup
 }
@@ -368,6 +389,12 @@ type DyldChainedPtrArm64eAuthBind struct {
 	Import  string
 }
 
+func (d DyldChainedPtrArm64eAuthBind) IsRebase() bool {
+	return d.Bind() == 0
+}
+func (d DyldChainedPtrArm64eAuthBind) IsBind() bool {
+	return d.Bind() != 0
+}
 func (d DyldChainedPtrArm64eAuthBind) Offset() uint64 {
 	return d.Fixup
 }
@@ -429,6 +456,12 @@ type DyldChainedPtr64Rebase struct {
 	Pointer uint64
 }
 
+func (d DyldChainedPtr64Rebase) IsRebase() bool {
+	return d.Bind() == 0
+}
+func (d DyldChainedPtr64Rebase) IsBind() bool {
+	return d.Bind() != 0
+}
 func (d DyldChainedPtr64Rebase) Offset() uint64 {
 	return d.Fixup
 }
@@ -476,6 +509,12 @@ type DyldChainedPtr64RebaseOffset struct {
 	Pointer uint64
 }
 
+func (d DyldChainedPtr64RebaseOffset) IsRebase() bool {
+	return d.Bind() == 0
+}
+func (d DyldChainedPtr64RebaseOffset) IsBind() bool {
+	return d.Bind() != 0
+}
 func (d DyldChainedPtr64RebaseOffset) Offset() uint64 {
 	return d.Fixup
 }
@@ -523,6 +562,12 @@ type DyldChainedPtrArm64eRebase24 struct {
 	Pointer uint64
 }
 
+func (d DyldChainedPtrArm64eRebase24) IsRebase() bool {
+	return d.Bind() == 0
+}
+func (d DyldChainedPtrArm64eRebase24) IsBind() bool {
+	return d.Bind() != 0
+}
 func (d DyldChainedPtrArm64eRebase24) Offset() uint64 {
 	return d.Fixup
 }
@@ -571,6 +616,12 @@ type DyldChainedPtrArm64eAuthRebase24 struct {
 	Pointer uint64
 }
 
+func (d DyldChainedPtrArm64eAuthRebase24) IsRebase() bool {
+	return d.Bind() == 0
+}
+func (d DyldChainedPtrArm64eAuthRebase24) IsBind() bool {
+	return d.Bind() != 0
+}
 func (d DyldChainedPtrArm64eAuthRebase24) Offset() uint64 {
 	return d.Fixup
 }
@@ -625,6 +676,12 @@ type DyldChainedPtrArm64eBind24 struct {
 	Import  string
 }
 
+func (d DyldChainedPtrArm64eBind24) IsRebase() bool {
+	return d.Bind() == 0
+}
+func (d DyldChainedPtrArm64eBind24) IsBind() bool {
+	return d.Bind() != 0
+}
 func (d DyldChainedPtrArm64eBind24) Offset() uint64 {
 	return d.Fixup
 }
@@ -676,6 +733,12 @@ type DyldChainedPtrArm64eAuthBind24 struct {
 	Import  string
 }
 
+func (d DyldChainedPtrArm64eAuthBind24) IsRebase() bool {
+	return d.Bind() == 0
+}
+func (d DyldChainedPtrArm64eAuthBind24) IsBind() bool {
+	return d.Bind() != 0
+}
 func (d DyldChainedPtrArm64eAuthBind24) Offset() uint64 {
 	return d.Fixup
 }
@@ -738,6 +801,12 @@ type DyldChainedPtr64Bind struct {
 	Import  string
 }
 
+func (d DyldChainedPtr64Bind) IsRebase() bool {
+	return d.Bind() == 0
+}
+func (d DyldChainedPtr64Bind) IsBind() bool {
+	return d.Bind() != 0
+}
 func (d DyldChainedPtr64Bind) Offset() uint64 {
 	return d.Fixup
 }
@@ -785,6 +854,12 @@ type DyldChainedPtr64KernelCacheRebase struct {
 	Pointer uint64
 }
 
+func (d DyldChainedPtr64KernelCacheRebase) IsRebase() bool {
+	return true
+}
+func (d DyldChainedPtr64KernelCacheRebase) IsBind() bool {
+	return false
+}
 func (d DyldChainedPtr64KernelCacheRebase) Offset() uint64 {
 	return d.Fixup
 }
@@ -852,6 +927,12 @@ type DyldChainedPtr32Rebase struct {
 	Pointer uint32
 }
 
+func (d DyldChainedPtr32Rebase) IsRebase() bool {
+	return d.Bind() == 0
+}
+func (d DyldChainedPtr32Rebase) IsBind() bool {
+	return d.Bind() != 0
+}
 func (d DyldChainedPtr32Rebase) Offset() uint64 {
 	return d.Fixup
 }
@@ -867,6 +948,9 @@ func (d DyldChainedPtr32Rebase) Bind() uint32 {
 func (d DyldChainedPtr32Rebase) Kind() string {
 	return "ptr32-rebase"
 }
+func (d DyldChainedPtr32Rebase) Raw() uint64 {
+	return uint64(d.Pointer)
+}
 func (d DyldChainedPtr32Rebase) String(baseAddr ...uint64) string {
 	if len(baseAddr) > 0 {
 		d.Fixup += baseAddr[0]
@@ -881,6 +965,12 @@ type DyldChainedPtr32Bind struct {
 	Import  string
 }
 
+func (d DyldChainedPtr32Bind) IsRebase() bool {
+	return d.Bind() == 0
+}
+func (d DyldChainedPtr32Bind) IsBind() bool {
+	return d.Bind() != 0
+}
 func (d DyldChainedPtr32Bind) Offset() uint64 {
 	return d.Fixup
 }
@@ -918,6 +1008,12 @@ type DyldChainedPtr32CacheRebase struct {
 	Pointer uint32
 }
 
+func (d DyldChainedPtr32CacheRebase) IsRebase() bool {
+	return true
+}
+func (d DyldChainedPtr32CacheRebase) IsBind() bool {
+	return false
+}
 func (d DyldChainedPtr32CacheRebase) Offset() uint64 {
 	return d.Fixup
 }
@@ -946,6 +1042,12 @@ type DyldChainedPtr32FirmwareRebase struct {
 	Pointer uint32
 }
 
+func (d DyldChainedPtr32FirmwareRebase) IsRebase() bool {
+	return true
+}
+func (d DyldChainedPtr32FirmwareRebase) IsBind() bool {
+	return false
+}
 func (d DyldChainedPtr32FirmwareRebase) Offset() uint64 {
 	return d.Fixup
 }
