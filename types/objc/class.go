@@ -177,9 +177,11 @@ func (c *Class) dump(verbose, addrs bool) string {
 		}
 		for _, ivar := range c.Ivars {
 			if verbose {
-				fmt.Fprintf(w, "  %s\n", ivar.Verbose())
-			} else if addrs {
-				fmt.Fprintf(w, "  %s\n", ivar.WithAddrs())
+				if addrs {
+					fmt.Fprintf(w, "  %s\n", ivar.WithAddrs())
+				} else {
+					fmt.Fprintf(w, "  %s\n", ivar.Verbose())
+				}
 			} else {
 				fmt.Fprintf(w, "  %s\n", &ivar)
 			}
