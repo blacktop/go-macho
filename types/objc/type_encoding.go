@@ -150,25 +150,44 @@ func getMethodWithArgs(method, returnType string, args []string) string {
 	return fmt.Sprintf("(%s)%s;", returnType, method)
 }
 
-func getPropertyType(attrs string) string {
-	var typ string
-
-	for _, attr := range strings.Split(attrs, ",") {
-		if strings.HasPrefix(attr, propertyType) {
-			attr = strings.TrimPrefix(attr, propertyType)
-			if strings.HasPrefix(attr, "@\"") {
-				typ = strings.Trim(attr, "@\"")
-				if strings.HasPrefix(typ, "<") {
-					typ = "NSObject" + typ
-				}
-				typ += " *"
-			} else {
-				typ = decodeType(attr) + " "
+func getPropertyType(attrs string) (typ string) {
+	if strings.HasPrefix(attrs, propertyType) {
+		var attr string
+		var typParts []string
+		parts := strings.Split(attrs, ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			sub := parts[i]
+			switch string(sub[0]) {
+			case propertyReadOnly:
+			case propertyBycopy:
+			case propertyByref:
+			case propertyDynamic:
+			case propertyGetter:
+			case propertySetter:
+			case propertyIVar:
+			case propertyWeak:
+			case propertyStrong:
+			case propertyAtomic:
+			case propertyNonAtomic:
+			case propertyType:
+				typParts = append([]string{strings.TrimPrefix(sub, propertyType)}, typParts...)
+				attr = strings.Join(typParts, ",")
+			default:
+				typParts = append([]string{sub}, typParts...)
 			}
-			break
 		}
+		if strings.HasPrefix(attr, "@\"") {
+			typ = strings.Trim(attr, "@\"")
+			if strings.HasPrefix(typ, "<") {
+				typ = "NSObject" + typ
+			}
+			typ += " *"
+		} else {
+			typ = decodeType(attr) + " "
+		}
+	} else {
+		typ = "?"
 	}
-
 	return typ
 }
 
@@ -287,6 +306,9 @@ func decodeType(encType string) string {
 			inner := encType[strings.IndexByte(encType, '[')+1 : strings.LastIndexByte(encType, ']')]
 			s += decodeArray(inner)
 		} else if strings.HasPrefix(encType, "{") { // STRUCT
+			if !(strings.Contains(encType, "{") && strings.Contains(encType, "}")) {
+				return "?"
+			}
 			inner := encType[strings.IndexByte(encType, '{')+1 : strings.LastIndexByte(encType, '}')]
 			s += decodeStructure(inner)
 		} else if strings.HasPrefix(encType, "(") { // UNION

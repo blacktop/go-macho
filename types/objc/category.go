@@ -51,7 +51,7 @@ func (c *Category) dump(verbose, addrs bool) string {
 		if addrs {
 			comment += fmt.Sprintf(" // %#x", c.VMAddr)
 		}
-		if c.Class.IsSwift() {
+		if c.Class != nil && c.Class.IsSwift() {
 			if len(comment) > 0 {
 				comment += " (Swift)"
 			} else {

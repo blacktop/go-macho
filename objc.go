@@ -1217,7 +1217,11 @@ func (f *File) GetObjCIvars(vmaddr uint64) ([]objc.Ivar, error) {
 
 		var o uint32
 		if err := binary.Read(f.cr, f.ByteOrder, &o); err != nil {
-			return nil, fmt.Errorf("failed to read ivar.offset: %v", err)
+			if err == io.EOF {
+				o = 0 // I've seen this happen when this points to the zero-filled __DATA __common section
+			} else {
+				return nil, fmt.Errorf("failed to read ivar.offset: %v", err)
+			}
 		}
 		n, err := f.GetCString(ivar.NameVMAddr)
 		if err != nil {
