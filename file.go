@@ -2595,17 +2595,15 @@ func (f *File) parseRebase(r *bytes.Reader) ([]types.Rebase, error) {
 
 	for {
 		ptr, err := r.ReadByte()
-
-		if err == io.EOF {
-			break
-		}
-
 		if err != nil {
+			if err == io.EOF {
+				break
+			}
 			return nil, err
 		}
 
-		imm := ptr & types.BIND_IMMEDIATE_MASK
-		opcode := ptr & types.BIND_OPCODE_MASK
+		imm := ptr & types.REBASE_IMMEDIATE_MASK
+		opcode := ptr & types.REBASE_OPCODE_MASK
 
 		switch opcode {
 		case types.REBASE_OPCODE_DONE:
@@ -2613,13 +2611,12 @@ func (f *File) parseRebase(r *bytes.Reader) ([]types.Rebase, error) {
 		case types.REBASE_OPCODE_SET_TYPE_IMM:
 			rebase.Type = imm
 		case types.REBASE_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
-			off, err := trie.ReadUleb128(r)
+			rebase.Start = f.Segments()[imm].Addr
+			rebase.Segment = f.Segments()[imm].Name
+			rebase.Offset, err = trie.ReadUleb128(r)
 			if err != nil {
 				return nil, err
 			}
-			rebase.Offset += off
-			rebase.Start = f.Segments()[imm].Addr
-			rebase.Segment = f.Segments()[imm].Name
 		case types.REBASE_OPCODE_ADD_ADDR_ULEB:
 			off, err := trie.ReadUleb128(r)
 			if err != nil {
@@ -2661,14 +2658,14 @@ func (f *File) parseRebase(r *bytes.Reader) ([]types.Rebase, error) {
 			if err := binary.Read(f.cr, f.ByteOrder, &rebase.Value); err != nil {
 				return nil, fmt.Errorf("failed to read pointer: %v", err)
 			}
-			off, err := trie.ReadUleb128(r)
-			if err != nil {
-				return nil, err
-			}
 			if sec := f.FindSectionForVMAddr(f.Segment(rebase.Segment).Addr + rebase.Offset); sec != nil {
 				rebase.Section = sec.Name
 			}
 			rebases = append(rebases, rebase)
+			off, err := trie.ReadUleb128(r)
+			if err != nil {
+				return nil, err
+			}
 			rebase.Offset += off + f.pointerSize()
 		case types.REBASE_OPCODE_DO_REBASE_ULEB_TIMES_SKIPPING_ULEB:
 			count, err := trie.ReadUleb128(r)
