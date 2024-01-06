@@ -67,8 +67,8 @@ func (h *FileHeader) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 }
 func (h *FileHeader) String() string {
 	var caps string
-	if len(h.SubCPU.Caps(h.CPU)) > 0 {
-		caps = fmt.Sprintf(" caps: %s", h.SubCPU.Caps(h.CPU))
+	if len(h.SubCPU.Capabilities(h.CPU)) > 0 {
+		caps = fmt.Sprintf(" caps: %s", h.SubCPU.Capabilities(h.CPU))
 	}
 	return fmt.Sprintf(
 		"Magic         = %s\n"+
@@ -103,7 +103,7 @@ func (h *FileHeader) MarshalJSON() ([]byte, error) {
 		Type:         h.Type.String(),
 		CPU:          h.CPU.String(),
 		SubCPU:       h.SubCPU.String(h.CPU),
-		SubCPUCaps:   h.SubCPU.Caps(h.CPU),
+		SubCPUCaps:   h.SubCPU.Capabilities(h.CPU),
 		Commands:     int(h.NCommands),
 		SizeCommands: int(h.SizeCommands),
 		Flags:        h.Flags.Flags(),

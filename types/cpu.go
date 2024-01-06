@@ -202,14 +202,17 @@ const (
 	CPUSubtypeArm6432V8  CPUSubtype = 1
 )
 
-// Capability bits used in the definition of cpu_subtype.
 const (
-	CpuSubtypeFeatureMask      CPUSubtype = 0xff000000                         /* mask for feature flags */
-	CpuSubtypeMask                        = CPUSubtype(^CpuSubtypeFeatureMask) /* mask for cpu subtype */
-	CpuSubtypeLib64                       = 0x80000000                         /* 64 bit libraries */
-	CpuSubtypePtrauthAbi                  = 0x80000000                         /* pointer authentication with versioned ABI */
-	CpuSubtypePtrauthAbiUser              = 0x40000000                         /* pointer authentication with userspace versioned ABI */
-	CpuSubtypeArm64PtrAuthMask            = 0x0f000000
+	/* Capability bits used in the definition of cpu_subtype. */
+	CpuSubtypeFeatureMask CPUSubtype = 0xff000000                         /* mask for feature flags */
+	CpuSubtypeMask                   = CPUSubtype(^CpuSubtypeFeatureMask) /* mask for cpu subtype */
+	CpuSubtypeLib64                  = 0x80000000                         /* 64 bit libraries */
+	/* CPU subtype capability flags for ptrauth on arm64e platforms */
+	CpuSubtypeArm64PtrAuthMask = 0x0f000000
+	/* CPU subtype capability flags for ptrauth on arm64e platforms, take 2 */
+	CpuSubtypeArm64eVersionedAbiMask = 0x80000000
+	CpuSubtypeArm64eKernelAbiMask    = 0x40000000
+	CpuSubtypeArm64ePtrAuthMask      = 0x3f000000
 	/*
 	 *      When selecting a slice, ANY will pick the slice with the best
 	 *      grading for the selected cpu_type_t, unlike the "ALL" subtypes,
@@ -248,6 +251,29 @@ var cpuSubtypeArm64Strings = []IntName{
 	{uint32(CPUSubtypeArm6432V8), "v8"},
 }
 
+func (st CPUSubtype) Capabilities(cpu CPU) string {
+	switch cpu {
+	case CPUArm64:
+		caps := st & CpuSubtypeFeatureMask
+		if caps > 0 {
+			if (st & CpuSubtypeMask) == CpuSubtypeLib64 { // lib64
+				return "LIB64"
+			} else if (st & CpuSubtypeMask) == CPUSubtypeArm64E { // arm64e
+				if (caps & CpuSubtypeArm64eKernelAbiMask) == 0 {
+					return fmt.Sprintf("USR%02d", ((caps & CpuSubtypeArm64ePtrAuthMask) >> 24))
+				}
+				return fmt.Sprintf("KER%02d", ((caps & CpuSubtypeArm64ePtrAuthMask) >> 24))
+			} else { // arm64 (v8/all)
+				if (caps & CpuSubtypeArm64eKernelAbiMask) == 0 {
+					return fmt.Sprintf("USR%02d", ((caps & CpuSubtypeArm64PtrAuthMask) >> 24))
+				}
+				return fmt.Sprintf("KER%02d", ((caps & CpuSubtypeArm64PtrAuthMask) >> 24))
+			}
+		}
+	}
+	return ""
+}
+
 func (st CPUSubtype) String(cpu CPU) string {
 	switch cpu {
 	case CPUI386:
@@ -264,21 +290,6 @@ func (st CPUSubtype) String(cpu CPU) string {
 	return "UNKNOWN"
 }
 
-func (st CPUSubtype) Caps(cpu CPU) string {
-	switch cpu {
-	case CPUArm64:
-		caps := st & CpuSubtypeFeatureMask
-		if caps > 0 {
-			if caps&CpuSubtypePtrauthAbiUser == 0 {
-				return fmt.Sprintf("USR%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
-			} else {
-				return fmt.Sprintf("KER%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
-			}
-		}
-	}
-	return ""
-}
-
 func (st CPUSubtype) GoString(cpu CPU) string {
 	switch cpu {
 	case CPUI386:
@@ -288,16 +299,9 @@ func (st CPUSubtype) GoString(cpu CPU) string {
 	case CPUArm:
 		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeArmStrings, true)
 	case CPUArm64:
-		var feature string
-		caps := st & CpuSubtypeFeatureMask
-		if caps > 0 {
-			if caps&CpuSubtypePtrauthAbiUser == 0 {
-				feature = fmt.Sprintf(" caps: PAC%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
-			} else {
-				feature = fmt.Sprintf(" caps: PAK%02d", (caps&CpuSubtypeArm64PtrAuthMask)>>24)
-			}
-		}
-		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm64Strings, true) + feature
+		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm64Strings, true)
+	case CPUArm6432:
+		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm64Strings, true)
 	}
 	return "UNKNOWN"
 }
