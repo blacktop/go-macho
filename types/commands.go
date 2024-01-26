@@ -220,6 +220,32 @@ type DylibCmd struct {
 	CompatVersion  Version
 }
 
+type DylibUseFlags uint32
+
+const (
+	DYLIB_USE_WEAK_LINK    DylibUseFlags = 0x01
+	DYLIB_USE_REEXPORT     DylibUseFlags = 0x02
+	DYLIB_USE_UPWARD       DylibUseFlags = 0x04
+	DYLIB_USE_DELAYED_INIT DylibUseFlags = 0x08
+)
+
+const DYLIB_USE_MARKER = 0x1a741800
+
+/*
+ * DylibUseCmd is an alternate encoding for: LC_LOAD_DYLIB.
+ * The flags field contains independent flags DYLIB_USE_*
+ * First supported in macOS 15, iOS 18.
+ */
+type DylibUseCmd struct {
+	LoadCmd                      /* LC_LOAD_DYLIB or LC_LOAD_WEAK_DYLIB */
+	Len            uint32        /* overall size, including path */
+	NameOffset     uint32        /* == 28, dylibs's path offset */
+	Marker         uint32        /* == DYLIB_USE_MARKER */
+	CurrentVersion uint32        /* dylib's current version number */
+	CompatVersion  uint32        /* dylib's compatibility version number */
+	Flags          DylibUseFlags /* DYLIB_USE_... flags */
+}
+
 // A LoadDylibCmd load a dynamically linked shared library.
 type LoadDylibCmd DylibCmd // LC_LOAD_DYLIB
 // A IDDylibCmd represents a Mach-O load dynamic library ident command.

@@ -162,6 +162,7 @@ const (
 	AppExtensionSafe           HeaderFlag = 0x2000000
 	NlistOutofsyncWithDyldinfo HeaderFlag = 0x4000000
 	SimSupport                 HeaderFlag = 0x8000000
+	ImplicitPagezero           HeaderFlag = 0x10000000
 	DylibInCache               HeaderFlag = 0x80000000
 )
 
@@ -251,6 +252,9 @@ func (f HeaderFlag) NlistOutofsyncWithDyldinfo() bool {
 }
 func (f HeaderFlag) SimSupport() bool {
 	return (f & SimSupport) != 0
+}
+func (f HeaderFlag) ImplicitPagezero() bool {
+	return (f & ImplicitPagezero) != 0
 }
 func (f HeaderFlag) DylibInCache() bool {
 	return (f & DylibInCache) != 0
@@ -352,6 +356,9 @@ func (f HeaderFlag) Flags() []string {
 	}
 	if f.SimSupport() {
 		flags = append(flags, "SimSupport")
+	}
+	if f.ImplicitPagezero() {
+		flags = append(flags, "ImplicitPagezero")
 	}
 	if f.DylibInCache() {
 		flags = append(flags, "DylibInCache")

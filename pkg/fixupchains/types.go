@@ -84,6 +84,7 @@ const (
 	DYLD_CHAINED_PTR_ARM64E_FIRMWARE     DCPtrKind = 10 // stride 4, unauth target is vmaddr
 	DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE DCPtrKind = 11 // stride 1, x86_64 kernel caches
 	DYLD_CHAINED_PTR_ARM64E_USERLAND24   DCPtrKind = 12 // stride 8, unauth target is vm offset, 24-bit bind
+	DYLD_CHAINED_PTR_ARM64E_SHARED_CACHE DCPtrKind = 13 // stride 8, regular/auth targets both vm offsets.  Only A keys supported
 )
 
 type DyldChainedStarts struct {
@@ -1068,4 +1069,111 @@ func (d DyldChainedPtr32FirmwareRebase) String(baseAddr ...uint64) string {
 		d.Fixup += baseAddr[0]
 	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%08x %16s: (next:%02d target: 0x%07x)", d.Fixup, d.Pointer, d.Kind(), d.Next(), d.Target())
+}
+
+// DYLD_CHAINED_PTR_ARM64E_SHARED_CACHE
+type DyldChainedPtrArm64eSharedCacheRebase struct {
+	Fixup   uint64
+	Pointer uint64
+}
+
+func (d DyldChainedPtrArm64eSharedCacheRebase) IsRebase() bool {
+	return true
+}
+func (d DyldChainedPtrArm64eSharedCacheRebase) IsBind() bool {
+	return false
+}
+func (d DyldChainedPtrArm64eSharedCacheRebase) Offset() uint64 {
+	return d.Fixup
+}
+func (d DyldChainedPtrArm64eSharedCacheRebase) Raw() uint64 {
+	return d.Pointer
+}
+func (d DyldChainedPtrArm64eSharedCacheRebase) Target() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 0, 34) // runtimeOffset - offset from the start of the shared cache
+}
+func (d DyldChainedPtrArm64eSharedCacheRebase) High8() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 34, 8) // TODO: check that this is correct when src is released
+}
+func (d DyldChainedPtrArm64eSharedCacheRebase) Next() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 52, 11) // 8-byte stide
+}
+func (d DyldChainedPtrArm64eSharedCacheRebase) Auth() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 63, 1) // == 0
+}
+func (d DyldChainedPtrArm64eSharedCacheRebase) Kind() string {
+	return "shared-cache-rebase"
+}
+func (d DyldChainedPtrArm64eSharedCacheRebase) String(baseAddr ...uint64) string {
+	if len(baseAddr) > 0 {
+		d.Fixup += baseAddr[0]
+	}
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: %#x, high8: 0x%02x)",
+		d.Fixup,
+		d.Pointer,
+		d.Kind(),
+		d.Next(),
+		d.Target(),
+		d.High8(),
+	)
+}
+
+// DYLD_CHAINED_PTR_ARM64E_SHARED_CACHE
+type DyldChainedPtrArm64eSharedCacheAuthRebase struct {
+	Fixup   uint64
+	Pointer uint64
+}
+
+func (d DyldChainedPtrArm64eSharedCacheAuthRebase) IsRebase() bool {
+	return true
+}
+func (d DyldChainedPtrArm64eSharedCacheAuthRebase) IsBind() bool {
+	return false
+}
+func (d DyldChainedPtrArm64eSharedCacheAuthRebase) Offset() uint64 {
+	return d.Fixup
+}
+func (d DyldChainedPtrArm64eSharedCacheAuthRebase) Raw() uint64 {
+	return d.Pointer
+}
+func (d DyldChainedPtrArm64eSharedCacheAuthRebase) Target() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 0, 34) // runtimeOffset - offset from the start of the shared cache
+}
+func (d DyldChainedPtrArm64eSharedCacheAuthRebase) Diversity() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 34, 16)
+}
+func (d DyldChainedPtrArm64eSharedCacheAuthRebase) AddrDiv() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 50, 1)
+}
+func (d DyldChainedPtrArm64eSharedCacheAuthRebase) IsDataKey() bool {
+	return types.ExtractBits(uint64(d.Pointer), 51, 1) != 0 // implicitly always the 'A' key.  0 -> IA.  1 -> DA
+}
+func (d DyldChainedPtrArm64eSharedCacheAuthRebase) Next() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 52, 11) // 8-byte stide
+}
+func (d DyldChainedPtrArm64eSharedCacheAuthRebase) Auth() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 63, 1) // == 1
+}
+func (d DyldChainedPtrArm64eSharedCacheAuthRebase) Kind() string {
+	return "shared-cache-auth-rebase"
+}
+func (d DyldChainedPtrArm64eSharedCacheAuthRebase) String(baseAddr ...uint64) string {
+	if len(baseAddr) > 0 {
+		d.Fixup += baseAddr[0]
+	}
+	// hack to handle the fact that the shared cache only has A keys
+	key := uint64(0)
+	if d.IsDataKey() {
+		key = 2
+	}
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: %#x, key: %s, addrDiv: %d, diversity: 0x%04x)",
+		d.Fixup,
+		d.Pointer,
+		d.Kind(),
+		d.Next(),
+		d.Target(),
+		KeyName(key),
+		d.AddrDiv(),
+		d.Diversity(),
+	)
 }
