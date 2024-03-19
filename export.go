@@ -282,10 +282,25 @@ func (f *File) CodeSign(config *codesign.Config) error {
 			if config.SpecialSlots == nil {
 				config.SpecialSlots = cs.CodeDirectories[0].SpecialSlots
 			}
+			if config.RuntimeVersion == 0 {
+				config.RuntimeVersion = cs.CodeDirectories[0].Header.Runtime
+			}
 		}
 	} else { // create NEW code signature
 		if config.ID == "" {
 			return fmt.Errorf("you must supply an ID")
+		}
+		// infer runtime version from build or min version load commands if necessary
+		if config.Flags & ctypes.RUNTIME != 0 {
+			if config.RuntimeVersion == 0 {
+				if bv := f.BuildVersion(); bv != nil {
+					config.RuntimeVersion = bv.Sdk
+				} else if vm := f.VersionMin(); vm != nil {
+					config.RuntimeVersion = vm.Sdk
+				}
+			}
+		} else {
+			config.RuntimeVersion = 0
 		}
 		cs = &CodeSignature{
 			CodeSignatureCmd: types.CodeSignatureCmd{

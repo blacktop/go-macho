@@ -12,6 +12,7 @@ import (
 	"io"
 	"strings"
 
+	mtypes "github.com/blacktop/go-macho/types"
 	"github.com/blacktop/go-macho/pkg/codesign/types"
 )
 
@@ -434,6 +435,7 @@ type Config struct {
 	EntitlementsDER     []byte
 	ResourceDirSlotHash []byte
 	SlotHashes          slotHashes
+	RuntimeVersion mtypes.Version
 	CertChain           []*x509.Certificate
 	SignerFunction      func([]byte) ([]byte, error)
 }
@@ -597,7 +599,7 @@ func createCodeDirectory(r io.Reader, config *Config) (*bytes.Buffer, error) {
 
 	cdHeader := types.CodeDirectoryType{
 		CdEarliest: types.CdEarliest{
-			Version:       types.SUPPORTS_EXECSEG, // TODO: support other versions (e.g.SUPPORTS_RUNTIME)
+			Version:       types.SUPPORTS_RUNTIME, // TODO: support other versions (e.g.SUPPORTS_LINKAGE)
 			Flags:         config.Flags,
 			HashOffset:    hashOffset,
 			IdentOffset:   identOffset,
@@ -611,6 +613,9 @@ func createCodeDirectory(r io.Reader, config *Config) (*bytes.Buffer, error) {
 		CdExecSeg: types.CdExecSeg{
 			ExecSegBase:  uint64(config.TextOffset),
 			ExecSegLimit: uint64(config.TextSize),
+		},
+		CdRuntime: types.CdRuntime{
+			Runtime: config.RuntimeVersion,
 		},
 	}
 
