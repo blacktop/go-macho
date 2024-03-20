@@ -547,6 +547,28 @@ func Sign(r io.Reader, config *Config) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+func nCodeSlots(config *Config) uint32 {
+	return uint32((int(config.CodeSize) + types.PAGE_SIZE - 1) / types.PAGE_SIZE)
+}
+
+func EstimateCodeSignatureSize(config *Config) uint64 {
+	cdHeaderSize := binary.Size(types.BlobHeader{}) + binary.Size(types.CodeDirectoryType{})
+	cdVariableSize := len(config.ID)+1+ len(types.EmptySha256Slot)*int(config.NSpecialSlots + nCodeSlots(config))
+	extraSlotsSize := 0
+	if len(config.Entitlements) > 0 {
+		extraSlotsSize += binary.Size(types.BlobHeader{}) + len(config.Entitlements)
+	}
+	if len(config.EntitlementsDER) > 0 {
+		extraSlotsSize += binary.Size(types.BlobHeader{}) + len(config.EntitlementsDER)
+	}
+	extraSlotsSize += 1024		// guess at maximum size of requirements
+	sigSize := 1<<14			// guess at size of CMS blob, including timestamp
+	for _, cert := range config.CertChain {
+		sigSize += len(cert.Raw)
+	}
+	return uint64(cdHeaderSize + cdVariableSize + extraSlotsSize + sigSize)
+}
+
 func createCodeDirectory(r io.Reader, config *Config) (*bytes.Buffer, error) {
 	var cddelta int
 	var cdbuf bytes.Buffer
@@ -602,7 +624,7 @@ func createCodeDirectory(r io.Reader, config *Config) (*bytes.Buffer, error) {
 			HashOffset:    hashOffset,
 			IdentOffset:   identOffset,
 			NSpecialSlots: config.NSpecialSlots,
-			NCodeSlots:    uint32((int(config.CodeSize) + types.PAGE_SIZE - 1) / types.PAGE_SIZE),
+			NCodeSlots:    nCodeSlots(config),
 			CodeLimit:     uint32(config.CodeSize),
 			HashSize:      sha256.Size,
 			HashType:      types.HASHTYPE_SHA256,
