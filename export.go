@@ -258,6 +258,10 @@ func (f *File) CodeSign(config *codesign.Config) error {
 		return fmt.Errorf("failed to find __LINKEDIT segment")
 	}
 
+	if config.ResourceDirSlotHash != nil {
+		config.SlotHashes.ResourceDir = config.ResourceDirSlotHash
+	}
+
 	if cs = f.CodeSignature(); cs != nil { // existing code signature
 		// import settings from existing code signature
 		if len(cs.CodeDirectories) > 0 {
@@ -275,9 +279,6 @@ func (f *File) CodeSign(config *codesign.Config) error {
 			}
 			if config.EntitlementsDER == nil {
 				config.EntitlementsDER = []byte(cs.EntitlementsDER)
-			}
-			if config.ResourceDirSlotHash != nil {
-				config.SlotHashes.ResourceDir = config.ResourceDirSlotHash
 			}
 			if config.SpecialSlots == nil {
 				config.SpecialSlots = cs.CodeDirectories[0].SpecialSlots
