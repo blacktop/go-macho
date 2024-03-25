@@ -283,7 +283,13 @@ func (f *File) CodeSign(config *codesign.Config) error {
 				config.SpecialSlots = cs.CodeDirectories[0].SpecialSlots
 			}
 			if config.RuntimeVersion == 0 {
-				config.RuntimeVersion = cs.CodeDirectories[0].Header.Runtime
+				if cs.CodeDirectories[0].Header.Runtime != 0 {
+					config.RuntimeVersion = cs.CodeDirectories[0].Header.Runtime
+				} else if bv := f.BuildVersion(); bv != nil {
+					config.RuntimeVersion = bv.Sdk
+				} else if vm := f.VersionMin(); vm != nil {
+					config.RuntimeVersion = vm.Sdk
+				}
 			}
 		}
 	} else { // create NEW code signature
