@@ -586,38 +586,68 @@ func CreateRequirements(id string, certs []*x509.Certificate) (Blob, error) {
 	}
 
 	// add appleCertificateExtensions cert extension check
-	appleCertificateExtensionsOID := asn1.ObjectIdentifier{1, 2, 840, 113635, 100, 6, 2, 6}
-	for idx, cert := range certs {
-		for _, ext := range cert.Extensions {
-			if ext.Id.Equal(appleCertificateExtensionsOID) {
-				if cert.IsCA {
-					slotIndex := uint32(idx)
-					if idx == 0 {
-						slotIndex = anchorCertIndex
-					}
-					var ops []uint32
-					ops = append(ops, uint32(opCertGeneric))
-					ops = append(ops, slotIndex)
-					ops = append(ops, encodeBytes(encodeOID(appleCertificateExtensionsOID))...)
-					ops = append(ops, uint32(matchExists))
-					statements = append(statements, ops)
-				}
-			}
-		}
+	developerIdCAExtensionOID := asn1.ObjectIdentifier{1, 2, 840, 113635, 100, 6, 2, 6}
+	wwdrCAExtensionOID := asn1.ObjectIdentifier{1, 2, 840, 113635, 100, 6, 2, 1}
+	developerIdApplicationExtensionOID := asn1.ObjectIdentifier{1, 2, 840, 113635, 100, 6, 1, 13}
+
+	var leafCert *x509.Certificate
+	if len(certs) > 0 && !certs[len(certs)-1].IsCA {
+		leafCert = certs[len(certs)-1]
 	}
 
-	if len(certs) > 1 {
-		// add on subject OU check
-		if !certs[len(certs)-1].IsCA {
-			leafCert := certs[len(certs)-1]
-			if leafCert != nil && len(leafCert.Subject.OrganizationalUnit) > 0 {
-				var ops []uint32
-				ops = append(ops, uint32(opCertField))
-				ops = append(ops, leafCertIndex)
-				ops = append(ops, encodeBytes([]byte("subject.OU"))...)
-				ops = append(ops, uint32(matchEqual))
-				ops = append(ops, encodeBytes([]byte(leafCert.Subject.OrganizationalUnit[0]))...)
+	// if any intermediate is an apple signing ca, add appropriate expressions
+	for idx, cert := range certs {
+		if !cert.IsCA {
+			continue
+		}
+		slotIndex := uint32(idx)
+		if idx == 0 {
+			slotIndex = anchorCertIndex
+		}
+		for _, ext := range cert.Extensions {
+			if ext.Id.Equal(developerIdCAExtensionOID) { // production certificate
+				ops := []uint32{uint32(opCertGeneric), slotIndex}
+				ops = append(ops, encodeBytes(encodeOID(developerIdCAExtensionOID))...)
+				ops = append(ops, uint32(matchExists))
 				statements = append(statements, ops)
+
+				if leafCert == nil {
+					break
+				}
+
+				// add on signing purpose check
+				for _, ext := range leafCert.Extensions {
+					if ext.Id.Equal(developerIdApplicationExtensionOID) {
+						ops := []uint32{uint32(opCertGeneric), leafCertIndex}
+						ops = append(ops, encodeBytes(encodeOID(developerIdApplicationExtensionOID))...)
+						ops = append(ops, uint32(matchExists))
+						statements = append(statements, ops)
+					}
+				}
+				// add on subject OU check
+				if len(leafCert.Subject.OrganizationalUnit) > 0 {
+					ops := []uint32{uint32(opCertField), leafCertIndex}
+					ops = append(ops, encodeBytes([]byte("subject.OU"))...)
+					ops = append(ops, uint32(matchEqual))
+					ops = append(ops, encodeBytes([]byte(leafCert.Subject.OrganizationalUnit[0]))...)
+					statements = append(statements, ops)
+				}
+			} else if ext.Id.Equal(wwdrCAExtensionOID) { // developer certificate
+				ops := []uint32{uint32(opCertGeneric), slotIndex}
+				ops = append(ops, encodeBytes(encodeOID(wwdrCAExtensionOID))...)
+				ops = append(ops, uint32(matchExists))
+				statements = append(statements, ops)
+
+				// add on subject CN check
+				if leafCert != nil && len(leafCert.Subject.CommonName) > 0 {
+					var ops []uint32
+					ops = append(ops, uint32(opCertField))
+					ops = append(ops, leafCertIndex)
+					ops = append(ops, encodeBytes([]byte("subject.CN"))...)
+					ops = append(ops, uint32(matchEqual))
+					ops = append(ops, encodeBytes([]byte(leafCert.Subject.OrganizationalUnit[0]))...)
+					statements = append(statements, ops)
+				}
 			}
 		}
 	}
