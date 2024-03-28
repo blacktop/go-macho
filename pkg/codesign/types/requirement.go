@@ -10,7 +10,6 @@ import (
 	"math"
 	"strings"
 
-	"github.com/blacktop/go-macho/pkg/trie"
 	mtypes "github.com/blacktop/go-macho/types"
 )
 
@@ -692,12 +691,11 @@ func CreateRequirements(id string, certs []*x509.Certificate) (Blob, error) {
 }
 
 func encodeOID(oid asn1.ObjectIdentifier) []byte {
-	var res bytes.Buffer
-	trie.EncodeUleb128(&res, uint64(oid[0])*40+uint64(oid[1]))
-	for _, v := range oid[2:] {
-		trie.EncodeUleb128(&res, uint64(v))
+	res, err := asn1.Marshal(oid)
+	if err != nil {
+		panic(fmt.Errorf("asn1.Marshal could not marshal object identifier %v: %w", oid, err))
 	}
-	return res.Bytes()
+	return res[2:]				// strip leading type tag and length
 }
 
 func encodeBytes(in []byte) []uint32 {
