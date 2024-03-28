@@ -1735,6 +1735,23 @@ func (f *File) BuildVersion() *BuildVersion {
 	return nil
 }
 
+// VersionMin returns the minimum-version load command, or nil if no minimum-version exists.
+func (f *File) VersionMin() *VersionMin {
+	for _, l := range f.Loads {
+		switch s := l.(type) {
+		case *VersionMinMacOSX:
+			return &s.VersionMin
+		case *VersionMinTvOS:
+			return &s.VersionMin
+		case *VersionMinWatchOS:
+			return &s.VersionMin
+		case *VersionMiniPhoneOS:
+			return &s.VersionMin
+		}
+	}
+	return nil
+}
+
 // FileSets returns an array of Fileset entries.
 func (f *File) FileSets() []*FilesetEntry {
 	var fsets []*FilesetEntry
