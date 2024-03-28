@@ -644,7 +644,7 @@ func CreateRequirements(id string, certs []*x509.Certificate) (Blob, error) {
 					ops = append(ops, leafCertIndex)
 					ops = append(ops, encodeBytes([]byte("subject.CN"))...)
 					ops = append(ops, uint32(matchEqual))
-					ops = append(ops, encodeBytes([]byte(leafCert.Subject.OrganizationalUnit[0]))...)
+					ops = append(ops, encodeBytes([]byte(leafCert.Subject.CommonName))...)
 					statements = append(statements, ops)
 				}
 			}
