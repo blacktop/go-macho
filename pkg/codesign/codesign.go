@@ -593,7 +593,14 @@ func createCodeDirectory(r io.Reader, config *Config) (*bytes.Buffer, error) {
 
 	// calculate the CodeDirectory offsets
 	identOffset := uint32(binary.Size(types.BlobHeader{}) + binary.Size(types.CodeDirectoryType{}))
-	hashOffset := identOffset + uint32(len(config.ID)+1+len(types.EmptySha256Slot)*int(config.NSpecialSlots))
+	teamOffset := uint32(binary.Size(types.BlobHeader{}) + binary.Size(types.CodeDirectoryType{}) + len(config.ID) + 1)
+	teamLen := len(config.TeamID)
+	if teamLen > 0 {
+		teamLen++
+	} else {
+		teamOffset = 0
+	}
+	hashOffset := identOffset + uint32(len(config.ID)+1+teamLen+len(types.EmptySha256Slot)*int(config.NSpecialSlots))
 
 	cdHeader := types.CodeDirectoryType{
 		CdEarliest: types.CdEarliest{
@@ -607,6 +614,9 @@ func createCodeDirectory(r io.Reader, config *Config) (*bytes.Buffer, error) {
 			HashSize:      sha256.Size,
 			HashType:      types.HASHTYPE_SHA256,
 			PageSize:      uint8(types.PAGE_SIZE_BITS),
+		},
+		CdTeamID: types.CdTeamID{
+			TeamOffset: teamOffset,
 		},
 		CdExecSeg: types.CdExecSeg{
 			ExecSegBase:  uint64(config.TextOffset),
@@ -639,6 +649,9 @@ func createCodeDirectory(r io.Reader, config *Config) (*bytes.Buffer, error) {
 	// adjust CodeDirectory header offsets
 	cdHeader.IdentOffset -= uint32(cddelta)
 	cdHeader.HashOffset -= uint32(cddelta)
+	if cdHeader.TeamOffset != 0 {
+		cdHeader.TeamOffset -= uint32(cddelta)
+	}
 
 	if config.IsMain {
 		cdHeader.ExecSegFlags = types.EXECSEG_MAIN_BINARY
@@ -653,6 +666,12 @@ func createCodeDirectory(r io.Reader, config *Config) (*bytes.Buffer, error) {
 	// write CodeDirectory identifier
 	if _, err := cdbuf.WriteString(config.ID + "\x00"); err != nil {
 		return nil, fmt.Errorf("failed to write identifier %s: %v", config.ID, err)
+	}
+	// write team identifier
+	if len(config.TeamID) > 0 {
+		if _, err := cdbuf.WriteString(config.TeamID + "\x00"); err != nil {
+			return nil, fmt.Errorf("failed to write team identifier %s: %v", config.TeamID, err)
+		}
 	}
 	if len(config.Entitlements) > 0 {
 		// write CodeDirectory Entitlements ASN1/DER slot hash
