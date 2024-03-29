@@ -311,7 +311,7 @@ func (f *File) CodeSign(config *codesign.Config) error {
 	f.ledata = bytes.NewBuffer(ledata[:(uint64(cs.Offset) - linkedit.Offset)])
 
 	// update __LINKEDIT segment sizes
-	linkedit.Filesz = pageAlign(uint64(len(ledata)), 0x4000) // TODO: is this enough padding to hold the new signature?
+	linkedit.Filesz = pageAlign(uint64(len(ledata)) + codesign.EstimateCodeSignatureSize(config), 0x4000)
 	linkedit.Memsz = pageAlign(linkedit.Filesz, 0x8000)
 	// update LC_CODE_SIGNATURE size
 	cs.Size = uint32((linkedit.Offset + linkedit.Filesz) - uint64(cs.Offset))
