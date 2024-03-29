@@ -460,13 +460,15 @@ func Sign(r io.Reader, config *Config) ([]byte, error) {
 	sb := types.NewSuperBlob(types.MAGIC_EMBEDDED_SIGNATURE)
 
 	// Requirements /////////////////////////////////////////////
-	reqBlob, err = types.CreateRequirements(config.ID, config.CertChain)
+	reqBlob, err = types.CreateRequirements(config.ID, config.CertChain, config.Flags == types.ADHOC)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Requirements: %v", err)
 	}
-	config.SlotHashes.Requirements, err = reqBlob.Sha256Hash()
-	if err != nil {
-		return nil, fmt.Errorf("failed to hash Requirements: %v", err)
+	if config.Flags != types.ADHOC {
+		config.SlotHashes.Requirements, err = reqBlob.Sha256Hash()
+		if err != nil {
+			return nil, fmt.Errorf("failed to hash Requirements: %v", err)
+		}
 	}
 
 	config.NSpecialSlots = uint32(2)
@@ -553,7 +555,7 @@ func nCodeSlots(config *Config) uint32 {
 
 func EstimateCodeSignatureSize(config *Config) uint64 {
 	cdHeaderSize := binary.Size(types.BlobHeader{}) + binary.Size(types.CodeDirectoryType{})
-	cdVariableSize := len(config.ID)+1+ len(types.EmptySha256Slot)*int(config.NSpecialSlots + nCodeSlots(config))
+	cdVariableSize := len(config.ID) + 1 + len(types.EmptySha256Slot)*int(config.NSpecialSlots+nCodeSlots(config))
 	extraSlotsSize := 0
 	if len(config.Entitlements) > 0 {
 		extraSlotsSize += binary.Size(types.BlobHeader{}) + len(config.Entitlements)
@@ -561,8 +563,8 @@ func EstimateCodeSignatureSize(config *Config) uint64 {
 	if len(config.EntitlementsDER) > 0 {
 		extraSlotsSize += binary.Size(types.BlobHeader{}) + len(config.EntitlementsDER)
 	}
-	extraSlotsSize += 1024		// guess at maximum size of requirements
-	sigSize := 1<<14			// guess at size of CMS blob, including timestamp
+	extraSlotsSize += 1024 // guess at maximum size of requirements
+	sigSize := 1 << 14     // guess at size of CMS blob, including timestamp
 	for _, cert := range config.CertChain {
 		sigSize += len(cert.Raw)
 	}
