@@ -76,6 +76,7 @@ const (
 	propertyStrong    = "P" // property GC'able
 	propertyAtomic    = "A" // property atomic
 	propertyNonAtomic = "N" // property non-atomic
+	propertyOptional  = "?" // property optional // TODO: correct this when Apple releases the macOS 14.4 ObjC source code
 )
 
 type methodEncodedArg struct {
@@ -170,6 +171,7 @@ func getPropertyType(attrs string) (typ string) {
 			case propertyAtomic:
 			case propertyNonAtomic:
 			case propertyType:
+			case propertyOptional:
 				typParts = append([]string{strings.TrimPrefix(sub, propertyType)}, typParts...)
 				attr = strings.Join(typParts, ",")
 			default:
@@ -228,6 +230,8 @@ func getPropertyAttributeTypes(attrs string) string {
 			attrsList = append(attrsList, "@dynamic")
 		case propertyStrong:
 			attrsList = append(attrsList, "collectable")
+		case propertyOptional:
+			attrsList = append(attrsList, "optional")
 		}
 	}
 
