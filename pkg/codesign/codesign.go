@@ -12,8 +12,8 @@ import (
 	"io"
 	"strings"
 
-	mtypes "github.com/blacktop/go-macho/types"
 	"github.com/blacktop/go-macho/pkg/codesign/types"
+	mtypes "github.com/blacktop/go-macho/types"
 )
 
 // CodeSignature object
@@ -435,7 +435,7 @@ type Config struct {
 	EntitlementsDER     []byte
 	ResourceDirSlotHash []byte
 	SlotHashes          slotHashes
-	RuntimeVersion mtypes.Version
+	RuntimeVersion      mtypes.Version
 	CertChain           []*x509.Certificate
 	SignerFunction      func([]byte) ([]byte, error)
 }
