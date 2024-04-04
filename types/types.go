@@ -65,31 +65,31 @@ func (u UUID) String() string {
 type Platform uint32
 
 const (
-	unknown                      Platform = 0  // PLATFORM_UNKNOWN
-	macOS                        Platform = 1  // PLATFORM_MACOS
-	iOS                          Platform = 2  // PLATFORM_IOS
-	tvOS                         Platform = 3  // PLATFORM_TVOS
-	watchOS                      Platform = 4  // PLATFORM_WATCHOS
-	bridgeOS                     Platform = 5  // PLATFORM_BRIDGEOS
-	macCatalyst                  Platform = 6  // PLATFORM_MACCATALYST
-	iOSSimulator                 Platform = 7  // PLATFORM_IOSSIMULATOR
-	tvOSSimulator                Platform = 8  // PLATFORM_TVOSSIMULATOR
-	watchOSSimulator             Platform = 9  // PLATFORM_WATCHOSSIMULATOR
-	driverKit                    Platform = 10 // PLATFORM_DRIVERKIT
-	realityOS                    Platform = 11 // PLATFORM_REALITYOS
-	realityOSSimulator           Platform = 12 // PLATFORM_REALITYOSSIMULATOR
-	firmware                     Platform = 13 // PLATFORM_FIRMWARE
-	sepOS                        Platform = 14 // PLATFORM_SEPOS
-	PLATFORM_MACOS_EXCLAVECORE   Platform = 15 // PLATFORM_MACOS_EXCLAVECORE
-	PLATFORM_MACOS_EXCLAVEKIT    Platform = 16 // PLATFORM_MACOS_EXCLAVEKIT
-	PLATFORM_IOS_EXCLAVECORE     Platform = 17 // PLATFORM_IOS_EXCLAVECORE
-	PLATFORM_IOS_EXCLAVEKIT      Platform = 18 // PLATFORM_IOS_EXCLAVEKIT
-	PLATFORM_TVOS_EXCLAVECORE    Platform = 19 // PLATFORM_TVOS_EXCLAVECORE
-	PLATFORM_TVOS_EXCLAVEKIT     Platform = 20 // PLATFORM_TVOS_EXCLAVEKIT
-	PLATFORM_WATCHOS_EXCLAVECORE Platform = 21 // PLATFORM_WATCHOS_EXCLAVECORE
-	PLATFORM_WATCHOS_EXCLAVEKIT  Platform = 22 // PLATFORM_WATCHOS_EXCLAVEKIT
+	Unknown            Platform = 0  // PLATFORM_UNKNOWN
+	macOS              Platform = 1  // PLATFORM_MACOS
+	iOS                Platform = 2  // PLATFORM_IOS
+	tvOS               Platform = 3  // PLATFORM_TVOS
+	watchOS            Platform = 4  // PLATFORM_WATCHOS
+	bridgeOS           Platform = 5  // PLATFORM_BRIDGEOS
+	macCatalyst        Platform = 6  // PLATFORM_MACCATALYST
+	iOsSimulator       Platform = 7  // PLATFORM_IOSSIMULATOR
+	tvOsSimulator      Platform = 8  // PLATFORM_TVOSSIMULATOR
+	watchOsSimulator   Platform = 9  // PLATFORM_WATCHOSSIMULATOR
+	Driverkit          Platform = 10 // PLATFORM_DRIVERKIT
+	visionOS           Platform = 11 // PLATFORM_VISIONOS
+	visionOsSimulator  Platform = 12 // PLATFORM_VISIONOSSIMULATOR
+	Firmware           Platform = 13 // PLATFORM_FIRMWARE
+	SepOS              Platform = 14 // PLATFORM_SEPOS
+	macOSExclaveCore   Platform = 15 // PLATFORM_MACOS_EXCLAVECORE
+	macOSExclaveKit    Platform = 16 // PLATFORM_MACOS_EXCLAVEKIT
+	iOSExclaveCore     Platform = 17 // PLATFORM_IOS_EXCLAVECORE
+	iOSExclaveKit      Platform = 18 // PLATFORM_IOS_EXCLAVEKIT
+	tvOsExclaveCore    Platform = 19 // PLATFORM_TVOS_EXCLAVECORE
+	tvOsExclaveKit     Platform = 20 // PLATFORM_TVOS_EXCLAVEKIT
+	watchOsExclaveCore Platform = 21 // PLATFORM_WATCHOS_EXCLAVECORE
+	watchOsExclaveKit  Platform = 22 // PLATFORM_WATCHOS_EXCLAVEKIT
 
-	any Platform = 0xFFFFFFFF // PLATFORM_ANY
+	ANY Platform = 0xFFFFFFFF // PLATFORM_ANY
 )
 
 func GetPlatformByName(name string) (Platform, error) {
@@ -104,26 +104,42 @@ func GetPlatformByName(name string) (Platform, error) {
 		return watchOS, nil
 	case "bridgeos":
 		return bridgeOS, nil
-	case "maccatalyst":
+	case "maccatalyst", "catalyst":
 		return macCatalyst, nil
-	case "iossimulator":
-		return iOSSimulator, nil
-	case "tvossimulator":
-		return tvOSSimulator, nil
-	case "watchossimulator":
-		return watchOSSimulator, nil
+	case "iossimulator", "ios_simulator":
+		return iOsSimulator, nil
+	case "tvossimulator", "tvos_simulator":
+		return tvOsSimulator, nil
+	case "watchossimulator", "watchos_simulator":
+		return watchOsSimulator, nil
 	case "driverkit":
-		return driverKit, nil
-	case "realityos":
-		return realityOS, nil
-	case "realityossimulator":
-		return realityOSSimulator, nil
+		return Driverkit, nil
+	case "visionos":
+		return visionOS, nil
+	case "visionossimulator", "visionos_simulator":
+		return visionOsSimulator, nil
 	case "firmware":
-		return firmware, nil
+		return Firmware, nil
 	case "sepos":
-		return sepOS, nil
+		return SepOS, nil
+	case "macosexclavecore", "macos_exclavecore":
+		return macOSExclaveCore, nil
+	case "macosexclavekit", "macos_exclavekit":
+		return macOSExclaveKit, nil
+	case "iosexclavecore", "ios_exclavecore":
+		return iOSExclaveCore, nil
+	case "iosexclavekit", "ios_exclavekit":
+		return iOSExclaveKit, nil
+	case "tvosexclavecore", "tvos_exclavecore":
+		return tvOsExclaveCore, nil
+	case "tvosexclavekit", "tvos_exclavekit":
+		return tvOsExclaveKit, nil
+	case "watchosexclavecore", "watchos_exclavecore":
+		return watchOsExclaveCore, nil
+	case "watchosexclavekit", "watchos_exclavekit":
+		return watchOsExclaveKit, nil
 	default:
-		return unknown, errors.New("unknown platform")
+		return Unknown, fmt.Errorf("unknown platform")
 	}
 }
 

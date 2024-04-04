@@ -8,39 +8,39 @@ func _() {
 	// An "invalid array index" compiler error signifies that the constant values have changed.
 	// Re-run the stringer command to generate them again.
 	var x [1]struct{}
-	_ = x[unknown-0]
+	_ = x[Unknown-0]
 	_ = x[macOS-1]
 	_ = x[iOS-2]
 	_ = x[tvOS-3]
 	_ = x[watchOS-4]
 	_ = x[bridgeOS-5]
 	_ = x[macCatalyst-6]
-	_ = x[iOSSimulator-7]
-	_ = x[tvOSSimulator-8]
-	_ = x[watchOSSimulator-9]
-	_ = x[driverKit-10]
-	_ = x[realityOS-11]
-	_ = x[realityOSSimulator-12]
-	_ = x[firmware-13]
-	_ = x[sepOS-14]
-	_ = x[PLATFORM_MACOS_EXCLAVECORE-15]
-	_ = x[PLATFORM_MACOS_EXCLAVEKIT-16]
-	_ = x[PLATFORM_IOS_EXCLAVECORE-17]
-	_ = x[PLATFORM_IOS_EXCLAVEKIT-18]
-	_ = x[PLATFORM_TVOS_EXCLAVECORE-19]
-	_ = x[PLATFORM_TVOS_EXCLAVEKIT-20]
-	_ = x[PLATFORM_WATCHOS_EXCLAVECORE-21]
-	_ = x[PLATFORM_WATCHOS_EXCLAVEKIT-22]
-	_ = x[any-4294967295]
+	_ = x[iOsSimulator-7]
+	_ = x[tvOsSimulator-8]
+	_ = x[watchOsSimulator-9]
+	_ = x[Driverkit-10]
+	_ = x[visionOS-11]
+	_ = x[visionOsSimulator-12]
+	_ = x[Firmware-13]
+	_ = x[SepOS-14]
+	_ = x[macOSExclaveCore-15]
+	_ = x[macOSExclaveKit-16]
+	_ = x[iOSExclaveCore-17]
+	_ = x[iOSExclaveKit-18]
+	_ = x[tvOsExclaveCore-19]
+	_ = x[tvOsExclaveKit-20]
+	_ = x[watchOsExclaveCore-21]
+	_ = x[watchOsExclaveKit-22]
+	_ = x[ANY-4294967295]
 }
 
 const (
-	_Platform_name_0 = "unknownmacOSiOStvOSwatchOSbridgeOSmacCatalystiOSSimulatortvOSSimulatorwatchOSSimulatordriverKitrealityOSrealityOSSimulatorfirmwaresepOSPLATFORM_MACOS_EXCLAVECOREPLATFORM_MACOS_EXCLAVEKITPLATFORM_IOS_EXCLAVECOREPLATFORM_IOS_EXCLAVEKITPLATFORM_TVOS_EXCLAVECOREPLATFORM_TVOS_EXCLAVEKITPLATFORM_WATCHOS_EXCLAVECOREPLATFORM_WATCHOS_EXCLAVEKIT"
-	_Platform_name_1 = "any"
+	_Platform_name_0 = "UnknownmacOSiOStvOSwatchOSbridgeOSmacCatalystiOsSimulatortvOsSimulatorwatchOsSimulatorDriverkitvisionOSvisionOsSimulatorFirmwareSepOSmacOSExclaveCoremacOSExclaveKitiOSExclaveCoreiOSExclaveKittvOsExclaveCoretvOsExclaveKitwatchOsExclaveCorewatchOsExclaveKit"
+	_Platform_name_1 = "ANY"
 )
 
 var (
-	_Platform_index_0 = [...]uint16{0, 7, 12, 15, 19, 26, 34, 45, 57, 70, 86, 95, 104, 122, 130, 135, 161, 186, 210, 233, 258, 282, 310, 337}
+	_Platform_index_0 = [...]uint8{0, 7, 12, 15, 19, 26, 34, 45, 57, 70, 86, 95, 103, 120, 128, 133, 149, 164, 178, 191, 206, 220, 238, 255}
 )
 
 func (i Platform) String() string {
