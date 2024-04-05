@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/blacktop/go-macho/internal/saferio"
 )
 
 /*
@@ -483,12 +485,7 @@ func (s *Section) SetReaders(r io.ReaderAt, sr *io.SectionReader) {
 
 // Data reads and returns the contents of the Mach-O section.
 func (s *Section) Data() ([]byte, error) {
-	dat := make([]byte, s.Size)
-	n, err := s.ReadAt(dat, int64(s.Offset))
-	if n == len(dat) {
-		err = nil
-	}
-	return dat[0:n], err
+	return saferio.ReadDataAt(s.sr, s.Size, 0)
 }
 
 // Open returns a new ReadSeeker reading the Mach-O section.

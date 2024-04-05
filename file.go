@@ -18,6 +18,7 @@ import (
 
 	"github.com/blacktop/go-dwarf"
 
+	"github.com/blacktop/go-macho/internal/saferio"
 	"github.com/blacktop/go-macho/pkg/codesign"
 	"github.com/blacktop/go-macho/pkg/fixupchains"
 	"github.com/blacktop/go-macho/pkg/trie"
@@ -183,11 +184,15 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 	if f.Magic == types.Magic64 {
 		offset = types.FileHeaderSize64
 	}
-	dat := make([]byte, f.SizeCommands)
-	if _, err := r.ReadAt(dat, offset); err != nil {
-		return nil, fmt.Errorf("failed to parse command dat: %v", err)
+	dat, err := saferio.ReadDataAt(r, uint64(f.SizeCommands), offset)
+	if err != nil {
+		return nil, err
 	}
-	f.Loads = []Load{}
+	c := saferio.SliceCap[Load](uint64(f.NCommands))
+	if c < 0 {
+		return nil, &FormatError{offset, "too many load commands", nil}
+	}
+	f.Loads = make([]Load, 0, c)
 	bo := f.ByteOrder
 	for i := uint32(0); i < f.NCommands; i++ {
 		// Each load command begins with uint32 command and length.
@@ -312,13 +317,19 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, fmt.Errorf("failed to read LC_SYMTAB: %v", err)
 			}
-			symdat := make([]byte, int(hdr.Nsyms)*f.symbolSize())
-			if _, err := f.cr.ReadAt(symdat, int64(hdr.Symoff)); err != nil {
-				return nil, fmt.Errorf("failed to read data at Symoff=%#x; %v", int64(hdr.Symoff), err)
-			}
-			strtab := make([]byte, hdr.Strsize)
-			if _, err := f.cr.ReadAt(strtab, int64(hdr.Stroff)); err != nil {
+			strtab, err := saferio.ReadDataAt(f.cr, uint64(hdr.Strsize), int64(hdr.Stroff))
+			if err != nil {
 				return nil, fmt.Errorf("failed to read data at Stroff=%#x; %v", int64(hdr.Stroff), err)
+			}
+			var symsz int
+			if f.Magic == types.Magic64 {
+				symsz = 16
+			} else {
+				symsz = 12
+			}
+			symdat, err := saferio.ReadDataAt(r, uint64(hdr.Nsyms)*uint64(symsz), int64(hdr.Symoff))
+			if err != nil {
+				return nil, fmt.Errorf("failed to read data at Symoff=%#x; %v", int64(hdr.Symoff), err)
 			}
 			st, err := f.parseSymtab(symdat, strtab, cmddat, &hdr, offset)
 			if err != nil {
@@ -494,18 +505,20 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, fmt.Errorf("failed to read LC_DYSYMTAB: %v", err)
 			}
-			if f.Symtab != nil && hdr.Iundefsym > uint32(len(f.Symtab.Syms)) {
+			if f.Symtab == nil {
+				return nil, &FormatError{offset, "dynamic symbol table seen before any ordinary symbol table", nil}
+			} else if hdr.Iundefsym > uint32(len(f.Symtab.Syms)) {
 				return nil, &FormatError{offset, fmt.Sprintf(
 					"undefined symbols index in dynamic symbol table command is greater than symbol table length (%d > %d)",
 					hdr.Iundefsym, len(f.Symtab.Syms)), nil}
-			} else if f.Symtab != nil && hdr.Iundefsym+hdr.Nundefsym > uint32(len(f.Symtab.Syms)) {
+			} else if hdr.Iundefsym+hdr.Nundefsym > uint32(len(f.Symtab.Syms)) {
 				return nil, &FormatError{offset, fmt.Sprintf(
 					"number of undefined symbols after index in dynamic symbol table command is greater than symbol table length (%d > %d)",
 					hdr.Iundefsym+hdr.Nundefsym, len(f.Symtab.Syms)), nil}
 			}
-			dat := make([]byte, hdr.Nindirectsyms*4)
-			if _, err := f.cr.ReadAt(dat, int64(hdr.Indirectsymoff)); err != nil {
-				return nil, fmt.Errorf("failed to read data at Indirectsymoff=%#x; %v", int64(hdr.Indirectsymoff), err)
+			dat, err := saferio.ReadDataAt(r, uint64(hdr.Nindirectsyms)*4, int64(hdr.Indirectsymoff))
+			if err != nil {
+				return nil, fmt.Errorf("failed to read data at Indirectsymoff @ %#x: %w", int64(hdr.Indirectsymoff), err)
 			}
 			x := make([]uint32, hdr.Nindirectsyms)
 			if err := binary.Read(bytes.NewReader(dat), bo, x); err != nil {
@@ -1231,6 +1244,12 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			f.Loads = append(f.Loads, l)
 		}
 		if s != nil {
+			if int64(s.Offset) < 0 {
+				return nil, &FormatError{offset, "invalid section offset", s.Offset}
+			}
+			if int64(s.Filesz) < 0 {
+				return nil, &FormatError{offset, "invalid section file size", s.Filesz}
+			}
 			// s.sr = io.NewSectionReader(r, int64(s.Offset), int64(s.Filesz))
 			s.ReaderAt = f.sr
 		}
@@ -1240,9 +1259,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 
 func (f *File) parseSymtab(symdat, strtab, cmddat []byte, hdr *types.SymtabCmd, offset int64) (*Symtab, error) {
 	bo := f.ByteOrder
-	symtab := make([]Symbol, hdr.Nsyms)
+	c := saferio.SliceCap[Symbol](uint64(hdr.Nsyms))
+	if c < 0 {
+		return nil, &FormatError{offset, "too many symbols", nil}
+	}
+	symtab := make([]Symbol, 0, c)
 	b := bytes.NewReader(symdat)
-	for i := range symtab {
+	for i := 0; i < int(hdr.Nsyms); i++ {
 		var n types.Nlist64
 		if f.Magic == types.Magic64 {
 			if err := binary.Read(b, bo, &n); err != nil {
@@ -1259,20 +1282,21 @@ func (f *File) parseSymtab(symdat, strtab, cmddat []byte, hdr *types.SymtabCmd, 
 			n.Desc = n32.Desc
 			n.Value = uint64(n32.Value)
 		}
-		sym := &symtab[i]
-		if n.Name >= uint32(len(strtab)) {
-			return nil, &FormatError{offset, "invalid name in symbol table", n.Name}
+		var name string
+		if n.Name < uint32(len(strtab)) {
+			// We add "_" to Go symbols. Strip it here. See issue 33808.
+			name = cstring(strtab[n.Name:])
+			if strings.Contains(name, ".") && name[0] == '_' {
+				name = name[1:]
+			}
 		}
-		// We add "_" to Go symbols. Strip it here. See issue 33808.
-		name := cstring(strtab[n.Name:])
-		if strings.Contains(name, ".") && name[0] == '_' {
-			name = name[1:]
-		}
-		sym.Name = name
-		sym.Type = n.Type
-		sym.Sect = n.Sect
-		sym.Desc = n.Desc
-		sym.Value = n.Value
+		symtab = append(symtab, Symbol{
+			Name:  name,
+			Type:  n.Type,
+			Sect:  n.Sect,
+			Desc:  n.Desc,
+			Value: n.Value,
+		})
 	}
 	st := new(Symtab)
 	st.LoadBytes = LoadBytes(cmddat)
@@ -1289,9 +1313,9 @@ func (f *File) pushSection(sh *types.Section, r io.ReaderAt) error {
 	f.Sections = append(f.Sections, sh)
 
 	if sh.Nreloc > 0 {
-		reldat := make([]byte, int(sh.Nreloc)*8)
-		if _, err := r.ReadAt(reldat, int64(sh.Reloff)); err != nil {
-			return fmt.Errorf("failed to read data at Reloff=%#x; %v", int64(sh.Reloff), err)
+		reldat, err := saferio.ReadDataAt(r, uint64(sh.Nreloc)*8, int64(sh.Reloff))
+		if err != nil {
+			return fmt.Errorf("failed to read data at Reloff @ %#x: %w", int64(sh.Reloff), err)
 		}
 		b := bytes.NewReader(reldat)
 
@@ -1303,7 +1327,7 @@ func (f *File) pushSection(sh *types.Section, r io.ReaderAt) error {
 
 			var ri types.RelocInfo
 			if err := binary.Read(b, bo, &ri); err != nil {
-				return fmt.Errorf("failed to read relocInfo; %v", err)
+				return fmt.Errorf("failed to read types.RelocInfo: %w", err)
 			}
 
 			if ri.Addr&(1<<31) != 0 { // scattered

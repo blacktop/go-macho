@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unsafe"
 
+	"github.com/blacktop/go-macho/internal/saferio"
 	"github.com/blacktop/go-macho/pkg/codesign"
 	"github.com/blacktop/go-macho/types"
 )
@@ -205,12 +206,7 @@ func (s *Segment) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 
 // Data reads and returns the contents of the segment.
 func (s *Segment) Data() ([]byte, error) {
-	dat := make([]byte, s.Filesz)
-	n, err := s.ReadAt(dat, int64(s.Offset))
-	if n == len(dat) {
-		err = nil
-	}
-	return dat[0:n], err
+	return saferio.ReadDataAt(s.sr, s.Filesz, 0)
 }
 
 // Open returns a new ReadSeeker reading the segment.
