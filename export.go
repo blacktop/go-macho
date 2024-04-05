@@ -324,12 +324,12 @@ func (f *File) CodeSign(config *codesign.Config) error {
 
 	config.CodeSize = uint64(cs.Offset)
 
-	// cache __LINKEDIT data for later use
-	ledata := make([]byte, linkedit.Filesz)
+	// cache __LINKEDIT data (up to but not including any existing code signature) for saving later
+	ledata := make([]byte, uint64(cs.Offset) - linkedit.Offset)
 	if _, err := f.cr.ReadAtAddr(ledata, linkedit.Addr); err != nil {
 		return fmt.Errorf("failed to read __LINKEDIT data: %v", err)
 	}
-	f.ledata = bytes.NewBuffer(ledata[:(uint64(cs.Offset) - linkedit.Offset)])
+	f.ledata = bytes.NewBuffer(ledata)
 
 	// update __LINKEDIT segment sizes
 	linkedit.Filesz = pageAlign(uint64(len(ledata)) + codesign.EstimateCodeSignatureSize(config), 0x4000)
@@ -342,16 +342,17 @@ func (f *File) CodeSign(config *codesign.Config) error {
 	if _, err := f.ReadAt(data, 0); err != nil {
 		return fmt.Errorf("failed to read codesign data: %v", err)
 	}
-	// update in signing data's load command info
-	wbuf := types.NewWriteAtBuffer(data)
-	if err := f.updateLinkeditSegmentData(wbuf, linkedit); err != nil {
-		return fmt.Errorf("failed to update __LINKEDIT segment data: %v", err)
+	// write modified file header and load commands (including __LINKEDIT and CodeSignature), since they are covered by hashes
+	var buf bytes.Buffer
+	if err := f.FileHeader.Write(&buf, f.ByteOrder); err != nil {
+		return fmt.Errorf("failed to write updated header: %v", err)
 	}
-	if err := f.updateCodeSignatureData(wbuf, cs); err != nil {
-		return fmt.Errorf("failed to update LC_CODE_SIGNATURE data: %v", err)
+	if err := f.writeLoadCommands(&buf); err != nil {
+		return fmt.Errorf("failed to write updated load commands: %v", err)
 	}
+	copy(data, buf.Bytes())
 
-	// sign data
+	// sign data and add it to the new LINKEDIT segment
 	csdata, err := codesign.Sign(bytes.NewReader(data), config)
 	if err != nil {
 		return fmt.Errorf("failed to create codesignature data: %v", err)
@@ -359,10 +360,6 @@ func (f *File) CodeSign(config *codesign.Config) error {
 	if _, err := f.ledata.Write(csdata); err != nil {
 		return fmt.Errorf("failed to write codesign data to linkedit segment data: %v", err)
 	}
-
-	// clear data for GC
-	data = nil
-	csdata = nil
 
 	if linkedit.Filesz < uint64(f.ledata.Len()) {
 		return fmt.Errorf("new linkedit data is larger than expected")
@@ -1079,42 +1076,6 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	}
 
 	return &lebuf, nil
-}
-
-func (f *File) updateLinkeditSegmentData(wb *types.WriteAtBuffer, le *Segment) error {
-	off := int64(binary.Size(f.FileHeader))
-	for _, l := range f.Loads {
-		if s, ok := l.(*Segment); ok && s.Name == "__LINKEDIT" {
-			var buf bytes.Buffer
-			if err := le.Write(&buf, f.ByteOrder); err != nil {
-				return err
-			}
-			if _, err := wb.WriteAt(buf.Bytes(), off); err != nil {
-				return err
-			}
-			break
-		}
-		off += int64(l.LoadSize())
-	}
-	return nil
-}
-
-func (f *File) updateCodeSignatureData(wb *types.WriteAtBuffer, cs *CodeSignature) error {
-	off := int64(binary.Size(f.FileHeader))
-	for _, l := range f.Loads {
-		if _, ok := l.(*CodeSignature); ok {
-			var buf bytes.Buffer
-			if err := cs.Write(&buf, f.ByteOrder); err != nil {
-				return err
-			}
-			if _, err := wb.WriteAt(buf.Bytes(), off); err != nil {
-				return err
-			}
-			break
-		}
-		off += int64(l.LoadSize())
-	}
-	return nil
 }
 
 func (f *File) writeLoadCommands(buf *bytes.Buffer) error {
