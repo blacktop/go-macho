@@ -423,22 +423,10 @@ func TestTypeString(t *testing.T) {
 	}
 }
 
-func TestNewFatFile(t *testing.T) {
-
-	f, err := os.Open("/usr/lib/libLeaksAtExit.dylib")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fat, err := NewFatFile(f)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fmt.Println(fat.Arches[0].FileTOC.String())
-
-	if fat.Arches[0].UUID().UUID.String() != "273FB269-0D2F-3A78-9874-09E004F8B069" {
-		t.Errorf("macho.UUID() = %s; want test", fat.Arches[0].UUID())
+func TestOpenBadDysymCmd(t *testing.T) {
+	_, err := openObscured("internal/testdata/gcc-amd64-darwin-exec-with-bad-dysym.base64")
+	if err == nil {
+		t.Fatal("openObscured did not fail when opening a file with an invalid dynamic symbol table command")
 	}
 }
 
@@ -644,7 +632,7 @@ func TestNewFile(t *testing.T) {
 		if t1, ok := typ.(*dwarf.StructType); ok {
 			if strings.EqualFold(t1.StructName, "thread") {
 				if !t1.Incomplete {
-					fmt.Println(t1.Defn())
+					fmt.Println(t1.Defn(false))
 				}
 			}
 		}
