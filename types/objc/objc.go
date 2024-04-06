@@ -379,7 +379,7 @@ type Property struct {
 func (p *Property) Type() string {
 	return getPropertyType(p.EncodedAttributes)
 }
-func (p *Property) Attributes() string {
+func (p *Property) Attributes() (string, bool) {
 	return getPropertyAttributeTypes(p.EncodedAttributes)
 }
 

@@ -73,7 +73,12 @@ func (p *Protocol) dump(verbose, addrs bool) string {
 		props += "\n"
 		for _, prop := range p.InstanceProperties {
 			if verbose {
-				props += fmt.Sprintf("@property %s%s%s;\n", prop.Attributes(), prop.Type(), prop.Name)
+				attrs, optional := prop.Attributes()
+				var optionalStr string
+				if optional {
+					optionalStr = "@optional\n"
+				}
+				props += fmt.Sprintf("%s@property %s%s%s;\n", optionalStr, attrs, prop.Type(), prop.Name)
 			} else {
 				props += fmt.Sprintf("@property (%s) %s;\n", prop.EncodedAttributes, prop.Name)
 			}

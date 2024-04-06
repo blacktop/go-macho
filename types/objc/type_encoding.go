@@ -76,7 +76,7 @@ const (
 	propertyStrong    = "P" // property GC'able
 	propertyAtomic    = "A" // property atomic
 	propertyNonAtomic = "N" // property non-atomic
-	propertyOptional  = "?" // property optional // TODO: correct this when Apple releases the macOS 14.4 ObjC source code
+	propertyOptional  = "?" // property optional
 )
 
 type methodEncodedArg struct {
@@ -170,8 +170,8 @@ func getPropertyType(attrs string) (typ string) {
 			case propertyStrong:
 			case propertyAtomic:
 			case propertyNonAtomic:
-			case propertyType:
 			case propertyOptional:
+			case propertyType:
 				typParts = append([]string{strings.TrimPrefix(sub, propertyType)}, typParts...)
 				attr = strings.Join(typParts, ",")
 			default:
@@ -193,10 +193,12 @@ func getPropertyType(attrs string) (typ string) {
 	return typ
 }
 
-func getPropertyAttributeTypes(attrs string) string {
+func getPropertyAttributeTypes(attrs string) (string, bool) {
 	// var ivarStr string
 	var attrsStr string
 	var attrsList []string
+
+	isOptional := false
 
 	for _, attr := range strings.Split(attrs, ",") {
 		if strings.HasPrefix(attr, propertyIVar) {
@@ -231,7 +233,7 @@ func getPropertyAttributeTypes(attrs string) string {
 		case propertyStrong:
 			attrsList = append(attrsList, "collectable")
 		case propertyOptional:
-			attrsList = append(attrsList, "optional")
+			isOptional = true
 		}
 	}
 
@@ -239,7 +241,7 @@ func getPropertyAttributeTypes(attrs string) string {
 		attrsStr = fmt.Sprintf("(%s) ", strings.Join(attrsList, ", "))
 	}
 
-	return attrsStr
+	return attrsStr, isOptional
 }
 
 func getIVarType(ivType string) string {
