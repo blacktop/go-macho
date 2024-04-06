@@ -327,7 +327,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			} else {
 				symsz = 12
 			}
-			symdat, err := saferio.ReadDataAt(r, uint64(hdr.Nsyms)*uint64(symsz), int64(hdr.Symoff))
+			symdat, err := saferio.ReadDataAt(f.cr, uint64(hdr.Nsyms)*uint64(symsz), int64(hdr.Symoff))
 			if err != nil {
 				return nil, fmt.Errorf("failed to read data at Symoff=%#x; %v", int64(hdr.Symoff), err)
 			}
@@ -516,7 +516,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 					"number of undefined symbols after index in dynamic symbol table command is greater than symbol table length (%d > %d)",
 					hdr.Iundefsym+hdr.Nundefsym, len(f.Symtab.Syms)), nil}
 			}
-			dat, err := saferio.ReadDataAt(r, uint64(hdr.Nindirectsyms)*4, int64(hdr.Indirectsymoff))
+			dat, err := saferio.ReadDataAt(f.cr, uint64(hdr.Nindirectsyms)*4, int64(hdr.Indirectsymoff))
 			if err != nil {
 				return nil, fmt.Errorf("failed to read data at Indirectsymoff @ %#x: %w", int64(hdr.Indirectsymoff), err)
 			}
