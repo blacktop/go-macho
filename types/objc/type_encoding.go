@@ -229,7 +229,7 @@ func getPropertyAttributeTypes(attrs string) (string, bool) {
 		case propertyWeak:
 			attrsList = append(attrsList, "weak")
 		case propertyDynamic:
-			attrsList = append(attrsList, "@dynamic")
+			// attrsList = append(attrsList, "@dynamic")
 		case propertyStrong:
 			attrsList = append(attrsList, "collectable")
 		case propertyOptional:
