@@ -148,7 +148,7 @@ func (c *Class) dump(verbose, addrs bool) string {
 		for _, prot := range c.Protocols {
 			subProts = append(subProts, prot.Name)
 		}
-		class += fmt.Sprintf("<%s>", strings.Join(subProts, ", "))
+		class += fmt.Sprintf(" <%s>", strings.Join(subProts, ", "))
 	}
 	if len(c.Ivars) > 0 {
 		class += fmt.Sprintf(" {")
@@ -171,44 +171,37 @@ func (c *Class) dump(verbose, addrs bool) string {
 		s := bytes.NewBufferString("")
 		w := tabwriter.NewWriter(s, 0, 0, 1, ' ', 0)
 		if addrs {
-			fmt.Fprintf(w, "\n  /* instance variables */\t// +size   offset\n")
+			fmt.Fprintf(w, "\n    /* instance variables */\t// +size   offset\n")
 		} else {
-			fmt.Fprintf(w, "\n  /* instance variables */\n")
+			fmt.Fprintf(w, "\n    /* instance variables */\n")
 		}
 		for _, ivar := range c.Ivars {
 			if verbose {
 				if addrs {
-					fmt.Fprintf(w, "  %s\n", ivar.WithAddrs())
+					fmt.Fprintf(w, "    %s\n", ivar.WithAddrs())
 				} else {
-					fmt.Fprintf(w, "  %s\n", ivar.Verbose())
+					fmt.Fprintf(w, "    %s\n", ivar.Verbose())
 				}
 			} else {
-				fmt.Fprintf(w, "  %s\n", &ivar)
+				fmt.Fprintf(w, "    %s\n", &ivar)
 			}
 		}
 		w.Flush()
-		s.WriteString("}\n\n")
+		s.WriteString("}")
 		iVars = s.String()
-	} else {
-		iVars = fmt.Sprintf("\n")
 	}
 	if len(c.Props) > 0 {
-		if len(c.Ivars) == 0 {
-			props += "\n"
-		}
 		for _, prop := range c.Props {
 			if verbose {
-				attrs, optional := prop.Attributes()
-				var optionalStr string
-				if optional {
-					optionalStr = "@optional\n"
-				}
-				props += fmt.Sprintf("%s@property %s%s%s;\n", optionalStr, attrs, prop.Type(), prop.Name)
+				attrs, _ := prop.Attributes()
+				props += fmt.Sprintf("@property %s%s%s;\n", attrs, prop.Type(), prop.Name)
 			} else {
 				props += fmt.Sprintf("@property (%s) %s;\n", prop.EncodedAttributes, prop.Name)
 			}
 		}
-		props += "\n"
+		if props != "" {
+			props += "\n"
+		}
 	}
 	if len(c.ClassMethods) > 0 {
 		s := bytes.NewBufferString("/* class methods */\n")
@@ -229,14 +222,12 @@ func (c *Class) dump(verbose, addrs bool) string {
 		}
 		w.Flush()
 		cMethods = s.String()
+		if cMethods != "" {
+			cMethods += "\n"
+		}
 	}
 	if len(c.InstanceMethods) > 0 {
-		var s *bytes.Buffer
-		if len(c.ClassMethods) > 0 {
-			s = bytes.NewBufferString("\n/* instance methods */\n")
-		} else {
-			s = bytes.NewBufferString("/* instance methods */\n")
-		}
+		s := bytes.NewBufferString("/* instance methods */\n")
 		for _, meth := range c.InstanceMethods {
 			if !addrs && strings.HasPrefix(meth.Name, ".cxx_") {
 				continue
@@ -252,15 +243,24 @@ func (c *Class) dump(verbose, addrs bool) string {
 			}
 		}
 		iMethods = s.String()
+		if iMethods != "" {
+			iMethods += "\n"
+		}
 	}
 
 	return fmt.Sprintf(
-		"%s%s%s%s%s@end\n",
+		"%s"+
+			"%s\n\n"+
+			"%s"+
+			"%s"+
+			"%s"+
+			"@end\n",
 		class,
 		iVars,
 		props,
 		cMethods,
-		iMethods)
+		iMethods,
+	)
 }
 
 // IsSwift returns true if the class is a Swift class.
