@@ -53,40 +53,37 @@ type Protocol struct {
 
 func (p *Protocol) dump(verbose, addrs bool) string {
 	var props string
+	var optProps string
 	var cMethods string
 	var iMethods string
 	var optMethods string
 
-	protocol := fmt.Sprintf("@protocol %s ", p.Name)
-
+	protocol := fmt.Sprintf("@protocol %s", p.Name)
 	if len(p.Prots) > 0 {
 		var subProts []string
 		for _, prot := range p.Prots {
 			subProts = append(subProts, prot.Name)
 		}
-		protocol += fmt.Sprintf("<%s>", strings.Join(subProts, ", "))
+		protocol += fmt.Sprintf(" <%s>", strings.Join(subProts, ", "))
 	}
 	if addrs {
 		protocol += fmt.Sprintf(" // %#x", p.Ptr)
 	}
 	if len(p.InstanceProperties) > 0 {
-		props += "\n"
 		for _, prop := range p.InstanceProperties {
 			if verbose {
-				attrs, optional := prop.Attributes()
-				var optionalStr string
-				if optional {
-					optionalStr = "@optional\n"
+				if attrs, optional := prop.Attributes(); !optional {
+					props += fmt.Sprintf("@property %s%s%s;\n", attrs, prop.Type(), prop.Name)
 				}
-				props += fmt.Sprintf("%s@property %s%s%s;\n", optionalStr, attrs, prop.Type(), prop.Name)
 			} else {
 				props += fmt.Sprintf("@property (%s) %s;\n", prop.EncodedAttributes, prop.Name)
 			}
 		}
-		props += "\n"
+		if props != "" {
+			props += "\n"
+		}
 	}
 	if len(p.ClassMethods) > 0 {
-		cMethods = "/* class methods */\n"
 		for _, meth := range p.ClassMethods {
 			if verbose {
 				rtype, args := decodeMethodTypes(meth.Types)
@@ -95,9 +92,11 @@ func (p *Protocol) dump(verbose, addrs bool) string {
 				cMethods += fmt.Sprintf("+[%s %s];\n", p.Name, meth.Name)
 			}
 		}
+		if cMethods != "" {
+			cMethods = "/* class methods */\n" + cMethods + "\n"
+		}
 	}
 	if len(p.InstanceMethods) > 0 {
-		iMethods = "/* instance methods */\n"
 		for _, meth := range p.InstanceMethods {
 			if verbose {
 				rtype, args := decodeMethodTypes(meth.Types)
@@ -106,9 +105,25 @@ func (p *Protocol) dump(verbose, addrs bool) string {
 				iMethods += fmt.Sprintf("-[%s %s];\n", p.Name, meth.Name)
 			}
 		}
+		if iMethods != "" {
+			iMethods = "/* required instance methods */\n" + iMethods + "\n"
+		}
+	}
+	if len(p.InstanceProperties) > 0 {
+		for _, prop := range p.InstanceProperties {
+			if verbose {
+				if attrs, optional := prop.Attributes(); optional {
+					optProps += fmt.Sprintf("@property %s%s%s;\n", attrs, prop.Type(), prop.Name)
+				}
+			} else {
+				// optProps += fmt.Sprintf("@property (%s) %s;\n", prop.EncodedAttributes, prop.Name)
+			}
+		}
+		if optProps != "" {
+			optProps += "\n"
+		}
 	}
 	if len(p.OptionalInstanceMethods) > 0 {
-		optMethods = "@optional\n/* instance methods */\n"
 		for _, meth := range p.OptionalInstanceMethods {
 			if verbose {
 				rtype, args := decodeMethodTypes(meth.Types)
@@ -117,15 +132,25 @@ func (p *Protocol) dump(verbose, addrs bool) string {
 				optMethods += fmt.Sprintf("-[%s %s];\n", p.Name, meth.Name)
 			}
 		}
+		if optMethods != "" {
+			optMethods = "/* optional instance methods */\n" + optMethods + "\n"
+		}
 	}
 	return fmt.Sprintf(
-		"%s\n"+
-			"%s%s%s%s"+
+		"%s\n\n"+
+			"@required\n\n"+
+			"%s"+
+			"%s"+
+			"%s"+
+			"@optional\n\n"+
+			"%s"+
+			"%s"+
 			"@end\n",
 		protocol,
 		props,
 		cMethods,
 		iMethods,
+		optProps,
 		optMethods,
 	)
 }
