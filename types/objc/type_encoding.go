@@ -229,7 +229,8 @@ func getPropertyAttributeTypes(attrs string) (string, bool) {
 		case propertyWeak:
 			attrsList = append(attrsList, "weak")
 		case propertyDynamic:
-			attrsList = append(attrsList, "@dynamic")
+			// omit the @dynamic directive because it must never appear inside
+			// @interface and @protocol blocks, only in @implementation blocks
 		case propertyStrong:
 			attrsList = append(attrsList, "collectable")
 		case propertyOptional:
