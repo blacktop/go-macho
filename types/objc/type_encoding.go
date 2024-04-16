@@ -181,7 +181,7 @@ func getPropertyType(attrs string) (typ string) {
 		if strings.HasPrefix(attr, "@\"") {
 			typ = strings.Trim(attr, "@\"")
 			if strings.HasPrefix(typ, "<") {
-				typ = "NSObject" + strings.ReplaceAll(typ, "><", ", ")
+				typ = "id " + strings.ReplaceAll(typ, "><", ", ")
 			}
 			typ += " *"
 		} else {
@@ -249,7 +249,7 @@ func getIVarType(ivType string) string {
 	if strings.HasPrefix(ivType, "@\"") && len(ivType) > 1 {
 		ivType = strings.Trim(ivType, "@\"")
 		if strings.HasPrefix(ivType, "<") {
-			ivType = "NSObject" + strings.ReplaceAll(ivType, "><", ", ")
+			ivType = "id " + strings.ReplaceAll(ivType, "><", ", ")
 		}
 		return ivType + " *"
 	}
