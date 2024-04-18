@@ -15,7 +15,7 @@ This package goes beyond the Go's `debug/macho` to:
 - Allow for creating custom MachO files
 - Parse Objective-C runtime information
 - Parse Swift runtime information
-- Parse code signature information
+- Read/Write code signature information
 - Parse fixup chain information
 
 ## Install
