@@ -717,21 +717,39 @@ func (f *File) GetObjCCategories() ([]objc.Category, error) {
 					if err != nil {
 						return nil, fmt.Errorf("failed to read cstring: %v", err)
 					}
-					categoryPtr.ClsVMAddr = f.vma.Convert(categoryPtr.ClsVMAddr)
-					if c, ok := f.objc[categoryPtr.ClsVMAddr]; ok {
-						category.Class = c.(*objc.Class)
+					if categoryPtr.ClsVMAddr > 0 {
+						categoryPtr.ClsVMAddr = f.vma.Convert(categoryPtr.ClsVMAddr)
+						if c, ok := f.objc[categoryPtr.ClsVMAddr]; ok {
+							category.Class = c.(*objc.Class)
+						} else {
+							category.Class, err = f.GetObjCClass(categoryPtr.ClsVMAddr)
+							if err != nil {
+								if f.HasFixups() {
+									bindName, err := f.GetBindName(categoryPtr.ClsVMAddr)
+									if err == nil {
+										category.Class = &objc.Class{Name: strings.TrimPrefix(bindName, "_OBJC_CLASS_$_")}
+									} else {
+										return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", categoryPtr.ClsVMAddr, err)
+									}
+								} else {
+									category.Class = &objc.Class{}
+								}
+							}
+							f.PutObjC(categoryPtr.ClsVMAddr, category.Class)
+						}
 					} else {
-						category.Class, err = f.GetObjCClass(categoryPtr.ClsVMAddr)
-						if err != nil {
-							bindName, err := f.GetBindName(categoryPtr.ClsVMAddr)
+						if c, ok := f.objc[categoryPtr.ClsVMAddr]; ok {
+							category.Class = c.(*objc.Class)
+						} else {
+							category.Class = &objc.Class{}
+							bindName, err := f.GetBindName(ptr + uint64(unsafe.Offsetof(categoryPtr.ClsVMAddr)))
 							if err == nil {
 								category.Class = &objc.Class{Name: strings.TrimPrefix(bindName, "_OBJC_CLASS_$_")}
 							} else {
-								category.Class = &objc.Class{}
-								// return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", categoryPtr.ClsVMAddr, err)
+								return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", ptr+uint64(unsafe.Offsetof(categoryPtr.ClsVMAddr)), err)
 							}
+							f.PutObjC(ptr+uint64(unsafe.Offsetof(categoryPtr.ClsVMAddr)), category.Class)
 						}
-						f.PutObjC(categoryPtr.ClsVMAddr, category.Class)
 					}
 					if categoryPtr.InstanceMethodsVMAddr > 0 {
 						categoryPtr.InstanceMethodsVMAddr = f.vma.Convert(categoryPtr.InstanceMethodsVMAddr)

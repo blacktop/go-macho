@@ -1558,7 +1558,7 @@ func (f *File) GetBindName(pointer uint64) (string, error) {
 				return "", fmt.Errorf("failed to parse LC_DYLD_INFO_ONLY bind info: %v", err)
 			}
 			for _, bind := range binds {
-				if bind.Value == pointer {
+				if (bind.Start + bind.SegOffset) == pointer {
 					return bind.Name, nil
 				}
 			}
@@ -2511,6 +2511,7 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 			}
 			bind.Start = f.Segments()[imm].Addr
 			bind.Segment = f.Segments()[imm].Name
+			bind.SegStart = f.Segments()[imm].Offset
 		case types.BIND_OPCODE_ADD_ADDR_ULEB:
 			out, err := trie.ReadUleb128(r)
 			if err != nil {
@@ -2524,7 +2525,7 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 				if sec := f.FindSectionForVMAddr(f.Segment(bind.Segment).Addr + segOffset); sec != nil {
 					bind.Section = sec.Name
 				}
-				bind.Offset = segOffset
+				bind.SegOffset = segOffset
 				binds = append(binds, bind)
 				segOffset += f.pointerSize()
 			}
@@ -2532,7 +2533,7 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 			if sec := f.FindSectionForVMAddr(f.Segment(bind.Segment).Addr + segOffset); sec != nil {
 				bind.Section = sec.Name
 			}
-			bind.Offset = segOffset
+			bind.SegOffset = segOffset
 			binds = append(binds, bind)
 			off, err := trie.ReadUleb128(r)
 			if err != nil {
@@ -2543,7 +2544,7 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 			if sec := f.FindSectionForVMAddr(f.Segment(bind.Segment).Addr + segOffset); sec != nil {
 				bind.Section = sec.Name
 			}
-			bind.Offset = segOffset
+			bind.SegOffset = segOffset
 			binds = append(binds, bind)
 			segOffset += uint64(imm)*f.pointerSize() + f.pointerSize()
 		case types.BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB:
@@ -2559,7 +2560,7 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 				if sec := f.FindSectionForVMAddr(f.Segment(bind.Segment).Addr + segOffset); sec != nil {
 					bind.Section = sec.Name
 				}
-				bind.Offset = segOffset
+				bind.SegOffset = segOffset
 				binds = append(binds, bind)
 				segOffset += skip + f.pointerSize()
 			}
@@ -2607,7 +2608,7 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 							return nil, fmt.Errorf("bind ordinal is out of range")
 						}
 						ordinalTable[ord].Value = ptr
-						ordinalTable[ord].Offset = segOffset
+						ordinalTable[ord].SegOffset = segOffset
 						binds = append(binds, ordinalTable[ord])
 					}
 					// The delta is bits [51..61]

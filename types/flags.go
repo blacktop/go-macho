@@ -108,25 +108,29 @@ func (bs Binds) Search(name string) (*Bind, error) {
 }
 
 type Bind struct {
-	Name    string
-	Type    uint8
-	Kind    BindKind
-	Flags   uint8
-	Addend  int64
-	Segment string
-	Section string
-	Start   uint64
-	Offset  uint64
-	Dylib   string
-	Value   uint64
+	Name      string
+	Type      uint8
+	Kind      BindKind
+	Flags     uint8
+	Addend    int64
+	Segment   string
+	SegStart  uint64
+	SegOffset uint64
+	Section   string
+	Start     uint64
+	Dylib     string
+	Value     uint64
 }
 
+func (b Bind) Offset() uint64 {
+	return b.SegStart + b.SegOffset
+}
 func (b Bind) String() string {
 	return fmt.Sprintf(
 		"%-7s %-16s  %#x  %-4s  %-10s  %5d %-25s\t%s%s",
 		b.Segment,
 		b.Section,
-		b.Start+b.Offset,
+		b.Start+b.SegOffset,
 		b.Kind,
 		getBindType(b.Type),
 		b.Addend,
