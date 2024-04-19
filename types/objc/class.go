@@ -79,6 +79,22 @@ func (f ClassRoFlags) HasCxxStructors() bool {
 func (f ClassRoFlags) HasFuture() bool {
 	return (f & RO_FUTURE) != 0
 }
+func (f ClassRoFlags) String() string {
+	var out []string
+	if f.IsMeta() {
+		out = append(out, "META")
+	}
+	if f.IsRoot() {
+		out = append(out, "ROOT")
+	}
+	if f.HasCxxStructors() {
+		out = append(out, "HAS_CXX_STRUCTORS")
+	}
+	if f.HasFuture() {
+		out = append(out, "FUTURE")
+	}
+	return strings.Join(out, " | ")
+}
 
 type ClassRO struct {
 	Flags                ClassRoFlags
