@@ -56,6 +56,7 @@ type File struct {
 
 var ErrMachOSectionNotFound = errors.New("MachO missing required section")
 var ErrMachODyldInfoNotFound = errors.New("LC_DYLD_INFO(_ONLY) not found")
+var ErrMachONoBindInfo = errors.New("MachO does not contain bind information (fixups)")
 
 // FormatError is returned by some operations if the data does
 // not have the correct format for an object file.
@@ -1565,7 +1566,7 @@ func (f *File) GetBindName(pointer uint64) (string, error) {
 			return "", fmt.Errorf("pointer %#x is not a bind", pointer)
 		}
 	}
-	return "", fmt.Errorf("macho does not contain fixups")
+	return "", ErrMachONoBindInfo
 }
 
 // GetCString returns a c-string at a given virtual address in the MachO

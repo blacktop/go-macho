@@ -467,14 +467,17 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 	} else {
 		bind, err := f.GetBindName(vmaddr + uint64(unsafe.Offsetof(classPtr.SuperclassVMAddr)))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", vmaddr, err)
-		}
-		if info.Flags.IsRoot() {
-			superClass = &objc.Class{Name: bind}
-		} else if info.Flags.IsMeta() {
-			superClass = &objc.Class{Name: strings.TrimPrefix(bind, "_OBJC_METACLASS_$_")}
+			if !errors.Is(err, ErrMachONoBindInfo) {
+				return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", vmaddr, err)
+			}
 		} else {
-			superClass = &objc.Class{Name: strings.TrimPrefix(bind, "_OBJC_CLASS_$_")}
+			if info.Flags.IsRoot() {
+				superClass = &objc.Class{Name: bind}
+			} else if info.Flags.IsMeta() {
+				superClass = &objc.Class{Name: strings.TrimPrefix(bind, "_OBJC_METACLASS_$_")}
+			} else {
+				superClass = &objc.Class{Name: strings.TrimPrefix(bind, "_OBJC_CLASS_$_")}
+			}
 		}
 	}
 
@@ -509,14 +512,17 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 	} else {
 		bind, err := f.GetBindName(vmaddr + uint64(unsafe.Offsetof(classPtr.IsaVMAddr)))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", vmaddr, err)
-		}
-		if info.Flags.IsRoot() {
-			isaClass = &objc.Class{Name: bind}
-		} else if info.Flags.IsMeta() {
-			isaClass = &objc.Class{Name: strings.TrimPrefix(bind, "_OBJC_METACLASS_$_")}
+			if !errors.Is(err, ErrMachONoBindInfo) {
+				return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", vmaddr, err)
+			}
 		} else {
-			isaClass = &objc.Class{Name: strings.TrimPrefix(bind, "_OBJC_CLASS_$_")}
+			if info.Flags.IsRoot() {
+				isaClass = &objc.Class{Name: bind}
+			} else if info.Flags.IsMeta() {
+				isaClass = &objc.Class{Name: strings.TrimPrefix(bind, "_OBJC_METACLASS_$_")}
+			} else {
+				isaClass = &objc.Class{Name: strings.TrimPrefix(bind, "_OBJC_CLASS_$_")}
+			}
 		}
 	}
 
@@ -650,14 +656,17 @@ func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 	} else {
 		bind, err := f.GetBindName(vmaddr + uint64(unsafe.Offsetof(classPtr.SuperclassVMAddr)))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", vmaddr, err)
-		}
-		if info.Flags.IsRoot() {
-			superClass = &objc.Class{Name: bind}
-		} else if info.Flags.IsMeta() {
-			superClass = &objc.Class{Name: strings.TrimPrefix(bind, "_OBJC_METACLASS_$_")}
+			if !errors.Is(err, ErrMachONoBindInfo) {
+				return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", vmaddr, err)
+			}
 		} else {
-			superClass = &objc.Class{Name: strings.TrimPrefix(bind, "_OBJC_CLASS_$_")}
+			if info.Flags.IsRoot() {
+				superClass = &objc.Class{Name: bind}
+			} else if info.Flags.IsMeta() {
+				superClass = &objc.Class{Name: strings.TrimPrefix(bind, "_OBJC_METACLASS_$_")}
+			} else {
+				superClass = &objc.Class{Name: strings.TrimPrefix(bind, "_OBJC_CLASS_$_")}
+			}
 		}
 	}
 
@@ -692,14 +701,17 @@ func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 	} else {
 		bind, err := f.GetBindName(vmaddr + uint64(unsafe.Offsetof(classPtr.IsaVMAddr)))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", vmaddr, err)
-		}
-		if info.Flags.IsRoot() {
-			isaClass = &objc.Class{Name: bind}
-		} else if info.Flags.IsMeta() {
-			isaClass = &objc.Class{Name: strings.TrimPrefix(bind, "_OBJC_METACLASS_$_")}
+			if !errors.Is(err, ErrMachONoBindInfo) {
+				return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", vmaddr, err)
+			}
 		} else {
-			isaClass = &objc.Class{Name: strings.TrimPrefix(bind, "_OBJC_CLASS_$_")}
+			if info.Flags.IsRoot() {
+				isaClass = &objc.Class{Name: bind}
+			} else if info.Flags.IsMeta() {
+				isaClass = &objc.Class{Name: strings.TrimPrefix(bind, "_OBJC_METACLASS_$_")}
+			} else {
+				isaClass = &objc.Class{Name: strings.TrimPrefix(bind, "_OBJC_CLASS_$_")}
+			}
 		}
 	}
 
@@ -758,7 +770,7 @@ func (f *File) GetObjCCategories() ([]objc.Category, error) {
 						return nil, fmt.Errorf("failed to read %T: %v", categoryPtr, err)
 					}
 
-					category := objc.Category{VMAddr: f.rebasePtr(ptr)}
+					category := objc.Category{VMAddr: f.rebasePtr(ptr), Class: &objc.Class{}}
 
 					categoryPtr.NameVMAddr = f.vma.Convert(categoryPtr.NameVMAddr)
 					category.Name, err = f.GetCString(categoryPtr.NameVMAddr)
@@ -774,13 +786,13 @@ func (f *File) GetObjCCategories() ([]objc.Category, error) {
 							if err != nil {
 								if f.HasFixups() {
 									bindName, err := f.GetBindName(categoryPtr.ClsVMAddr)
-									if err == nil {
-										category.Class = &objc.Class{Name: strings.TrimPrefix(bindName, "_OBJC_CLASS_$_")}
+									if err != nil {
+										if !errors.Is(err, ErrMachONoBindInfo) {
+											return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", categoryPtr.ClsVMAddr, err)
+										}
 									} else {
-										return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", categoryPtr.ClsVMAddr, err)
+										category.Class = &objc.Class{Name: strings.TrimPrefix(bindName, "_OBJC_CLASS_$_")}
 									}
-								} else {
-									category.Class = &objc.Class{}
 								}
 							}
 							f.PutObjC(categoryPtr.ClsVMAddr, category.Class)
@@ -791,12 +803,14 @@ func (f *File) GetObjCCategories() ([]objc.Category, error) {
 						} else {
 							category.Class = &objc.Class{}
 							bindName, err := f.GetBindName(ptr + uint64(unsafe.Offsetof(categoryPtr.ClsVMAddr)))
-							if err == nil {
-								category.Class = &objc.Class{Name: strings.TrimPrefix(bindName, "_OBJC_CLASS_$_")}
+							if err != nil {
+								if !errors.Is(err, ErrMachONoBindInfo) {
+									return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", ptr+uint64(unsafe.Offsetof(categoryPtr.ClsVMAddr)), err)
+								}
 							} else {
-								return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", ptr+uint64(unsafe.Offsetof(categoryPtr.ClsVMAddr)), err)
+								category.Class = &objc.Class{Name: strings.TrimPrefix(bindName, "_OBJC_CLASS_$_")}
+								f.PutObjC(ptr+uint64(unsafe.Offsetof(categoryPtr.ClsVMAddr)), category.Class)
 							}
-							f.PutObjC(ptr+uint64(unsafe.Offsetof(categoryPtr.ClsVMAddr)), category.Class)
 						}
 					}
 					if categoryPtr.InstanceMethodsVMAddr > 0 {
