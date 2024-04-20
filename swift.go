@@ -1224,6 +1224,13 @@ func (f *File) readProtocolConformance(r io.ReadSeeker, addr uint64) (pcd *swift
 	paddr = f.vma.Convert(paddr)
 	if paddr == 0 {
 		pcd.Protocol = "<stripped>"
+		paddr = pcd.ProtocolOffsest.GetRelPtrAddress()
+		if (paddr & 1) == 1 {
+			paddr = paddr &^ 1
+		}
+		if bind, err := f.GetBindName(paddr); err == nil {
+			pcd.Protocol = bind
+		}
 	} else if bind, err := f.GetBindName(paddr); err == nil {
 		pcd.Protocol = bind
 	} else {
@@ -1382,6 +1389,13 @@ func (f *File) readProtocolConformance(r io.ReadSeeker, addr uint64) (pcd *swift
 		}
 		if addr == 0 {
 			pcd.ResilientWitnesses[idx].Symbol = "<stripped>"
+			addr = wit.RequirementOff.GetRelPtrAddress()
+			if (addr & 1) == 1 {
+				addr = addr &^ 1
+			}
+			if bind, err := f.GetBindName(addr); err == nil {
+				pcd.ResilientWitnesses[idx].Symbol = bind
+			}
 		} else {
 			if bind, err := f.GetBindName(addr); err == nil {
 				pcd.ResilientWitnesses[idx].Symbol = bind
