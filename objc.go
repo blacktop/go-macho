@@ -637,7 +637,7 @@ func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 			if c, ok := f.GetObjC(classPtr.SuperclassVMAddr); ok {
 				superClass = c.(*objc.Class)
 			} else {
-				superClass, err = f.GetObjCClass(classPtr.SuperclassVMAddr)
+				superClass, err = f.GetObjCClass2(classPtr.SuperclassVMAddr)
 				if err != nil {
 					if f.HasFixups() {
 						bindName, err := f.GetBindName(classPtr.SuperclassVMAddr)

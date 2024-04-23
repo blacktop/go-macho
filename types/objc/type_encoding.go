@@ -50,7 +50,7 @@ var typeEncoding = map[string]string{
 	// "@?": "void (^)(void)", // block type
 }
 var typeSpecifiers = map[string]string{
-	"A": "atomic",
+	"A": "_Atomic",
 	"j": "_Complex",
 	"!": "vector",
 	"r": "const",
@@ -350,7 +350,7 @@ func decodeUnion(unionType string) string {
 
 func decodeBitfield(bitfield string) string {
 	span := encodingGetSizeOfArguments(bitfield)
-	return fmt.Sprintf("unsigned int x :%d", span)
+	return fmt.Sprintf("unsigned int x:%d", span)
 }
 
 func getFieldName(field string) (string, string) {
@@ -392,7 +392,7 @@ func decodeStructOrUnion(typ, kind string) string {
 		} else {
 			if strings.HasPrefix(field, "b") {
 				span := encodingGetSizeOfArguments(field)
-				fields = append(fields, fmt.Sprintf("unsigned int x%d :%d;", idx, span))
+				fields = append(fields, fmt.Sprintf("unsigned int x%d:%d;", idx, span))
 			} else if strings.HasPrefix(field, "[") {
 				array := decodeType(field)
 				array = strings.TrimSpace(strings.Replace(array, "x", fmt.Sprintf("x%d", idx), 1))

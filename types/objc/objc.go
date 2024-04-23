@@ -451,7 +451,7 @@ func (i *Ivar) dump(verbose, addrs bool) string {
 	}
 	if verbose {
 		ivtype := getIVarType(i.Type)
-		if regexp.MustCompile(`x\[[0-9]+\] $`).MatchString(ivtype) { // array special case
+		if regexp.MustCompile(`x(\s?)(\[[0-9]+\]|:[0-9]+) $`).MatchString(ivtype) { // array|bitfield special case
 			ivtype = strings.TrimSpace(replaceLast(ivtype, "x", i.Name))
 			return fmt.Sprintf("%s;%s", ivtype, addr)
 		}
