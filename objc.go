@@ -466,11 +466,7 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 		}
 	} else {
 		bind, err := f.GetBindName(vmaddr + uint64(unsafe.Offsetof(classPtr.SuperclassVMAddr)))
-		if err != nil {
-			if !errors.Is(err, ErrMachONoBindInfo) {
-				return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", vmaddr, err)
-			}
-		} else {
+		if err == nil {
 			if info.Flags.IsRoot() {
 				superClass = &objc.Class{Name: bind}
 			} else if info.Flags.IsMeta() {
@@ -511,11 +507,7 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 		}
 	} else {
 		bind, err := f.GetBindName(vmaddr + uint64(unsafe.Offsetof(classPtr.IsaVMAddr)))
-		if err != nil {
-			if !errors.Is(err, ErrMachONoBindInfo) {
-				return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", vmaddr, err)
-			}
-		} else {
+		if err == nil {
 			if info.Flags.IsRoot() {
 				isaClass = &objc.Class{Name: bind}
 			} else if info.Flags.IsMeta() {
@@ -655,11 +647,7 @@ func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 		}
 	} else {
 		bind, err := f.GetBindName(vmaddr + uint64(unsafe.Offsetof(classPtr.SuperclassVMAddr)))
-		if err != nil {
-			if !errors.Is(err, ErrMachONoBindInfo) {
-				return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", vmaddr, err)
-			}
-		} else {
+		if err == nil {
 			if info.Flags.IsRoot() {
 				superClass = &objc.Class{Name: bind}
 			} else if info.Flags.IsMeta() {
@@ -700,11 +688,7 @@ func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 		}
 	} else {
 		bind, err := f.GetBindName(vmaddr + uint64(unsafe.Offsetof(classPtr.IsaVMAddr)))
-		if err != nil {
-			if !errors.Is(err, ErrMachONoBindInfo) {
-				return nil, fmt.Errorf("failed to read super class objc_class_t at vmaddr: %#x; %v", vmaddr, err)
-			}
-		} else {
+		if err == nil {
 			if info.Flags.IsRoot() {
 				isaClass = &objc.Class{Name: bind}
 			} else if info.Flags.IsMeta() {
