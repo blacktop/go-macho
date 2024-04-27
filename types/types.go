@@ -148,6 +148,9 @@ type Version uint32
 func (v Version) String() string {
 	s := make([]byte, 4)
 	binary.BigEndian.PutUint32(s, uint32(v))
+	if (s[2] & 0xFF) == 0 {
+		return fmt.Sprintf("%d", binary.BigEndian.Uint16(s[:2]))
+	}
 	if (s[3] & 0xFF) == 0 {
 		return fmt.Sprintf("%d.%d", binary.BigEndian.Uint16(s[:2]), s[2])
 	}
