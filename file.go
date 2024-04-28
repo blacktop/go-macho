@@ -1750,14 +1750,15 @@ func (f *File) SourceVersion() *SourceVersion {
 	return nil
 }
 
-// BuildVersion returns the build version load command, or nil if no build version exists.
-func (f *File) BuildVersion() *BuildVersion {
+// BuildVersions returns the build version load commands as an array.
+func (f *File) BuildVersions() []*BuildVersion {
+	var builds []*BuildVersion
 	for _, l := range f.Loads {
 		if s, ok := l.(*BuildVersion); ok {
-			return s
+			builds = append(builds, s)
 		}
 	}
-	return nil
+	return builds
 }
 
 // VersionMin returns the minimum-version load command, or nil if no minimum-version exists.
