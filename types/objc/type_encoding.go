@@ -61,6 +61,7 @@ var typeSpecifiers = map[string]string{
 	"n": "in",
 	"o": "out",
 	"r": "const",
+	"|": "/* gc invisible */", // TODO: review
 }
 
 const (
