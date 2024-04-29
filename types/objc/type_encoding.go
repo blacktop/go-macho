@@ -22,21 +22,21 @@ var typeEncoding = map[string]string{
 	"L": "unsigned long",
 	"q": "long long",
 	"Q": "unsigned long long",
-	"t": "int128",
-	"T": "unsigned int128",
+	"t": "_int128",
+	"T": "unsigned _int128",
 	"f": "float",
 	"d": "double",
 	"D": "long double",
 	"b": "bit field",
-	"B": "BOOL",
+	"B": "_Bool",
 	"v": "void",
-	"z": "size_t",
-	"Z": "int32",
-	"w": "wchar_t",
+	// "z": "size_t",
+	// "Z": "int32",
+	// "w": "wchar_t",
 	"?": "undefined",
 	"^": "*",
 	"*": "char *",
-	"%": "NXAtom",
+	"%": "const char *", // "NXAtom",
 	// "[":  "", // _C_ARY_B
 	// "]":  "", // _C_ARY_E
 	// "(":  "", // _C_UNION_B
@@ -50,16 +50,15 @@ var typeEncoding = map[string]string{
 	// "@?": "void (^)(void)", // block type
 }
 var typeSpecifiers = map[string]string{
-	"A": "_Atomic",
 	"j": "_Complex",
-	"!": "vector",
+	"A": "_Atomic",
 	"r": "const",
 	"n": "in",
 	"N": "inout",
 	"o": "out",
-	"O": "by copy",
-	"R": "by ref",
-	"V": "one way",
+	"O": "bycopy",
+	"R": "byref",
+	"V": "oneway",
 	"+": "gnu register",
 }
 
@@ -274,6 +273,9 @@ func decodeType(encType string) string {
 	}
 
 	if strings.HasPrefix(encType, "^") {
+		if typ, ok := typeEncoding[encType]; ok {
+			return typ
+		}
 		return decodeType(encType[1:]) + " *" // pointer
 	}
 
@@ -299,7 +301,10 @@ func decodeType(encType string) string {
 		return typ
 	}
 
-	if spec, ok := typeSpecifiers[string(encType[0])]; ok {
+	if spec, ok := typeSpecifiers[string(encType[0])]; ok { // TODO: can there be more than 2 specifiers?
+		if spec2, ok := typeSpecifiers[string(encType[1])]; ok {
+			return spec2 + " " + spec + " " + decodeType(encType[2:])
+		}
 		return spec + " " + decodeType(encType[1:])
 	}
 
