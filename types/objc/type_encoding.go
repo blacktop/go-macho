@@ -9,57 +9,59 @@ import (
 // ref - https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ObjCRuntimeGuide/Articles/ocrtTypeEncodings.html
 
 var typeEncoding = map[string]string{
-	"@": "id",
-	"#": "Class",
-	":": "SEL",
-	"c": "char",
-	"C": "unsigned char",
-	"s": "short",
-	"S": "unsigned short",
-	"i": "int",
-	"I": "unsigned int",
-	"l": "long",
-	"L": "unsigned long",
-	"q": "long long",
-	"Q": "unsigned long long",
-	"t": "_int128",
-	"T": "unsigned _int128",
-	"f": "float",
-	"d": "double",
-	"D": "long double",
-	"b": "bit field",
-	"B": "_Bool",
-	"v": "void",
-	// "z": "size_t",
-	// "Z": "int32",
-	// "w": "wchar_t",
-	"?": "undefined",
-	"^": "*",
-	"*": "char *",
-	"%": "const char *", // "NXAtom",
-	// "[":  "", // _C_ARY_B
-	// "]":  "", // _C_ARY_E
-	// "(":  "", // _C_UNION_B
-	// ")":  "", // _C_UNION_E
-	// "{":  "", // _C_STRUCT_B
-	// "}":  "", // _C_STRUCT_E
-	"!":  "vector",
-	"Vv": "void",
-	"^?": "void *",         // void *
-	"@?": "id /* block */", // block type
-	// "@?": "void (^)(void)", // block type
+	"":   "",                      // Nothing
+	"!":  "/* vector */",          // TODO: review
+	"#":  "Class",                 // Objective-C Class
+	"%":  "const char *",          // TODO: review
+	"*":  "char *",                // C String
+	":":  "SEL",                   // Objective-C Selector
+	"?":  "void * /* unknown */",  // Unknown (likely a C Function and unlikely an Objective-C Block)
+	"@":  "id",                    // Objective-C Pointer
+	"@?": "id /* block */",        // Objective-C Block Pointer
+	"B":  "_Bool",                 // C Boolean
+	"C":  "unsigned char",         // Unsigned C Character
+	"D":  "long double",           // Extended-Precision C Floating-Point
+	"I":  "unsigned int",          // Unsigned C Integer
+	"L":  "unsigned long",         // Unsigned C Long Integer
+	"Q":  "unsigned long long",    // Unsigned C Long-Long Integer
+	"S":  "unsigned short",        // Unsigned C Short Integer
+	"T":  "unsigned __int128",     // Unsigned C 128-bit Integer
+	"^":  "*",                     // C Pointer
+	"^?": "void * /* function */", // C Function Pointer
+	"b":  ":",                     // C Bit Field
+	"c":  "char",                  // Signed C Character or Objective-C Boolean
+	"d":  "double",                // Double-Precision C Floating-Point
+	"f":  "float",                 // Single-Precision C Floating-Point
+	"i":  "int",                   // Signed C Integer
+	"l":  "long",                  // Signed C Long Integer
+	"q":  "long long",             // Signed C Long-Long Integer
+	"s":  "short",                 // Signed C Short Integer
+	"t":  "__int128",              // Signed C 128-bit Integer
+	"v":  "void",                  // C Void
+	// "%": "NXAtom", // TODO: review
+	// "Z": "int32", // TODO: review
+	// "w": "wchar_t", // TODO: review
+	// "z": "size_t", // TODO: review
+	// "(": "", // C Union Begin
+	// ")": "", // C Union End
+	// "[": "", // C Array Begin
+	// "]": "", // C Array End
+	// "{": "", // C Struct Begin
+	// "}": "", // C Struct End
 }
+
 var typeSpecifiers = map[string]string{
-	"j": "_Complex",
+	"+": "/* gnu register */", // TODO: review
 	"A": "_Atomic",
-	"r": "const",
-	"n": "in",
 	"N": "inout",
-	"o": "out",
 	"O": "bycopy",
 	"R": "byref",
 	"V": "oneway",
-	"+": "gnu register",
+	"j": "_Complex",
+	"n": "in",
+	"o": "out",
+	"r": "const",
+	"|": "/* gc invisible */", // TODO: review
 }
 
 const (
@@ -268,8 +270,8 @@ func getReturnType(types string) string {
 func decodeType(encType string) string {
 	var s string
 
-	if len(encType) == 0 {
-		return ""
+	if typ, ok := typeEncoding[encType]; ok {
+		return typ
 	}
 
 	if strings.HasPrefix(encType, "^") {
@@ -279,31 +281,11 @@ func decodeType(encType string) string {
 		return decodeType(encType[1:]) + " *" // pointer
 	}
 
-	if strings.HasPrefix(encType, "@?") {
-		if len(encType) > 2 { // TODO: remove this??
-			pointerType := decodeType(encType[2:])
-			return "id  ^" + pointerType
-		} else {
-			return "id /* block */"
-		}
-	}
-
-	if strings.HasPrefix(encType, "^?") {
-		if len(encType) > 2 {
-			pointerType := decodeType(encType[2:])
-			return "void * " + pointerType
-		} else {
-			return "void *"
-		}
-	}
-
-	if typ, ok := typeEncoding[encType]; ok {
-		return typ
-	}
-
 	if spec, ok := typeSpecifiers[string(encType[0])]; ok { // TODO: can there be more than 2 specifiers?
-		if spec2, ok := typeSpecifiers[string(encType[1])]; ok {
-			return spec2 + " " + spec + " " + decodeType(encType[2:])
+		if len(encType) > 1 {
+			if spec2, ok := typeSpecifiers[string(encType[1])]; ok {
+				return spec2 + " " + spec + " " + decodeType(encType[2:])
+			}
 		}
 		return spec + " " + decodeType(encType[1:])
 	}
