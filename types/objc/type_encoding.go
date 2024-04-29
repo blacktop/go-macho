@@ -51,7 +51,7 @@ var typeEncoding = map[string]string{
 }
 
 var typeSpecifiers = map[string]string{
-	"+": "gnu register", // TODO: review
+	"+": "/* gnu register */", // TODO: review
 	"A": "_Atomic",
 	"N": "inout",
 	"O": "bycopy",
