@@ -10,9 +10,9 @@ import (
 
 var typeEncoding = map[string]string{
 	"":   "",                      // Nothing
-	"!":  "vector",                // TODO: review
+	"!":  "/* vector */",          // TODO: review
 	"#":  "Class",                 // Objective-C Class
-	"%":  "NXAtom",                // TODO: review
+	"%":  "const char *",          // TODO: review
 	"*":  "char *",                // C String
 	":":  "SEL",                   // Objective-C Selector
 	"?":  "void * /* unknown */",  // Unknown (likely a C Function and unlikely an Objective-C Block)
@@ -26,7 +26,6 @@ var typeEncoding = map[string]string{
 	"Q":  "unsigned long long",    // Unsigned C Long-Long Integer
 	"S":  "unsigned short",        // Unsigned C Short Integer
 	"T":  "unsigned __int128",     // Unsigned C 128-bit Integer
-	"Z":  "int32",                 // MAYBE
 	"^":  "*",                     // C Pointer
 	"^?": "void * /* function */", // C Function Pointer
 	"b":  ":",                     // C Bit Field
@@ -38,9 +37,11 @@ var typeEncoding = map[string]string{
 	"q":  "long long",             // Signed C Long-Long Integer
 	"s":  "short",                 // Signed C Short Integer
 	"t":  "__int128",              // Signed C 128-bit Integer
-	"w":  "wchar_t",               // TODO: review
 	"v":  "void",                  // C Void
-	"z":  "size_t",                // TODO: review
+	// "%": "NXAtom", // TODO: review
+	// "Z": "int32", // TODO: review
+	// "w": "wchar_t", // TODO: review
+	// "z": "size_t", // TODO: review
 	// "(": "", // C Union Begin
 	// ")": "", // C Union End
 	// "[": "", // C Array Begin
@@ -50,7 +51,6 @@ var typeEncoding = map[string]string{
 }
 
 var typeSpecifiers = map[string]string{
-	"!": "vector",       // TODO: review
 	"+": "gnu register", // TODO: review
 	"A": "_Atomic",
 	"N": "inout",
@@ -274,10 +274,18 @@ func decodeType(encType string) string {
 	}
 
 	if strings.HasPrefix(encType, "^") {
+		if typ, ok := typeEncoding[encType]; ok {
+			return typ
+		}
 		return decodeType(encType[1:]) + " *" // pointer
 	}
 
-	if spec, ok := typeSpecifiers[string(encType[0])]; ok {
+	if spec, ok := typeSpecifiers[string(encType[0])]; ok { // TODO: can there be more than 2 specifiers?
+		if len(encType) > 1 {
+			if spec2, ok := typeSpecifiers[string(encType[1])]; ok {
+				return spec2 + " " + spec + " " + decodeType(encType[2:])
+			}
+		}
 		return spec + " " + decodeType(encType[1:])
 	}
 
