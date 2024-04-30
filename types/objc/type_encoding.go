@@ -7,20 +7,22 @@ import (
 )
 
 // References:
-// 01. https://clang.llvm.org/docs/LanguageExtensions.html#vectors-and-extended-vectors
-// 02. https://developer.apple.com/documentation/objectivec/bool#discussion
-// 03. https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms#Handle-data-types-and-data-alignment-properly
-// 04. https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ObjCRuntimeGuide/Articles/ocrtTypeEncodings.html#//apple_ref/doc/uid/TP40008048-CH100-SW1
-// 05. https://developer.apple.com/library/archive/documentation/Darwin/Conceptual/64bitPorting/transition/transition.html#//apple_ref/doc/uid/TP40001064-CH207-SW1
-// 06. https://gcc.gnu.org/onlinedocs/gcc/Vector-Extensions.html
-// 07. https://github.com/apple-oss-distributions/clang/blob/rel/clang-800/src/tools/clang/include/clang/AST/DeclBase.h#L173-L200
-// 08. https://github.com/apple-oss-distributions/clang/blob/rel/clang-800/src/tools/clang/include/clang/AST/DeclObjC.h#L698-L727
-// 09. https://github.com/apple-oss-distributions/clang/blob/rel/clang-800/src/tools/clang/lib/AST/ASTContext.cpp#L5452-L5518
-// 10. https://github.com/apple-oss-distributions/objc4/blob/rel/objc4-906/runtime/runtime.h#L1856-L1900
-// 11. https://github.com/apple-oss-distributions/objc4/blob/rel/objc4-838/runtime/hashtable2.h#L251-L294
-// 12. https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.2.0/gcc/doc/objc.texi
-// 13. https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.2.0/gcc/objc/objc-encoding.cc
-// 14. https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.2.0/libobjc/objc/runtime.h#L83-L139
+// 01. https://clang.llvm.org/docs/LanguageExtensions.html#half-precision-floating-point
+// 02. https://clang.llvm.org/docs/LanguageExtensions.html#vectors-and-extended-vectors
+// 03. https://developer.apple.com/documentation/objectivec/bool#discussion
+// 04. https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms#Handle-data-types-and-data-alignment-properly
+// 05. https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ObjCRuntimeGuide/Articles/ocrtTypeEncodings.html#//apple_ref/doc/uid/TP40008048-CH100-SW1
+// 06. https://developer.apple.com/library/archive/documentation/Darwin/Conceptual/64bitPorting/transition/transition.html#//apple_ref/doc/uid/TP40001064-CH207-SW1
+// 07. https://gcc.gnu.org/onlinedocs/gcc/Half-Precision.html
+// 08. https://gcc.gnu.org/onlinedocs/gcc/Vector-Extensions.html
+// 09. https://github.com/apple-oss-distributions/clang/blob/rel/clang-800/src/tools/clang/include/clang/AST/DeclBase.h#L173-L200
+// 10. https://github.com/apple-oss-distributions/clang/blob/rel/clang-800/src/tools/clang/include/clang/AST/DeclObjC.h#L698-L727
+// 11. https://github.com/apple-oss-distributions/clang/blob/rel/clang-800/src/tools/clang/lib/AST/ASTContext.cpp#L5452-L5518
+// 12. https://github.com/apple-oss-distributions/objc4/blob/rel/objc4-906/runtime/runtime.h#L1856-L1900
+// 13. https://github.com/apple-oss-distributions/objc4/blob/rel/objc4-838/runtime/hashtable2.h#L251-L294
+// 14. https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.2.0/gcc/doc/objc.texi
+// 15. https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.2.0/gcc/objc/objc-encoding.cc
+// 16. https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.2.0/libobjc/objc/runtime.h#L83-L139
 
 var typeEncoding = map[string]string{
 	"":   "",                          // Nothing
