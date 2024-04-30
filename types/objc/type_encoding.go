@@ -7,14 +7,18 @@ import (
 )
 
 // References:
-// 1. https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ObjCRuntimeGuide/Articles/ocrtTypeEncodings.html
-// 2. https://github.com/apple-oss-distributions/clang/blob/rel/clang-800/src/tools/clang/include/clang/AST/DeclBase.h#L173-L200
-// 3. https://github.com/apple-oss-distributions/clang/blob/rel/clang-800/src/tools/clang/include/clang/AST/DeclObjC.h#L698-L727
-// 4. https://github.com/apple-oss-distributions/clang/blob/rel/clang-800/src/tools/clang/lib/AST/ASTContext.cpp#L5452-L5518
-// 5. https://github.com/apple-oss-distributions/objc4/blob/rel/objc4-906/runtime/runtime.h#L1856-L1900
-// 6. https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.2.0/gcc/doc/objc.texi
-// 7. https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.2.0/gcc/objc/objc-encoding.cc
-// 8. https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.2.0/libobjc/objc/runtime.h#L83-L139
+// 01. https://developer.apple.com/documentation/objectivec/bool#discussion
+// 02. https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms#Handle-data-types-and-data-alignment-properly
+// 03. https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ObjCRuntimeGuide/Articles/ocrtTypeEncodings.html#//apple_ref/doc/uid/TP40008048-CH100-SW1
+// 04. https://developer.apple.com/library/archive/documentation/Darwin/Conceptual/64bitPorting/transition/transition.html#//apple_ref/doc/uid/TP40001064-CH207-SW1
+// 05. https://github.com/apple-oss-distributions/clang/blob/rel/clang-800/src/tools/clang/include/clang/AST/DeclBase.h#L173-L200
+// 06. https://github.com/apple-oss-distributions/clang/blob/rel/clang-800/src/tools/clang/include/clang/AST/DeclObjC.h#L698-L727
+// 07. https://github.com/apple-oss-distributions/clang/blob/rel/clang-800/src/tools/clang/lib/AST/ASTContext.cpp#L5452-L5518
+// 08. https://github.com/apple-oss-distributions/objc4/blob/rel/objc4-906/runtime/runtime.h#L1856-L1900
+// 09. https://github.com/apple-oss-distributions/objc4/blob/rel/objc4-838/runtime/hashtable2.h#L251-L294
+// 10. https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.2.0/gcc/doc/objc.texi
+// 11. https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.2.0/gcc/objc/objc-encoding.cc
+// 12. https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.2.0/libobjc/objc/runtime.h#L83-L139
 
 var typeEncoding = map[string]string{
 	"":   "",                          // Nothing
