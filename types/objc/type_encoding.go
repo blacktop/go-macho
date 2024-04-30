@@ -38,9 +38,7 @@ var typeEncoding = map[string]string{
 	"Q":  "unsigned long long",        // Unsigned C Long-Long Integer
 	"S":  "unsigned short",            // Unsigned C Short Integer
 	"T":  "unsigned __int128",         // Unsigned C 128-bit Integer (fixed size)
-	"^":  "/* pointer */",             // C Pointer
 	"^?": "void * /* function */",     // C Function Pointer
-	"b":  "/* bit field */",           // C Bit Field
 	"c":  "signed char",               // Signed C Character (fixed signedness) or Objective-C Boolean (on Intel)
 	"d":  "double",                    // Double-Precision C Floating-Point
 	"f":  "float",                     // Single-Precision C Floating-Point
@@ -51,6 +49,8 @@ var typeEncoding = map[string]string{
 	"t":  "__int128",                  // Signed C 128-bit Integer
 	"v":  "void",                      // C Void
 	// "!": "", // GNU Vector (LLVM Vector is unrepresented)
+	// "^": "", // C Pointer
+	// "b": "", // C Bit Field
 	// "(": "", // C Union Begin
 	// ")": "", // C Union End
 	// "[": "", // C Array Begin
