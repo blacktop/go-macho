@@ -38,16 +38,16 @@ var typeEncoding = map[string]string{
 	"C":  "unsigned char",             // Unsigned C Character
 	"D":  "long double",               // Extended-Precision C Floating-Point (64 bits on ARM, 80 bits on Intel, and 128 bits on PowerPC)
 	"I":  "unsigned int",              // Unsigned C Integer
-	"L":  "unsigned int32_t",          // Unsigned C Long Integer (fixed at 32 bits)
+	"L":  "unsigned int32_t",          // Unsigned C Long Integer (fixed to 32 bits)
 	"Q":  "unsigned long long",        // Unsigned C Long-Long Integer
 	"S":  "unsigned short",            // Unsigned C Short Integer
-	"T":  "unsigned __int128",         // Unsigned C 128-bit Integer (fixed size)
+	"T":  "unsigned __int128",         // Unsigned C 128-bit Integer
 	"^?": "void * /* function */",     // C Function Pointer
 	"c":  "signed char",               // Signed C Character (fixed signedness) or Objective-C Boolean (on Intel)
 	"d":  "double",                    // Double-Precision C Floating-Point
 	"f":  "float",                     // Single-Precision C Floating-Point
 	"i":  "int",                       // Signed C Integer
-	"l":  "int32_t",                   // Signed C Long Integer (fixed at 32 bits)
+	"l":  "int32_t",                   // Signed C Long Integer (fixed to 32 bits)
 	"q":  "long long",                 // Signed C Long-Long Integer
 	"s":  "short",                     // Signed C Short Integer
 	"t":  "__int128",                  // Signed C 128-bit Integer
