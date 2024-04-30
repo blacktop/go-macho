@@ -6,42 +6,47 @@ import (
 	"unicode"
 )
 
-// ref - https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ObjCRuntimeGuide/Articles/ocrtTypeEncodings.html
+// References:
+// 1. https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ObjCRuntimeGuide/Articles/ocrtTypeEncodings.html
+// 2. https://github.com/apple-oss-distributions/clang/blob/rel/clang-800/src/tools/clang/include/clang/AST/DeclBase.h#L173-L200
+// 3. https://github.com/apple-oss-distributions/clang/blob/rel/clang-800/src/tools/clang/include/clang/AST/DeclObjC.h#L698-L727
+// 4. https://github.com/apple-oss-distributions/clang/blob/rel/clang-800/src/tools/clang/lib/AST/ASTContext.cpp#L5452-L5518
+// 5. https://github.com/apple-oss-distributions/objc4/blob/rel/objc4-906/runtime/runtime.h#L1856-L1900
+// 6. https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.2.0/gcc/doc/objc.texi
+// 7. https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.2.0/gcc/objc/objc-encoding.cc
+// 8. https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.2.0/libobjc/objc/runtime.h#L83-L139
 
 var typeEncoding = map[string]string{
-	"":   "",                      // Nothing
-	"!":  "/* vector */",          // TODO: review
-	"#":  "Class",                 // Objective-C Class
-	"%":  "const char *",          // TODO: review
-	"*":  "char *",                // C String
-	":":  "SEL",                   // Objective-C Selector
-	"?":  "void * /* unknown */",  // Unknown (likely a C Function and unlikely an Objective-C Block)
-	"@":  "id",                    // Objective-C Pointer
-	"@?": "id /* block */",        // Objective-C Block Pointer
-	"B":  "_Bool",                 // C Boolean
-	"C":  "unsigned char",         // Unsigned C Character
-	"D":  "long double",           // Extended-Precision C Floating-Point
-	"I":  "unsigned int",          // Unsigned C Integer
-	"L":  "unsigned long",         // Unsigned C Long Integer
-	"Q":  "unsigned long long",    // Unsigned C Long-Long Integer
-	"S":  "unsigned short",        // Unsigned C Short Integer
-	"T":  "unsigned __int128",     // Unsigned C 128-bit Integer
-	"^":  "*",                     // C Pointer
-	"^?": "void * /* function */", // C Function Pointer
-	"b":  ":",                     // C Bit Field
-	"c":  "char",                  // Signed C Character or Objective-C Boolean
-	"d":  "double",                // Double-Precision C Floating-Point
-	"f":  "float",                 // Single-Precision C Floating-Point
-	"i":  "int",                   // Signed C Integer
-	"l":  "long",                  // Signed C Long Integer
-	"q":  "long long",             // Signed C Long-Long Integer
-	"s":  "short",                 // Signed C Short Integer
-	"t":  "__int128",              // Signed C 128-bit Integer
-	"v":  "void",                  // C Void
-	// "%": "NXAtom", // TODO: review
-	// "Z": "int32", // TODO: review
-	// "w": "wchar_t", // TODO: review
-	// "z": "size_t", // TODO: review
+	"":   "",                          // Nothing
+	" ":  "_Float16",                  // Half-Precision C Floating-Point (LLVM only)
+	"#":  "Class",                     // Objective-C Class
+	"%":  "const char * /* NXAtom */", // Objective-C NXAtom (legacy Objective-C runtime only)
+	"*":  "char *",                    // C String
+	":":  "SEL",                       // Objective-C Selector
+	"?":  "void * /* unknown */",      // Unknown (likely a C Function and unlikely an Objective-C Block)
+	"@":  "id",                        // Objective-C Pointer
+	"@?": "id /* block */",            // Objective-C Block Pointer
+	"B":  "_Bool",                     // C Boolean or Objective-C Boolean (on ARM and PowerPC)
+	"C":  "unsigned char",             // Unsigned C Character
+	"D":  "long double",               // Extended-Precision C Floating-Point (64 bits on ARM, 80 bits on Intel, and 128 bits on PowerPC)
+	"I":  "unsigned int",              // Unsigned C Integer
+	"L":  "unsigned int32_t",          // Unsigned C Long Integer (fixed at 32 bits)
+	"Q":  "unsigned long long",        // Unsigned C Long-Long Integer
+	"S":  "unsigned short",            // Unsigned C Short Integer
+	"T":  "unsigned __int128",         // Unsigned C 128-bit Integer (fixed size)
+	"^":  "/* pointer */",             // C Pointer
+	"^?": "void * /* function */",     // C Function Pointer
+	"b":  "/* bit field */",           // C Bit Field
+	"c":  "signed char",               // Signed C Character (fixed signedness) or Objective-C Boolean (on Intel)
+	"d":  "double",                    // Double-Precision C Floating-Point
+	"f":  "float",                     // Single-Precision C Floating-Point
+	"i":  "int",                       // Signed C Integer
+	"l":  "int32_t",                   // Signed C Long Integer (fixed at 32 bits)
+	"q":  "long long",                 // Signed C Long-Long Integer
+	"s":  "short",                     // Signed C Short Integer
+	"t":  "__int128",                  // Signed C 128-bit Integer
+	"v":  "void",                      // C Void
+	// "!": "", // GNU Vector (LLVM Vector is unrepresented)
 	// "(": "", // C Union Begin
 	// ")": "", // C Union End
 	// "[": "", // C Array Begin
