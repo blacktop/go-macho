@@ -2,6 +2,7 @@ package objc
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode"
 )
@@ -291,7 +292,14 @@ func decodeType(encType string) string {
 		if typ, ok := typeEncoding[encType]; ok {
 			return typ
 		}
-		return decodeType(encType[1:]) + " *" // pointer
+
+		decType := decodeType(encType[1:])
+
+		if encType[1] == '!' {
+			return strings.Replace(decType, "x", "*x", 1) // vector pointer
+		}
+
+		return decType + " *" // pointer
 	}
 
 	if spec, ok := typeSpecifiers[string(encType[0])]; ok { // TODO: can there be more than 2 specifiers?
@@ -312,18 +320,25 @@ func decodeType(encType string) string {
 	}
 
 	if len(encType) > 2 {
-		if strings.HasPrefix(encType, "[") { // ARRAY
+		switch encType[0] {
+		case '!': // VECTOR
+			inner := encType[strings.IndexByte(encType, '[')+1 : strings.LastIndexByte(encType, ']')]
+			s += decodeVector(inner)
+
+		case '(': // UNION
+			inner := encType[strings.IndexByte(encType, '(')+1 : strings.LastIndexByte(encType, ')')]
+			s += decodeUnion(inner)
+
+		case '[': // ARRAY
 			inner := encType[strings.IndexByte(encType, '[')+1 : strings.LastIndexByte(encType, ']')]
 			s += decodeArray(inner)
-		} else if strings.HasPrefix(encType, "{") { // STRUCT
+
+		case '{': // STRUCT
 			if !(strings.Contains(encType, "{") && strings.Contains(encType, "}")) {
 				return "?"
 			}
 			inner := encType[strings.IndexByte(encType, '{')+1 : strings.LastIndexByte(encType, '}')]
 			s += decodeStructure(inner)
-		} else if strings.HasPrefix(encType, "(") { // UNION
-			inner := encType[strings.IndexByte(encType, '(')+1 : strings.LastIndexByte(encType, ')')]
-			s += decodeUnion(inner)
 		}
 	}
 
@@ -339,7 +354,13 @@ func decodeArray(arrayType string) string {
 	if len(arrayType) == 1 {
 		return fmt.Sprintf("x[%s]", arrayType)
 	}
-	return fmt.Sprintf("%s x[%s]", decodeType(arrayType[numIdx+1:]), arrayType[:numIdx+1])
+
+	decType := decodeType(arrayType[numIdx+1:])
+	if !strings.HasSuffix(decType, "*") {
+		decType += " "
+	}
+
+	return fmt.Sprintf("%sx[%s]", decType, arrayType[:numIdx+1])
 }
 
 func decodeStructure(structure string) string {
@@ -348,6 +369,27 @@ func decodeStructure(structure string) string {
 
 func decodeUnion(unionType string) string {
 	return decodeStructOrUnion(unionType, "union")
+}
+
+var (
+	vectorRegExp = regexp.MustCompile(`(?P<size>\d+),(?P<alignment>\d+)(?P<type>.+)`)
+)
+
+func decodeVector(vectorType string) string {
+	matches := vectorRegExp.FindStringSubmatch(vectorType)
+	if len(matches) != 4 {
+		return ""
+	}
+
+	vSize := matches[1]
+	vAlignment := matches[2]
+
+	eType := decodeType(matches[3])
+	if !strings.HasSuffix(eType, "*") {
+		eType += " "
+	}
+
+	return fmt.Sprintf("%sx __attribute__((aligned(%s), vector_size(%s)))", eType, vAlignment, vSize)
 }
 
 func decodeBitfield(bitfield string) string {
@@ -365,6 +407,10 @@ func getFieldName(field string) (string, string) {
 	}
 	return "", field
 }
+
+var (
+	vectorIdentifierRegExp = regexp.MustCompile(`(.+[ *]x)( __attribute__.+)`)
+)
 
 func decodeStructOrUnion(typ, kind string) string {
 	name, rest, _ := strings.Cut(typ, "=")
@@ -397,10 +443,28 @@ func decodeStructOrUnion(typ, kind string) string {
 				fields = append(fields, fmt.Sprintf("unsigned int x%d:%d;", idx, span))
 			} else if strings.HasPrefix(field, "[") {
 				array := decodeType(field)
-				array = strings.TrimSpace(strings.Replace(array, "x", fmt.Sprintf("x%d", idx), 1))
+				array = strings.TrimSpace(strings.Replace(array, "x", fmt.Sprintf("x%d", idx), 1)) + ";"
 				fields = append(fields, array)
 			} else {
-				fields = append(fields, fmt.Sprintf("%s x%d;", decodeType(field), idx))
+				decType := decodeType(field)
+				if !strings.HasSuffix(decType, "))") {
+					if !strings.HasSuffix(decType, "*") {
+						decType += " "
+					}
+
+					fields = append(fields, fmt.Sprintf("%sx%d;", decType, idx))
+				} else {
+					matches := vectorIdentifierRegExp.FindStringSubmatchIndex(decType)
+					if len(matches) != 6 {
+						fields = append(fields, fmt.Sprintf("%sx%d;", decType, idx))
+					} else {
+						middle := matches[4]
+						prefix := decType[:middle]
+						suffix := decType[middle:]
+
+						fields = append(fields, fmt.Sprintf("%s%d%s;", prefix, idx, suffix))
+					}
+				}
 			}
 			idx++
 		}
@@ -441,6 +505,12 @@ func skipFirstType(typStr string) string {
 				i++
 			}
 			return string(typ[i+1:])
+		case '!': /* vectors */
+			i += 2
+			for typ[i] == ',' || typ[i] >= '0' && typ[i] <= '9' {
+				i++
+			}
+			return string(typ[i+subtypeUntil(string(typ[i:]), ']')+1:])
 		case '[': /* arrays */
 			i++
 			for typ[i] >= '0' && typ[i] <= '9' {
@@ -522,6 +592,12 @@ func CutType(typStr string) (string, string, bool) {
 				i++
 			}
 			return string(typ[:i]), string(typ[i:]), true
+		case '!': /* vectors */
+			i += 2
+			for typ[i] == ',' || typ[i] >= '0' && typ[i] <= '9' {
+				i++
+			}
+			return string(typ[:i+subtypeUntil(string(typ[i:]), ']')+1]), string(typ[i+subtypeUntil(string(typ[i:]), ']')+1:]), true
 		case '[': /* arrays */
 			i++
 			for typ[i] >= '0' && typ[i] <= '9' {
