@@ -6,42 +6,55 @@ import (
 	"unicode"
 )
 
-// ref - https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ObjCRuntimeGuide/Articles/ocrtTypeEncodings.html
+// References:
+// 01. https://clang.llvm.org/docs/LanguageExtensions.html#half-precision-floating-point
+// 02. https://clang.llvm.org/docs/LanguageExtensions.html#vectors-and-extended-vectors
+// 03. https://developer.apple.com/documentation/objectivec/bool#discussion
+// 04. https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms#Handle-data-types-and-data-alignment-properly
+// 05. https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ObjCRuntimeGuide/Articles/ocrtTypeEncodings.html#//apple_ref/doc/uid/TP40008048-CH100-SW1
+// 06. https://developer.apple.com/library/archive/documentation/Darwin/Conceptual/64bitPorting/transition/transition.html#//apple_ref/doc/uid/TP40001064-CH207-SW1
+// 07. https://gcc.gnu.org/onlinedocs/gcc/Half-Precision.html
+// 08. https://gcc.gnu.org/onlinedocs/gcc/Vector-Extensions.html
+// 09. https://github.com/apple-oss-distributions/clang/blob/rel/clang-800/src/tools/clang/include/clang/AST/DeclBase.h#L173-L200
+// 10. https://github.com/apple-oss-distributions/clang/blob/rel/clang-800/src/tools/clang/include/clang/AST/DeclObjC.h#L698-L727
+// 11. https://github.com/apple-oss-distributions/clang/blob/rel/clang-800/src/tools/clang/lib/AST/ASTContext.cpp#L5452-L5518
+// 12. https://github.com/apple-oss-distributions/objc4/blob/rel/objc4-906/runtime/runtime.h#L1856-L1900
+// 13. https://github.com/apple-oss-distributions/objc4/blob/rel/objc4-838/runtime/hashtable2.h#L251-L294
+// 14. https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.2.0/gcc/doc/objc.texi
+// 15. https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.2.0/gcc/objc/objc-encoding.cc
+// 16. https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.2.0/libobjc/objc/runtime.h#L83-L139
 
 var typeEncoding = map[string]string{
-	"":   "",                      // Nothing
-	"!":  "/* vector */",          // TODO: review
-	"#":  "Class",                 // Objective-C Class
-	"%":  "const char *",          // TODO: review
-	"*":  "char *",                // C String
-	":":  "SEL",                   // Objective-C Selector
-	"?":  "void * /* unknown */",  // Unknown (likely a C Function and unlikely an Objective-C Block)
-	"@":  "id",                    // Objective-C Pointer
-	"@?": "id /* block */",        // Objective-C Block Pointer
-	"B":  "_Bool",                 // C Boolean
-	"C":  "unsigned char",         // Unsigned C Character
-	"D":  "long double",           // Extended-Precision C Floating-Point
-	"I":  "unsigned int",          // Unsigned C Integer
-	"L":  "unsigned long",         // Unsigned C Long Integer
-	"Q":  "unsigned long long",    // Unsigned C Long-Long Integer
-	"S":  "unsigned short",        // Unsigned C Short Integer
-	"T":  "unsigned __int128",     // Unsigned C 128-bit Integer
-	"^":  "*",                     // C Pointer
-	"^?": "void * /* function */", // C Function Pointer
-	"b":  ":",                     // C Bit Field
-	"c":  "char",                  // Signed C Character or Objective-C Boolean
-	"d":  "double",                // Double-Precision C Floating-Point
-	"f":  "float",                 // Single-Precision C Floating-Point
-	"i":  "int",                   // Signed C Integer
-	"l":  "long",                  // Signed C Long Integer
-	"q":  "long long",             // Signed C Long-Long Integer
-	"s":  "short",                 // Signed C Short Integer
-	"t":  "__int128",              // Signed C 128-bit Integer
-	"v":  "void",                  // C Void
-	// "%": "NXAtom", // TODO: review
-	// "Z": "int32", // TODO: review
-	// "w": "wchar_t", // TODO: review
-	// "z": "size_t", // TODO: review
+	"":   "",                          // Nothing
+	" ":  "_Float16",                  // Half-Precision C Floating-Point (LLVM only)
+	"#":  "Class",                     // Objective-C Class
+	"%":  "const char * /* NXAtom */", // Objective-C NXAtom (legacy Objective-C runtime only)
+	"*":  "char *",                    // C String
+	":":  "SEL",                       // Objective-C Selector
+	"?":  "void * /* unknown */",      // Unknown (likely a C Function and unlikely an Objective-C Block)
+	"@":  "id",                        // Objective-C Pointer
+	"@?": "id /* block */",            // Objective-C Block Pointer
+	"B":  "_Bool",                     // C Boolean or Objective-C Boolean (on ARM and PowerPC)
+	"C":  "unsigned char",             // Unsigned C Character
+	"D":  "long double",               // Extended-Precision C Floating-Point (64 bits on ARM, 80 bits on Intel, and 128 bits on PowerPC)
+	"I":  "unsigned int",              // Unsigned C Integer
+	"L":  "unsigned int32_t",          // Unsigned C Long Integer (fixed to 32 bits)
+	"Q":  "unsigned long long",        // Unsigned C Long-Long Integer
+	"S":  "unsigned short",            // Unsigned C Short Integer
+	"T":  "unsigned __int128",         // Unsigned C 128-bit Integer
+	"^?": "void * /* function */",     // C Function Pointer
+	"c":  "signed char",               // Signed C Character (fixed signedness) or Objective-C Boolean (on Intel)
+	"d":  "double",                    // Double-Precision C Floating-Point
+	"f":  "float",                     // Single-Precision C Floating-Point
+	"i":  "int",                       // Signed C Integer
+	"l":  "int32_t",                   // Signed C Long Integer (fixed to 32 bits)
+	"q":  "long long",                 // Signed C Long-Long Integer
+	"s":  "short",                     // Signed C Short Integer
+	"t":  "__int128",                  // Signed C 128-bit Integer
+	"v":  "void",                      // C Void
+	// "!": "", // GNU Vector (LLVM Vector is unrepresented)
+	// "^": "", // C Pointer
+	// "b": "", // C Bit Field
 	// "(": "", // C Union Begin
 	// ")": "", // C Union End
 	// "[": "", // C Array Begin
