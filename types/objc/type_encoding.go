@@ -126,6 +126,32 @@ func decodeMethodTypes(encodedTypes string) (string, []string) {
 	return getReturnType(encodedTypes), argTypes
 }
 
+func getLastCapitalizedPart(s string) string {
+	start := len(s)
+	for i := len(s) - 1; i >= 0; i-- {
+		if unicode.IsUpper(rune(s[i])) {
+			start = i
+		} else if start != len(s) {
+			break
+		}
+	}
+	if start == len(s) {
+		return s
+	}
+	return strings.ToLower(s[start:])
+}
+
+func isReserved(s string) bool {
+	switch s {
+	case "alignas", "alignof", "auto", "bool", "break", "case", "char", "const", "constexpr", "continue", "default", "do", "double", "else", "enum", "extern", "false", "float", "for", "goto", "if", "inline", "int", "long", "nullptr", "register", "restrict", "return", "short", "signed", "sizeof", "static", "static_assert", "struct", "switch", "thread_local", "true", "typedef", "typeof", "typeof_unqual", "union", "unsigned", "void", "volatile", "while":
+		return true // C Keywords
+	case "and", "and_eq", "asm", "atomic_cancel", "atomic_commit", "atomic_noexcept", "bitand", "bitor", "catch", "char8_t", "char16_t", "char32_t", "class", "compl", "concept", "consteval", "constinit", "const_cast", "co_await", "co_return", "co_yield", "decltype", "delete", "dynamic_cast", "explicit", "export", "friend", "mutable", "namespace", "new", "noexcept", "not", "not_eq", "operator", "or", "or_eq", "private", "protected", "public", "reflexpr", "reinterpret_cast", "requires", "static_cast", "synchronized", "template", "this", "throw", "try", "typeid", "typename", "using", "virtual", "wchar_t", "xor", "xor_eq":
+		return true // C++ Keywords
+	default:
+		return false
+	}
+}
+
 func getMethodWithArgs(method, returnType string, args []string) string {
 	if len(args) <= 2 {
 		return fmt.Sprintf("(%s)%s;", returnType, method)
@@ -137,10 +163,14 @@ func getMethodWithArgs(method, returnType string, args []string) string {
 	var methodStr string
 	if len(parts) > 1 { // method has arguments based on SEL having ':'
 		for idx, part := range parts {
+			argName := getLastCapitalizedPart(part)
+			if isReserved(argName) {
+				argName = "_" + argName
+			}
 			if len(part) == 0 || idx >= len(args) {
 				break
 			}
-			methodStr += fmt.Sprintf("%s:%sarg%d ", part, args[idx], idx)
+			methodStr += fmt.Sprintf("%s:%s ", part, args[idx]+argName)
 		}
 		return fmt.Sprintf("(%s)%s;", returnType, strings.TrimSpace(methodStr))
 	}
