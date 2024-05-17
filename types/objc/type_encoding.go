@@ -3,7 +3,6 @@ package objc
 import (
 	"fmt"
 	"strings"
-	"unicode"
 )
 
 // References:
@@ -127,21 +126,6 @@ func decodeMethodTypes(encodedTypes string) (string, []string) {
 	return getReturnType(encodedTypes), argTypes
 }
 
-func getLastCapitalizedPart(s string) string {
-	start := len(s)
-	for i := len(s) - 1; i >= 0; i-- {
-		if unicode.IsUpper(rune(s[i])) {
-			start = i
-		} else if start != len(s) {
-			break
-		}
-	}
-	if start == len(s) {
-		return s
-	}
-	return strings.ToLower(s[start:])
-}
-
 func getMethodWithArgs(method, returnType string, args []string) string {
 	if len(args) <= 2 {
 		return fmt.Sprintf("(%s)%s;", returnType, method)
@@ -153,11 +137,10 @@ func getMethodWithArgs(method, returnType string, args []string) string {
 	var methodStr string
 	if len(parts) > 1 { // method has arguments based on SEL having ':'
 		for idx, part := range parts {
-			argName := getLastCapitalizedPart(part)
 			if len(part) == 0 || idx >= len(args) {
 				break
 			}
-			methodStr += fmt.Sprintf("%s:%s ", part, args[idx]+argName)
+			methodStr += fmt.Sprintf("%s:%sarg%d ", part, args[idx], idx)
 		}
 		return fmt.Sprintf("(%s)%s;", returnType, strings.TrimSpace(methodStr))
 	}
