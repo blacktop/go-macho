@@ -26,33 +26,35 @@ import (
 // 16. https://github.com/gcc-mirror/gcc/blob/releases/gcc-13.2.0/libobjc/objc/runtime.h#L83-L139
 
 var typeEncoding = map[string]string{
-	"":   "",                          // Nothing
-	" ":  "_Float16",                  // Half-Precision C Floating-Point (LLVM only)
-	"#":  "Class",                     // Objective-C Class
-	"%":  "const char * /* NXAtom */", // Objective-C NXAtom (legacy Objective-C runtime only)
-	"*":  "char *",                    // C String
-	":":  "SEL",                       // Objective-C Selector
-	"?":  "void * /* unknown */",      // Unknown (likely a C Function and unlikely an Objective-C Block)
-	"@":  "id",                        // Objective-C Pointer
-	"@?": "id /* block */",            // Objective-C Block Pointer
-	"B":  "_Bool",                     // C Boolean or Objective-C Boolean (on ARM and PowerPC)
-	"C":  "unsigned char",             // Unsigned C Character
-	"D":  "long double",               // Extended-Precision C Floating-Point (64 bits on ARM, 80 bits on Intel, and 128 bits on PowerPC)
-	"I":  "unsigned int",              // Unsigned C Integer
-	"L":  "unsigned int32_t",          // Unsigned C Long Integer (fixed to 32 bits)
-	"Q":  "unsigned long long",        // Unsigned C Long-Long Integer
-	"S":  "unsigned short",            // Unsigned C Short Integer
-	"T":  "unsigned __int128",         // Unsigned C 128-bit Integer
-	"^?": "void * /* function */",     // C Function Pointer
-	"c":  "signed char",               // Signed C Character (fixed signedness) or Objective-C Boolean (on Intel)
-	"d":  "double",                    // Double-Precision C Floating-Point
-	"f":  "float",                     // Single-Precision C Floating-Point
-	"i":  "int",                       // Signed C Integer
-	"l":  "int32_t",                   // Signed C Long Integer (fixed to 32 bits)
-	"q":  "long long",                 // Signed C Long-Long Integer
-	"s":  "short",                     // Signed C Short Integer
-	"t":  "__int128",                  // Signed C 128-bit Integer
-	"v":  "void",                      // C Void
+	"":     "",                          // Nothing
+	" ":    "_Float16",                  // Half-Precision C Floating-Point (LLVM only)
+	"#":    "Class",                     // Objective-C Class
+	"%":    "const char * /* NXAtom */", // Objective-C NXAtom (legacy Objective-C runtime only)
+	"*":    "char *",                    // C String
+	":":    "SEL",                       // Objective-C Selector
+	"?":    "void * /* unknown */",      // Unknown (likely a C Function and unlikely an Objective-C Block)
+	"@":    "id",                        // Objective-C Pointer
+	"@?":   "id /* block */",            // Objective-C Block Pointer
+	"B":    "_Bool",                     // C Boolean or Objective-C Boolean (on ARM and PowerPC)
+	"C":    "unsigned char",             // Unsigned C Character
+	"D":    "long double",               // Extended-Precision C Floating-Point (64 bits on ARM, 80 bits on Intel, and 128 bits on PowerPC)
+	"I":    "unsigned int",              // Unsigned C Integer
+	"L":    "unsigned int32_t",          // Unsigned C Long Integer (fixed to 32 bits)
+	"Q":    "unsigned long long",        // Unsigned C Long-Long Integer
+	"S":    "unsigned short",            // Unsigned C Short Integer
+	"T":    "unsigned __int128",         // Unsigned C 128-bit Integer
+	"^(?)": "void * /* union */",        // C Union Pointer
+	"^?":   "void * /* function */",     // C Function Pointer
+	"^{?}": "void * /* struct */",       // C Struct Pointer
+	"c":    "signed char",               // Signed C Character (fixed signedness) or Objective-C Boolean (on Intel)
+	"d":    "double",                    // Double-Precision C Floating-Point
+	"f":    "float",                     // Single-Precision C Floating-Point
+	"i":    "int",                       // Signed C Integer
+	"l":    "int32_t",                   // Signed C Long Integer (fixed to 32 bits)
+	"q":    "long long",                 // Signed C Long-Long Integer
+	"s":    "short",                     // Signed C Short Integer
+	"t":    "__int128",                  // Signed C 128-bit Integer
+	"v":    "void",                      // C Void
 	// "!": "", // GNU Vector (LLVM Vector is unrepresented)
 	// "^": "", // C Pointer
 	// "b": "", // C Bit Field
@@ -409,7 +411,7 @@ func getFieldName(field string) (string, string) {
 }
 
 var (
-	vectorIdentifierRegExp = regexp.MustCompile(`(.+[ *]x)( __attribute__.+)`)
+	vectorIdentifierRegExp = regexp.MustCompile(`(.+[ *])x( __attribute__.+)`)
 )
 
 func decodeStructOrUnion(typ, kind string) string {
@@ -430,44 +432,40 @@ func decodeStructOrUnion(typ, kind string) string {
 	field, rest, ok := CutType(rest)
 
 	for ok {
-		if fieldName != "" {
-			dtype := decodeType(field)
-			if strings.HasSuffix(dtype, " *") {
-				fields = append(fields, fmt.Sprintf("%s%s;", dtype, fieldName))
-			} else {
-				fields = append(fields, fmt.Sprintf("%s %s;", dtype, fieldName))
-			}
+		if fieldName == "" {
+			fieldName = fmt.Sprintf("x%d", idx)
+		}
+
+		if strings.HasPrefix(field, "b") {
+			span := encodingGetSizeOfArguments(field)
+			fields = append(fields, fmt.Sprintf("unsigned int %s:%d;", fieldName, span))
+		} else if strings.HasPrefix(field, "[") {
+			array := decodeType(field)
+			array = strings.TrimSpace(strings.Replace(array, "x", fieldName, 1)) + ";"
+			fields = append(fields, array)
 		} else {
-			if strings.HasPrefix(field, "b") {
-				span := encodingGetSizeOfArguments(field)
-				fields = append(fields, fmt.Sprintf("unsigned int x%d:%d;", idx, span))
-			} else if strings.HasPrefix(field, "[") {
-				array := decodeType(field)
-				array = strings.TrimSpace(strings.Replace(array, "x", fmt.Sprintf("x%d", idx), 1)) + ";"
-				fields = append(fields, array)
+			decType := decodeType(field)
+			if !strings.HasSuffix(decType, "))") {
+				if !strings.HasSuffix(decType, "*") {
+					decType += " "
+				}
+
+				fields = append(fields, fmt.Sprintf("%s%s;", decType, fieldName))
 			} else {
-				decType := decodeType(field)
-				if !strings.HasSuffix(decType, "))") {
-					if !strings.HasSuffix(decType, "*") {
-						decType += " "
-					}
-
-					fields = append(fields, fmt.Sprintf("%sx%d;", decType, idx))
+				matches := vectorIdentifierRegExp.FindStringSubmatchIndex(decType)
+				if len(matches) != 6 {
+					fields = append(fields, fmt.Sprintf("%s%s;", decType, fieldName))
 				} else {
-					matches := vectorIdentifierRegExp.FindStringSubmatchIndex(decType)
-					if len(matches) != 6 {
-						fields = append(fields, fmt.Sprintf("%sx%d;", decType, idx))
-					} else {
-						middle := matches[4]
-						prefix := decType[:middle]
-						suffix := decType[middle:]
+					prefix := decType[:matches[3]]
+					suffix := decType[matches[4]:]
 
-						fields = append(fields, fmt.Sprintf("%s%d%s;", prefix, idx, suffix))
-					}
+					fields = append(fields, fmt.Sprintf("%s%s%s;", prefix, fieldName, suffix))
 				}
 			}
-			idx++
 		}
+
+		idx++
+
 		fieldName, rest = getFieldName(rest)
 		field, rest, ok = CutType(rest)
 	}

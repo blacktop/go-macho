@@ -47,11 +47,46 @@ func Test_decodeType(t *testing.T) {
 			want: "struct { int x0; float x1[3]; unsigned int x2:3; unsigned int x3:2; signed char x4; }",
 		},
 		{
-			name: "Test union",
+			name: "Test struct 3",
+			args: args{
+				encType: "{__xar_t=}",
+			},
+			want: "struct __xar_t",
+		},
+		{
+			name: "Test struct 2",
+			args: args{
+				encType: "{?=\"val\"[8I]}",
+			},
+			want: "struct { unsigned int val[8]; }",
+		},
+		{
+			name: "Test struct 3",
+			args: args{
+				encType: "^{?}",
+			},
+			want: "void * /* struct */",
+		},
+		{
+			name: "Test union 0",
 			args: args{
 				encType: "(?=i)",
 			},
 			want: "union { int x0; }",
+		},
+		{
+			name: "Test union 1",
+			args: args{
+				encType: "(?=\"fat\"^S\"thin\"*)",
+			},
+			want: "union { unsigned short *fat; char *thin; }",
+		},
+		{
+			name: "Test union 2",
+			args: args{
+				encType: "^(?)",
+			},
+			want: "void * /* union */",
 		},
 		{
 			name: "Test block",
