@@ -133,6 +133,14 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 	f.objc = make(map[uint64]any)
 	f.swift = make(map[uint64]any)
 
+	f.vma = &types.VMAddrConverter{
+		Converter:    f.convertToVMAddr,
+		VMAddr2Offet: f.getOffset,
+		Offet2VMAddr: f.getVMAddress,
+	}
+	f.sr = types.NewCustomSectionReader(r, f.vma, 0, 1<<63-1)
+	f.cr = f.sr
+
 	if config != nil {
 		if config[0].SectionReader != nil {
 			f.sr = config[0].SectionReader
@@ -142,18 +150,12 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 		if config[0].CacheReader != nil {
 			f.cr = config[0].CacheReader
 		}
-		f.vma = &config[0].VMAddrConverter
+		if config[0].VMAddrConverter.Converter != nil {
+			f.vma = &config[0].VMAddrConverter
+		}
 		loadIncluding = config[0].LoadIncluding
 		loadExcluding = config[0].LoadExcluding
 		f.sharedCacheRelativeSelectorBaseVMAddress = config[0].RelativeSelectorBase
-	} else {
-		f.vma = &types.VMAddrConverter{
-			Converter:    f.convertToVMAddr,
-			VMAddr2Offet: f.getOffset,
-			Offet2VMAddr: f.getVMAddress,
-		}
-		f.sr = types.NewCustomSectionReader(r, f.vma, 0, 1<<63-1)
-		f.cr = f.sr
 	}
 
 	// Read and decode Mach magic to determine byte order, size.
