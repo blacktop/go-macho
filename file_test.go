@@ -454,57 +454,57 @@ func TestNewFile(t *testing.T) {
 
 	fmt.Println(got.FileTOC.String())
 
-	cs := got.CodeSignature()
-	if cs != nil {
+	if cs := got.CodeSignature(); cs != nil {
 		fmt.Println(cs.Requirements[0].Detail)
-	}
-	if len(cs.LaunchConstraintsSelf) > 0 {
-		os.WriteFile("lc_self.bin", cs.LaunchConstraintsSelf, 0644)
-		lc, err := cstypes.ParseLaunchContraints(cs.LaunchConstraintsSelf)
-		if err != nil {
-			t.Fatalf("ParseLaunchContraints() error = %v", err)
+
+		if len(cs.LaunchConstraintsSelf) > 0 {
+			os.WriteFile("lc_self.bin", cs.LaunchConstraintsSelf, 0644)
+			lc, err := cstypes.ParseLaunchContraints(cs.LaunchConstraintsSelf)
+			if err != nil {
+				t.Fatalf("ParseLaunchContraints() error = %v", err)
+			}
+			dat, err := json.MarshalIndent(lc, "", "  ")
+			if err != nil {
+				t.Fatalf("json.MarshalIndent() error = %v", err)
+			}
+			fmt.Println(string(dat))
 		}
-		dat, err := json.MarshalIndent(lc, "", "  ")
-		if err != nil {
-			t.Fatalf("json.MarshalIndent() error = %v", err)
+		if len(cs.LaunchConstraintsParent) > 0 {
+			os.WriteFile("lc_parent.bin", cs.LaunchConstraintsParent, 0644)
+			lc, err := cstypes.ParseLaunchContraints(cs.LaunchConstraintsParent)
+			if err != nil {
+				t.Fatalf("ParseLaunchContraints() error = %v", err)
+			}
+			dat, err := json.MarshalIndent(lc, "", "  ")
+			if err != nil {
+				t.Fatalf("json.MarshalIndent() error = %v", err)
+			}
+			fmt.Println(string(dat))
 		}
-		fmt.Println(string(dat))
-	}
-	if len(cs.LaunchConstraintsParent) > 0 {
-		os.WriteFile("lc_parent.bin", cs.LaunchConstraintsParent, 0644)
-		lc, err := cstypes.ParseLaunchContraints(cs.LaunchConstraintsParent)
-		if err != nil {
-			t.Fatalf("ParseLaunchContraints() error = %v", err)
+		if len(cs.LaunchConstraintsResponsible) > 0 {
+			os.WriteFile("lc_responsible.bin", cs.LaunchConstraintsResponsible, 0644)
+			lc, err := cstypes.ParseLaunchContraints(cs.LaunchConstraintsResponsible)
+			if err != nil {
+				t.Fatalf("ParseLaunchContraints() error = %v", err)
+			}
+			dat, err := json.MarshalIndent(lc, "", "  ")
+			if err != nil {
+				t.Fatalf("json.MarshalIndent() error = %v", err)
+			}
+			fmt.Println(string(dat))
 		}
-		dat, err := json.MarshalIndent(lc, "", "  ")
-		if err != nil {
-			t.Fatalf("json.MarshalIndent() error = %v", err)
+		if len(cs.LibraryConstraints) > 0 {
+			os.WriteFile("lib_constraints.bin", cs.LibraryConstraints, 0644)
+			lc, err := cstypes.ParseLaunchContraints(cs.LibraryConstraints)
+			if err != nil {
+				t.Fatalf("ParseLaunchContraints() error = %v", err)
+			}
+			dat, err := json.MarshalIndent(lc, "", "  ")
+			if err != nil {
+				t.Fatalf("json.MarshalIndent() error = %v", err)
+			}
+			fmt.Println(string(dat))
 		}
-		fmt.Println(string(dat))
-	}
-	if len(cs.LaunchConstraintsResponsible) > 0 {
-		os.WriteFile("lc_responsible.bin", cs.LaunchConstraintsResponsible, 0644)
-		lc, err := cstypes.ParseLaunchContraints(cs.LaunchConstraintsResponsible)
-		if err != nil {
-			t.Fatalf("ParseLaunchContraints() error = %v", err)
-		}
-		dat, err := json.MarshalIndent(lc, "", "  ")
-		if err != nil {
-			t.Fatalf("json.MarshalIndent() error = %v", err)
-		}
-		fmt.Println(string(dat))
-	}
-	if len(cs.LibraryConstraints) > 0 {
-		os.WriteFile("lib_constraints.bin", cs.LibraryConstraints, 0644)
-		lc, err := cstypes.ParseLaunchContraints(cs.LibraryConstraints)
-		if err != nil {
-			t.Fatalf("ParseLaunchContraints() error = %v", err)
-		}
-		dat, err := json.MarshalIndent(lc, "", "  ")
-		if err != nil {
-			t.Fatalf("json.MarshalIndent() error = %v", err)
-		}
-		fmt.Println(string(dat))
 	}
 
 	d, err := got.DWARF()

@@ -1,6 +1,6 @@
 package types
 
-//go:generate stringer -type=LoadCmd -output commands_string.go
+//go:generate stringer -type=LoadCmd,ThreadFlavor -output commands_string.go
 
 import (
 	"encoding/json"

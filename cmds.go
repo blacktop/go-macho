@@ -577,14 +577,40 @@ func (t *Thread) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	return nil
 }
 func (t *Thread) String() string {
+	regPadding := 9
+	padding := strings.Repeat(" ", 7)
+	var out []string
 	for _, thread := range t.Threads {
-		if thread.Flavor == types.ARM_THREAD_STATE64 {
-			regs := make([]uint64, thread.Count/2)
+		switch thread.Flavor {
+		case types.X86_THREAD_STATE32:
+			var regs Regs386
 			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)
-			return fmt.Sprintf("Threads: %d, ARM64 EntryPoint: %#016x", len(t.Threads), regs[len(regs)-2])
+			out = append(out, fmt.Sprintf("%s%s EntryPoint: %#08x\n%s", padding, thread.Flavor, regs.IP, regs.String(regPadding)))
+		case types.X86_THREAD_STATE64:
+			var regs RegsAMD64
+			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)
+			out = append(out, fmt.Sprintf("%s%s EntryPoint: %#016x\n%s", padding, thread.Flavor, regs.IP, regs.String(regPadding)))
+		case types.ARM_THREAD_STATE32:
+			var regs RegsARM
+			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)
+			out = append(out, fmt.Sprintf("%s%s EntryPoint: %#08x\n%s", padding, thread.Flavor, regs.PC, regs.String(regPadding)))
+		case types.ARM_THREAD_STATE64:
+			var regs RegsARM64
+			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)
+			out = append(out, fmt.Sprintf("%s%s EntryPoint: %#016x\n%s", padding, thread.Flavor, regs.PC, regs.String(regPadding)))
+		case types.ARM_EXCEPTION_STATE:
+			var regs ArmExceptionState
+			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)
+			out = append(out, fmt.Sprintf("%s%s:\n%s", padding, thread.Flavor, regs.String(regPadding)))
+		case types.ARM_EXCEPTION_STATE64:
+			var regs ArmExceptionState64
+			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)
+			out = append(out, fmt.Sprintf("%s%s:\n%s", padding, thread.Flavor, regs.String(regPadding)))
+		default:
+			out = append(out, fmt.Sprintf("%s%s", padding, thread.Flavor))
 		}
 	}
-	return fmt.Sprintf("Threads: %d", len(t.Threads))
+	return fmt.Sprintf("Threads: %d\n%s", len(t.Threads), strings.Join(out, "\n"))
 }
 func (t *Thread) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
@@ -1984,6 +2010,7 @@ type VersionMinWatchOS struct {
 type Note struct {
 	LoadBytes
 	types.NoteCmd
+	Data []byte
 }
 
 func (n *Note) LoadSize() uint32 {
@@ -1996,7 +2023,7 @@ func (n *Note) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	return nil
 }
 func (n *Note) String() string {
-	return fmt.Sprintf("DataOwner=%s, offset=0x%08x-0x%08x size=%5d", string(n.DataOwner[:]), n.Offset, n.Offset+n.Size, n.Size)
+	return fmt.Sprintf("DataOwner: \"%s\", offset=0x%08x-0x%08x size=%5d", string(n.DataOwner[:]), n.Offset, n.Offset+n.Size, n.Size)
 }
 func (n *Note) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {

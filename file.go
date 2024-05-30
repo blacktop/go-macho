@@ -367,6 +367,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
+			l.bo = bo
 			for {
 				var thread types.ThreadState
 				err := binary.Read(b, bo, &thread.Flavor)
@@ -1160,6 +1161,10 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.DataOwner = n.DataOwner
 			l.Offset = n.Offset
 			l.Size = n.Size
+			l.Data = make([]byte, l.Size)
+			if _, err := f.cr.ReadAt(l.Data, int64(l.Offset)); err != nil {
+				return nil, fmt.Errorf("failed to read Note data at offset=%#x; %v", int64(l.Offset), err)
+			}
 			f.Loads = append(f.Loads, l)
 		case types.LC_BUILD_VERSION:
 			var build types.BuildVersionCmd
