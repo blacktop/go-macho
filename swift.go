@@ -26,6 +26,12 @@ func (f *File) HasSwift() bool {
 			return true
 		}
 	}
+	for _, sec := range f.Sections {
+		switch sec.Name {
+		case "__swift5_types", "__swift5_types2", "__swift5_builtin", "__swift5_fieldmd", "__swift5_assocty", "__swift5_protos", "__swift5_proto", "__swift5_reflstr", "__swift5_capture", "__swift5_typeref", "__swift5_mpenum", "__constg_swiftt", "__swift5_replace", "__swift5_replac2", "__swift5_acfuncs":
+			return true
+		}
+	}
 	return false
 }
 
