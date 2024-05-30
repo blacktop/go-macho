@@ -1394,6 +1394,10 @@ func readString(r io.Reader) (string, error) {
 }
 
 func (f *File) is64bit() bool { return f.FileHeader.Magic == types.Magic64 }
+func (f *File) isArm64() bool { return f.CPU == types.CPUArm64 }
+func (f *File) isArm64e() bool {
+	return f.isArm64() && (f.SubCPU&types.CpuSubtypeMask) == types.CPUSubtypeArm64E
+}
 
 func (f *File) pointerSize() uint64 {
 	if f.is64bit() {
@@ -1501,7 +1505,6 @@ func (f *File) convertToVMAddr(value uint64) uint64 {
 	if value == 0 {
 		return 0
 	}
-
 	if f.HasFixups() {
 		if dcf, err := f.DyldChainedFixups(); err == nil {
 			if target, ok := dcf.IsRebase(value, f.GetBaseAddress()); ok {
@@ -1517,6 +1520,7 @@ func (f *File) convertToVMAddr(value uint64) uint64 {
 				return value
 			}
 		}
+	} else if f.isArm64e() {
 		// TODO: fix this dumb hack for SUPPORT_OLD_ARM64E_FORMAT
 		dcf := fixupchains.DyldChainedFixups{
 			PointerFormat: fixupchains.DYLD_CHAINED_PTR_ARM64E,
@@ -1533,7 +1537,6 @@ func (f *File) convertToVMAddr(value uint64) uint64 {
 			}
 		}
 	}
-
 	return value
 }
 
