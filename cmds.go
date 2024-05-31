@@ -592,19 +592,19 @@ func (t *Thread) String() string {
 		case types.X86_THREAD_STATE32:
 			var regs Regs386
 			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)
-			out = append(out, fmt.Sprintf("%s%s EntryPoint: %#08x\n%s", padding, flavor, regs.IP, regs.String(regPadding)))
+			out = append(out, fmt.Sprintf("%s%s:\n%s", padding, flavor, regs.String(regPadding)))
 		case types.X86_THREAD_STATE64:
 			var regs RegsAMD64
 			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)
-			out = append(out, fmt.Sprintf("%s%s EntryPoint: %#016x\n%s", padding, flavor, regs.IP, regs.String(regPadding)))
+			out = append(out, fmt.Sprintf("%s%s:\n%s", padding, flavor, regs.String(regPadding)))
 		case types.ARM_THREAD_STATE32:
 			var regs RegsARM
 			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)
-			out = append(out, fmt.Sprintf("%s%s EntryPoint: %#08x\n%s", padding, flavor, regs.PC, regs.String(regPadding)))
+			out = append(out, fmt.Sprintf("%s%s:\n%s", padding, flavor, regs.String(regPadding)))
 		case types.ARM_THREAD_STATE64:
 			var regs RegsARM64
 			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)
-			out = append(out, fmt.Sprintf("%s%s EntryPoint: %#016x\n%s", padding, flavor, regs.PC, regs.String(regPadding)))
+			out = append(out, fmt.Sprintf("%s%s:\n%s", padding, flavor, regs.String(regPadding)))
 		case types.ARM_EXCEPTION_STATE:
 			var regs ArmExceptionState
 			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)
