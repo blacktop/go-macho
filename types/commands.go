@@ -1,6 +1,6 @@
 package types
 
-//go:generate stringer -type=LoadCmd,ThreadFlavor -output commands_string.go
+//go:generate stringer -type=LoadCmd,X86ThreadFlavor,ArmThreadFlavor -output commands_string.go
 
 import (
 	"encoding/json"
@@ -367,56 +367,58 @@ type IDDylinkerCmd DylinkerCmd // LC_ID_DYLINKER
 type DyldEnvironmentCmd DylinkerCmd // LC_DYLD_ENVIRONMENT
 
 type ThreadFlavor uint32
+type X86ThreadFlavor ThreadFlavor
+type ArmThreadFlavor ThreadFlavor
 
 const (
 	//
 	// x86 flavors
 	//
-	X86_THREAD_STATE32    ThreadFlavor = 1
-	X86_FLOAT_STATE32     ThreadFlavor = 2
-	X86_EXCEPTION_STATE32 ThreadFlavor = 3
-	X86_THREAD_STATE64    ThreadFlavor = 4
-	X86_FLOAT_STATE64     ThreadFlavor = 5
-	X86_EXCEPTION_STATE64 ThreadFlavor = 6
-	X86_THREAD_STATE      ThreadFlavor = 7
-	X86_FLOAT_STATE       ThreadFlavor = 8
-	X86_EXCEPTION_STATE   ThreadFlavor = 9
-	X86_DEBUG_STATE32     ThreadFlavor = 10
-	X86_DEBUG_STATE64     ThreadFlavor = 11
-	X86_DEBUG_STATE       ThreadFlavor = 12
-	X86_THREAD_STATE_NONE ThreadFlavor = 13
+	X86_THREAD_STATE32    X86ThreadFlavor = 1
+	X86_FLOAT_STATE32     X86ThreadFlavor = 2
+	X86_EXCEPTION_STATE32 X86ThreadFlavor = 3
+	X86_THREAD_STATE64    X86ThreadFlavor = 4
+	X86_FLOAT_STATE64     X86ThreadFlavor = 5
+	X86_EXCEPTION_STATE64 X86ThreadFlavor = 6
+	X86_THREAD_STATE      X86ThreadFlavor = 7
+	X86_FLOAT_STATE       X86ThreadFlavor = 8
+	X86_EXCEPTION_STATE   X86ThreadFlavor = 9
+	X86_DEBUG_STATE32     X86ThreadFlavor = 10
+	X86_DEBUG_STATE64     X86ThreadFlavor = 11
+	X86_DEBUG_STATE       X86ThreadFlavor = 12
+	X86_THREAD_STATE_NONE X86ThreadFlavor = 13
 	/* 14 and 15 are used for the internal X86_SAVED_STATE flavours */
 	/* Arrange for flavors to take sequential values, 32-bit, 64-bit, non-specific */
-	X86_AVX_STATE32         ThreadFlavor = 16
-	X86_AVX_STATE64         ThreadFlavor = (X86_AVX_STATE32 + 1)
-	X86_AVX_STATE           ThreadFlavor = (X86_AVX_STATE32 + 2)
-	X86_AVX512_STATE32      ThreadFlavor = 19
-	X86_AVX512_STATE64      ThreadFlavor = (X86_AVX512_STATE32 + 1)
-	X86_AVX512_STATE        ThreadFlavor = (X86_AVX512_STATE32 + 2)
-	X86_PAGEIN_STATE        ThreadFlavor = 22
-	X86_THREAD_FULL_STATE64 ThreadFlavor = 23
-	X86_INSTRUCTION_STATE   ThreadFlavor = 24
-	X86_LAST_BRANCH_STATE   ThreadFlavor = 25
+	X86_AVX_STATE32         X86ThreadFlavor = 16
+	X86_AVX_STATE64         X86ThreadFlavor = (X86_AVX_STATE32 + 1)
+	X86_AVX_STATE           X86ThreadFlavor = (X86_AVX_STATE32 + 2)
+	X86_AVX512_STATE32      X86ThreadFlavor = 19
+	X86_AVX512_STATE64      X86ThreadFlavor = (X86_AVX512_STATE32 + 1)
+	X86_AVX512_STATE        X86ThreadFlavor = (X86_AVX512_STATE32 + 2)
+	X86_PAGEIN_STATE        X86ThreadFlavor = 22
+	X86_THREAD_FULL_STATE64 X86ThreadFlavor = 23
+	X86_INSTRUCTION_STATE   X86ThreadFlavor = 24
+	X86_LAST_BRANCH_STATE   X86ThreadFlavor = 25
 	//
 	// arm flavors
 	//
-	ARM_THREAD_STATE         ThreadFlavor = 1
-	ARM_UNIFIED_THREAD_STATE ThreadFlavor = ARM_THREAD_STATE
-	ARM_VFP_STATE            ThreadFlavor = 2
-	ARM_EXCEPTION_STATE      ThreadFlavor = 3
-	ARM_DEBUG_STATE          ThreadFlavor = 4 /* pre-armv8 */
-	ARM_THREAD_STATE_NONE    ThreadFlavor = 5
-	ARM_THREAD_STATE64       ThreadFlavor = 6
-	ARM_EXCEPTION_STATE64    ThreadFlavor = 7
+	ARM_THREAD_STATE         ArmThreadFlavor = 1
+	ARM_UNIFIED_THREAD_STATE ArmThreadFlavor = ARM_THREAD_STATE
+	ARM_VFP_STATE            ArmThreadFlavor = 2
+	ARM_EXCEPTION_STATE      ArmThreadFlavor = 3
+	ARM_DEBUG_STATE          ArmThreadFlavor = 4 /* pre-armv8 */
+	ARM_THREAD_STATE_NONE    ArmThreadFlavor = 5
+	ARM_THREAD_STATE64       ArmThreadFlavor = 6
+	ARM_EXCEPTION_STATE64    ArmThreadFlavor = 7
 	//      ARM_THREAD_STATE_LAST    8 /* legacy */
-	ARM_THREAD_STATE32 ThreadFlavor = 9
+	ARM_THREAD_STATE32 ArmThreadFlavor = 9
 	/* API */
-	ARM_DEBUG_STATE32 ThreadFlavor = 14
-	ARM_DEBUG_STATE64 ThreadFlavor = 15
-	ARM_NEON_STATE    ThreadFlavor = 16
-	ARM_NEON_STATE64  ThreadFlavor = 17
-	ARM_CPMU_STATE64  ThreadFlavor = 18
-	ARM_PAGEIN_STATE  ThreadFlavor = 27
+	ARM_DEBUG_STATE32 ArmThreadFlavor = 14
+	ARM_DEBUG_STATE64 ArmThreadFlavor = 15
+	ARM_NEON_STATE    ArmThreadFlavor = 16
+	ARM_NEON_STATE64  ArmThreadFlavor = 17
+	ARM_CPMU_STATE64  ArmThreadFlavor = 18
+	ARM_PAGEIN_STATE  ArmThreadFlavor = 27
 )
 
 type ThreadState struct {
@@ -1126,6 +1128,46 @@ type NoteCmd struct {
 	DataOwner [16]byte // owner name for this LC_NOTE
 	Offset    uint64   // file offset of this data
 	Size      uint64   // length of data region
+}
+
+/* Note commands DataOwner = "addrable bits" */
+type NoteAddrableBitsV3 struct {
+	Version     uint32
+	NumAddrBits uint32
+	Reserved    uint64
+}
+type NoteAddrableBitsV4 struct {
+	Version    uint32
+	LoAddrBits uint32
+	HiAddrBits uint32
+	Reserved   uint32
+}
+type NoteAllImageInfosImageEntry struct {
+	FilepathOffset uint64 // offset in corefile to c-string of the file path,
+	// UINT64_MAX if unavailable.
+	UUID UUID // uint8_t[16].  should be set to all zeroes if
+	// uuid is unknown.
+	LoadAddress    uint64 // UINT64_MAX if unknown.
+	SegAddrsOffset uint64 // offset to the array of struct segment_vmaddr's.
+	SegmentCount   uint32 // The number of segments for this binary.
+	Unused         uint32
+}
+type NoteAllImageInfosSegmentVmaddr struct {
+	Name   [16]byte
+	VmAddr uint64
+	Unused uint64
+}
+type NoteAllImageInfos struct {
+	Version        uint32
+	InfoArrayCount uint32
+	EntriesFileoff uint64
+	EntriesSize    uint32
+	_              uint32
+}
+type NoteAllImageInfosImage struct {
+	Name     string
+	Entry    NoteAllImageInfosImageEntry
+	Segments []NoteAllImageInfosSegmentVmaddr
 }
 
 // FilesetEntryCmd commands describe constituent Mach-O files that are part

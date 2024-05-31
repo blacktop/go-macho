@@ -553,6 +553,7 @@ type Thread struct {
 	LoadBytes
 	types.ThreadCmd
 	bo      binary.ByteOrder
+	IsArm   bool
 	Threads []types.ThreadState
 }
 
@@ -581,33 +582,39 @@ func (t *Thread) String() string {
 	padding := strings.Repeat(" ", 7)
 	var out []string
 	for _, thread := range t.Threads {
-		switch thread.Flavor {
+		var flavor any
+		if t.IsArm {
+			flavor = types.ArmThreadFlavor(thread.Flavor)
+		} else {
+			flavor = types.X86ThreadFlavor(thread.Flavor)
+		}
+		switch flavor {
 		case types.X86_THREAD_STATE32:
 			var regs Regs386
 			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)
-			out = append(out, fmt.Sprintf("%s%s EntryPoint: %#08x\n%s", padding, thread.Flavor, regs.IP, regs.String(regPadding)))
+			out = append(out, fmt.Sprintf("%s%s EntryPoint: %#08x\n%s", padding, flavor, regs.IP, regs.String(regPadding)))
 		case types.X86_THREAD_STATE64:
 			var regs RegsAMD64
 			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)
-			out = append(out, fmt.Sprintf("%s%s EntryPoint: %#016x\n%s", padding, thread.Flavor, regs.IP, regs.String(regPadding)))
+			out = append(out, fmt.Sprintf("%s%s EntryPoint: %#016x\n%s", padding, flavor, regs.IP, regs.String(regPadding)))
 		case types.ARM_THREAD_STATE32:
 			var regs RegsARM
 			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)
-			out = append(out, fmt.Sprintf("%s%s EntryPoint: %#08x\n%s", padding, thread.Flavor, regs.PC, regs.String(regPadding)))
+			out = append(out, fmt.Sprintf("%s%s EntryPoint: %#08x\n%s", padding, flavor, regs.PC, regs.String(regPadding)))
 		case types.ARM_THREAD_STATE64:
 			var regs RegsARM64
 			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)
-			out = append(out, fmt.Sprintf("%s%s EntryPoint: %#016x\n%s", padding, thread.Flavor, regs.PC, regs.String(regPadding)))
+			out = append(out, fmt.Sprintf("%s%s EntryPoint: %#016x\n%s", padding, flavor, regs.PC, regs.String(regPadding)))
 		case types.ARM_EXCEPTION_STATE:
 			var regs ArmExceptionState
 			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)
-			out = append(out, fmt.Sprintf("%s%s:\n%s", padding, thread.Flavor, regs.String(regPadding)))
+			out = append(out, fmt.Sprintf("%s%s:\n%s", padding, flavor, regs.String(regPadding)))
 		case types.ARM_EXCEPTION_STATE64:
 			var regs ArmExceptionState64
 			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)
-			out = append(out, fmt.Sprintf("%s%s:\n%s", padding, thread.Flavor, regs.String(regPadding)))
+			out = append(out, fmt.Sprintf("%s%s:\n%s", padding, flavor, regs.String(regPadding)))
 		default:
-			out = append(out, fmt.Sprintf("%s%s", padding, thread.Flavor))
+			out = append(out, fmt.Sprintf("%s%s", padding, flavor))
 		}
 	}
 	return fmt.Sprintf("Threads: %d\n%s", len(t.Threads), strings.Join(out, "\n"))
@@ -2010,6 +2017,7 @@ type VersionMinWatchOS struct {
 type Note struct {
 	LoadBytes
 	types.NoteCmd
+	bo   binary.ByteOrder
 	Data []byte
 }
 
@@ -2023,7 +2031,60 @@ func (n *Note) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	return nil
 }
 func (n *Note) String() string {
-	return fmt.Sprintf("DataOwner: \"%s\", offset=0x%08x-0x%08x size=%5d", string(n.DataOwner[:]), n.Offset, n.Offset+n.Size, n.Size)
+	var note string
+	padding := strings.Repeat(" ", 7)
+	switch string(bytes.Trim(n.DataOwner[:], "\x00")) {
+	case "addrable bits":
+		var version uint32
+		if err := binary.Read(bytes.NewReader(n.Data), n.bo, &version); err == nil {
+			switch version {
+			case 3:
+				var addrableBits types.NoteAddrableBitsV3
+				if err := binary.Read(bytes.NewReader(n.Data), n.bo, &addrableBits); err == nil {
+					note = fmt.Sprintf("%sAddrableBits: version=%d, num_bits=%d", padding, version, addrableBits.NumAddrBits)
+				}
+			case 4:
+				var addrableBits types.NoteAddrableBitsV4
+				if err := binary.Read(bytes.NewReader(n.Data), n.bo, &addrableBits); err == nil {
+					note = fmt.Sprintf("%sAddrableBits: version=%d, lo_bits=%d, hi_bits=%d", padding, version, addrableBits.LoAddrBits, addrableBits.HiAddrBits)
+				}
+			}
+		}
+	case "all image infos":
+		var imgs []types.NoteAllImageInfosImage
+		r := bytes.NewReader(n.Data)
+		var allImageInfos types.NoteAllImageInfos
+		if err := binary.Read(r, n.bo, &allImageInfos); err == nil {
+			note = fmt.Sprintf("%sAllImageInfos: version=%d img_count=%d", padding, allImageInfos.Version, allImageInfos.InfoArrayCount)
+			entries := make([]types.NoteAllImageInfosImageEntry, allImageInfos.InfoArrayCount)
+			if err := binary.Read(r, n.bo, &entries); err == nil {
+				for _, entry := range entries {
+					var img types.NoteAllImageInfosImage
+					img.Entry = entry
+					segs := make([]types.NoteAllImageInfosSegmentVmaddr, entry.SegmentCount)
+					if err := binary.Read(r, n.bo, &segs); err == nil {
+						img.Segments = segs
+					}
+					imgs = append(imgs, img)
+				}
+				for i := 0; i < int(allImageInfos.InfoArrayCount); i++ {
+					if name, err := readString(r); err == nil {
+						imgs[i].Name = name
+					}
+				}
+				note += "\n"
+			}
+		}
+		for _, img := range imgs {
+			note += fmt.Sprintf("%s%#x: %s\n", strings.Repeat(" ", 9), img.Entry.LoadAddress, img.Name)
+			for _, seg := range img.Segments {
+				note += fmt.Sprintf("%s%#x %s\n", strings.Repeat(" ", 11), seg.VmAddr, string(bytes.Trim(seg.Name[:], "\x00")))
+			}
+		}
+		note = strings.TrimSuffix(note, "\n")
+	}
+
+	return fmt.Sprintf("DataOwner: \"%s\", offset=0x%08x-0x%08x size=%5d\n%s", string(n.DataOwner[:]), n.Offset, n.Offset+n.Size, n.Size, note)
 }
 func (n *Note) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {

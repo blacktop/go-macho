@@ -368,6 +368,9 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadCmd = cmd
 			l.Len = siz
 			l.bo = bo
+			if f.isArm() || f.isArm64() || f.isArm64e() {
+				l.IsArm = true
+			}
 			for {
 				var thread types.ThreadState
 				err := binary.Read(b, bo, &thread.Flavor)
@@ -1161,6 +1164,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.DataOwner = n.DataOwner
 			l.Offset = n.Offset
 			l.Size = n.Size
+			l.bo = bo
 			l.Data = make([]byte, l.Size)
 			if _, err := f.cr.ReadAt(l.Data, int64(l.Offset)); err != nil {
 				return nil, fmt.Errorf("failed to read Note data at offset=%#x; %v", int64(l.Offset), err)
@@ -1399,7 +1403,8 @@ func readString(r io.Reader) (string, error) {
 }
 
 func (f *File) is64bit() bool { return f.FileHeader.Magic == types.Magic64 }
-func (f *File) isArm64() bool { return f.CPU == types.CPUArm64 }
+func (f *File) isArm() bool   { return f.CPU == types.CPUArm }
+func (f *File) isArm64() bool { return f.CPU == types.CPUArm64 || f.CPU == types.CPUArm6432 }
 func (f *File) isArm64e() bool {
 	return f.isArm64() && (f.SubCPU&types.CpuSubtypeMask) == types.CPUSubtypeArm64E
 }
