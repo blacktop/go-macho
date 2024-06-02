@@ -75,6 +75,13 @@ func Test_decodeType(t *testing.T) {
 			want: "struct __CFRuntimeBase { unsigned long long x0; _Atomic unsigned long long x1; }",
 		},
 		{
+			name: "Test struct 4",
+			args: args{
+				encType: "{__cfobservers_t=\"slot\"@\"next\"^{__cfobservers_t}}",
+			},
+			want: "struct __cfobservers_t { id slot; struct __cfobservers_t *next; }",
+		},
+		{
 			name: "Test union 0",
 			args: args{
 				encType: "(?=i)",
@@ -94,6 +101,13 @@ func Test_decodeType(t *testing.T) {
 				encType: "^(?)",
 			},
 			want: "void * /* union */",
+		},
+		{
+			name: "Test union 3",
+			args: args{
+				encType: "(?=\"xpc\"@\"NSObject<OS_xpc_object>\"\"remote\"@\"OS_xpc_remote_connection\")",
+			},
+			want: "union { NSObject<OS_xpc_object> *xpc; OS_xpc_remote_connection *remote; }",
 		},
 		{
 			name: "Test block",
