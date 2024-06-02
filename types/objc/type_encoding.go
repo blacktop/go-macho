@@ -449,7 +449,7 @@ func decodeStructOrUnion(typ, kind string) string {
 		// Although technically possible, binaries produced by clang never have a
 		// mix of named and unnamed fields in the same struct. This assumption is
 		// necessary to disambiguate {"x0"@"x1"c}.
-		if fieldName != "" && strings.HasSuffix(field, `"`) && !strings.HasPrefix(rest, `"`) {
+		if fieldName != "" && rest != "" && strings.HasSuffix(field, `"`) && !strings.HasPrefix(rest, `"`) {
 			penultQuoteIdx := strings.LastIndex(strings.TrimRight(field, `"`), `"`)
 			rest = field[penultQuoteIdx:] + rest
 			field = field[:penultQuoteIdx]
