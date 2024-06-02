@@ -14,9 +14,9 @@ func Test_decodeType(t *testing.T) {
 		{
 			name: "Test all",
 			args: args{
-				encType: "^{OutterStruct=(InnerUnion=q{InnerStruct=ii})b1b2b10b1q[2^v]^![4,8c]}",
+				encType: "^{OutterStruct=(InnerUnion=q{InnerStruct=ii})b1b2b10b1q[2^v]^![4,8c]AQ}",
 			},
-			want: "struct OutterStruct { union InnerUnion { long long x0; struct InnerStruct { int x0; int x1; } x1; } x0; unsigned int x1:1; unsigned int x2:2; unsigned int x3:10; unsigned int x4:1; long long x5; void *x6[2]; signed char *x7 __attribute__((aligned(8), vector_size(4))); } *",
+			want: "struct OutterStruct { union InnerUnion { long long x0; struct InnerStruct { int x0; int x1; } x1; } x0; unsigned int x1:1; unsigned int x2:2; unsigned int x3:10; unsigned int x4:1; long long x5; void *x6[2]; signed char *x7 __attribute__((aligned(8), vector_size(4))); _Atomic unsigned long long x8; } *",
 		},
 		{
 			name: "Test array",
@@ -66,6 +66,13 @@ func Test_decodeType(t *testing.T) {
 				encType: "^{?}",
 			},
 			want: "void * /* struct */",
+		},
+		{
+			name: "Test struct 4",
+			args: args{
+				encType: "{__CFRuntimeBase=QAQ}",
+			},
+			want: "struct __CFRuntimeBase { unsigned long long x0; _Atomic unsigned long long x1; }",
 		},
 		{
 			name: "Test union 0",
