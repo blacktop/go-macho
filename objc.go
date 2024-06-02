@@ -1560,9 +1560,6 @@ func (f *File) GetCFStrings() ([]objc.CFString, error) {
 					cfstrings[idx].Class = c.(*objc.Class)
 				}
 				cfstrings[idx].Address = sec.Addr + uint64(idx*binary.Size(objc.CFString64Type{}))
-				if err != nil {
-					return nil, fmt.Errorf("failed to calulate cfstring vmaddr: %v", err)
-				}
 			}
 		}
 	}

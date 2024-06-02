@@ -2184,7 +2184,7 @@ type BitstreamWrapperHeader struct {
 func (f *File) GetEmbeddedLLVMBitcode() (*xar.Reader, error) {
 	llvmBundle := f.Section("__LLVM", "__bundle")
 	if llvmBundle == nil {
-		return nil, fmt.Errorf("no %s.%s section", llvmBundle.Seg, llvmBundle.Name)
+		return nil, fmt.Errorf("no %s.%s section", "__LLVM", "__bundle")
 	}
 	data, err := llvmBundle.Data()
 	if err != nil {
