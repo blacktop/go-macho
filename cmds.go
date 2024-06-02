@@ -2076,7 +2076,7 @@ func (n *Note) String() string {
 			}
 		}
 		for _, img := range imgs {
-			note += fmt.Sprintf("%s%#x: %s\n", strings.Repeat(" ", 9), img.Entry.LoadAddress, img.Name)
+			note += fmt.Sprintf("%s%#x: uuid=%s %s\n", strings.Repeat(" ", 9), img.Entry.LoadAddress, img.Entry.UUID, img.Name)
 			for _, seg := range img.Segments {
 				note += fmt.Sprintf("%s%#x %s\n", strings.Repeat(" ", 11), seg.VmAddr, string(bytes.Trim(seg.Name[:], "\x00")))
 			}
