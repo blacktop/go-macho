@@ -366,17 +366,21 @@ func decodeType(encType string) string {
 }
 
 func decodeArray(arrayType string) string {
-	numIdx := strings.LastIndexAny(arrayType, "0123456789")
-	if len(arrayType) == 1 {
-		return fmt.Sprintf("x[%s]", arrayType)
+	typIdx := 0
+	for _, c := range arrayType {
+		if c < '0' || c > '9' {
+			break
+		}
+
+		typIdx++
 	}
 
-	decType := decodeType(arrayType[numIdx+1:])
+	decType := decodeType(arrayType[typIdx:])
 	if !strings.HasSuffix(decType, "*") {
 		decType += " "
 	}
 
-	return fmt.Sprintf("%sx[%s]", decType, arrayType[:numIdx+1])
+	return fmt.Sprintf("%sx[%s]", decType, arrayType[:typIdx])
 }
 
 func decodeStructure(structure string) string {

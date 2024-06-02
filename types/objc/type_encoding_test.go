@@ -19,11 +19,18 @@ func Test_decodeType(t *testing.T) {
 			want: "struct OutterStruct { union InnerUnion { long long x0; struct InnerStruct { int x0; int x1; } x1; } x0; unsigned int x1:1; unsigned int x2:2; unsigned int x3:10; unsigned int x4:1; long long x5; void *x6[2]; signed char *x7 __attribute__((aligned(8), vector_size(4))); _Atomic unsigned long long x8; } *",
 		},
 		{
-			name: "Test array",
+			name: "Test array 0",
 			args: args{
 				encType: "[2^v]",
 			},
 			want: "void *x[2]",
+		},
+		{
+			name: "Test array 1",
+			args: args{
+				encType: "[20{IDSGlobalLinkAttribute=\"type\"S\"len\"S\"value\"(?=\"ss\"{sockaddr_storage=\"ss_len\"C\"ss_family\"C\"__ss_pad1\"[6c]\"__ss_align\"q\"__ss_pad2\"[112c]}\"u16\"S\"u32\"I\"u64\"Q\"binaryData\"{IDSGLAttrBinaryData_=\"len\"i\"data\"[1024C]})}]",
+			},
+			want: "struct IDSGlobalLinkAttribute { unsigned short type; unsigned short len; union { struct sockaddr_storage { unsigned char ss_len; unsigned char ss_family; signed char __ss_pad1[6]; long long __ss_align; signed char __ss_pad2[112]; } ss; unsigned short u16; unsigned int u32; unsigned long long u64; struct IDSGLAttrBinaryData_ { int len; unsigned char data[1024]; } binaryData; } value; } x[20]",
 		},
 		{
 			name: "Test bitfield",
