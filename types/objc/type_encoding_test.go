@@ -103,6 +103,13 @@ func Test_decodeType(t *testing.T) {
 			want: "void * /* union */",
 		},
 		{
+			name: "Test union 3",
+			args: args{
+				encType: "(?=\"xpc\"@\"NSObject<OS_xpc_object>\"\"remote\"@\"OS_xpc_remote_connection\")",
+			},
+			want: "union { NSObject<OS_xpc_object> *xpc; OS_xpc_remote_connection *remote; }",
+		},
+		{
 			name: "Test block",
 			args: args{
 				encType: "@?",
