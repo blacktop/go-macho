@@ -492,17 +492,27 @@ func skipFirstType(typStr string) string {
 	typ := []byte(typStr)
 	for {
 		switch typ[i] {
+		case '+': /* gnu register */
+			fallthrough
+		case 'A': /* _Atomic */
+			fallthrough
+		case 'N': /* inout */
+			fallthrough
 		case 'O': /* bycopy */
+			fallthrough
+		case 'R': /* byref */
+			fallthrough
+		case 'V': /* oneway */
+			fallthrough
+		case 'j': /* _Complex */
 			fallthrough
 		case 'n': /* in */
 			fallthrough
 		case 'o': /* out */
 			fallthrough
-		case 'N': /* inout */
-			fallthrough
 		case 'r': /* const */
 			fallthrough
-		case 'V': /* oneway */
+		case '|': /* gc invisible */
 			fallthrough
 		case '^': /* pointers */
 			i++
@@ -573,17 +583,27 @@ func CutType(typStr string) (string, string, bool) {
 	typ := []byte(typStr)
 	for {
 		switch typ[i] {
+		case '+': /* gnu register */
+			fallthrough
+		case 'A': /* _Atomic */
+			fallthrough
+		case 'N': /* inout */
+			fallthrough
 		case 'O': /* bycopy */
+			fallthrough
+		case 'R': /* byref */
+			fallthrough
+		case 'V': /* oneway */
+			fallthrough
+		case 'j': /* _Complex */
 			fallthrough
 		case 'n': /* in */
 			fallthrough
 		case 'o': /* out */
 			fallthrough
-		case 'N': /* inout */
-			fallthrough
 		case 'r': /* const */
 			fallthrough
-		case 'V': /* oneway */
+		case '|': /* gc invisible */
 			fallthrough
 		case '^': /* pointers */
 			i++
