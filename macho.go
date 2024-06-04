@@ -115,6 +115,14 @@ type RegsARM struct {
 	CPSR uint32
 }
 
+func (r RegsARM) OnlyEntry() bool {
+	return r.R0 == 0 && r.R1 == 0 && r.R2 == 0 && r.R3 == 0 &&
+		r.R4 == 0 && r.R5 == 0 && r.R6 == 0 && r.R7 == 0 &&
+		r.R8 == 0 && r.R9 == 0 && r.R10 == 0 && r.R11 == 0 &&
+		r.R12 == 0 && r.SP == 0 && r.LR == 0 && r.PC != 0 &&
+		r.CPSR == 0
+}
+
 func (r RegsARM) String(padding int) string {
 	return fmt.Sprintf(
 		"%s r0  %#08x r1     %#08x r2  %#08x r3  %#08x\n"+
@@ -166,6 +174,18 @@ type RegsARM64 struct {
 	PC   uint64 /* Program counter */
 	CPSR uint32 /* Current program status register */
 	PAD  uint32 /* Same size for 32-bit or 64-bit clients */
+}
+
+func (r RegsARM64) OnlyEntry() bool {
+	return r.X0 == 0 && r.X1 == 0 && r.X2 == 0 && r.X3 == 0 &&
+		r.X4 == 0 && r.X5 == 0 && r.X6 == 0 && r.X7 == 0 &&
+		r.X8 == 0 && r.X9 == 0 && r.X10 == 0 && r.X11 == 0 &&
+		r.X12 == 0 && r.X13 == 0 && r.X14 == 0 && r.X15 == 0 &&
+		r.X16 == 0 && r.X17 == 0 && r.X18 == 0 && r.X19 == 0 &&
+		r.X20 == 0 && r.X21 == 0 && r.X22 == 0 && r.X23 == 0 &&
+		r.X24 == 0 && r.X25 == 0 && r.X26 == 0 && r.X27 == 0 &&
+		r.X28 == 0 && r.FP == 0 && r.LR == 0 && r.SP == 0 &&
+		r.PC != 0 && r.CPSR == 0 && r.PAD == 0
 }
 
 func (r RegsARM64) String(padding int) string {

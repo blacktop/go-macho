@@ -600,11 +600,20 @@ func (t *Thread) String() string {
 		case types.ARM_THREAD_STATE32:
 			var regs RegsARM
 			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)
+			if regs.OnlyEntry() {
+				out = append(out, fmt.Sprintf("%s%s Entry: %#08x", padding, flavor, regs.PC))
+			} else {
+				out = append(out, fmt.Sprintf("%s%s:\n%s", padding, flavor, regs.String(regPadding)))
+			}
 			out = append(out, fmt.Sprintf("%s%s:\n%s", padding, flavor, regs.String(regPadding)))
 		case types.ARM_THREAD_STATE64:
 			var regs RegsARM64
 			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)
-			out = append(out, fmt.Sprintf("%s%s:\n%s", padding, flavor, regs.String(regPadding)))
+			if regs.OnlyEntry() {
+				out = append(out, fmt.Sprintf("%s%s Entry: %#016x", padding, flavor, regs.PC))
+			} else {
+				out = append(out, fmt.Sprintf("%s%s:\n%s", padding, flavor, regs.String(regPadding)))
+			}
 		case types.ARM_EXCEPTION_STATE:
 			var regs ArmExceptionState
 			binary.Read(bytes.NewReader(thread.Data), t.bo, &regs)

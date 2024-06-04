@@ -401,6 +401,9 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadCmd = cmd
 			l.Len = siz
 			l.bo = bo
+			if f.isArm() || f.isArm64() || f.isArm64e() {
+				l.IsArm = true
+			}
 			for {
 				var thread types.ThreadState
 				err := binary.Read(b, bo, &thread.Flavor)
