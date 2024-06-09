@@ -1271,34 +1271,20 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Size = led.Size
 			f.Loads = append(f.Loads, l)
 		case types.LC_SEP_SYMTAB:
-			var hdr types.SymtabCmd
+			var hdr types.SepSymtabCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, fmt.Errorf("failed to read LC_SEP_SYMTAB: %v", err)
 			}
-			strtab, err := saferio.ReadDataAt(f.cr, uint64(hdr.Strsize), int64(hdr.Stroff))
-			if err != nil {
-				return nil, fmt.Errorf("failed to read data at Stroff=%#x; %v", int64(hdr.Stroff), err)
-			}
-			var symsz int
-			if f.Magic == types.Magic64 {
-				symsz = 16
-			} else {
-				symsz = 12
-			}
-			symdat, err := saferio.ReadDataAt(f.cr, uint64(hdr.Nsyms)*uint64(symsz), int64(hdr.Symoff))
-			if err != nil {
-				return nil, fmt.Errorf("failed to read data at Symoff=%#x; %v", int64(hdr.Symoff), err)
-			}
-			st, err := f.parseSymtab(symdat, strtab, cmddat, &hdr, offset)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read parseSymtab: %v", err)
-			}
-			st.LoadBytes = cmddat
-			st.LoadCmd = cmd
-			st.Len = siz
-			f.Loads = append(f.Loads, st)
-			f.Symtab = st
+			l := new(SepSymtab)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			l.Nsyms = uint32(hdr.Nsyms)
+			l.Symoff = uint32(hdr.Symoff)
+			l.Stroff = uint32(hdr.Stroff)
+			l.Strsize = uint32(hdr.Strsize)
+			f.Loads = append(f.Loads, l)
 		case types.LC_SEP_SYMSEG:
 			var led types.SymsegCmd
 			b := bytes.NewReader(cmddat)

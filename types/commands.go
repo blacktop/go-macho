@@ -1195,10 +1195,10 @@ type SepSegmentCmd LinkEditDataCmd // LC_SEP_SEG
 type SepSymtabCmd struct {
 	LoadCmd        // LC_SEP_SYMTAB
 	Len     uint32 // sizeof(struct symtab_command)
-	Symoff  uint32 // symbol table offset
-	Nsyms   uint32 // number of symbol table entries
-	Stroff  uint32 // string table offset
-	Strsize uint32 // string table size in bytes
+	Symoff  uint16 // symbol table offset
+	Nsyms   uint16 // number of symbol table entries
+	Stroff  uint16 // string table offset
+	Strsize uint16 // string table size in bytes
 }
 
 type SepSymsegCmd struct {
