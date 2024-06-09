@@ -2252,27 +2252,54 @@ type AtomInfo struct {
 }
 
 /*******************************************************************************
- * LC_SEP_SEGMENT
+ * LC_SEP_CACHE_SLIDE
  *******************************************************************************/
 
-type SepSegment struct {
+type SepCacheSlide struct {
+	LoadBytes
+	types.SepCacheSlideCmd
+}
+
+func (l *SepCacheSlide) LoadSize() uint32 {
+	return uint32(binary.Size(l.SepCacheSlideCmd))
+}
+func (l *SepCacheSlide) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, l.SepCacheSlideCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
+	}
+	return nil
+}
+func (l *SepCacheSlide) String() string {
+	return fmt.Sprintf("slide=0x%09x", (l.Offset&0xFFFFF)-0x8000)
+}
+func (l *SepCacheSlide) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		LoadCmd string `json:"load_cmd"`
+		Len     uint32 `json:"length"`
+		Offset  uint32 `json:"offset"`
+		Size    uint32 `json:"size"`
+	}{
+		LoadCmd: l.Command().String(),
+		Len:     l.Len,
+		Offset:  l.Offset,
+		Size:    l.Size,
+	})
+}
+
+/*******************************************************************************
+ * LC_SEP_UNKNOWN_2
+ *******************************************************************************/
+
+type SepUnknown2 struct {
 	LinkEditData
 }
 
 /*******************************************************************************
- * LC_SEP_SYMTAB
+ * LC_SEP_UNKNOWN_3
  *******************************************************************************/
 
-type SepSymtab struct {
-	Symtab
-}
-
-/*******************************************************************************
- * LC_SEP_SYMSEG
- *******************************************************************************/
-
-type SepSymseg struct {
-	SymSeg
+type SepUnknown3 struct {
+	LinkEditData
 }
 
 /*******************************************************************************

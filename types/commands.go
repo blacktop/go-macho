@@ -78,9 +78,9 @@ const (
 	/*
 	 * sep load commands
 	 */
-	LC_SEP_SEGMENT LoadCmd = (LC_SEGMENT | LC_SEP)
-	LC_SEP_SYMTAB  LoadCmd = (LC_SYMTAB | LC_SEP)
-	LC_SEP_SYMSEG  LoadCmd = (LC_SYMSEG | LC_SEP)
+	LC_SEP_CACHE_SLIDE LoadCmd = (0x1 | LC_SEP)
+	LC_SEP_UNKNOWN_2   LoadCmd = (0x2 | LC_SEP)
+	LC_SEP_UNKNOWN_3   LoadCmd = (0x3 | LC_SEP)
 )
 
 type SegFlag uint32
@@ -1190,7 +1190,9 @@ type FilesetEntryCmd struct {
 	Reserved      uint32 // reserved
 }
 
-type SepSegmentCmd LinkEditDataCmd // LC_SEP_SEG
+type SepCacheSlideCmd LinkEditDataCmd // LC_SEP_CACHE_SLIDE
+type SepUnknown2Cmd LinkEditDataCmd   // LC_SEP_UNKNOWN_2
+type SepUnknown3Cmd LinkEditDataCmd   // LC_SEP_UNKNOWN_3
 
 type SepSymtabCmd struct {
 	LoadCmd        // LC_SEP_SYMTAB

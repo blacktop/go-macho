@@ -1257,42 +1257,39 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Offset = led.Offset
 			l.Size = led.Size
 			f.Loads = append(f.Loads, l)
-		case types.LC_SEP_SEGMENT:
+		case types.LC_SEP_CACHE_SLIDE:
 			var led types.LinkEditDataCmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &led); err != nil {
-				return nil, fmt.Errorf("failed to read LC_SEP_SEGMENT: %v", err)
+				return nil, fmt.Errorf("failed to read LC_SEP_CACHE_SLIDE: %v", err)
 			}
-			l := new(SepSegment)
+			l := new(SepCacheSlide)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
 			l.Offset = led.Offset
 			l.Size = led.Size
 			f.Loads = append(f.Loads, l)
-		case types.LC_SEP_SYMTAB:
-			var hdr types.SepSymtabCmd
+		case types.LC_SEP_UNKNOWN_2:
+			var led types.SepUnknown2Cmd
 			b := bytes.NewReader(cmddat)
-			if err := binary.Read(b, bo, &hdr); err != nil {
-				return nil, fmt.Errorf("failed to read LC_SEP_SYMTAB: %v", err)
+			if err := binary.Read(b, bo, &led); err != nil {
+				return nil, fmt.Errorf("failed to read LC_SEP_UNKNOWN_2: %v", err)
 			}
-			l := new(SepSymtab)
+			l := new(SepUnknown2)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			l.Nsyms = uint32(hdr.Nsyms)
-			l.Symoff = uint32(hdr.Symoff)
-			l.Stroff = uint32(hdr.Stroff)
-			l.Strsize = uint32(hdr.Strsize)
+			l.Offset = led.Offset
+			l.Size = led.Size
 			f.Loads = append(f.Loads, l)
-		case types.LC_SEP_SYMSEG:
-			var led types.SymsegCmd
+		case types.LC_SEP_UNKNOWN_3:
+			var led types.SepUnknown3Cmd
 			b := bytes.NewReader(cmddat)
 			if err := binary.Read(b, bo, &led); err != nil {
 				return nil, fmt.Errorf("failed to read LC_SEP_SYMSEG: %v", err)
 			}
-
-			l := new(SepSymseg)
+			l := new(SepUnknown3)
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
