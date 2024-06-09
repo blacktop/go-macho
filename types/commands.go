@@ -15,6 +15,7 @@ func (c LoadCmd) Command() LoadCmd { return c }
 
 const (
 	LC_REQ_DYLD       LoadCmd = 0x80000000
+	LC_SEP            LoadCmd = 0x8000000
 	LC_SEGMENT        LoadCmd = 0x1  // segment of this file to be mapped
 	LC_SYMTAB         LoadCmd = 0x2  // link-edit stab symbol table info
 	LC_SYMSEG         LoadCmd = 0x3  // link-edit gdb symbol table info (obsolete)
@@ -74,6 +75,12 @@ const (
 	LC_DYLD_CHAINED_FIXUPS      LoadCmd = (0x34 | LC_REQ_DYLD) // used with linkedit_data_command
 	LC_FILESET_ENTRY            LoadCmd = (0x35 | LC_REQ_DYLD) /* used with fileset_entry_command */
 	LC_ATOM_INFO                LoadCmd = 0x36                 /* used with linkedit_data_command */
+	/*
+	 * sep load commands
+	 */
+	LC_SEP_CACHE_SLIDE LoadCmd = (0x1 | LC_SEP)
+	LC_SEP_UNKNOWN_2   LoadCmd = (0x2 | LC_SEP)
+	LC_SEP_UNKNOWN_3   LoadCmd = (0x3 | LC_SEP)
 )
 
 type SegFlag uint32
@@ -1181,4 +1188,24 @@ type FilesetEntryCmd struct {
 	FileOffset    uint64 // file offset of the entry
 	EntryIdOffset uint32 // contained entry id
 	Reserved      uint32 // reserved
+}
+
+type SepCacheSlideCmd LinkEditDataCmd // LC_SEP_CACHE_SLIDE
+type SepUnknown2Cmd LinkEditDataCmd   // LC_SEP_UNKNOWN_2
+type SepUnknown3Cmd LinkEditDataCmd   // LC_SEP_UNKNOWN_3
+
+type SepSymtabCmd struct {
+	LoadCmd        // LC_SEP_SYMTAB
+	Len     uint32 // sizeof(struct symtab_command)
+	Symoff  uint16 // symbol table offset
+	Nsyms   uint16 // number of symbol table entries
+	Stroff  uint16 // string table offset
+	Strsize uint16 // string table size in bytes
+}
+
+type SepSymsegCmd struct {
+	LoadCmd        /* LC_SEP_SYMSEG */
+	Len     uint32 /* sizeof(struct symseg_command) */
+	Offset  uint32 /* symbol segment offset */
+	Size    uint32 /* symbol segment size in bytes */
 }

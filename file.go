@@ -1257,6 +1257,45 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Offset = led.Offset
 			l.Size = led.Size
 			f.Loads = append(f.Loads, l)
+		case types.LC_SEP_CACHE_SLIDE:
+			var led types.LinkEditDataCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &led); err != nil {
+				return nil, fmt.Errorf("failed to read LC_SEP_CACHE_SLIDE: %v", err)
+			}
+			l := new(SepCacheSlide)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			l.Offset = led.Offset
+			l.Size = led.Size
+			f.Loads = append(f.Loads, l)
+		case types.LC_SEP_UNKNOWN_2:
+			var led types.SepUnknown2Cmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &led); err != nil {
+				return nil, fmt.Errorf("failed to read LC_SEP_UNKNOWN_2: %v", err)
+			}
+			l := new(SepUnknown2)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			l.Offset = led.Offset
+			l.Size = led.Size
+			f.Loads = append(f.Loads, l)
+		case types.LC_SEP_UNKNOWN_3:
+			var led types.SepUnknown3Cmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &led); err != nil {
+				return nil, fmt.Errorf("failed to read LC_SEP_SYMSEG: %v", err)
+			}
+			l := new(SepUnknown3)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			l.Offset = led.Offset
+			l.Size = led.Size
+			f.Loads = append(f.Loads, l)
 		}
 		if s != nil {
 			if int64(s.Offset) < 0 {
