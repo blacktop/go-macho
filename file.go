@@ -1257,6 +1257,62 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Offset = led.Offset
 			l.Size = led.Size
 			f.Loads = append(f.Loads, l)
+		case types.LC_SEP_SEGMENT:
+			var led types.LinkEditDataCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &led); err != nil {
+				return nil, fmt.Errorf("failed to read LC_SEP_SEGMENT: %v", err)
+			}
+			l := new(SepSegment)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			l.Offset = led.Offset
+			l.Size = led.Size
+			f.Loads = append(f.Loads, l)
+		case types.LC_SEP_SYMTAB:
+			var hdr types.SymtabCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &hdr); err != nil {
+				return nil, fmt.Errorf("failed to read LC_SEP_SYMTAB: %v", err)
+			}
+			strtab, err := saferio.ReadDataAt(f.cr, uint64(hdr.Strsize), int64(hdr.Stroff))
+			if err != nil {
+				return nil, fmt.Errorf("failed to read data at Stroff=%#x; %v", int64(hdr.Stroff), err)
+			}
+			var symsz int
+			if f.Magic == types.Magic64 {
+				symsz = 16
+			} else {
+				symsz = 12
+			}
+			symdat, err := saferio.ReadDataAt(f.cr, uint64(hdr.Nsyms)*uint64(symsz), int64(hdr.Symoff))
+			if err != nil {
+				return nil, fmt.Errorf("failed to read data at Symoff=%#x; %v", int64(hdr.Symoff), err)
+			}
+			st, err := f.parseSymtab(symdat, strtab, cmddat, &hdr, offset)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read parseSymtab: %v", err)
+			}
+			st.LoadBytes = cmddat
+			st.LoadCmd = cmd
+			st.Len = siz
+			f.Loads = append(f.Loads, st)
+			f.Symtab = st
+		case types.LC_SEP_SYMSEG:
+			var led types.SymsegCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &led); err != nil {
+				return nil, fmt.Errorf("failed to read LC_SEP_SYMSEG: %v", err)
+			}
+
+			l := new(SepSymseg)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			l.Offset = led.Offset
+			l.Size = led.Size
+			f.Loads = append(f.Loads, l)
 		}
 		if s != nil {
 			if int64(s.Offset) < 0 {
