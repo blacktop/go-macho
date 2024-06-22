@@ -89,6 +89,13 @@ func Test_decodeType(t *testing.T) {
 			want: "struct __cfobservers_t { id slot; struct __cfobservers_t *next; }",
 		},
 		{
+			name: "Test struct 5",
+			args: args{
+				encType: "{_UISmallVector<unsigned short, 16UL>=\"_vector\"\"_size\"Q}",
+			},
+			want: "struct _UISmallVector<unsigned short, 16UL> { id _vector; unsigned long long _size; }",
+		},
+		{
 			name: "Test union 0",
 			args: args{
 				encType: "(?=i)",

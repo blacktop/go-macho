@@ -455,8 +455,13 @@ func decodeStructOrUnion(typ, kind string) string {
 		// necessary to disambiguate {"x0"@"x1"c}.
 		if fieldName != "" && rest != "" && strings.HasSuffix(field, `"`) && !strings.HasPrefix(rest, `"`) {
 			penultQuoteIdx := strings.LastIndex(strings.TrimRight(field, `"`), `"`)
-			rest = field[penultQuoteIdx:] + rest
-			field = field[:penultQuoteIdx]
+			if penultQuoteIdx == -1 {
+				rest = field + rest
+				field = "id"
+			} else {
+				rest = field[penultQuoteIdx:] + rest
+				field = field[:penultQuoteIdx]
+			}
 		}
 
 		if fieldName == "" {
