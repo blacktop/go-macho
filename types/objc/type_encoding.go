@@ -355,6 +355,11 @@ func decodeType(encType string) string {
 			}
 			inner := encType[strings.IndexByte(encType, '{')+1 : strings.LastIndexByte(encType, '}')]
 			s += decodeStructure(inner)
+
+		case '<': // block func prototype
+			inner := encType[strings.IndexByte(encType, '<')+1 : strings.LastIndexByte(encType, '>')]
+			ret, args := decodeMethodTypes(inner)
+			s += fmt.Sprintf("(%s (^)(%s))", ret, strings.Join(args, " "))
 		}
 	}
 
@@ -563,6 +568,9 @@ func skipFirstType(typStr string) string {
 		case '(': /* unions */
 			i++
 			return string(typ[i+subtypeUntil(string(typ[i:]), ')')+1:])
+		case '<': /* block func prototype */
+			i++
+			return string(typ[i+subtypeUntil(string(typ[i:]), '>')+1:])
 		default: /* basic types */
 			i++
 			return string(typ[i:])
@@ -578,9 +586,9 @@ func subtypeUntil(typ string, end byte) int {
 			return len(head) - len(typ)
 		}
 		switch typ[0] {
-		case ']', '}', ')':
+		case ']', '}', ')', '>':
 			level -= 1
-		case '[', '{', '(':
+		case '[', '{', '(', '<':
 			level += 1
 		}
 		typ = typ[1:]
@@ -660,6 +668,9 @@ func CutType(typStr string) (string, string, bool) {
 		case '(': /* unions */
 			i++
 			return string(typ[:i+subtypeUntil(string(typ[i:]), ')')+1]), string(typ[i+subtypeUntil(string(typ[i:]), ')')+1:]), true
+		case '<': /* block func prototype */
+			i++
+			return string(typ[:i+subtypeUntil(string(typ[i:]), '>')+1]), string(typ[i+subtypeUntil(string(typ[i:]), '>')+1:]), true
 		default: /* basic types */
 			i++
 			return string(typ[:i]), string(typ[i:]), true
