@@ -311,7 +311,7 @@ func decodeType(encType string) string {
 
 		decType := decodeType(encType[1:])
 
-		if encType[1] == '!' {
+		if len(encType) > 1 && encType[1] == '!' {
 			return strings.Replace(decType, "x", "*x", 1) // vector pointer
 		}
 
