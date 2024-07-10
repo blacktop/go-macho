@@ -1649,7 +1649,7 @@ func (f *File) GetCStrings() ([]string, error) {
 	var strs []string
 
 	for _, sec := range f.Sections {
-		if sec.Flags.IsCstringLiterals() {
+		if sec.Flags.IsCstringLiterals() && sec.Name == "__cstring" {
 			off, err := f.GetOffset(sec.Addr)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get offset for %s.%s: %v", sec.Seg, sec.Name, err)
