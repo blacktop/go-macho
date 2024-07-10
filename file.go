@@ -17,6 +17,7 @@ import (
 	"sync"
 
 	"github.com/blacktop/go-dwarf"
+	"golang.org/x/exp/slices"
 
 	"github.com/blacktop/go-macho/internal/saferio"
 	"github.com/blacktop/go-macho/pkg/codesign"
@@ -1642,6 +1643,46 @@ func (f *File) GetCString(addr uint64) (string, error) {
 	}
 
 	return "", fmt.Errorf("string not found at address %#x", addr)
+}
+
+func (f *File) GetCStrings() ([]string, error) {
+	var strs []string
+
+	for _, sec := range f.Sections {
+		if sec.Flags.IsCstringLiterals() {
+			off, err := f.GetOffset(sec.Addr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get offset for %s.%s: %v", sec.Seg, sec.Name, err)
+			}
+			dat := make([]byte, sec.Size)
+			if _, err = f.ReadAt(dat, int64(off)); err != nil {
+				return nil, fmt.Errorf("failed to read cstring data in %s.%s: %v", sec.Seg, sec.Name, err)
+			}
+
+			csr := bytes.NewBuffer(dat)
+
+			for {
+				s, err := csr.ReadString('\x00')
+
+				if err == io.EOF {
+					break
+				}
+
+				if err != nil {
+					return nil, fmt.Errorf("failed to read string: %v", err)
+				}
+
+				s = strings.Trim(s, "\x00")
+
+				if len(s) > 0 {
+					strs = append(strs, s)
+				}
+			}
+			slices.Sort(strs)
+		}
+	}
+
+	return strs, nil
 }
 
 // GetCStringAtOffset returns a c-string at a given offset into the MachO
