@@ -13,11 +13,12 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/blacktop/go-dwarf"
-	"golang.org/x/exp/slices"
 
 	"github.com/blacktop/go-macho/internal/saferio"
 	"github.com/blacktop/go-macho/pkg/codesign"
@@ -1675,10 +1676,15 @@ func (f *File) GetCStrings() ([]string, error) {
 				s = strings.Trim(s, "\x00")
 
 				if len(s) > 0 {
+					for _, r := range s {
+						if r > unicode.MaxASCII || !unicode.IsPrint(r) {
+							continue // skip non-ascii strings
+						}
+					}
 					strs = append(strs, s)
 				}
 			}
-			slices.Sort(strs)
+			sort.Strings(strs)
 		}
 	}
 
