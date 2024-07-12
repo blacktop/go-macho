@@ -13,7 +13,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"unicode"
@@ -1646,8 +1645,8 @@ func (f *File) GetCString(addr uint64) (string, error) {
 	return "", fmt.Errorf("string not found at address %#x", addr)
 }
 
-func (f *File) GetCStrings() ([]string, error) {
-	var strs []string
+func (f *File) GetCStrings() (map[uint64]string, error) {
+	strs := make(map[uint64]string)
 
 	for _, sec := range f.Sections {
 		if sec.Flags.IsCstringLiterals() && sec.Name == "__cstring" {
@@ -1663,6 +1662,8 @@ func (f *File) GetCStrings() ([]string, error) {
 			csr := bytes.NewBuffer(dat)
 
 			for {
+				pos := sec.Addr + uint64(csr.Cap()-csr.Len())
+
 				s, err := csr.ReadString('\x00')
 
 				if err == io.EOF {
@@ -1681,10 +1682,9 @@ func (f *File) GetCStrings() ([]string, error) {
 							continue // skip non-ascii strings
 						}
 					}
-					strs = append(strs, s)
+					strs[pos] = s
 				}
 			}
-			sort.Strings(strs)
 		}
 	}
 
@@ -2022,6 +2022,9 @@ func (f *File) GetFunctionsForRange(start, end uint64) ([]types.Function, error)
 }
 
 func (f *File) GetFunctionData(fn types.Function) ([]byte, error) {
+	if fn.EndAddr <= fn.StartAddr {
+		return nil, fmt.Errorf("invalid function range %#x - %#x", fn.StartAddr, fn.EndAddr)
+	}
 	data := make([]byte, fn.EndAddr-fn.StartAddr)
 	if _, err := f.cr.ReadAtAddr(data, fn.StartAddr); err != nil {
 		return nil, fmt.Errorf("failed to read data at address %#x: %v", fn.StartAddr, err)
