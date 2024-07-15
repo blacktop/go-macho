@@ -1645,11 +1645,11 @@ func (f *File) GetCString(addr uint64) (string, error) {
 	return "", fmt.Errorf("string not found at address %#x", addr)
 }
 
-func (f *File) GetCStrings() (map[uint64]string, error) {
-	strs := make(map[uint64]string)
+func (f *File) GetCStrings() (map[string]map[string]uint64, error) {
+	strs := make(map[string]map[string]uint64)
 
 	for _, sec := range f.Sections {
-		if sec.Flags.IsCstringLiterals() && sec.Name == "__cstring" {
+		if sec.Flags.IsCstringLiterals() || sec.Name == "__os_log" {
 			off, err := f.GetOffset(sec.Addr)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get offset for %s.%s: %v", sec.Seg, sec.Name, err)
@@ -1657,7 +1657,11 @@ func (f *File) GetCStrings() (map[uint64]string, error) {
 			dat := make([]byte, sec.Size)
 			if _, err = f.ReadAt(dat, int64(off)); err != nil {
 				return nil, fmt.Errorf("failed to read cstring data in %s.%s: %v", sec.Seg, sec.Name, err)
+
 			}
+
+			section := fmt.Sprintf("%s.%s", sec.Seg, sec.Name)
+			strs[section] = make(map[string]uint64)
 
 			csr := bytes.NewBuffer(dat)
 
@@ -1682,7 +1686,7 @@ func (f *File) GetCStrings() (map[uint64]string, error) {
 							continue // skip non-ascii strings
 						}
 					}
-					strs[pos] = s
+					strs[section][s] = pos
 				}
 			}
 		}
