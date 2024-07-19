@@ -2941,7 +2941,9 @@ func (f *File) FindSymbolAddress(symbol string) (uint64, error) {
 	}
 	exports, err := f.GetExports()
 	if err != nil {
-		return 0, fmt.Errorf("failed to get exports: %v", err)
+		if err != ErrMachODyldInfoNotFound {
+			return 0, fmt.Errorf("failed to get exports: %v", err)
+		}
 	}
 	for _, sym := range exports {
 		if strings.EqualFold(sym.Name, symbol) {
