@@ -1975,6 +1975,9 @@ func (f *File) GenerateFunctionStarts() ([]types.Function, error) {
 			})
 		}
 	}
+	if len(funcs) == 0 {
+		return nil, fmt.Errorf("failed to find any function starts by searching for 'pacibsp' prologues")
+	}
 	// set end addresses
 	for i := 0; i < len(funcs)-1; i++ {
 		funcs[i].EndAddr = funcs[i+1].StartAddr
