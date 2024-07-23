@@ -55,6 +55,7 @@ type File struct {
  * Mach-O reader
  */
 
+var ErrMachOArchNotSupported = errors.New("MachO arch not supported")
 var ErrMachOSectionNotFound = errors.New("MachO missing required section")
 var ErrMachODyldInfoNotFound = errors.New("LC_DYLD_INFO(_ONLY) not found")
 var ErrMachONoBindInfo = errors.New("MachO does not contain bind information (fixups)")
@@ -1938,6 +1939,53 @@ func (f *File) FunctionStarts() *FunctionStarts {
 	return nil
 }
 
+func (f *File) GenerateFunctionStarts() ([]types.Function, error) {
+	if len(f.functions) > 0 {
+		return f.functions, nil
+	}
+
+	if !f.isArm64e() {
+		return nil, ErrMachOArchNotSupported
+	}
+
+	var funcs []types.Function
+
+	text := f.Section("__TEXT", "__text")
+	if text == nil {
+		text = f.Section("__TEXT_EXEC", "__text")
+		if text == nil {
+			return nil, ErrMachOSectionNotFound
+		}
+	}
+	data, err := text.Data()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read __text section data: %v", err)
+	}
+
+	instructions := make([]uint32, len(data)/binary.Size(uint32(0)))
+	if err := binary.Read(bytes.NewReader(data), f.ByteOrder, &instructions); err != nil {
+		return nil, fmt.Errorf("failed to read __text section data: %v", err)
+	}
+
+	// find function starts by looking for the instruction 0xe320f000
+	for idx, instr := range instructions {
+		if instr == 0xd503237f {
+			funcs = append(funcs, types.Function{
+				StartAddr: text.Addr + uint64(idx*4),
+			})
+		}
+	}
+	// set end addresses
+	for i := 0; i < len(funcs)-1; i++ {
+		funcs[i].EndAddr = funcs[i+1].StartAddr
+	}
+	funcs[len(funcs)-1].EndAddr = Align(text.Addr+text.Size, uint64(text.Align))
+
+	f.functions = funcs
+
+	return funcs, nil
+}
+
 // GetFunctions returns the function array, or nil if none exists.
 func (f *File) GetFunctions(data ...byte) []types.Function {
 
@@ -1949,6 +1997,9 @@ func (f *File) GetFunctions(data ...byte) []types.Function {
 
 	fs := f.FunctionStarts()
 	if fs == nil {
+		if fs, err := f.GenerateFunctionStarts(); err == nil {
+			return fs
+		}
 		return nil
 	}
 
