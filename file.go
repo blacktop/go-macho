@@ -1791,6 +1791,16 @@ func (f *File) Section(segment, section string) *types.Section {
 
 // FindSegmentForVMAddr returns the segment containing a given virtual memory ddress.
 func (f *File) FindSegmentForVMAddr(vmAddr uint64) *Segment {
+	if f.FileTOC.FileHeader.Type == types.MH_FILESET {
+		for _, fs := range f.FileSets() {
+			if mfe, err := f.GetFileSetFileByName(fs.EntryID); err == nil {
+				if seg := mfe.FindSegmentForVMAddr(vmAddr); seg != nil {
+					seg.Name = fmt.Sprintf("%s.%s", fs.EntryID, seg.Name)
+					return seg
+				}
+			}
+		}
+	}
 	for _, seg := range f.Segments() {
 		if seg.Addr <= vmAddr && vmAddr < seg.Addr+seg.Memsz {
 			return seg
@@ -1801,6 +1811,16 @@ func (f *File) FindSegmentForVMAddr(vmAddr uint64) *Segment {
 
 // FindSectionForVMAddr returns the section containing a given virtual memory ddress.
 func (f *File) FindSectionForVMAddr(vmAddr uint64) *types.Section {
+	if f.FileTOC.FileHeader.Type == types.MH_FILESET {
+		for _, fs := range f.FileSets() {
+			if mfe, err := f.GetFileSetFileByName(fs.EntryID); err == nil {
+				if sec := mfe.FindSectionForVMAddr(vmAddr); sec != nil {
+					sec.Name = fmt.Sprintf("%s.%s", fs.EntryID, sec.Name)
+					return sec
+				}
+			}
+		}
+	}
 	for _, sec := range f.Sections {
 		if sec.Addr <= vmAddr && vmAddr < sec.Addr+sec.Size {
 			return sec
