@@ -1651,14 +1651,10 @@ func (f *File) GetCStrings() (map[string]map[string]uint64, error) {
 
 	for _, sec := range f.Sections {
 		if sec.Flags.IsCstringLiterals() || sec.Name == "__os_log" {
-			off, err := f.GetOffset(sec.Addr)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get offset for %s.%s: %v", sec.Seg, sec.Name, err)
-			}
+			f.cr.SeekToAddr(sec.Addr)
 			dat := make([]byte, sec.Size)
-			if _, err = f.ReadAt(dat, int64(off)); err != nil {
+			if _, err := f.cr.Read(dat); err != nil {
 				return nil, fmt.Errorf("failed to read cstring data in %s.%s: %v", sec.Seg, sec.Name, err)
-
 			}
 
 			section := fmt.Sprintf("%s.%s", sec.Seg, sec.Name)
