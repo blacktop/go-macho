@@ -324,10 +324,15 @@ func (f *File) CodeSign(config *codesign.Config) error {
 
 	config.CodeSize = uint64(cs.Offset)
 
-	// cache __LINKEDIT data (up to but not including any existing code signature) for saving later
+	// cache __LINKEDIT data (up to but not including any existing code signature) for saving later.
+	// if the actual data doesn't go up to a page boundary (because we're adding a new signature), pad it with zeroes
 	ledata := make([]byte, uint64(cs.Offset)-linkedit.Offset)
-	if _, err := f.cr.ReadAtAddr(ledata, linkedit.Addr); err != nil {
-		return fmt.Errorf("failed to read __LINKEDIT data: %v", err)
+	size := uint64(len(ledata))
+	if size > linkedit.Filesz {
+		size = linkedit.Filesz
+	}
+	if n, err := f.cr.ReadAtAddr(ledata[:size], linkedit.Addr); err != nil {
+		return fmt.Errorf("failed to read __LINKEDIT data: %d, %v", n, err)
 	}
 	f.ledata = bytes.NewBuffer(ledata)
 
@@ -337,9 +342,9 @@ func (f *File) CodeSign(config *codesign.Config) error {
 	// update LC_CODE_SIGNATURE size
 	cs.Size = uint32((linkedit.Offset + linkedit.Filesz) - uint64(cs.Offset))
 
-	// read data to be signed
+	// read data to be signed; pad to beginning of code signature if necessary (in case we added a signature to a not-page-aligned-size file)
 	data := make([]byte, cs.Offset)
-	if _, err := f.ReadAt(data, 0); err != nil {
+	if _, err := f.ReadAt(data[:linkedit.Offset+size], 0); err != nil {
 		return fmt.Errorf("failed to read codesign data: %v", err)
 	}
 	// write modified file header and load commands (including __LINKEDIT and CodeSignature), since they are covered by hashes
