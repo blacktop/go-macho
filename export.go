@@ -332,7 +332,7 @@ func (f *File) CodeSign(config *codesign.Config) error {
 		size = linkedit.Filesz
 	}
 	if n, err := f.cr.ReadAtAddr(ledata[:size], linkedit.Addr); err != nil {
-		return fmt.Errorf("failed to read __LINKEDIT data: %d, %v", n, err)
+		return fmt.Errorf("failed to read __LINKEDIT data: read=%d, %v", n, err)
 	}
 	f.ledata = bytes.NewBuffer(ledata)
 
