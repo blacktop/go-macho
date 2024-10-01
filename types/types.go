@@ -65,29 +65,31 @@ func (u UUID) String() string {
 type Platform uint32
 
 const (
-	Platform_Unknown            Platform = 0  // PLATFORM_UNKNOWN
-	Platform_macOS              Platform = 1  // PLATFORM_MACOS
-	Platform_iOS                Platform = 2  // PLATFORM_IOS
-	Platform_tvOS               Platform = 3  // PLATFORM_TVOS
-	Platform_watchOS            Platform = 4  // PLATFORM_WATCHOS
-	Platform_bridgeOS           Platform = 5  // PLATFORM_BRIDGEOS
-	Platform_macCatalyst        Platform = 6  // PLATFORM_MACCATALYST
-	Platform_iOsSimulator       Platform = 7  // PLATFORM_IOSSIMULATOR
-	Platform_tvOsSimulator      Platform = 8  // PLATFORM_TVOSSIMULATOR
-	Platform_watchOsSimulator   Platform = 9  // PLATFORM_WATCHOSSIMULATOR
-	Platform_Driverkit          Platform = 10 // PLATFORM_DRIVERKIT
-	Platform_visionOS           Platform = 11 // PLATFORM_VISIONOS
-	Platform_visionOsSimulator  Platform = 12 // PLATFORM_VISIONOSSIMULATOR
-	Platform_Firmware           Platform = 13 // PLATFORM_FIRMWARE
-	Platform_sepOS              Platform = 14 // PLATFORM_SEPOS
-	Platform_macOSExclaveCore   Platform = 15 // PLATFORM_MACOS_EXCLAVECORE
-	Platform_macOSExclaveKit    Platform = 16 // PLATFORM_MACOS_EXCLAVEKIT
-	Platform_iOSExclaveCore     Platform = 17 // PLATFORM_IOS_EXCLAVECORE
-	Platform_iOSExclaveKit      Platform = 18 // PLATFORM_IOS_EXCLAVEKIT
-	Platform_tvOsExclaveCore    Platform = 19 // PLATFORM_TVOS_EXCLAVECORE
-	Platform_tvOsExclaveKit     Platform = 20 // PLATFORM_TVOS_EXCLAVEKIT
-	Platform_watchOsExclaveCore Platform = 21 // PLATFORM_WATCHOS_EXCLAVECORE
-	Platform_watchOsExclaveKit  Platform = 22 // PLATFORM_WATCHOS_EXCLAVEKIT
+	Platform_Unknown             Platform = 0  // PLATFORM_UNKNOWN
+	Platform_macOS               Platform = 1  // PLATFORM_MACOS
+	Platform_iOS                 Platform = 2  // PLATFORM_IOS
+	Platform_tvOS                Platform = 3  // PLATFORM_TVOS
+	Platform_watchOS             Platform = 4  // PLATFORM_WATCHOS
+	Platform_bridgeOS            Platform = 5  // PLATFORM_BRIDGEOS
+	Platform_macCatalyst         Platform = 6  // PLATFORM_MACCATALYST
+	Platform_iOsSimulator        Platform = 7  // PLATFORM_IOSSIMULATOR
+	Platform_tvOsSimulator       Platform = 8  // PLATFORM_TVOSSIMULATOR
+	Platform_watchOsSimulator    Platform = 9  // PLATFORM_WATCHOSSIMULATOR
+	Platform_Driverkit           Platform = 10 // PLATFORM_DRIVERKIT
+	Platform_visionOS            Platform = 11 // PLATFORM_VISIONOS
+	Platform_visionOsSimulator   Platform = 12 // PLATFORM_VISIONOSSIMULATOR
+	Platform_Firmware            Platform = 13 // PLATFORM_FIRMWARE
+	Platform_sepOS               Platform = 14 // PLATFORM_SEPOS
+	Platform_macOSExclaveCore    Platform = 15 // PLATFORM_MACOS_EXCLAVECORE
+	Platform_macOSExclaveKit     Platform = 16 // PLATFORM_MACOS_EXCLAVEKIT
+	Platform_iOSExclaveCore      Platform = 17 // PLATFORM_IOS_EXCLAVECORE
+	Platform_iOSExclaveKit       Platform = 18 // PLATFORM_IOS_EXCLAVEKIT
+	Platform_tvOsExclaveCore     Platform = 19 // PLATFORM_TVOS_EXCLAVECORE
+	Platform_tvOsExclaveKit      Platform = 20 // PLATFORM_TVOS_EXCLAVEKIT
+	Platform_watchOsExclaveCore  Platform = 21 // PLATFORM_WATCHOS_EXCLAVECORE
+	Platform_watchOsExclaveKit   Platform = 22 // PLATFORM_WATCHOS_EXCLAVEKIT
+	Platform_visionOsExclaveCore Platform = 23 // PLATFORM_WATCHOS_EXCLAVEKIT
+	Platform_visionOsExclaveKit  Platform = 24 // PLATFORM_WATCHOS_EXCLAVEKIT
 
 	ANY Platform = 0xFFFFFFFF // PLATFORM_ANY
 )
@@ -138,6 +140,10 @@ func GetPlatformByName(name string) (Platform, error) {
 		return Platform_watchOsExclaveCore, nil
 	case "watchosexclavekit", "watchos_exclavekit":
 		return Platform_watchOsExclaveKit, nil
+	case "visionosexclavecore", "visionos_exclavecore":
+		return Platform_visionOsExclaveCore, nil
+	case "visionosexclavekit", "visionos_exclavekit":
+		return Platform_visionOsExclaveKit, nil
 	default:
 		return Platform_Unknown, fmt.Errorf("unknown platform")
 	}
