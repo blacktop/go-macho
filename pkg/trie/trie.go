@@ -85,11 +85,11 @@ func ReadSleb128(r *bytes.Reader) (int64, error) {
 
 		// If high order bit is 1.
 		if (b & 0x80) == 0 {
-			break
-		}
+			if (shift < 64) && ((b & 0x40) > 0) {
+				result |= -(1 << shift)
+			}
 
-		if (shift < 64) && ((b & 0x40) > 0) {
-			result |= -(1 << shift)
+			break
 		}
 	}
 
