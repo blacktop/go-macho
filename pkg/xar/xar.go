@@ -504,7 +504,9 @@ func (r *Reader) readXmlFileTree(xmlFile *xmlFile, dir string) (err error) {
 		}
 	}
 
-	r.Files[xf.Id] = xf
+	if xf.Type != FileTypeDirectory {
+		r.Files[xf.Id] = xf
+	}
 
 	if xf.Type == FileTypeDirectory {
 		for _, subXmlFile := range xmlFile.File {
