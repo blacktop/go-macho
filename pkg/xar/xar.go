@@ -47,9 +47,11 @@ var (
 	ErrFileEncodingUnsupported = errors.New("xar: unsupported file encoding")
 )
 
-const xarVersion = 1
-const xarHeaderMagic = 0x78617221 // 'xar!'
-const xarHeaderSize = 28
+const (
+	xarHeaderMagic = 0x78617221 // 'xar!'
+	xarVersion     = 1
+	xarHeaderSize  = 28
+)
 
 type xarHeader struct {
 	magic         uint32
