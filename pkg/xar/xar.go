@@ -361,10 +361,9 @@ func (r *Reader) readAndVerifySignature(root *xmlXar, checksumKind uint32, check
 }
 
 // This is a convenience method that returns true if the opened XAR archive
-// has a signature. Internally, it checks whether the SignatureCreationTime
-// field of the Reader is > 0.
+// has a signature. Internally, it checks whether there is at least one certificate.
 func (r *Reader) HasSignature() bool {
-	return r.SignatureCreationTime > 0
+	return len(r.Certificates) > 0
 }
 
 // This is a convenience method that returns true of the signature if the
@@ -384,14 +383,13 @@ func (r *Reader) HasSignature() bool {
 // If an archive has a signature, the certificate chain of the archive can be
 // accessed through the Certificates field of the Reader.
 //
-// Internally, this method checks whether the SignatureError field is non-nil,
-// and whether the SignatureCreationTime is > 0.
+// Internally, this method checks whether the SignatureError field is non-nil.
 //
 // If the signature is not valid, and the XAR file has a signature, the
 // SignatureError field of the Reader can be used to determine a possible
 // cause.
 func (r *Reader) ValidSignature() bool {
-	return r.SignatureCreationTime > 0 && r.SignatureError == nil
+	return r.SignatureError == nil
 }
 
 func xmlFileToFileInfo(xmlFile *xmlFile) (fi FileInfo, err error) {
