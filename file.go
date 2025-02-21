@@ -1259,6 +1259,51 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Offset = led.Offset
 			l.Size = led.Size
 			f.Loads = append(f.Loads, l)
+		case types.LC_FUNCTION_VARIANTS:
+			var led types.LinkEditDataCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &led); err != nil {
+				return nil, fmt.Errorf("failed to read LC_FUNCTION_VARIANTS: %v", err)
+			}
+			l := new(FunctionVariants)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			l.Offset = led.Offset
+			l.Size = led.Size
+			f.Loads = append(f.Loads, l)
+		case types.LC_FUNCTION_VARIANT_FIXUPS:
+			var led types.LinkEditDataCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &led); err != nil {
+				return nil, fmt.Errorf("failed to read LC_FUNCTION_VARIANT_FIXUPS: %v", err)
+			}
+			l := new(FunctionVariants)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			l.Offset = led.Offset
+			l.Size = led.Size
+			f.Loads = append(f.Loads, l)
+		case types.LC_TARGET_TRIPLE:
+			var hdr types.TargetTripleCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &hdr); err != nil {
+				return nil, fmt.Errorf("failed to read LC_TARGET_TRIPLE: %v", err)
+			}
+			l := new(TargetTriple)
+			if hdr.TargetOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid target in target triple command", hdr.TargetOffset}
+			}
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			l.TargetOffset = hdr.TargetOffset
+			if hdr.TargetOffset >= uint32(len(cmddat)) {
+				return nil, &FormatError{offset, "invalid target in target triple command", hdr.TargetOffset}
+			}
+			l.Target = cstring(cmddat[hdr.TargetOffset:])
+			f.Loads = append(f.Loads, l)
 		case types.LC_SEP_CACHE_SLIDE:
 			var led types.LinkEditDataCmd
 			b := bytes.NewReader(cmddat)

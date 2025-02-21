@@ -75,6 +75,9 @@ const (
 	LC_DYLD_CHAINED_FIXUPS      LoadCmd = (0x34 | LC_REQ_DYLD) // used with linkedit_data_command
 	LC_FILESET_ENTRY            LoadCmd = (0x35 | LC_REQ_DYLD) /* used with fileset_entry_command */
 	LC_ATOM_INFO                LoadCmd = 0x36                 /* used with linkedit_data_command */
+	LC_FUNCTION_VARIANTS        LoadCmd = 0x37                 /* used with linkedit_data_command */
+	LC_FUNCTION_VARIANT_FIXUPS  LoadCmd = 0x38                 /* used with linkedit_data_command */
+	LC_TARGET_TRIPLE            LoadCmd = 0x39                 /* target triple used to compile */
 	/*
 	 * sep load commands
 	 */
@@ -838,6 +841,16 @@ type RpathCmd struct {
 }
 
 /*
+ * TargetTripleCmd contains a string which specifies the
+ * target triple (e.g. "arm64e-apple-macosx15.0.0") used to compile the code.
+ */
+type TargetTripleCmd struct {
+	LoadCmd             // LC_TARGET_TRIPLE
+	Len          uint32 // includes string
+	TargetOffset uint32 // path to add to run path
+}
+
+/*
  * LinkEditDataCmd contains the offsets and sizes of a blob
  * of data in the __LINKEDIT segment.
  */
@@ -870,6 +883,10 @@ type LinkerOptimizationHintCmd LinkEditDataCmd // LC_LINKER_OPTIMIZATION_HINT
 type DyldExportsTrieCmd LinkEditDataCmd // LC_DYLD_EXPORTS_TRIE
 // A DyldChainedFixupsCmd is used with linkedit_data_command command.
 type DyldChainedFixupsCmd LinkEditDataCmd // LC_DYLD_CHAINED_FIXUPS
+// A FunctionVariantsCmd is used with linkedit_data_command command.
+type FunctionVariantsCmd LinkEditDataCmd // LC_FUNCTION_VARIANTS
+// A FunctionVariantFixupsCmd is used with linkedit_data_command command.
+type FunctionVariantFixupsCmd LinkEditDataCmd // LC_FUNCTION_VARIANT_FIXUPS
 
 type EncryptionSystem uint32
 

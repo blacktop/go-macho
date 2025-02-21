@@ -85,6 +85,7 @@ const (
 	DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE DCPtrKind = 11 // stride 1, x86_64 kernel caches
 	DYLD_CHAINED_PTR_ARM64E_USERLAND24   DCPtrKind = 12 // stride 8, unauth target is vm offset, 24-bit bind
 	DYLD_CHAINED_PTR_ARM64E_SHARED_CACHE DCPtrKind = 13 // stride 8, regular/auth targets both vm offsets.  Only A keys supported
+	DYLD_CHAINED_PTR_ARM64E_SEGMENTED    DCPtrKind = 14 // stride 4, rebase offsets use segIndex and segOffset
 )
 
 type DyldChainedStarts struct {
@@ -1173,6 +1174,112 @@ func (d DyldChainedPtrArm64eSharedCacheAuthRebase) String(baseAddr ...uint64) st
 		d.Next(),
 		d.Target(),
 		KeyName(key),
+		d.AddrDiv(),
+		d.Diversity(),
+	)
+}
+
+// DYLD_CHAINED_PTR_ARM64E_SEGMENTED
+type DyldChainedPtrArm64eSegmentedRebase struct {
+	Fixup   uint64
+	Pointer uint64
+}
+
+func (d DyldChainedPtrArm64eSegmentedRebase) IsRebase() bool {
+	return true
+}
+func (d DyldChainedPtrArm64eSegmentedRebase) IsBind() bool {
+	return false
+}
+func (d DyldChainedPtrArm64eSegmentedRebase) Offset() uint64 {
+	return d.Fixup
+}
+func (d DyldChainedPtrArm64eSegmentedRebase) Raw() uint64 {
+	return d.Pointer
+}
+func (d DyldChainedPtrArm64eSegmentedRebase) Target() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 0, 28) // offset in segment
+}
+func (d DyldChainedPtrArm64eSegmentedRebase) SegIndex() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 28, 4) // index into segment address table
+}
+func (d DyldChainedPtrArm64eSegmentedRebase) Next() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 51, 12) // 4-byte stide
+}
+func (d DyldChainedPtrArm64eSegmentedRebase) Auth() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 63, 1) // == 0
+}
+func (d DyldChainedPtrArm64eSegmentedRebase) Kind() string {
+	return "segmented-rebase"
+}
+func (d DyldChainedPtrArm64eSegmentedRebase) String(baseAddr ...uint64) string {
+	if len(baseAddr) > 0 {
+		d.Fixup += baseAddr[0]
+	}
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: %#x, seg_index: %d)",
+		d.Fixup,
+		d.Pointer,
+		d.Kind(),
+		d.Next(),
+		d.Target(),
+		d.SegIndex(),
+	)
+}
+
+// DYLD_CHAINED_PTR_ARM64E_SEGMENTED
+type DyldChainedPtrArm64eAuthSegmentedRebase struct {
+	Fixup   uint64
+	Pointer uint64
+}
+
+func (d DyldChainedPtrArm64eAuthSegmentedRebase) IsRebase() bool {
+	return true
+}
+func (d DyldChainedPtrArm64eAuthSegmentedRebase) IsBind() bool {
+	return false
+}
+func (d DyldChainedPtrArm64eAuthSegmentedRebase) Offset() uint64 {
+	return d.Fixup
+}
+func (d DyldChainedPtrArm64eAuthSegmentedRebase) Raw() uint64 {
+	return d.Pointer
+}
+func (d DyldChainedPtrArm64eAuthSegmentedRebase) Target() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 0, 28) // offset in segment
+}
+func (d DyldChainedPtrArm64eAuthSegmentedRebase) SegIndex() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 28, 4) // index into segment address table
+}
+func (d DyldChainedPtrArm64eAuthSegmentedRebase) Diversity() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 32, 16)
+}
+func (d DyldChainedPtrArm64eAuthSegmentedRebase) AddrDiv() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 48, 1)
+}
+func (d DyldChainedPtrArm64eAuthSegmentedRebase) Key() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 49, 2)
+}
+func (d DyldChainedPtrArm64eAuthSegmentedRebase) Next() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 51, 12) // 4-byte stide
+}
+func (d DyldChainedPtrArm64eAuthSegmentedRebase) Auth() uint64 {
+	return types.ExtractBits(uint64(d.Pointer), 63, 1) // == 1
+}
+func (d DyldChainedPtrArm64eAuthSegmentedRebase) Kind() string {
+	return "segmented-auth-rebase"
+}
+func (d DyldChainedPtrArm64eAuthSegmentedRebase) String(baseAddr ...uint64) string {
+	if len(baseAddr) > 0 {
+		d.Fixup += baseAddr[0]
+	}
+	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: %#x, seg_index: %d, key: %s, addrDiv: %d, diversity: 0x%04x)",
+		d.Fixup,
+		d.Pointer,
+		d.Kind(),
+		d.Next(),
+		d.Target(),
+		d.SegIndex(),
+		KeyName(d.Key()),
 		d.AddrDiv(),
 		d.Diversity(),
 	)

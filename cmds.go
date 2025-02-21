@@ -2252,6 +2252,65 @@ type AtomInfo struct {
 }
 
 /*******************************************************************************
+ * LC_FUNCTION_VARIANTS
+ *******************************************************************************/
+
+type FunctionVariants struct {
+	LinkEditData
+}
+
+/*******************************************************************************
+ * LC_FUNCTION_VARIANT_FIXUPS
+ *******************************************************************************/
+
+type FunctionVariantFixups struct {
+	LinkEditData
+}
+
+/*******************************************************************************
+ * LC_TARGET_TRIPLE
+ *******************************************************************************/
+
+type TargetTriple struct {
+	LoadBytes
+	types.TargetTripleCmd
+	Target string
+}
+
+func (t *TargetTriple) LoadSize() uint32 {
+	return pointerAlign(uint32(binary.Size(t.TargetTripleCmd)) + uint32(len(t.Target)) + 1)
+}
+func (t *TargetTriple) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	if err := binary.Write(buf, o, t.TargetTripleCmd); err != nil {
+		return fmt.Errorf("failed to write %s to buffer: %v", t.Command(), err)
+	}
+	if _, err := buf.WriteString(t.Target + "\x00"); err != nil {
+		return fmt.Errorf("failed to write %s to LC buffer: %v", t.Target, err)
+	}
+	if (buf.Len() % 8) != 0 {
+		pad := 8 - (buf.Len() % 8)
+		if _, err := buf.Write(make([]byte, pad)); err != nil {
+			return fmt.Errorf("failed to write %s padding: %v", t.Command(), err)
+		}
+	}
+	return nil
+}
+func (t *TargetTriple) String() string {
+	return t.Target
+}
+func (t *TargetTriple) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		LoadCmd string `json:"load_cmd"`
+		Len     uint32 `json:"length"`
+		Target  string `json:"target"`
+	}{
+		LoadCmd: t.Command().String(),
+		Len:     t.Len,
+		Target:  t.Target,
+	})
+}
+
+/*******************************************************************************
  * LC_SEP_CACHE_SLIDE
  *******************************************************************************/
 
