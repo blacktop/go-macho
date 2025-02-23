@@ -233,7 +233,7 @@ func (c *Class) dump(verbose, addrs bool) string {
 				}
 				s.WriteString(fmt.Sprintf("+ %s\n", getMethodWithArgs(meth.Name, rtype, args)))
 			} else {
-				s.WriteString(fmt.Sprintf("-[%s %s];\n", c.Name, meth.Name))
+				s.WriteString(fmt.Sprintf("+[%s %s];\n", c.Name, meth.Name))
 			}
 		}
 		w.Flush()
