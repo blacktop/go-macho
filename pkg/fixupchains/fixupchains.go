@@ -472,16 +472,24 @@ func (dcf *DyldChainedFixups) IsBind(addr uint64) (*DcfImport, int64, bool) {
 		}
 		if DcpArm64eIsAuth(addr) { // is auth-bind
 			if dcf.PointerFormat == DYLD_CHAINED_PTR_ARM64E_USERLAND24 {
-				return &dcf.Imports[DyldChainedPtrArm64eAuthBind24{Pointer: addr}.Ordinal()], 0, true
+				ord := DyldChainedPtrArm64eAuthBind24{Pointer: addr}.Ordinal()
+				if ord > uint64(len(dcf.Imports)-1) {
+					return nil, 0, false // OOB
+				}
+				return &dcf.Imports[ord], 0, true
 			}
 			return &dcf.Imports[DyldChainedPtrArm64eAuthBind{Pointer: addr}.Ordinal()], 0, true
 		}
 		if dcf.PointerFormat == DYLD_CHAINED_PTR_ARM64E_USERLAND24 {
-			return &dcf.Imports[DyldChainedPtrArm64eAuthBind24{Pointer: addr}.Ordinal()], DyldChainedPtrArm64eBind{Pointer: addr}.SignExtendedAddend(), true
+			ord := DyldChainedPtrArm64eAuthBind24{Pointer: addr}.Ordinal()
+			if ord > uint64(len(dcf.Imports)-1) {
+				return nil, 0, false // OOB
+			}
+			return &dcf.Imports[ord], DyldChainedPtrArm64eBind{Pointer: addr}.SignExtendedAddend(), true
 		}
 		ord := DyldChainedPtrArm64eAuthBind{Pointer: addr}.Ordinal()
 		if ord > uint64(len(dcf.Imports)-1) {
-			return nil, 0, false
+			return nil, 0, false // OOB
 		}
 		return &dcf.Imports[ord], DyldChainedPtrArm64eBind{Pointer: addr}.SignExtendedAddend(), true
 	case DYLD_CHAINED_PTR_64, DYLD_CHAINED_PTR_64_OFFSET:
@@ -490,7 +498,7 @@ func (dcf *DyldChainedFixups) IsBind(addr uint64) (*DcfImport, int64, bool) {
 		}
 		ord := DyldChainedPtr64Bind{Pointer: addr}.Ordinal()
 		if ord > uint64(len(dcf.Imports)-1) {
-			return nil, 0, false
+			return nil, 0, false // OOB
 		}
 		return &dcf.Imports[ord], int64(DyldChainedPtr64Bind{Pointer: addr}.Addend()), true
 	case DYLD_CHAINED_PTR_32:
@@ -499,7 +507,7 @@ func (dcf *DyldChainedFixups) IsBind(addr uint64) (*DcfImport, int64, bool) {
 		}
 		ord := DyldChainedPtr32Bind{Pointer: uint32(addr)}.Ordinal()
 		if ord > uint64(len(dcf.Imports)-1) {
-			return nil, 0, false
+			return nil, 0, false // OOB
 		}
 		return &dcf.Imports[ord], int64(DyldChainedPtr32Bind{Pointer: uint32(addr)}.Addend()), true
 	case DYLD_CHAINED_PTR_64_KERNEL_CACHE, DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE:
