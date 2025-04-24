@@ -31,8 +31,14 @@ import (
 type File struct {
 	FileTOC
 
-	Symtab   *Symtab
-	Dysymtab *Dysymtab
+	Symtab           *Symtab
+	Dysymtab         *Dysymtab
+	Dylibs           []*LoadDylib
+	DylibIDs         []*IDDylib
+	Dylinkers        []*LoadDylinker
+	DyldEnvironments []*DyldEnvironment
+	SourceVersions   []*SourceVersion
+	LinkerOptions    []*LinkerOption
 
 	vma         *types.VMAddrConverter
 	dcf         *fixupchains.DyldChainedFixups
@@ -567,6 +573,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.CurrentVersion = hdr.CurrentVersion
 			l.CompatVersion = hdr.CompatVersion
 			f.Loads = append(f.Loads, l)
+			f.Dylibs = append(f.Dylibs, l)
 		case types.LC_ID_DYLIB:
 			var hdr types.DylibCmd
 			b := bytes.NewReader(cmddat)
@@ -586,6 +593,8 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.CurrentVersion = hdr.CurrentVersion
 			l.CompatVersion = hdr.CompatVersion
 			f.Loads = append(f.Loads, l)
+			f.DylibIDs = append(f.DylibIDs, l)
+
 		case types.LC_LOAD_DYLINKER:
 			var hdr types.DylinkerCmd
 			b := bytes.NewReader(cmddat)
@@ -602,6 +611,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			}
 			l.Name = cstring(cmddat[hdr.NameOffset:])
 			f.Loads = append(f.Loads, l)
+			f.Dylinkers = append(f.Dylinkers, l)
 		case types.LC_ID_DYLINKER:
 			var hdr types.IDDylinkerCmd
 			b := bytes.NewReader(cmddat)
@@ -1024,6 +1034,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			}
 			l.Name = cstring(cmddat[hdr.NameOffset:])
 			f.Loads = append(f.Loads, l)
+			f.DyldEnvironments = append(f.DyldEnvironments, l)
 		case types.LC_MAIN:
 			var hdr types.EntryPointCmd
 			b := bytes.NewReader(cmddat)
@@ -1070,6 +1081,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Len = siz
 			l.Version = sv.Version
 			f.Loads = append(f.Loads, l)
+			f.SourceVersions = append(f.SourceVersions, l)
 		case types.LC_DYLIB_CODE_SIGN_DRS:
 			var led types.LinkEditDataCmd
 			b := bytes.NewReader(cmddat)
@@ -1116,6 +1128,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				l.Options = append(l.Options, o)
 			}
 			f.Loads = append(f.Loads, l)
+			f.LinkerOptions = append(f.LinkerOptions, l)
 		case types.LC_LINKER_OPTIMIZATION_HINT:
 			var led types.LinkEditDataCmd
 			b := bytes.NewReader(cmddat)
@@ -2001,8 +2014,8 @@ func (f *File) FunctionStarts() *FunctionStarts {
 }
 
 func (f *File) GenerateFunctionStarts() ([]types.Function, error) {
-	if len(f.functions) > 0 {
-		return f.functions, nil
+	if len(f.Functions) > 0 {
+		return f.Functions, nil
 	}
 
 	if !f.isArm64e() {
@@ -2045,7 +2058,7 @@ func (f *File) GenerateFunctionStarts() ([]types.Function, error) {
 	}
 	funcs[len(funcs)-1].EndAddr = Align(text.Addr+text.Size, uint64(text.Align))
 
-	f.functions = funcs
+	f.Functions = funcs
 
 	return funcs, nil
 }
@@ -2053,8 +2066,8 @@ func (f *File) GenerateFunctionStarts() ([]types.Function, error) {
 // GetFunctions returns the function array, or nil if none exists.
 func (f *File) GetFunctions(data ...byte) []types.Function {
 
-	if len(f.functions) > 0 {
-		return f.functions
+	if len(f.Functions) > 0 {
+		return f.Functions
 	}
 
 	var funcs []types.Function
@@ -2114,7 +2127,7 @@ func (f *File) GetFunctions(data ...byte) []types.Function {
 	}
 
 	// cache parsed functions
-	f.functions = funcs
+	f.Functions = funcs
 
 	return funcs
 }
