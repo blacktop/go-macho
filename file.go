@@ -2014,8 +2014,8 @@ func (f *File) FunctionStarts() *FunctionStarts {
 }
 
 func (f *File) GenerateFunctionStarts() ([]types.Function, error) {
-	if len(f.functions) > 0 {
-		return f.functions, nil
+	if len(f.Functions) > 0 {
+		return f.Functions, nil
 	}
 
 	if !f.isArm64e() {
@@ -2058,7 +2058,7 @@ func (f *File) GenerateFunctionStarts() ([]types.Function, error) {
 	}
 	funcs[len(funcs)-1].EndAddr = Align(text.Addr+text.Size, uint64(text.Align))
 
-	f.functions = funcs
+	f.Functions = funcs
 
 	return funcs, nil
 }
@@ -2066,8 +2066,8 @@ func (f *File) GenerateFunctionStarts() ([]types.Function, error) {
 // GetFunctions returns the function array, or nil if none exists.
 func (f *File) GetFunctions(data ...byte) []types.Function {
 
-	if len(f.functions) > 0 {
-		return f.functions
+	if len(f.Functions) > 0 {
+		return f.Functions
 	}
 
 	var funcs []types.Function
@@ -2127,7 +2127,7 @@ func (f *File) GetFunctions(data ...byte) []types.Function {
 	}
 
 	// cache parsed functions
-	f.functions = funcs
+	f.Functions = funcs
 
 	return funcs
 }

@@ -14,7 +14,7 @@ type FileTOC struct {
 	ByteOrder binary.ByteOrder
 	Loads     loads
 	Sections  []*types.Section
-	functions []types.Function
+	Functions []types.Function
 }
 
 func (t *FileTOC) AddLoad(l Load) uint32 {
