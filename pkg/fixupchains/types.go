@@ -631,16 +631,16 @@ func (d DyldChainedPtrArm64eAuthRebase24) Raw() uint64 {
 	return d.Pointer
 }
 func (d DyldChainedPtrArm64eAuthRebase24) Target() uint64 {
-	return types.ExtractBits(uint64(d.Pointer), 0, 24) // target
+	return types.ExtractBits(uint64(d.Pointer), 0, 32) // target
 }
 func (d DyldChainedPtrArm64eAuthRebase24) Diversity() uint64 {
-	return types.ExtractBits(uint64(d.Pointer), 24, 16)
+	return types.ExtractBits(uint64(d.Pointer), 32, 16)
 }
 func (d DyldChainedPtrArm64eAuthRebase24) AddrDiv() uint64 {
-	return types.ExtractBits(uint64(d.Pointer), 40, 1)
+	return types.ExtractBits(uint64(d.Pointer), 48, 1)
 }
 func (d DyldChainedPtrArm64eAuthRebase24) Key() uint64 {
-	return types.ExtractBits(uint64(d.Pointer), 41, 2)
+	return types.ExtractBits(uint64(d.Pointer), 49, 2)
 }
 func (d DyldChainedPtrArm64eAuthRebase24) Next() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 51, 11) // 8-byte stide
