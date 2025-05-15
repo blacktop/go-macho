@@ -379,12 +379,25 @@ func (f *File) CodeSign(config *codesign.Config) error {
 
 func (f *File) Save(outpath string) error {
 	var buf bytes.Buffer
+	if err := f.SaveBuffer(&buf); err != nil {
+		return err
+	}
 
-	if err := f.FileHeader.Write(&buf, f.ByteOrder); err != nil {
+	os.MkdirAll(filepath.Dir(outpath), os.ModePerm)
+
+	if err := os.WriteFile(outpath, buf.Bytes(), 0755); err != nil {
+		return fmt.Errorf("failed to save MachO to file %s: %v", outpath, err)
+	}
+
+	return nil
+}
+
+func (f *File) SaveBuffer(buf *bytes.Buffer) error {
+	if err := f.FileHeader.Write(buf, f.ByteOrder); err != nil {
 		return fmt.Errorf("failed to write file header to buffer: %v", err)
 	}
 
-	if err := f.writeLoadCommands(&buf); err != nil {
+	if err := f.writeLoadCommands(buf); err != nil {
 		return fmt.Errorf("failed to write load commands: %v", err)
 	}
 
@@ -426,12 +439,6 @@ func (f *File) Save(outpath string) error {
 				}
 			}
 		}
-	}
-
-	os.MkdirAll(filepath.Dir(outpath), os.ModePerm)
-
-	if err := os.WriteFile(outpath, buf.Bytes(), 0755); err != nil {
-		return fmt.Errorf("failed to save MachO to file %s: %v", outpath, err)
 	}
 
 	return nil
