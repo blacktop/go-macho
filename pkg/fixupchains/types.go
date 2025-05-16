@@ -369,15 +369,16 @@ func (d DyldChainedPtrArm64eAuthRebase) Kind() string {
 	return "auth-rebase"
 }
 func (d DyldChainedPtrArm64eAuthRebase) String(baseAddr ...uint64) string {
+	var baddr uint64
 	if len(baseAddr) > 0 {
-		d.Fixup += baseAddr[0]
+		baddr = baseAddr[0]
 	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: %#x, key: %s, addrDiv: %d, diversity: 0x%04x)",
-		d.Fixup,
+		d.Fixup+baddr,
 		d.Pointer,
 		d.Kind(),
 		d.Next(),
-		d.Target(),
+		d.Target()+baddr,
 		KeyName(d.Key()),
 		d.AddrDiv(),
 		d.Diversity(),
