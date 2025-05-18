@@ -249,15 +249,16 @@ func (d DyldChainedPtrArm64eRebase) Kind() string {
 	return "rebase"
 }
 func (d DyldChainedPtrArm64eRebase) String(baseAddr ...uint64) string {
+	var baddr uint64
 	if len(baseAddr) > 0 {
-		d.Fixup += baseAddr[0]
+		baddr = baseAddr[0]
 	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: %#x, high8: 0x%02x)",
-		d.Fixup,
+		d.Fixup+baddr,
 		d.Pointer,
 		d.Kind(),
 		d.Next(),
-		d.UnpackTarget(),
+		d.UnpackTarget()+baddr,
 		d.High8(),
 	)
 }
@@ -369,15 +370,16 @@ func (d DyldChainedPtrArm64eAuthRebase) Kind() string {
 	return "auth-rebase"
 }
 func (d DyldChainedPtrArm64eAuthRebase) String(baseAddr ...uint64) string {
+	var baddr uint64
 	if len(baseAddr) > 0 {
-		d.Fixup += baseAddr[0]
+		baddr = baseAddr[0]
 	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: %#x, key: %s, addrDiv: %d, diversity: 0x%04x)",
-		d.Fixup,
+		d.Fixup+baddr,
 		d.Pointer,
 		d.Kind(),
 		d.Next(),
-		d.Target(),
+		d.Target()+baddr,
 		KeyName(d.Key()),
 		d.AddrDiv(),
 		d.Diversity(),
@@ -492,15 +494,16 @@ func (d DyldChainedPtr64Rebase) Kind() string {
 	return "ptr64-rebase"
 }
 func (d DyldChainedPtr64Rebase) String(baseAddr ...uint64) string {
+	var baddr uint64
 	if len(baseAddr) > 0 {
-		d.Fixup += baseAddr[0]
+		baddr = baseAddr[0]
 	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: %#x, high8: 0x%02x)",
-		d.Fixup,
+		d.Fixup+baddr,
 		d.Pointer,
 		d.Kind(),
 		d.Next(),
-		d.Target(),
+		d.Target()+baddr,
 		d.High8(),
 	)
 }
@@ -545,15 +548,16 @@ func (d DyldChainedPtr64RebaseOffset) Kind() string {
 	return "rebase-offset"
 }
 func (d DyldChainedPtr64RebaseOffset) String(baseAddr ...uint64) string {
+	var baddr uint64
 	if len(baseAddr) > 0 {
-		d.Fixup += baseAddr[0]
+		baddr = baseAddr[0]
 	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: %#x, high8: 0x%02x)",
-		d.Fixup,
+		d.Fixup+baddr,
 		d.Pointer,
 		d.Kind(),
 		d.Next(),
-		d.Target(),
+		d.Target()+baddr,
 		d.High8(),
 	)
 }
@@ -780,28 +784,29 @@ func (d DyldChainedPtr64KernelCacheRebase) Kind() string {
 	return "kcache-rebase"
 }
 func (d DyldChainedPtr64KernelCacheRebase) String(baseAddr ...uint64) string {
+	var baddr uint64
 	if len(baseAddr) > 0 {
-		d.Fixup += baseAddr[0]
+		baddr = baseAddr[0]
 	}
 	if d.IsAuth() == 1 {
 		return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, key: %s, addrDiv: %d, diversity: 0x%04x, target: 0x%08x, cacheLevel: %d)",
-			d.Fixup,
+			d.Fixup+baddr,
 			d.Pointer,
 			d.Kind(),
 			d.Next(),
 			KeyName(d.Key()),
 			d.AddrDiv(),
 			d.Diversity(),
-			d.Target(),
+			d.Target()+baddr,
 			d.CacheLevel(),
 		)
 	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: 0x%08x, cacheLevel: %d)",
-		d.Fixup,
+		d.Fixup+baddr,
 		d.Pointer,
 		d.Kind(),
 		d.Next(),
-		d.Target(),
+		d.Target()+baddr,
 		d.CacheLevel(),
 	)
 }
@@ -841,10 +846,11 @@ func (d DyldChainedPtr32Rebase) Raw() uint64 {
 	return uint64(d.Pointer)
 }
 func (d DyldChainedPtr32Rebase) String(baseAddr ...uint64) string {
+	var baddr uint64
 	if len(baseAddr) > 0 {
-		d.Fixup += baseAddr[0]
+		baddr = baseAddr[0]
 	}
-	return fmt.Sprintf("0x%08x:  raw: 0x%08x %16s: (next:%02d target: 0x%07x)", d.Fixup, d.Pointer, d.Kind(), d.Next(), d.Target())
+	return fmt.Sprintf("0x%08x:  raw: 0x%08x %16s: (next:%02d target: 0x%07x)", d.Fixup+baddr, d.Pointer, d.Kind(), d.Next(), d.Target()+baddr)
 }
 
 // DYLD_CHAINED_PTR_32
@@ -919,10 +925,11 @@ func (d DyldChainedPtr32CacheRebase) Kind() string {
 	return "cache-rebase"
 }
 func (d DyldChainedPtr32CacheRebase) String(baseAddr ...uint64) string {
+	var baddr uint64
 	if len(baseAddr) > 0 {
-		d.Fixup += baseAddr[0]
+		baddr = baseAddr[0]
 	}
-	return fmt.Sprintf("0x%08x:  raw: 0x%08x %16s: (next:%02d target: 0x%07x)", d.Fixup, d.Pointer, d.Kind(), d.Next(), d.Target())
+	return fmt.Sprintf("0x%08x:  raw: 0x%08x %16s: (next:%02d target: 0x%07x)", d.Fixup+baddr, d.Pointer, d.Kind(), d.Next(), d.Target()+baddr)
 }
 
 // DYLD_CHAINED_PTR_32_FIRMWARE
@@ -993,15 +1000,16 @@ func (d DyldChainedPtrArm64eSharedCacheRebase) Kind() string {
 	return "shared-cache-rebase"
 }
 func (d DyldChainedPtrArm64eSharedCacheRebase) String(baseAddr ...uint64) string {
+	var baddr uint64
 	if len(baseAddr) > 0 {
-		d.Fixup += baseAddr[0]
+		baddr = baseAddr[0]
 	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: %#x, high8: 0x%02x)",
-		d.Fixup,
+		d.Fixup+baddr,
 		d.Pointer,
 		d.Kind(),
 		d.Next(),
-		d.Target(),
+		d.Target()+baddr,
 		d.High8(),
 	)
 }
@@ -1046,8 +1054,9 @@ func (d DyldChainedPtrArm64eSharedCacheAuthRebase) Kind() string {
 	return "shared-cache-auth-rebase"
 }
 func (d DyldChainedPtrArm64eSharedCacheAuthRebase) String(baseAddr ...uint64) string {
+	var baddr uint64
 	if len(baseAddr) > 0 {
-		d.Fixup += baseAddr[0]
+		baddr = baseAddr[0]
 	}
 	// hack to handle the fact that the shared cache only has A keys
 	key := uint64(0)
@@ -1055,11 +1064,11 @@ func (d DyldChainedPtrArm64eSharedCacheAuthRebase) String(baseAddr ...uint64) st
 		key = 2
 	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: %#x, key: %s, addrDiv: %d, diversity: 0x%04x)",
-		d.Fixup,
+		d.Fixup+baddr,
 		d.Pointer,
 		d.Kind(),
 		d.Next(),
-		d.Target(),
+		d.Target()+baddr,
 		KeyName(key),
 		d.AddrDiv(),
 		d.Diversity(),
@@ -1100,15 +1109,16 @@ func (d DyldChainedPtrArm64eSegmentedRebase) Kind() string {
 	return "segmented-rebase"
 }
 func (d DyldChainedPtrArm64eSegmentedRebase) String(baseAddr ...uint64) string {
+	var baddr uint64
 	if len(baseAddr) > 0 {
-		d.Fixup += baseAddr[0]
+		baddr = baseAddr[0]
 	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: %#x, seg_index: %d)",
-		d.Fixup,
+		d.Fixup+baddr,
 		d.Pointer,
 		d.Kind(),
 		d.Next(),
-		d.Target(),
+		d.Target()+baddr,
 		d.SegIndex(),
 	)
 }
@@ -1156,15 +1166,16 @@ func (d DyldChainedPtrArm64eAuthSegmentedRebase) Kind() string {
 	return "segmented-auth-rebase"
 }
 func (d DyldChainedPtrArm64eAuthSegmentedRebase) String(baseAddr ...uint64) string {
+	var baddr uint64
 	if len(baseAddr) > 0 {
-		d.Fixup += baseAddr[0]
+		baddr = baseAddr[0]
 	}
 	return fmt.Sprintf("0x%08x:  raw: 0x%016x %16s: (next: %03d, target: %#x, seg_index: %d, key: %s, addrDiv: %d, diversity: 0x%04x)",
-		d.Fixup,
+		d.Fixup+baddr,
 		d.Pointer,
 		d.Kind(),
 		d.Next(),
-		d.Target(),
+		d.Target()+baddr,
 		d.SegIndex(),
 		KeyName(d.Key()),
 		d.AddrDiv(),
