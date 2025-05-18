@@ -960,10 +960,11 @@ func (d DyldChainedPtr32FirmwareRebase) Kind() string {
 	return "firmware-rebase"
 }
 func (d DyldChainedPtr32FirmwareRebase) String(baseAddr ...uint64) string {
+	var baddr uint64
 	if len(baseAddr) > 0 {
-		d.Fixup += baseAddr[0]
+		baddr = baseAddr[0]
 	}
-	return fmt.Sprintf("0x%08x:  raw: 0x%08x %16s: (next:%02d target: 0x%07x)", d.Fixup, d.Pointer, d.Kind(), d.Next(), d.Target())
+	return fmt.Sprintf("0x%08x:  raw: 0x%08x %16s: (next:%02d target: 0x%07x)", d.Fixup+baddr, d.Pointer, d.Kind(), d.Next(), d.Target()+baddr)
 }
 
 // DYLD_CHAINED_PTR_ARM64E_SHARED_CACHE
