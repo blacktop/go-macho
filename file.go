@@ -1538,6 +1538,10 @@ func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
 	return f.cr.ReadAt(p, off) // TODO: should this be f.cr  or f.sr?
 }
 
+func (f *File) ReadAtAddr(p []byte, addr uint64) (n int, err error) {
+	return f.cr.ReadAtAddr(p, addr)
+}
+
 // GetOffset returns the file offset for a given virtual address
 func (f *File) GetOffset(address uint64) (uint64, error) {
 	return f.vma.GetOffset(address)
@@ -1723,12 +1727,17 @@ func (f *File) GetCStrings() (map[string]map[string]uint64, error) {
 				s = strings.Trim(s, "\x00")
 
 				if len(s) > 0 {
+					// Check if string contains printable characters (including Unicode like emojis)
+					isPrintable := true
 					for _, r := range s {
-						if r > unicode.MaxASCII || !unicode.IsPrint(r) {
-							continue // skip non-ascii strings
+						if !unicode.IsPrint(r) && !unicode.IsSpace(r) {
+							isPrintable = false
+							break
 						}
 					}
-					strs[section][s] = pos
+					if isPrintable {
+						strs[section][s] = pos
+					}
 				}
 			}
 		}
