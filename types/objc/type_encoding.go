@@ -608,6 +608,9 @@ func CutType(typStr string) (string, string, bool) {
 
 	typ := []byte(typStr)
 	for {
+		if i >= len(typ) {
+			return "", string(typ[1:]), false
+		}
 		switch typ[i] {
 		case '+': /* gnu register */
 			fallthrough

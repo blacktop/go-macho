@@ -10,6 +10,10 @@ import (
 
 const IsDyldPreoptimized = 1 << 7
 
+const (
+	WORD_SHIFT = 3 // assuming 64-bit pointers (log2(8))
+)
+
 type Toc struct {
 	ClassList        uint64
 	NonLazyClassList uint64
@@ -423,11 +427,18 @@ type IvarList struct {
 }
 
 type IvarT struct {
-	Offset      uint64 // uint32_t*  (uint64_t* on x86_64)
-	NameVMAddr  uint64 // const char*
-	TypesVMAddr uint64 // const char*
-	Alignment   uint32
-	Size        uint32
+	Offset       uint64 // uint32_t*  (uint64_t* on x86_64)
+	NameVMAddr   uint64 // const char*
+	TypesVMAddr  uint64 // const char*
+	AlignmentRaw uint32
+	Size         uint32
+}
+
+func (i IvarT) Alignment() uint32 {
+	if i.AlignmentRaw == ^uint32(0) {
+		return 1 << WORD_SHIFT
+	}
+	return 1 << i.AlignmentRaw
 }
 
 type Ivar struct {

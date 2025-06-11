@@ -1263,8 +1263,23 @@ func (f *File) GetObjCIvars(vmaddr uint64) ([]objc.Ivar, error) {
 		return nil, fmt.Errorf("failed to read objc_ivar_list_t: %v", err)
 	}
 
+	// FIXME: what ARE these alignments ?
+	// var maxAlignment uint32
+	// for _, ivar := range ivs {
+	// 	if ivar.Alignment() > maxAlignment {
+	// 		maxAlignment = ivar.Alignment()
+	// 	}
+	// }
+
+	// var diff uint32
+	// if maxAlignment > 0 {
+	// 	alignMask := maxAlignment - 1
+	// 	diff = (diff + alignMask) &^ alignMask
+	// }
+
 	for _, ivar := range ivs {
 		ivar.Offset = f.vma.Convert(ivar.Offset)
+		// ivar.Offset += uint64(diff) // align ivar offsets to max alignment
 		ivar.NameVMAddr = f.vma.Convert(ivar.NameVMAddr)
 		ivar.TypesVMAddr = f.vma.Convert(ivar.TypesVMAddr)
 
@@ -1286,6 +1301,9 @@ func (f *File) GetObjCIvars(vmaddr uint64) ([]objc.Ivar, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to read ivar name cstring: %v", err)
 		}
+		// if diff > 0 {
+		// 	ivar.TypesVMAddr += uint64(diff) // align ivar types to max alignment
+		// }
 		t, err := f.GetCString(ivar.TypesVMAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read ivar types cstring: %v", err)
