@@ -1351,7 +1351,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if int64(s.Filesz) < 0 {
 				return nil, &FormatError{offset, "invalid section file size", s.Filesz}
 			}
-			// s.sr = io.NewSectionReader(r, int64(s.Offset), int64(s.Filesz))
+			s.sr = io.NewSectionReader(r, int64(s.Offset), int64(s.Filesz))
 			s.ReaderAt = f.sr
 		}
 	}

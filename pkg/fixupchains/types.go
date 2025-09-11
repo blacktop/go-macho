@@ -13,6 +13,7 @@ type DyldChainedFixups struct {
 	PointerFormat DCPtrKind
 	Starts        []DyldChainedStarts
 	Imports       []DcfImport
+	fixups        map[uint64]Fixup // keyed by target file offset
 	r             *bytes.Reader
 	sr            types.MachoReader
 	bo            binary.ByteOrder
@@ -40,6 +41,13 @@ type Bind interface {
 	Addend() uint64
 	Raw() uint64
 	String(baseAddr ...uint64) string
+}
+
+type Auth interface {
+	Fixup
+	Diversity() uint64
+	Key() uint64
+	AddrDiv() uint64
 }
 
 type DCSymbolsFormat uint32
@@ -1044,6 +1052,12 @@ func (d DyldChainedPtrArm64eSharedCacheAuthRebase) AddrDiv() uint64 {
 }
 func (d DyldChainedPtrArm64eSharedCacheAuthRebase) IsDataKey() bool {
 	return types.ExtractBits(uint64(d.Pointer), 51, 1) != 0 // implicitly always the 'A' key.  0 -> IA.  1 -> DA
+}
+func (d DyldChainedPtrArm64eSharedCacheAuthRebase) Key() uint64 {
+	if d.IsDataKey() {
+		return 2 // DA
+	}
+	return 0 // IA
 }
 func (d DyldChainedPtrArm64eSharedCacheAuthRebase) Next() uint64 {
 	return types.ExtractBits(uint64(d.Pointer), 52, 11) // 8-byte stide
