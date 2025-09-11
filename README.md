@@ -44,4 +44,4 @@ func main() {
 
 ## License
 
-MIT Copyright (c) 2020-2024 **blacktop**
+MIT Copyright (c) 2020-2025 **blacktop**
