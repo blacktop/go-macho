@@ -4,12 +4,17 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/blacktop/go-macho/types"
 )
+
+// ErrNoFixupAtOffset is returned when no fixup exists at the specified file offset.
+var ErrNoFixupAtOffset = errors.New("no fixup found at offset")
 
 // NewChainedFixups creates a new DyldChainedFixups instance
 func NewChainedFixups(lcdat *bytes.Reader, sr *types.MachoReader, bo binary.ByteOrder) *DyldChainedFixups {
@@ -23,58 +28,70 @@ func NewChainedFixups(lcdat *bytes.Reader, sr *types.MachoReader, bo binary.Byte
 
 // Parse parses a LC_DYLD_CHAINED_FIXUPS load command
 func (dcf *DyldChainedFixups) Parse() (*DyldChainedFixups, error) {
-
-	if dcf.Starts == nil {
-		if err := dcf.ParseStarts(); err != nil {
-			return nil, err
-		}
+	if err := dcf.ParseStarts(); err != nil {
+		return nil, err
 	}
 
-	// Parse Imports
-	if err := dcf.parseImports(); err != nil {
+	if err := dcf.EnsureImports(); err != nil {
 		return nil, fmt.Errorf("failed to parse imports: %v", err)
 	}
 
-	for segIdx, start := range dcf.Starts {
+	if dcf.chainsParsed {
+		return dcf, nil
+	}
 
-		if start.PageStarts == nil {
+	if dcf.fixups == nil {
+		dcf.fixups = make(map[uint64]Fixup)
+	} else {
+		for k := range dcf.fixups {
+			delete(dcf.fixups, k)
+		}
+	}
+	for idx := range dcf.Starts {
+		if len(dcf.Starts[idx].Fixups) > 0 {
+			dcf.Starts[idx].Fixups = dcf.Starts[idx].Fixups[:0]
+		}
+	}
+
+	for segIdx, start := range dcf.Starts {
+		if start.PageStarts == nil || start.PageCount == 0 {
 			continue
 		}
 
 		for pageIndex := uint16(0); pageIndex < start.PageCount; pageIndex++ {
 			offsetInPage := start.PageStarts[pageIndex]
-
 			if offsetInPage == DYLD_CHAINED_PTR_START_NONE {
 				continue
 			}
-
 			if offsetInPage&DYLD_CHAINED_PTR_START_MULTI != 0 {
-				// 32-bit chains which may need multiple starts per page
 				overflowIndex := offsetInPage & ^DYLD_CHAINED_PTR_START_MULTI
 				chainEnd := false
 				for !chainEnd {
-					chainEnd = (start.PageStarts[overflowIndex]&DYLD_CHAINED_PTR_START_LAST != 0)
-					offsetInPage = (start.PageStarts[overflowIndex] & ^DYLD_CHAINED_PTR_START_LAST)
+					chainEnd = (start.PageStarts[overflowIndex] & DYLD_CHAINED_PTR_START_LAST) != 0
+					offsetInPage = start.PageStarts[overflowIndex] & ^DYLD_CHAINED_PTR_START_LAST
 					if err := dcf.walkDcFixupChain(segIdx, pageIndex, offsetInPage); err != nil {
 						return nil, err
 					}
 					overflowIndex++
 				}
-
-			} else {
-				// one chain per page
-				if err := dcf.walkDcFixupChain(segIdx, pageIndex, offsetInPage); err != nil {
-					return nil, err
-				}
+				continue
+			}
+			if err := dcf.walkDcFixupChain(segIdx, pageIndex, offsetInPage); err != nil {
+				return nil, err
 			}
 		}
 	}
+
+	dcf.chainsParsed = true
 
 	return dcf, nil
 }
 
 // ParseStarts parses the DyldChainedStartsInSegment(s)
 func (dcf *DyldChainedFixups) ParseStarts() error {
+	if dcf.metadataParsed {
+		return nil
+	}
 
 	if err := binary.Read(dcf.r, dcf.bo, &dcf.DyldChainedFixupsHeader); err != nil {
 		return err
@@ -112,12 +129,223 @@ func (dcf *DyldChainedFixups) ParseStarts() error {
 			return err
 		}
 
-		dcf.PointerFormat = dcf.Starts[segIdx].PointerFormat
+		if dcf.PointerFormat == 0 {
+			dcf.PointerFormat = dcf.Starts[segIdx].PointerFormat
+		}
 	}
+
+	dcf.metadataParsed = true
+	dcf.segmentIndex = nil
 
 	return nil
 }
 
+// ResetSegmentIndex invalidates the cached segment lookup index so it can be rebuilt.
+func (dcf *DyldChainedFixups) ResetSegmentIndex() {
+	dcf.segmentIndex = nil
+}
+
+func (dcf *DyldChainedFixups) ensureSegmentIndex() {
+	if dcf.segmentIndex != nil {
+		return
+	}
+	index := make([]segmentRange, 0, len(dcf.Starts))
+	for idx := range dcf.Starts {
+		start := &dcf.Starts[idx]
+		if start.PageCount == 0 || start.PageSize == 0 || start.PageStarts == nil {
+			continue
+		}
+		segStart := start.SegmentOffset
+		segEnd := segStart + uint64(start.PageCount)*uint64(start.PageSize)
+		if segEnd <= segStart {
+			continue
+		}
+		index = append(index, segmentRange{start: segStart, end: segEnd, index: idx})
+	}
+	sort.Slice(index, func(i, j int) bool {
+		if index[i].start == index[j].start {
+			return index[i].end < index[j].end
+		}
+		return index[i].start < index[j].start
+	})
+	dcf.segmentIndex = index
+}
+
+func (dcf *DyldChainedFixups) findSegmentForOffset(offset uint64) *DyldChainedStarts {
+	dcf.ensureSegmentIndex()
+	if len(dcf.segmentIndex) == 0 {
+		return nil
+	}
+	i := sort.Search(len(dcf.segmentIndex), func(i int) bool {
+		return dcf.segmentIndex[i].start > offset
+	})
+	if i == 0 {
+		cover := dcf.segmentIndex[0]
+		if offset >= cover.start && offset < cover.end {
+			return &dcf.Starts[cover.index]
+		}
+		return nil
+	}
+	cover := dcf.segmentIndex[i-1]
+	if offset >= cover.start && offset < cover.end {
+		return &dcf.Starts[cover.index]
+	}
+	if i < len(dcf.segmentIndex) {
+		next := dcf.segmentIndex[i]
+		if offset >= next.start && offset < next.end {
+			return &dcf.Starts[next.index]
+		}
+	}
+	return nil
+}
+
+// EnsureImports lazily parses the imports table for chained fixups.
+func (dcf *DyldChainedFixups) EnsureImports() error {
+	if dcf.importsParsed {
+		return nil
+	}
+	if dcf.ImportsCount == 0 {
+		dcf.Imports = dcf.Imports[:0]
+		dcf.importsParsed = true
+		return nil
+	}
+	if err := dcf.parseImports(); err != nil {
+		return err
+	}
+	dcf.importsParsed = true
+	return nil
+}
+
+// Rebase returns the rebased target encoded at the given file offset if the location contains
+// a chained rebase pointer. The offset must be a file offset matching the coordinate system used
+// by dyld chained fixups metadata. The result matches the semantics of IsRebase (runtime offset).
+func (dcf *DyldChainedFixups) Rebase(offset uint64, preferredLoadAddress uint64) (uint64, error) {
+	start, pageStart, err := dcf.locateStartForOffset(offset)
+	if err != nil {
+		return 0, err
+	}
+	if pageStart == DYLD_CHAINED_PTR_START_NONE {
+		return 0, fmt.Errorf("offset %#x is not covered by chained rebase fixups", offset)
+	}
+	dcf.PointerFormat = start.PointerFormat
+
+	raw, err := dcf.readRawPointer(start.PointerFormat, offset)
+	if err != nil {
+		return 0, err
+	}
+
+	return dcf.decodeRebaseTarget(start.PointerFormat, offset, raw, preferredLoadAddress)
+}
+
+// RebaseRaw decodes a chained rebase pointer given the file offset and raw pointer bits.
+// preferredLoadAddress is used to produce the runtime offset consistent with IsRebase.
+func (dcf *DyldChainedFixups) RebaseRaw(offset uint64, raw uint64, preferredLoadAddress uint64) (uint64, error) {
+	start, pageStart, err := dcf.locateStartForOffset(offset)
+	if err != nil {
+		return 0, err
+	}
+	if pageStart == DYLD_CHAINED_PTR_START_NONE {
+		return 0, fmt.Errorf("offset %#x is not covered by chained rebase fixups", offset)
+	}
+	dcf.PointerFormat = start.PointerFormat
+
+	return dcf.decodeRebaseTarget(start.PointerFormat, offset, raw, preferredLoadAddress)
+}
+
+// PointerFormatForOffset reports the chained pointer format that applies to the given file offset.
+func (dcf *DyldChainedFixups) PointerFormatForOffset(offset uint64) (DCPtrKind, error) {
+	start, pageStart, err := dcf.locateStartForOffset(offset)
+	if err != nil {
+		return 0, err
+	}
+	if pageStart == DYLD_CHAINED_PTR_START_NONE {
+		return 0, fmt.Errorf("offset %#x is not covered by chained fixups", offset)
+	}
+	dcf.PointerFormat = start.PointerFormat
+	return start.PointerFormat, nil
+}
+
+func (dcf *DyldChainedFixups) locateStartForOffset(offset uint64) (*DyldChainedStarts, DCPtrStart, error) {
+	if err := dcf.ParseStarts(); err != nil {
+		return nil, 0, err
+	}
+
+	start := dcf.findSegmentForOffset(offset)
+	if start == nil {
+		return nil, 0, fmt.Errorf("offset %#x is not covered by chained rebase fixups", offset)
+	}
+
+	if start.PageSize == 0 {
+		return nil, 0, fmt.Errorf("invalid page size for chained fixups segment covering offset %#x", offset)
+	}
+
+	pageSize := uint64(start.PageSize)
+	segStart := start.SegmentOffset
+	if offset < segStart {
+		return nil, 0, fmt.Errorf("offset %#x precedes segment start %#x", offset, segStart)
+	}
+	pageIndex := (offset - segStart) / pageSize
+	if pageIndex >= uint64(len(start.PageStarts)) {
+		return nil, 0, fmt.Errorf("offset %#x exceeds page array bounds", offset)
+	}
+
+	return start, start.PageStarts[pageIndex], nil
+}
+
+func (dcf *DyldChainedFixups) decodeRebaseTarget(format DCPtrKind, offset uint64, raw uint64, preferredLoadAddress uint64) (uint64, error) {
+	switch format {
+	case DYLD_CHAINED_PTR_ARM64E, DYLD_CHAINED_PTR_ARM64E_USERLAND, DYLD_CHAINED_PTR_ARM64E_USERLAND24,
+		DYLD_CHAINED_PTR_ARM64E_KERNEL, DYLD_CHAINED_PTR_ARM64E_FIRMWARE:
+		if DcpArm64eIsBind(raw) {
+			return 0, fmt.Errorf("offset %#x encodes a bind pointer, not a rebase", offset)
+		}
+		if DcpArm64eIsAuth(raw) {
+			rebase := DyldChainedPtrArm64eAuthRebase{Pointer: raw, Fixup: offset}
+			return rebase.Target(), nil
+		}
+		rebase := DyldChainedPtrArm64eRebase{Pointer: raw, Fixup: offset}
+		target := rebase.UnpackTarget()
+		if format == DYLD_CHAINED_PTR_ARM64E || format == DYLD_CHAINED_PTR_ARM64E_USERLAND24 || format == DYLD_CHAINED_PTR_ARM64E_FIRMWARE {
+			target -= preferredLoadAddress
+		}
+		return target, nil
+	case DYLD_CHAINED_PTR_64:
+		if Generic64IsBind(raw) {
+			return 0, fmt.Errorf("offset %#x encodes a bind pointer, not a rebase", offset)
+		}
+		rebase := DyldChainedPtr64Rebase{Pointer: raw, Fixup: offset}
+		target := rebase.UnpackedTarget()
+		target -= preferredLoadAddress
+		return target, nil
+	case DYLD_CHAINED_PTR_64_OFFSET:
+		if Generic64IsBind(raw) {
+			return 0, fmt.Errorf("offset %#x encodes a bind pointer, not a rebase", offset)
+		}
+		rebase := DyldChainedPtr64RebaseOffset{Pointer: raw, Fixup: offset}
+		target := rebase.UnpackedTarget()
+		target -= preferredLoadAddress
+		return target, nil
+	case DYLD_CHAINED_PTR_64_KERNEL_CACHE, DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE:
+		rebase := DyldChainedPtr64KernelCacheRebase{Pointer: raw, Fixup: offset}
+		return rebase.Target(), nil
+	case DYLD_CHAINED_PTR_32:
+		ptr32 := uint32(raw)
+		if Generic32IsBind(ptr32) {
+			return 0, fmt.Errorf("offset %#x encodes a bind pointer, not a rebase", offset)
+		}
+		rebase := DyldChainedPtr32Rebase{Pointer: ptr32, Fixup: offset}
+		target := rebase.Target()
+		return target - preferredLoadAddress, nil
+	case DYLD_CHAINED_PTR_32_CACHE:
+		rebase := DyldChainedPtr32CacheRebase{Pointer: uint32(raw), Fixup: offset}
+		return rebase.Target(), nil
+	case DYLD_CHAINED_PTR_32_FIRMWARE:
+		rebase := DyldChainedPtr32FirmwareRebase{Pointer: uint32(raw), Fixup: offset}
+		return rebase.Target() - preferredLoadAddress, nil
+	default:
+		return 0, fmt.Errorf("pointer format %d not supported for rebase lookups", format)
+	}
+}
 func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, offsetInPage DCPtrStart) error {
 
 	var dcPtr uint32
@@ -406,9 +634,35 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 	return nil
 }
 
+func (dcf *DyldChainedFixups) readRawPointer(format DCPtrKind, offset uint64) (uint64, error) {
+	size := pointerSize(format)
+	if size != 4 && size != 8 {
+		return 0, fmt.Errorf("unsupported pointer size for format %d", format)
+	}
+
+	// Check if we have a valid reader
+	if dcf.sr == nil {
+		return 0, fmt.Errorf("no reader available for reading pointer at %#x", offset)
+	}
+
+	var buf [8]byte
+	n, err := dcf.sr.ReadAt(buf[:size], int64(offset))
+	if err != nil && err != io.EOF {
+		return 0, fmt.Errorf("failed to read pointer at %#x: %w", offset, err)
+	}
+	if n != size {
+		return 0, fmt.Errorf("short read at %#x", offset)
+	}
+	if size == 4 {
+		return uint64(dcf.bo.Uint32(buf[:4])), nil
+	}
+	return dcf.bo.Uint64(buf[:8]), nil
+}
+
 func (dcf *DyldChainedFixups) parseImports() error {
 
 	var imports []Import
+	dcf.Imports = dcf.Imports[:0]
 
 	if _, err := dcf.r.Seek(int64(dcf.ImportsOffset), io.SeekStart); err != nil {
 		return fmt.Errorf("failed to seek to imports offset %d: %v", dcf.ImportsOffset, err)
@@ -512,6 +766,9 @@ func (dcf *DyldChainedFixups) IsRebase(addr, preferredLoadAddress uint64) (uint6
 }
 
 func (dcf *DyldChainedFixups) IsBind(addr uint64) (*DcfImport, int64, bool) {
+	if err := dcf.EnsureImports(); err != nil {
+		return nil, 0, false
+	}
 	if len(dcf.Imports) == 0 {
 		return nil, 0, false
 	}
@@ -580,9 +837,326 @@ func (dcf *DyldChainedFixups) IsBind(addr uint64) (*DcfImport, int64, bool) {
 	}
 }
 
-// Lookup returns the fixup that points to the given file offset.
-// For virtual addresses, convert to file offset first using macho.GetOffset(addr).
-func (dcf *DyldChainedFixups) Lookup(targetOffset uint64) (Fixup, bool) {
-	f, ok := dcf.fixups[targetOffset]
-	return f, ok
+// LookupByTarget returns all fixups that point to the given target address.
+// This only includes rebases (including auth rebases), not binds.
+// Note: This requires the chains to be walked first (calls Parse if needed).
+func (dcf *DyldChainedFixups) LookupByTarget(targetOffset uint64) []Fixup {
+	// Ensure chains have been walked to populate the fixups map
+	if !dcf.chainsParsed {
+		if _, err := dcf.Parse(); err != nil {
+			return nil
+		}
+	}
+
+	if dcf.fixups == nil {
+		return nil
+	}
+
+	// For now, return single fixup as slice for compatibility
+	if f, ok := dcf.fixups[targetOffset]; ok {
+		return []Fixup{f}
+	}
+	return nil
+}
+
+// LookupByOffset returns the fixup at the given file offset (where the fixup is located).
+// Note: This requires the chains to be walked first (calls Parse if needed).
+func (dcf *DyldChainedFixups) LookupByOffset(fileOffset uint64) (Fixup, bool) {
+	// Ensure chains have been walked to populate the Fixups slices
+	if !dcf.chainsParsed {
+		if _, err := dcf.Parse(); err != nil {
+			return nil, false
+		}
+	}
+
+	if dcf.Starts == nil {
+		return nil, false
+	}
+
+	// Search through all segments
+	for _, seg := range dcf.Starts {
+		for _, fixup := range seg.Fixups {
+			if fixup.Offset() == fileOffset {
+				return fixup, true
+			}
+		}
+	}
+	return nil, false
+}
+
+// GetAuthRebase returns the auth rebase at the given target, if it exists.
+// This is useful for quickly checking if a pointer is authenticated and getting its diversity.
+// Note: This requires the chains to be walked first (calls Parse if needed).
+func (dcf *DyldChainedFixups) GetAuthRebase(targetOffset uint64) (Auth, bool) {
+	// Ensure chains have been walked to populate the fixups map
+	if !dcf.chainsParsed {
+		if _, err := dcf.Parse(); err != nil {
+			return nil, false
+		}
+	}
+
+	if fixup, ok := dcf.fixups[targetOffset]; ok {
+		if auth, ok := fixup.(Auth); ok {
+			return auth, true
+		}
+	}
+	return nil, false
+}
+
+func (dcf *DyldChainedFixups) GetFixupAtOffset(offset uint64) (Fixup, error) {
+	// Ensure metadata is parsed
+	if err := dcf.ParseStarts(); err != nil {
+		return nil, fmt.Errorf("failed to parse starts: %w", err)
+	}
+
+	// Ensure imports are available for bind fixups
+	if err := dcf.EnsureImports(); err != nil {
+		return nil, fmt.Errorf("failed to ensure imports: %w", err)
+	}
+
+	// Find the segment and page start for this offset
+	start, pageStart, err := dcf.locateStartForOffset(offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to locate start for offset %#x: %w", offset, err)
+	}
+
+	// If page has no fixups, this offset can't contain a fixup
+	if pageStart == DYLD_CHAINED_PTR_START_NONE {
+		return nil, ErrNoFixupAtOffset
+	}
+
+	// Check if this offset is properly aligned for the pointer format
+	pointerSize := uint64(pointerSize(start.PointerFormat))
+	if offset%pointerSize != 0 {
+		return nil, ErrNoFixupAtOffset
+	}
+
+	// Calculate page boundaries
+	pageSize := uint64(start.PageSize)
+	segStart := start.SegmentOffset
+	pageIndex := (offset - segStart) / pageSize
+	pageContentStart := segStart + pageIndex*pageSize
+	offsetInPage := offset - pageContentStart
+
+	// Check if this offset could be part of a chain based on stride alignment
+	stride := stride(start.PointerFormat)
+	if offsetInPage%stride != 0 {
+		return nil, ErrNoFixupAtOffset
+	}
+
+	// Now we need to check if this specific offset is actually part of a chain
+	// We'll do this by checking if it's reachable from any chain start on this page
+	if pageStart&DYLD_CHAINED_PTR_START_MULTI != 0 {
+		// Multiple starts in page - check each one
+		overflowIndex := pageStart & ^DYLD_CHAINED_PTR_START_MULTI
+		for {
+			chainEnd := (start.PageStarts[overflowIndex] & DYLD_CHAINED_PTR_START_LAST) != 0
+			chainStart := start.PageStarts[overflowIndex] & ^DYLD_CHAINED_PTR_START_LAST
+
+			if found, fixup, err := dcf.checkChainForOffset(start, pageContentStart, uint64(chainStart), offsetInPage); err != nil {
+				return nil, err
+			} else if found {
+				return fixup, nil
+			}
+
+			if chainEnd {
+				break
+			}
+			overflowIndex++
+		}
+	} else {
+		// Single chain start in page
+		if found, fixup, err := dcf.checkChainForOffset(start, pageContentStart, uint64(pageStart), offsetInPage); err != nil {
+			return nil, err
+		} else if found {
+			return fixup, nil
+		}
+	}
+
+	return nil, ErrNoFixupAtOffset
+}
+
+// checkChainForOffset walks a single chain to see if it contains the target offset.
+// Returns (true, fixup, nil) if found, (false, nil, nil) if not found, or (false, nil, err) on error.
+func (dcf *DyldChainedFixups) checkChainForOffset(start *DyldChainedStarts, pageContentStart, chainStartOffset, targetOffsetInPage uint64) (bool, Fixup, error) {
+	currentOffset := chainStartOffset
+	stride := stride(start.PointerFormat)
+
+	for {
+		// Check if we've reached our target offset
+		if currentOffset == targetOffsetInPage {
+			// Read and decode the fixup at this location
+			fixupLocation := pageContentStart + currentOffset
+			fixup, err := dcf.readAndDecodeFixup(start.PointerFormat, fixupLocation)
+			return true, fixup, err
+		}
+
+		// Read the current pointer to get the next offset
+		fixupLocation := pageContentStart + currentOffset
+		raw, err := dcf.readRawPointer(start.PointerFormat, fixupLocation)
+		if err != nil {
+			return false, nil, fmt.Errorf("failed to read pointer at %#x: %w", fixupLocation, err)
+		}
+
+		// Calculate next offset based on pointer format
+		var next uint64
+		switch start.PointerFormat {
+		case DYLD_CHAINED_PTR_32, DYLD_CHAINED_PTR_32_CACHE, DYLD_CHAINED_PTR_32_FIRMWARE:
+			next = Generic32Next(uint32(raw))
+		case DYLD_CHAINED_PTR_64, DYLD_CHAINED_PTR_64_OFFSET, DYLD_CHAINED_PTR_64_KERNEL_CACHE, DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE:
+			next = Generic64Next(raw)
+		case DYLD_CHAINED_PTR_ARM64E, DYLD_CHAINED_PTR_ARM64E_USERLAND, DYLD_CHAINED_PTR_ARM64E_USERLAND24,
+			DYLD_CHAINED_PTR_ARM64E_KERNEL, DYLD_CHAINED_PTR_ARM64E_FIRMWARE:
+			next = DcpArm64eNext(raw)
+		default:
+			return false, nil, fmt.Errorf("unsupported pointer format %d", start.PointerFormat)
+		}
+
+		// If next is 0, we've reached the end of the chain
+		if next == 0 {
+			break
+		}
+
+		// Move to next fixup in chain
+		currentOffset += next * stride
+
+		// Safety check to prevent infinite loops
+		if currentOffset > uint64(start.PageSize) {
+			break
+		}
+	}
+
+	return false, nil, nil
+}
+
+// readAndDecodeFixup reads the raw pointer at the given location and decodes it into the appropriate Fixup type.
+func (dcf *DyldChainedFixups) readAndDecodeFixup(format DCPtrKind, fixupLocation uint64) (Fixup, error) {
+	raw, err := dcf.readRawPointer(format, fixupLocation)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read raw pointer: %w", err)
+	}
+
+	// Decode based on pointer format
+	switch format {
+	case DYLD_CHAINED_PTR_32:
+		ptr32 := uint32(raw)
+		if Generic32IsBind(ptr32) {
+			bind := DyldChainedPtr32Bind{Pointer: ptr32, Fixup: fixupLocation}
+			if ord := bind.Ordinal(); ord < uint64(len(dcf.Imports)) {
+				bind.Import = dcf.Imports[ord].Name
+			}
+			return bind, nil
+		}
+		return DyldChainedPtr32Rebase{Pointer: ptr32, Fixup: fixupLocation}, nil
+
+	case DYLD_CHAINED_PTR_32_CACHE:
+		return DyldChainedPtr32CacheRebase{Pointer: uint32(raw), Fixup: fixupLocation}, nil
+
+	case DYLD_CHAINED_PTR_32_FIRMWARE:
+		return DyldChainedPtr32FirmwareRebase{Pointer: uint32(raw), Fixup: fixupLocation}, nil
+
+	case DYLD_CHAINED_PTR_64:
+		if Generic64IsBind(raw) {
+			bind := DyldChainedPtr64Bind{Pointer: raw, Fixup: fixupLocation}
+			if ord := bind.Ordinal(); ord < uint64(len(dcf.Imports)) {
+				bind.Import = dcf.Imports[ord].Name
+			}
+			return bind, nil
+		}
+		return DyldChainedPtr64Rebase{Pointer: raw, Fixup: fixupLocation}, nil
+
+	case DYLD_CHAINED_PTR_64_OFFSET:
+		if Generic64IsBind(raw) {
+			bind := DyldChainedPtr64Bind{Pointer: raw, Fixup: fixupLocation}
+			if ord := bind.Ordinal(); ord < uint64(len(dcf.Imports)) {
+				bind.Import = dcf.Imports[ord].Name
+			}
+			return bind, nil
+		}
+		return DyldChainedPtr64RebaseOffset{Pointer: raw, Fixup: fixupLocation}, nil
+
+	case DYLD_CHAINED_PTR_64_KERNEL_CACHE, DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE:
+		return DyldChainedPtr64KernelCacheRebase{Pointer: raw, Fixup: fixupLocation}, nil
+
+	case DYLD_CHAINED_PTR_ARM64E_KERNEL:
+		if !DcpArm64eIsBind(raw) && !DcpArm64eIsAuth(raw) {
+			return DyldChainedPtrArm64eRebase{Pointer: raw, Fixup: fixupLocation}, nil
+		} else if DcpArm64eIsBind(raw) && !DcpArm64eIsAuth(raw) {
+			bind := DyldChainedPtrArm64eBind{Pointer: raw, Fixup: fixupLocation}
+			if ord := bind.Ordinal(); ord < uint64(len(dcf.Imports)) {
+				bind.Import = dcf.Imports[ord].Name
+			}
+			return bind, nil
+		} else if !DcpArm64eIsBind(raw) && DcpArm64eIsAuth(raw) {
+			return DyldChainedPtrArm64eAuthRebase{Pointer: raw, Fixup: fixupLocation}, nil
+		} else {
+			bind := DyldChainedPtrArm64eAuthBind{Pointer: raw, Fixup: fixupLocation}
+			if ord := bind.Ordinal(); ord < uint64(len(dcf.Imports)) {
+				bind.Import = dcf.Imports[ord].Name
+			}
+			return bind, nil
+		}
+
+	case DYLD_CHAINED_PTR_ARM64E_FIRMWARE:
+		if !DcpArm64eIsBind(raw) && !DcpArm64eIsAuth(raw) {
+			return DyldChainedPtrArm64eRebase{Pointer: raw, Fixup: fixupLocation}, nil
+		} else if DcpArm64eIsBind(raw) && !DcpArm64eIsAuth(raw) {
+			bind := DyldChainedPtrArm64eBind{Pointer: raw, Fixup: fixupLocation}
+			if ord := bind.Ordinal(); ord < uint64(len(dcf.Imports)) {
+				bind.Import = dcf.Imports[ord].Name
+			}
+			return bind, nil
+		} else if !DcpArm64eIsBind(raw) && DcpArm64eIsAuth(raw) {
+			return DyldChainedPtrArm64eAuthRebase{Pointer: raw, Fixup: fixupLocation}, nil
+		} else {
+			bind := DyldChainedPtrArm64eAuthBind{Pointer: raw, Fixup: fixupLocation}
+			if ord := bind.Ordinal(); ord < uint64(len(dcf.Imports)) {
+				bind.Import = dcf.Imports[ord].Name
+			}
+			return bind, nil
+		}
+
+	case DYLD_CHAINED_PTR_ARM64E, DYLD_CHAINED_PTR_ARM64E_USERLAND:
+		if !DcpArm64eIsBind(raw) && !DcpArm64eIsAuth(raw) {
+			return DyldChainedPtrArm64eRebase{Pointer: raw, Fixup: fixupLocation}, nil
+		} else if DcpArm64eIsBind(raw) && !DcpArm64eIsAuth(raw) {
+			bind := DyldChainedPtrArm64eBind{Pointer: raw, Fixup: fixupLocation}
+			if ord := bind.Ordinal(); ord < uint64(len(dcf.Imports)) {
+				bind.Import = dcf.Imports[ord].Name
+			}
+			return bind, nil
+		} else if !DcpArm64eIsBind(raw) && DcpArm64eIsAuth(raw) {
+			return DyldChainedPtrArm64eAuthRebase{Pointer: raw, Fixup: fixupLocation}, nil
+		} else {
+			bind := DyldChainedPtrArm64eAuthBind{Pointer: raw, Fixup: fixupLocation}
+			if ord := bind.Ordinal(); ord < uint64(len(dcf.Imports)) {
+				bind.Import = dcf.Imports[ord].Name
+			}
+			return bind, nil
+		}
+
+	case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
+		if !DcpArm64eIsBind(raw) && !DcpArm64eIsAuth(raw) {
+			return DyldChainedPtrArm64eRebase{Pointer: raw, Fixup: fixupLocation}, nil
+		} else if DcpArm64eIsBind(raw) && DcpArm64eIsAuth(raw) {
+			bind := DyldChainedPtrArm64eAuthBind24{Pointer: raw, Fixup: fixupLocation}
+			if ord := bind.Ordinal(); ord < uint64(len(dcf.Imports)) {
+				bind.Import = dcf.Imports[ord].Name
+			}
+			return bind, nil
+		} else if !DcpArm64eIsBind(raw) && DcpArm64eIsAuth(raw) {
+			return DyldChainedPtrArm64eAuthRebase{Pointer: raw, Fixup: fixupLocation}, nil
+		} else if DcpArm64eIsBind(raw) && !DcpArm64eIsAuth(raw) {
+			bind := DyldChainedPtrArm64eBind24{Pointer: raw, Fixup: fixupLocation}
+			if ord := bind.Ordinal(); ord < uint64(len(dcf.Imports)) {
+				bind.Import = dcf.Imports[ord].Name
+			}
+			return bind, nil
+		}
+
+	default:
+		return nil, fmt.Errorf("unsupported pointer format %d for fixup decoding", format)
+	}
+
+	return nil, fmt.Errorf("failed to decode fixup for format %d", format)
 }

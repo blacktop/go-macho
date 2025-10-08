@@ -10,13 +10,17 @@ import (
 
 type DyldChainedFixups struct {
 	DyldChainedFixupsHeader
-	PointerFormat DCPtrKind
-	Starts        []DyldChainedStarts
-	Imports       []DcfImport
-	fixups        map[uint64]Fixup // keyed by target file offset
-	r             *bytes.Reader
-	sr            types.MachoReader
-	bo            binary.ByteOrder
+	PointerFormat  DCPtrKind
+	Starts         []DyldChainedStarts
+	Imports        []DcfImport
+	fixups         map[uint64]Fixup // keyed by target file offset
+	r              *bytes.Reader
+	sr             types.MachoReader
+	bo             binary.ByteOrder
+	metadataParsed bool
+	importsParsed  bool
+	chainsParsed   bool
+	segmentIndex   []segmentRange
 }
 
 type Fixup interface {
@@ -103,6 +107,12 @@ type DyldChainedStarts struct {
 	Fixups      []Fixup
 }
 
+type segmentRange struct {
+	start uint64
+	end   uint64
+	index int
+}
+
 // Rebases filters fixups to only rebases
 func (s *DyldChainedStarts) Rebases() []Rebase {
 	var rebases []Rebase
@@ -154,6 +164,20 @@ func stride(pointerFormat DCPtrKind) uint64 {
 	default:
 		panic(fmt.Sprintf("unsupported pointer chain format: %d", pointerFormat))
 	}
+}
+
+func pointerSize(pointerFormat DCPtrKind) int {
+	switch pointerFormat {
+	case DYLD_CHAINED_PTR_32, DYLD_CHAINED_PTR_32_CACHE, DYLD_CHAINED_PTR_32_FIRMWARE:
+		return 4
+	default:
+		return 8
+	}
+}
+
+// PointerSize returns the size in bytes for pointers using the given chained pointer format.
+func PointerSize(pointerFormat DCPtrKind) int {
+	return pointerSize(pointerFormat)
 }
 
 // DyldChainedStartsInSegment object is embedded in dyld_chain_starts_in_image

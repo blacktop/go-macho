@@ -222,7 +222,7 @@ func (k SplitInfoKind) String() string {
 	case DYLD_CACHE_ADJ_V2_THREADED_POINTER_64:
 		return "threaded_pointer_64"
 	default:
-		return fmt.Sprintf("unknown kind %#02x", k)
+		return fmt.Sprintf("unknown kind %#02x", uint64(k))
 	}
 
 }
