@@ -39,6 +39,19 @@ func (f *File) rebasePtr(ptr uint64) uint64 {
 	}
 }
 
+func (f *File) getCStringWithFallback(addr uint64, label string) (string, error) {
+	str, err := f.GetCString(addr)
+	if err == nil {
+		return str, nil
+	}
+	if errors.Is(err, io.EOF) ||
+		errors.Is(err, ErrCStringNoTerminator) ||
+		errors.Is(err, ErrCStringNotFound) {
+		return fmt.Sprintf("/* unresolved %s at %#x */", label, addr), nil
+	}
+	return "", err
+}
+
 // HasObjC returns true if MachO contains a __objc_imageinfo section
 func (f *File) HasObjC() bool {
 	for _, s := range f.Segments() {
@@ -1194,11 +1207,11 @@ func (f *File) forEachObjCMethod(methodListVMAddr uint64, handler func(uint64, o
 			method.TypesVMAddr = uint64(methodVMAddr+int64(m.TypesOffset)) + uint64(unsafe.Offsetof(m.TypesOffset))
 			method.ImpVMAddr = uint64(methodVMAddr+int64(m.ImpOffset)) + uint64(unsafe.Offsetof(m.ImpOffset))
 
-			method.Name, err = f.GetCString(method.NameVMAddr)
+			method.Name, err = f.getCStringWithFallback(method.NameVMAddr, "selector")
 			if err != nil {
 				return fmt.Errorf("failed to read relative_method_t name cstring: %v", err)
 			}
-			method.Types, err = f.GetCString(method.TypesVMAddr)
+			method.Types, err = f.getCStringWithFallback(method.TypesVMAddr, "method types")
 			if err != nil {
 				return fmt.Errorf("failed to read relative_method_t types cstring: %v", err)
 			}
@@ -1219,11 +1232,11 @@ func (f *File) forEachObjCMethod(methodListVMAddr uint64, handler func(uint64, o
 			m.NameVMAddr = f.vma.Convert(m.NameVMAddr)
 			m.TypesVMAddr = f.vma.Convert(m.TypesVMAddr)
 			m.ImpVMAddr = f.vma.Convert(m.ImpVMAddr)
-			n, err := f.GetCString(m.NameVMAddr)
+			n, err := f.getCStringWithFallback(m.NameVMAddr, "selector")
 			if err != nil {
 				return fmt.Errorf("failed to read method_t name cstring: %v", err)
 			}
-			t, err := f.GetCString(m.TypesVMAddr)
+			t, err := f.getCStringWithFallback(m.TypesVMAddr, "method types")
 			if err != nil {
 				return fmt.Errorf("failed to read method_t types cstring: %v", err)
 			}
@@ -1304,7 +1317,7 @@ func (f *File) GetObjCIvars(vmaddr uint64) ([]objc.Ivar, error) {
 		// if diff > 0 {
 		// 	ivar.TypesVMAddr += uint64(diff) // align ivar types to max alignment
 		// }
-		t, err := f.GetCString(ivar.TypesVMAddr)
+		t, err := f.getCStringWithFallback(ivar.TypesVMAddr, "ivar type")
 		if err != nil {
 			return nil, fmt.Errorf("failed to read ivar types cstring: %v", err)
 		}
@@ -1342,11 +1355,11 @@ func (f *File) GetObjCProperties(vmaddr uint64) ([]objc.Property, error) {
 		prop.NameVMAddr = f.vma.Convert(prop.NameVMAddr)
 		prop.AttributesVMAddr = f.vma.Convert(prop.AttributesVMAddr)
 
-		name, err := f.GetCString(prop.NameVMAddr)
+		name, err := f.getCStringWithFallback(prop.NameVMAddr, "property name")
 		if err != nil {
 			return nil, fmt.Errorf("failed to read prop name cstring: %v", err)
 		}
-		attrib, err := f.GetCString(prop.AttributesVMAddr)
+		attrib, err := f.getCStringWithFallback(prop.AttributesVMAddr, "property attributes")
 		if err != nil {
 			return nil, fmt.Errorf("failed to read prop attributes cstring: %v", err)
 		}

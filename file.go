@@ -60,6 +60,9 @@ var ErrMachOSectionNotFound = errors.New("MachO missing required section")
 var ErrMachODyldInfoNotFound = errors.New("LC_DYLD_INFO(_ONLY) not found")
 var ErrMachONoBindInfo = errors.New("MachO does not contain bind information (fixups)")
 
+var ErrCStringNoTerminator = errors.New("c-string has no terminator")
+var ErrCStringNotFound = errors.New("c-string not found")
+
 // FormatError is returned by some operations if the data does
 // not have the correct format for an object file.
 type FormatError struct {
@@ -1752,22 +1755,52 @@ func (f *File) GetBindName(pointer uint64) (string, error) {
 
 // GetCString returns a c-string at a given virtual address in the MachO
 func (f *File) GetCString(addr uint64) (string, error) {
-	// Thread-safe: Use ReadAtAddr which doesn't modify shared state
-	const maxStringLen = 4096
-	buf := make([]byte, maxStringLen)
+	const (
+		chunkSize = 0x1000  // 4 KiB per read attempt
+		maxLength = 1 << 20 // 1 MiB safety cap
+	)
 
-	n, err := f.cr.ReadAtAddr(buf, addr)
-	if err != nil && err != io.EOF {
-		return "", fmt.Errorf("failed to read at address %#x: %w", addr, err)
+	buf := make([]byte, chunkSize)
+	var out []byte
+	current := addr
+
+	for len(out) < maxLength {
+		n, err := f.cr.ReadAtAddr(buf, current)
+		if n > 0 {
+			nullIdx := bytes.IndexByte(buf[:n], 0)
+			if nullIdx >= 0 {
+				out = append(out, buf[:nullIdx]...)
+				if len(out) == 0 {
+					return "", fmt.Errorf("%w at address %#x", ErrCStringNotFound, addr)
+				}
+				return string(out), nil
+			}
+			out = append(out, buf[:n]...)
+			current += uint64(n)
+			if errors.Is(err, io.EOF) {
+				return "", fmt.Errorf("%w at address %#x", ErrCStringNoTerminator, addr)
+			}
+			continue
+		}
+
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				if len(out) == 0 {
+					return "", fmt.Errorf("%w at address %#x", ErrCStringNotFound, addr)
+				}
+				return "", fmt.Errorf("%w at address %#x", ErrCStringNoTerminator, addr)
+			}
+			return "", fmt.Errorf("failed to read at address %#x: %w", current, err)
+		}
+
+		// No bytes read and no error, avoid infinite loop
+		break
 	}
 
-	// Find null terminator
-	nullIdx := bytes.IndexByte(buf[:n], 0)
-	if nullIdx == -1 {
-		return "", fmt.Errorf("string not found at address %#x (no null terminator)", addr)
+	if len(out) == 0 {
+		return "", fmt.Errorf("%w at address %#x", ErrCStringNotFound, addr)
 	}
-
-	return string(buf[:nullIdx]), nil
+	return "", fmt.Errorf("%w at address %#x", ErrCStringNoTerminator, addr)
 }
 
 func (f *File) GetCStrings() (map[string]map[string]uint64, error) {
@@ -1823,22 +1856,51 @@ func (f *File) GetCStrings() (map[string]map[string]uint64, error) {
 
 // GetCStringAtOffset returns a c-string at a given offset into the MachO
 func (f *File) GetCStringAtOffset(strOffset int64) (string, error) {
-	// Thread-safe: Use ReadAt which doesn't modify shared state
-	const maxStringLen = 4096
-	buf := make([]byte, maxStringLen)
+	const (
+		chunkSize = 0x1000  // 4 KiB per read attempt
+		maxLength = 1 << 20 // 1 MiB safety cap
+	)
 
-	n, err := f.cr.ReadAt(buf, strOffset)
-	if err != nil && err != io.EOF {
-		return "", fmt.Errorf("failed to read at offset %#x: %w", strOffset, err)
+	buf := make([]byte, chunkSize)
+	var out []byte
+	current := strOffset
+
+	for len(out) < maxLength {
+		n, err := f.cr.ReadAt(buf, current)
+		if n > 0 {
+			nullIdx := bytes.IndexByte(buf[:n], 0)
+			if nullIdx >= 0 {
+				out = append(out, buf[:nullIdx]...)
+				if len(out) == 0 {
+					return "", fmt.Errorf("%w at offset %#x", ErrCStringNotFound, strOffset)
+				}
+				return string(out), nil
+			}
+			out = append(out, buf[:n]...)
+			current += int64(n)
+			if errors.Is(err, io.EOF) {
+				return "", fmt.Errorf("%w at offset %#x", ErrCStringNoTerminator, strOffset)
+			}
+			continue
+		}
+
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				if len(out) == 0 {
+					return "", fmt.Errorf("%w at offset %#x", ErrCStringNotFound, strOffset)
+				}
+				return "", fmt.Errorf("%w at offset %#x", ErrCStringNoTerminator, strOffset)
+			}
+			return "", fmt.Errorf("failed to read at offset %#x: %w", current, err)
+		}
+
+		break
 	}
 
-	// Find null terminator
-	nullIdx := bytes.IndexByte(buf[:n], 0)
-	if nullIdx == -1 {
-		return "", fmt.Errorf("string not found at offset %#x (no null terminator)", strOffset)
+	if len(out) == 0 {
+		return "", fmt.Errorf("%w at offset %#x", ErrCStringNotFound, strOffset)
 	}
-
-	return string(buf[:nullIdx]), nil
+	return "", fmt.Errorf("%w at offset %#x", ErrCStringNoTerminator, strOffset)
 }
 
 // IsCString returns cstring at given virtual address if is in a CstringLiterals section
