@@ -42,6 +42,7 @@ func TestLookupFunctionality(t *testing.T) {
 				// Add to both places
 				dcf.Starts[0].Fixups = append(dcf.Starts[0].Fixups, authRebase)
 				dcf.fixups[authRebase.Target()] = authRebase
+				dcf.chainsParsed = true
 
 				return dcf
 			},
@@ -74,6 +75,7 @@ func TestLookupFunctionality(t *testing.T) {
 				// Add to both places
 				dcf.Starts[0].Fixups = append(dcf.Starts[0].Fixups, rebase)
 				dcf.fixups[rebase.Target()] = rebase
+				dcf.chainsParsed = true
 
 				return dcf
 			},
@@ -86,8 +88,9 @@ func TestLookupFunctionality(t *testing.T) {
 			name: "lookup non-existent target",
 			setupFixups: func() *DyldChainedFixups {
 				return &DyldChainedFixups{
-					fixups: make(map[uint64]Fixup),
-					Starts: []DyldChainedStarts{},
+					fixups:       make(map[uint64]Fixup),
+					Starts:       []DyldChainedStarts{},
+					chainsParsed: true,
 				}
 			},
 			targetOffset:  0x9999,
@@ -101,21 +104,14 @@ func TestLookupFunctionality(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dcf := tt.setupFixups()
 
-			// Test the original Lookup function
-			fixup, found := dcf.Lookup(tt.targetOffset)
+			fixups := dcf.LookupByTarget(tt.targetOffset)
+			found := len(fixups) > 0
 			if found != tt.wantFound {
-				t.Errorf("Lookup() found = %v, want %v", found, tt.wantFound)
+				t.Errorf("LookupByTarget() found = %v, want %v", found, tt.wantFound)
 				return
 			}
 
 			if !found {
-				return
-			}
-
-			// Test LookupByTarget
-			fixups := dcf.LookupByTarget(tt.targetOffset)
-			if tt.wantFound && len(fixups) == 0 {
-				t.Error("LookupByTarget() returned no fixups when expected")
 				return
 			}
 
@@ -133,6 +129,7 @@ func TestLookupFunctionality(t *testing.T) {
 			}
 
 			// Verify the fixup is the correct type
+			fixup := fixups[0]
 			if tt.wantAuth {
 				if _, ok := fixup.(Auth); !ok {
 					t.Errorf("Expected Auth fixup, got %T", fixup)
@@ -148,6 +145,7 @@ func TestLookupFunctionality(t *testing.T) {
 
 func TestLookupByOffset(t *testing.T) {
 	dcf := &DyldChainedFixups{
+		chainsParsed: true,
 		Starts: []DyldChainedStarts{
 			{
 				Fixups: []Fixup{
