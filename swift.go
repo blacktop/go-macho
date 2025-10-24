@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/blacktop/go-macho/types"
 	"github.com/blacktop/go-macho/types/swift"
 )
 
@@ -2498,6 +2499,281 @@ func (f *File) getContextDesc(addr uint64) (ctx *swift.TargetModuleContext, err 
 	}
 
 	return ctx, nil
+}
+
+func (f *File) swiftSymbolicName(addr uint64) (string, error) {
+	reader, ok := f.cr.(types.MachoReader)
+	if !ok {
+		return "", fmt.Errorf("reader does not support ReadAtAddr for swift symbolic references")
+	}
+
+	header := make([]byte, 8)
+	n, err := reader.ReadAtAddr(header, addr)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", fmt.Errorf("failed to read swift symbolic reference header at %#x: %w", addr, err)
+	}
+	if n < len(header) {
+		return "", fmt.Errorf("swift symbolic reference header truncated at %#x", addr)
+	}
+
+	offset := int32(f.ByteOrder.Uint32(header[0:4]))
+	flags := f.ByteOrder.Uint32(header[4:8])
+
+	var (
+		target          uint64
+		canSymbolically bool
+	)
+	switch {
+	case offset == 0:
+		target = addr + 8
+		canSymbolically = true
+	case offset != 0:
+		target = uint64(int64(addr) + int64(offset))
+		canSymbolically = true
+	}
+
+	if canSymbolically {
+		name, err := f.makeSymbolicMangledNameStringRef(target)
+		if err == nil {
+			return name, nil
+		}
+		if fallback, fbErr := f.swiftFallbackSymbolicName(reader, addr, offset, flags); fbErr == nil {
+			return fallback, nil
+		}
+		return "", err
+	}
+
+	if fallback, fbErr := f.swiftFallbackSymbolicName(reader, addr, offset, flags); fbErr == nil {
+		return fallback, nil
+	}
+
+	return "", fmt.Errorf("swift symbolic reference offset %d out of expected range", offset)
+}
+
+func isPrintableASCII(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, r := range s {
+		if r < 0x20 || r > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+func collectSwiftStrings(reader types.MachoReader, addr uint64, max int) ([]string, error) {
+	buf := make([]byte, max)
+	n, err := reader.ReadAtAddr(buf, addr)
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	buf = buf[:n]
+
+	var parts []string
+	i := 0
+	for i < len(buf) {
+		for i < len(buf) && buf[i] == 0 {
+			i++
+		}
+		if i >= len(buf) {
+			break
+		}
+		j := i
+		for j < len(buf) && buf[j] != 0 {
+			j++
+		}
+		if j > i {
+			parts = append(parts, string(buf[i:j]))
+		}
+		i = j + 1
+	}
+	return parts, nil
+}
+
+func normalizeSwiftMangling(s string) string {
+	switch {
+	case strings.HasPrefix(s, "_$s"), strings.HasPrefix(s, "_T"):
+		return s
+	case strings.HasPrefix(s, "$s"):
+		return "_" + s
+	default:
+		return s
+	}
+}
+
+func swiftStringScore(s string) int {
+	switch {
+	case strings.HasPrefix(s, "_TtC"), strings.HasPrefix(s, "_TtV"), strings.HasPrefix(s, "_TtO"), strings.HasPrefix(s, "_TtP"):
+		return 5
+	case strings.HasPrefix(s, "_Tt"):
+		return 4
+	case strings.HasPrefix(s, "_$s"):
+		return 1
+	default:
+		return 0
+	}
+}
+
+func swiftAsciiScore(s string) int {
+	score := 1
+	if strings.Contains(s, ".") {
+		score = 4
+		if strings.ContainsAny(s, " \t") {
+			score = 2
+		}
+	}
+	return score
+}
+
+func selectSwiftString(parts []string, reverse bool) (string, bool) {
+	var ordered []string
+	if reverse {
+		ordered = make([]string, len(parts))
+		for i := range parts {
+			ordered[i] = parts[len(parts)-1-i]
+		}
+	} else {
+		ordered = append(ordered, parts...)
+	}
+
+	bestScore := -1
+	best := ""
+	update := func(candidate string, score int) {
+		if len(candidate) == 0 {
+			return
+		}
+		if score > bestScore || (score == bestScore && len(candidate) > len(best)) {
+			bestScore = score
+			best = candidate
+		}
+	}
+
+	// prefer mangled tokens
+	for _, part := range ordered {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "_T") || strings.HasPrefix(part, "$s") {
+			normalized := normalizeSwiftMangling(part)
+			update(normalized, swiftStringScore(normalized))
+		}
+	}
+
+	// fall back to printable ASCII, still preferring the longest segment
+	for _, part := range ordered {
+		part = strings.TrimSpace(part)
+		if len(part) == 0 {
+			continue
+		}
+		if isPrintableASCII(part) {
+			normalized := normalizeSwiftMangling(part)
+			update(normalized, swiftAsciiScore(normalized))
+		}
+	}
+
+	if len(best) > 0 {
+		return best, true
+	}
+
+	return "", false
+}
+
+func selectSwiftStringFromJoined(parts []string) (string, bool) {
+	if len(parts) == 0 {
+		return "", false
+	}
+	joined := strings.Join(parts, "\x00")
+
+	bestScore := -1
+	best := ""
+	update := func(candidate string, score int) {
+		if len(candidate) == 0 {
+			return
+		}
+		if score > bestScore || (score == bestScore && len(candidate) > len(best)) {
+			bestScore = score
+			best = candidate
+		}
+	}
+
+	if idx := strings.Index(joined, "_T"); idx >= 0 {
+		end := idx
+		for end < len(joined) && joined[end] != 0 {
+			end++
+		}
+		normalized := normalizeSwiftMangling(joined[idx:end])
+		update(normalized, swiftStringScore(normalized))
+	}
+	if idx := strings.Index(joined, "$s"); idx >= 0 {
+		end := idx
+		for end < len(joined) && joined[end] != 0 {
+			end++
+		}
+		normalized := normalizeSwiftMangling(joined[idx:end])
+		update(normalized, swiftStringScore(normalized))
+	}
+	if idx := strings.Index(joined, "."); idx >= 0 {
+		// handle ASCII forms like Module.Type
+		parts := strings.Split(joined, "\x00")
+		for _, part := range parts {
+			trimmed := strings.TrimSpace(part)
+			if isPrintableASCII(trimmed) {
+				normalized := normalizeSwiftMangling(trimmed)
+				update(normalized, swiftAsciiScore(normalized))
+			}
+		}
+	}
+	if len(best) > 0 {
+		return best, true
+	}
+	return "", false
+}
+
+func (f *File) swiftFallbackSymbolicName(reader types.MachoReader, addr uint64, offset int32, flags uint32) (string, error) {
+	const readLimit = 0x1000
+
+	if offset != 0 {
+		target := uint64(int64(addr) + int64(offset))
+		parts, err := collectSwiftStrings(reader, target, readLimit)
+		if err != nil {
+			return "", err
+		}
+		if candidate, ok := selectSwiftString(parts, false); ok {
+			return candidate, nil
+		}
+		return "", fmt.Errorf("swift relative string at %#x not printable", target)
+	}
+
+	if offset == 0 {
+		if flags != 0 && flags != 1 {
+			if flags&0xffff0000 != 0 {
+				return "", fmt.Errorf("unexpected swift inline flags %#x", flags)
+			}
+		}
+		parts, err := collectSwiftStrings(reader, addr+8, readLimit)
+		if err == nil {
+			if candidate, ok := selectSwiftString(parts, true); ok {
+				return candidate, nil
+			}
+			if candidate, ok := selectSwiftString(parts, false); ok {
+				return candidate, nil
+			}
+		}
+	}
+
+	parts, err := collectSwiftStrings(reader, addr, readLimit)
+	if err != nil {
+		return "", err
+	}
+	if candidate, ok := selectSwiftString(parts, true); ok {
+		return candidate, nil
+	}
+	if candidate, ok := selectSwiftString(parts, false); ok {
+		return candidate, nil
+	}
+	if candidate, ok := selectSwiftStringFromJoined(parts); ok {
+		return candidate, nil
+	}
+	return "", fmt.Errorf("swift metadata at %#x not printable", addr)
 }
 
 // ref: https://github.com/apple/swift/blob/main/lib/Demangling/Demangler.cpp (demangleSymbolicReference)

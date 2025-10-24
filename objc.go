@@ -39,7 +39,7 @@ func (f *File) rebasePtr(ptr uint64) uint64 {
 	}
 }
 
-func (f *File) getCStringWithFallback(addr uint64, label string) (string, error) {
+func (f *File) getCStringWithFallback(addr uint64, label string, allowSwift bool) (string, error) {
 	str, err := f.GetCString(addr)
 	if err == nil {
 		return str, nil
@@ -47,6 +47,12 @@ func (f *File) getCStringWithFallback(addr uint64, label string) (string, error)
 	if errors.Is(err, io.EOF) ||
 		errors.Is(err, ErrCStringNoTerminator) ||
 		errors.Is(err, ErrCStringNotFound) {
+		if allowSwift {
+			if swiftStr, swiftErr := f.swiftSymbolicName(addr); swiftErr == nil {
+				return swiftStr, nil
+			}
+			return fmt.Sprintf("@\"SwiftUnresolved_0x%x\"", addr), nil
+		}
 		return fmt.Sprintf("/* unresolved %s at %#x */", label, addr), nil
 	}
 	return "", err
@@ -430,11 +436,22 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 		}
 	}
 
+	isSwiftClass := (classPtr.DataVMAddrAndFastFlags&objc.FAST_IS_SWIFT_LEGACY != 0) || (classPtr.DataVMAddrAndFastFlags&objc.FAST_IS_SWIFT_STABLE != 0)
+
 	var ivars []objc.Ivar
 	if info.IvarsVMAddr > 0 {
-		ivars, err = f.GetObjCIvars(info.IvarsVMAddr)
+		ivars, err = f.getObjCIvarsWithSwift(info.IvarsVMAddr, isSwiftClass)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get ivars at vmaddr: %#x; %v", info.IvarsVMAddr, err)
+		}
+		if isSwiftClass {
+			if fieldMap, ferr := f.swiftFieldTypesForClass(name); ferr == nil && len(fieldMap) > 0 {
+				for idx := range ivars {
+					if typ, ok := matchSwiftFieldType(ivars[idx].Name, fieldMap); ok {
+						ivars[idx].Type = typ
+					}
+				}
+			}
 		}
 	}
 
@@ -444,7 +461,7 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to disable preattached categories: %v", err)
 		}
-		props, err = f.GetObjCProperties(info.BasePropertiesVMAddr)
+		props, err = f.getObjCPropertiesWithSwift(info.BasePropertiesVMAddr, isSwiftClass)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get props at vmaddr: %#x; %v", info.BasePropertiesVMAddr, err)
 		}
@@ -611,11 +628,22 @@ func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 		}
 	}
 
+	isSwiftClass := (classPtr.DataVMAddrAndFastFlags&objc.FAST_IS_SWIFT_LEGACY != 0) || (classPtr.DataVMAddrAndFastFlags&objc.FAST_IS_SWIFT_STABLE != 0)
+
 	var ivars []objc.Ivar
 	if info.IvarsVMAddr > 0 {
-		ivars, err = f.GetObjCIvars(info.IvarsVMAddr)
+		ivars, err = f.getObjCIvarsWithSwift(info.IvarsVMAddr, isSwiftClass)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get ivars at vmaddr: %#x; %v", info.IvarsVMAddr, err)
+		}
+		if isSwiftClass {
+			if fieldMap, ferr := f.swiftFieldTypesForClass(name); ferr == nil && len(fieldMap) > 0 {
+				for idx := range ivars {
+					if typ, ok := matchSwiftFieldType(ivars[idx].Name, fieldMap); ok {
+						ivars[idx].Type = typ
+					}
+				}
+			}
 		}
 	}
 
@@ -625,7 +653,7 @@ func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to disable preattached categories: %v", err)
 		}
-		props, err = f.GetObjCProperties(info.BasePropertiesVMAddr)
+		props, err = f.getObjCPropertiesWithSwift(info.BasePropertiesVMAddr, isSwiftClass)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get props at vmaddr: %#x; %v", info.BasePropertiesVMAddr, err)
 		}
@@ -833,7 +861,8 @@ func (f *File) GetObjCCategories() ([]objc.Category, error) {
 					}
 					if categoryPtr.InstancePropertiesVMAddr > 0 {
 						categoryPtr.InstancePropertiesVMAddr = f.vma.Convert(categoryPtr.InstancePropertiesVMAddr)
-						category.Properties, err = f.GetObjCProperties(categoryPtr.InstancePropertiesVMAddr)
+						allowSwiftProps := category.Class != nil && category.Class.IsSwift()
+						category.Properties, err = f.getObjCPropertiesWithSwift(categoryPtr.InstancePropertiesVMAddr, allowSwiftProps)
 						if err != nil {
 							return nil, fmt.Errorf("failed to get class methods at vmaddr: %#x; %v", categoryPtr.ClassMethodsVMAddr, err)
 						}
@@ -1017,7 +1046,7 @@ func (f *File) getObjcProtocol(vmaddr uint64) (proto *objc.Protocol, err error) 
 	}
 	if protoPtr.InstancePropertiesVMAddr > 0 {
 		protoPtr.InstancePropertiesVMAddr = f.vma.Convert(protoPtr.InstancePropertiesVMAddr)
-		proto.InstanceProperties, err = f.GetObjCProperties(protoPtr.InstancePropertiesVMAddr)
+		proto.InstanceProperties, err = f.getObjCPropertiesWithSwift(protoPtr.InstancePropertiesVMAddr, false)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read instance property vmaddr: %v", err)
 		}
@@ -1207,11 +1236,11 @@ func (f *File) forEachObjCMethod(methodListVMAddr uint64, handler func(uint64, o
 			method.TypesVMAddr = uint64(methodVMAddr+int64(m.TypesOffset)) + uint64(unsafe.Offsetof(m.TypesOffset))
 			method.ImpVMAddr = uint64(methodVMAddr+int64(m.ImpOffset)) + uint64(unsafe.Offsetof(m.ImpOffset))
 
-			method.Name, err = f.getCStringWithFallback(method.NameVMAddr, "selector")
+			method.Name, err = f.getCStringWithFallback(method.NameVMAddr, "selector", false)
 			if err != nil {
 				return fmt.Errorf("failed to read relative_method_t name cstring: %v", err)
 			}
-			method.Types, err = f.getCStringWithFallback(method.TypesVMAddr, "method types")
+			method.Types, err = f.getCStringWithFallback(method.TypesVMAddr, "method types", false)
 			if err != nil {
 				return fmt.Errorf("failed to read relative_method_t types cstring: %v", err)
 			}
@@ -1232,11 +1261,11 @@ func (f *File) forEachObjCMethod(methodListVMAddr uint64, handler func(uint64, o
 			m.NameVMAddr = f.vma.Convert(m.NameVMAddr)
 			m.TypesVMAddr = f.vma.Convert(m.TypesVMAddr)
 			m.ImpVMAddr = f.vma.Convert(m.ImpVMAddr)
-			n, err := f.getCStringWithFallback(m.NameVMAddr, "selector")
+			n, err := f.getCStringWithFallback(m.NameVMAddr, "selector", false)
 			if err != nil {
 				return fmt.Errorf("failed to read method_t name cstring: %v", err)
 			}
-			t, err := f.getCStringWithFallback(m.TypesVMAddr, "method types")
+			t, err := f.getCStringWithFallback(m.TypesVMAddr, "method types", false)
 			if err != nil {
 				return fmt.Errorf("failed to read method_t types cstring: %v", err)
 			}
@@ -1259,6 +1288,10 @@ func (f *File) forEachObjCMethod(methodListVMAddr uint64, handler func(uint64, o
 
 // GetObjCIvars returns the Objective-C instance variables
 func (f *File) GetObjCIvars(vmaddr uint64) ([]objc.Ivar, error) {
+	return f.getObjCIvarsWithSwift(vmaddr, false)
+}
+
+func (f *File) getObjCIvarsWithSwift(vmaddr uint64, allowSwift bool) ([]objc.Ivar, error) {
 
 	var ivarsList objc.IvarList
 	var ivars []objc.Ivar
@@ -1317,9 +1350,14 @@ func (f *File) GetObjCIvars(vmaddr uint64) ([]objc.Ivar, error) {
 		// if diff > 0 {
 		// 	ivar.TypesVMAddr += uint64(diff) // align ivar types to max alignment
 		// }
-		t, err := f.getCStringWithFallback(ivar.TypesVMAddr, "ivar type")
+		t, err := f.getCStringWithFallback(ivar.TypesVMAddr, "ivar type", allowSwift)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read ivar types cstring: %v", err)
+		}
+		if allowSwift && t == "" {
+			if guess, ok := f.swiftASCIITypeGuess(ivar.TypesVMAddr); ok {
+				t = guess
+			}
 		}
 		ivars = append(ivars, objc.Ivar{
 			Name:   n,
@@ -1334,6 +1372,10 @@ func (f *File) GetObjCIvars(vmaddr uint64) ([]objc.Ivar, error) {
 
 // GetObjCProperties returns the Objective-C properties
 func (f *File) GetObjCProperties(vmaddr uint64) ([]objc.Property, error) {
+	return f.getObjCPropertiesWithSwift(vmaddr, false)
+}
+
+func (f *File) getObjCPropertiesWithSwift(vmaddr uint64, allowSwift bool) ([]objc.Property, error) {
 
 	var propList objc.PropertyList
 	var objcProperties []objc.Property
@@ -1355,11 +1397,11 @@ func (f *File) GetObjCProperties(vmaddr uint64) ([]objc.Property, error) {
 		prop.NameVMAddr = f.vma.Convert(prop.NameVMAddr)
 		prop.AttributesVMAddr = f.vma.Convert(prop.AttributesVMAddr)
 
-		name, err := f.getCStringWithFallback(prop.NameVMAddr, "property name")
+		name, err := f.getCStringWithFallback(prop.NameVMAddr, "property name", allowSwift)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read prop name cstring: %v", err)
 		}
-		attrib, err := f.getCStringWithFallback(prop.AttributesVMAddr, "property attributes")
+		attrib, err := f.getCStringWithFallback(prop.AttributesVMAddr, "property attributes", allowSwift)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read prop attributes cstring: %v", err)
 		}
