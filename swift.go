@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/blacktop/go-macho/internal/swiftdemangle"
 	"github.com/blacktop/go-macho/swift/demangle"
 	"github.com/blacktop/go-macho/types"
 	"github.com/blacktop/go-macho/types/swift"
@@ -587,7 +588,7 @@ func (f *File) GetSwiftAccessibleFunctions() (funcs []swift.AccessibleFunction, 
 			name := ""
 			if afr.Name.IsSet() {
 				if s, err := f.GetCString(afr.Name.GetAddress()); err == nil {
-					name = demangle.NormalizeIdentifier(s)
+					name = f.demangleSwiftString(s)
 				} else {
 					name = fmt.Sprintf("(name %#x)", afr.Name.GetAddress())
 				}
@@ -596,9 +597,9 @@ func (f *File) GetSwiftAccessibleFunctions() (funcs []swift.AccessibleFunction, 
 			functionType := ""
 			if afr.FunctionType.IsSet() {
 				if s, err := f.makeSymbolicMangledNameStringRef(afr.FunctionType.GetAddress()); err == nil {
-					functionType = demangle.NormalizeIdentifier(s)
+					functionType = f.demangleSwiftString(s)
 				} else if raw, err := f.GetCString(afr.FunctionType.GetAddress()); err == nil {
-					functionType = demangle.NormalizeIdentifier(raw)
+					functionType = f.demangleSwiftString(raw)
 				} else {
 					functionType = fmt.Sprintf("(type %#x)", afr.FunctionType.GetAddress())
 				}
@@ -2594,6 +2595,17 @@ func (f *File) readObjCProtocolName(addr uint64) (string, error) {
 		return name, nil
 	}
 	return fmt.Sprintf("objc.protocol@%#x", addr), nil
+}
+
+func (f *File) demangleSwiftString(input string) string {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return input
+	}
+	if out, _, err := swiftdemangle.New(nil).DemangleString([]byte(trimmed)); err == nil && out != "" {
+		return out
+	}
+	return demangle.NormalizeIdentifier(input)
 }
 
 func isPrintableASCII(s string) bool {

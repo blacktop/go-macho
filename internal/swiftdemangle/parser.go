@@ -2,6 +2,7 @@ package swiftdemangle
 
 import (
 	"fmt"
+	"strings"
 )
 
 // SymbolicReferenceResolver resolves symbolic reference offsets found in mangled
@@ -116,4 +117,205 @@ func fromBase36(b byte) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func isContextKind(b byte) bool {
+	switch b {
+	case 'C', 'V', 'O', 'E', 'P', 'N', 'B', 'I', 'A', 'G', 'M', 'T':
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *parser) parseSymbol() (*Node, error) {
+	if p.eof() {
+		return nil, fmt.Errorf("empty symbol")
+	}
+
+	if p.peek() == '_' {
+		p.consume()
+	}
+
+	if err := p.expect('$'); err != nil {
+		return nil, err
+	}
+	if p.eof() {
+		return nil, fmt.Errorf("unexpected end after $")
+	}
+
+	prefix := p.peek()
+	if prefix != 's' && prefix != 'S' {
+		return nil, fmt.Errorf("unsupported symbol prefix %q", prefix)
+	}
+	p.consume()
+
+	moduleName, err := p.readIdentifier()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read module: %w", err)
+	}
+	moduleNode := NewNode(KindModule, moduleName)
+	p.pushSubstitution(moduleNode)
+
+	var contextNames []string
+	var contextNodes []*Node
+	for {
+		savePos := p.pos
+		name, err := p.readIdentifier()
+		if err != nil {
+			p.pos = savePos
+			break
+		}
+		if p.eof() {
+			p.pos = savePos
+			break
+		}
+		kind := p.peek()
+		if !isContextKind(kind) {
+			p.pos = savePos
+			break
+		}
+		p.consume()
+
+		pathNames := append([]string{moduleName}, append(contextNames, name)...)
+		node := buildNominal(nominalTypeKinds[kind], pathNames)
+		contextNames = append(contextNames, name)
+		contextNodes = append(contextNodes, node)
+		p.pushSubstitution(node)
+	}
+
+	entity, err := p.parseSymbolEntity(moduleName, contextNames)
+	if err != nil {
+		return nil, err
+	}
+	return entity, nil
+}
+
+func (p *parser) parseSymbolEntity(moduleName string, contextNames []string) (*Node, error) {
+	name, err := p.readIdentifier()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read entity name: %w", err)
+	}
+
+	labels := []string{}
+	for !p.eof() && p.peek() == '_' {
+		p.consume()
+		if p.eof() {
+			break
+		}
+		if p.peek() >= '0' && p.peek() <= '9' {
+			label, err := p.readIdentifier()
+			if err != nil {
+				return nil, err
+			}
+			labels = append(labels, label)
+		} else {
+			labels = append(labels, "_")
+		}
+	}
+
+	node, err := p.parseFunctionEntity(moduleName, contextNames, name, labels)
+	if err != nil {
+		return nil, err
+	}
+	return node, nil
+}
+
+func (p *parser) parseFunctionEntity(moduleName string, contextNames []string, baseName string, labels []string) (*Node, error) {
+	resultType, err := p.parseType()
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse function result type: %w", err)
+	}
+
+	savePos := p.pos
+	paramsTuple := NewNode(KindTuple, "")
+	if tuple, ok, err := p.parseFunctionInput(); err != nil {
+		return nil, err
+	} else if ok {
+		paramsTuple = tuple
+	} else {
+		p.pos = savePos
+	}
+
+	async := false
+	throws := false
+
+	if !p.eof() && p.peek() == 'Y' {
+		async = true
+		p.consume()
+		if !p.eof() && p.peek() == 'a' {
+			p.consume()
+		}
+	}
+	if !p.eof() && p.peek() == 'K' {
+		throws = true
+		p.consume()
+	}
+
+	if err := p.expect('F'); err != nil {
+		return nil, fmt.Errorf("expected function suffix: %w", err)
+	}
+
+	paramNodes := []*Node{}
+	switch paramsTuple.Kind {
+	case KindTuple:
+		paramNodes = append(paramNodes, paramsTuple.Children...)
+	case KindArgumentTuple:
+		paramNodes = append(paramNodes, paramsTuple.Children...)
+	case KindUnknown:
+		if paramsTuple != nil {
+			paramNodes = append(paramNodes, paramsTuple)
+		}
+	default:
+		if paramsTuple != nil {
+			paramNodes = append(paramNodes, paramsTuple)
+		}
+	}
+
+	normalized := normalizeArgumentLabels(len(paramNodes), labels)
+	argumentTuple := NewNode(KindArgumentTuple, "")
+	for idx, param := range paramNodes {
+		arg := NewNode(KindArgument, normalized[idx])
+		arg.Append(param)
+		argumentTuple.Append(arg)
+	}
+
+	funcNode := NewNode(KindFunction, buildQualifiedName(moduleName, contextNames, baseName))
+	funcNode.Flags.Async = async
+	funcNode.Flags.Throws = throws
+	funcNode.Append(argumentTuple, resultType)
+	return funcNode, nil
+}
+
+func normalizeArgumentLabels(paramCount int, labels []string) []string {
+	if paramCount == 0 {
+		return nil
+	}
+	normalized := make([]string, paramCount)
+	for i := range normalized {
+		normalized[i] = "_"
+	}
+	if len(labels) == paramCount-1 {
+		copy(normalized[1:], labels)
+		return normalized
+	}
+	start := paramCount - len(labels)
+	if start < 0 {
+		start = 0
+	}
+	for i := 0; i < len(labels) && start+i < paramCount; i++ {
+		if labels[i] != "" {
+			normalized[start+i] = labels[i]
+		}
+	}
+	return normalized
+}
+
+func buildQualifiedName(module string, contexts []string, base string) string {
+	parts := []string{module}
+	parts = append(parts, contexts...)
+	if base != "" {
+		parts = append(parts, base)
+	}
+	return strings.Join(parts, ".")
 }

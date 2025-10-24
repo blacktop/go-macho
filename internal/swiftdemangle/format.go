@@ -27,6 +27,25 @@ func Format(node *Node) string {
 			elems = append(elems, Format(child))
 		}
 		return "(" + strings.Join(elems, ", ") + ")"
+	case KindArgumentTuple:
+		var elems []string
+		for _, child := range node.Children {
+			elems = append(elems, Format(child))
+		}
+		return "(" + strings.Join(elems, ", ") + ")"
+	case KindArgument:
+		var typ string
+		if len(node.Children) > 0 {
+			typ = Format(node.Children[0])
+		}
+		label := node.Text
+		if label == "" {
+			label = "_"
+		}
+		if typ == "" {
+			return label
+		}
+		return label + ": " + typ
 	case KindOptional:
 		if len(node.Children) > 0 {
 			return Format(node.Children[0]) + "?"
@@ -79,6 +98,20 @@ func Format(node *Node) string {
 		}
 		params := Format(node.Children[0])
 		result := Format(node.Children[1])
+		if node.Text != "" {
+			var extras []string
+			if node.Flags.Async {
+				extras = append(extras, "async")
+			}
+			if node.Flags.Throws {
+				extras = append(extras, "throws")
+			}
+			suffix := ""
+			if len(extras) > 0 {
+				suffix = " " + strings.Join(extras, " ")
+			}
+			return node.Text + params + suffix + " -> " + result
+		}
 		parts := []string{params}
 		if node.Flags.Async {
 			parts = append(parts, "async")

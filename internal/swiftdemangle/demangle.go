@@ -1,6 +1,7 @@
 package swiftdemangle
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/blacktop/go-macho/types/swift"
@@ -26,11 +27,38 @@ func New(resolver SymbolicReferenceResolver) *Demangler {
 
 // DemangleString returns both the AST and formatted representation.
 func (d *Demangler) DemangleString(mangled []byte) (string, *Node, error) {
+	clean := bytes.TrimPrefix(mangled, []byte("_"))
+	if len(clean) > 1 && clean[0] == '$' {
+		if node, err := d.DemangleSymbol(mangled); err == nil {
+			return Format(node), node, nil
+		}
+	}
 	node, err := d.DemangleType(mangled)
 	if err != nil {
 		return "", nil, err
 	}
 	return Format(node), node, nil
+}
+
+// DemangleSymbol converts a mangled Swift symbol string into an AST.
+func (d *Demangler) DemangleSymbol(mangled []byte) (*Node, error) {
+	if len(mangled) == 0 {
+		return nil, fmt.Errorf("empty symbol string")
+	}
+	clean := bytes.TrimPrefix(mangled, []byte("_"))
+	if len(clean) < 2 || clean[0] != '$' {
+		return nil, fmt.Errorf("not a mangled symbol")
+	}
+
+	p := newParser(clean, d.resolver)
+	node, err := p.parseSymbol()
+	if err != nil {
+		return nil, err
+	}
+	if !p.eof() {
+		return nil, fmt.Errorf("trailing characters at position %d", p.pos)
+	}
+	return node, nil
 }
 
 // DemangleType converts a mangled Swift type string into an AST.
@@ -203,6 +231,30 @@ func (p *parser) parseStandardType() (*Node, bool) {
 	}
 
 	prefix := p.data[p.pos]
+	if prefix == 'S' && p.data[p.pos+1] == 'o' {
+		start := p.pos
+		p.pos += 2
+		name, err := p.readIdentifier()
+		if err != nil {
+			p.pos = start
+			return nil, false
+		}
+		if p.eof() {
+			p.pos = start
+			return nil, false
+		}
+		kind := p.peek()
+		if kind != 'C' {
+			p.pos = start
+			return nil, false
+		}
+		p.consume()
+		node := NewNode(KindClass, name)
+		node.Append(NewNode(KindModule, "__C"))
+		p.pushSubstitution(node)
+		return node, true
+	}
+
 	switch prefix {
 	case 'S', 's':
 		name := string(p.data[p.pos+1 : p.pos+2])

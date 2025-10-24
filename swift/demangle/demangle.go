@@ -22,11 +22,11 @@ func TryNormalizeIdentifier(name string) (string, bool) {
 	for _, pref := range methodPrefixes {
 		if strings.HasPrefix(name, pref) {
 			body := strings.TrimSpace(name[len(pref):])
-			if sym, ok := demangleSymbolName(body); ok {
-				return pref + sym, true
-			}
 			if demangled, ok := demangleCandidateString(body); ok {
 				return pref + demangled, true
+			}
+			if sym, ok := demangleSymbolName(body); ok {
+				return pref + sym, true
 			}
 		}
 	}
@@ -62,11 +62,7 @@ func demangleCandidateString(candidate string) (string, bool) {
 	}
 
 	for _, attempt := range attempts {
-		node, err := swiftdemangle.New(nil).DemangleType([]byte(attempt))
-		if err != nil {
-			continue
-		}
-		if formatted := swiftdemangle.Format(node); formatted != "" {
+		if formatted, _, err := swiftdemangle.New(nil).DemangleString([]byte(attempt)); err == nil && formatted != "" {
 			return formatted, true
 		}
 	}
@@ -157,10 +153,8 @@ func demangleTypeFragment(fragment string) (string, bool) {
 		return "", false
 	}
 
-	if node, err := swiftdemangle.New(nil).DemangleType([]byte(fragment)); err == nil {
-		if formatted := swiftdemangle.Format(node); formatted != "" {
-			return formatted, true
-		}
+	if formatted, _, err := swiftdemangle.New(nil).DemangleString([]byte(fragment)); err == nil && formatted != "" {
+		return formatted, true
 	}
 
 	if mapped, ok := swiftStandardTypes[fragment]; ok {
@@ -303,81 +297,14 @@ func demangleStableSymbolName(symbol string) (string, bool) {
 }
 
 func demangleSymbolName(symbol string) (string, bool) {
-	s := strings.TrimPrefix(symbol, "_")
-	if !strings.HasPrefix(s, "$s") && !strings.HasPrefix(s, "$S") {
+	trimmed := strings.TrimPrefix(symbol, "_")
+	if !strings.HasPrefix(trimmed, "$s") && !strings.HasPrefix(trimmed, "$S") {
 		return "", false
 	}
-	s = s[2:]
-	pos := 0
-
-	readIdent := func() (string, bool) {
-		if pos >= len(s) || s[pos] < '0' || s[pos] > '9' {
-			return "", false
-		}
-		start := pos
-		for pos < len(s) && s[pos] >= '0' && s[pos] <= '9' {
-			pos++
-		}
-		length, err := strconv.Atoi(s[start:pos])
-		if err != nil || pos+length > len(s) {
-			return "", false
-		}
-		ident := s[pos : pos+length]
-		pos += length
-		return ident, true
+	if node, err := swiftdemangle.New(nil).DemangleSymbol([]byte(trimmed)); err == nil {
+		return swiftdemangle.Format(node), true
 	}
-
-	module, ok := readIdent()
-	if !ok {
-		return "", false
-	}
-	contexts := []string{}
-
-	for pos < len(s) {
-		ident, ok := readIdent()
-		if !ok {
-			break
-		}
-		if pos >= len(s) {
-			break
-		}
-		kind := s[pos]
-		if isContextKind(kind) {
-			pos++
-			contexts = append(contexts, ident)
-			continue
-		}
-		baseParts := []string{ident}
-		for pos < len(s) {
-			if s[pos] == '_' {
-				pos++
-				ident, ok := readIdent()
-				if !ok {
-					break
-				}
-				baseParts = append(baseParts, ident)
-				continue
-			}
-			break
-		}
-		name := baseParts[0]
-		if len(baseParts) > 1 {
-			labels := make([]string, len(baseParts)-1)
-			for i, label := range baseParts[1:] {
-				if label == "" {
-					labels[i] = "_"
-				} else {
-					labels[i] = label + ":"
-				}
-			}
-			name += "(" + strings.Join(labels, " ") + ")"
-		}
-		parts := append([]string{module}, contexts...)
-		parts = append(parts, name)
-		return strings.Join(parts, "."), true
-	}
-
-	return module, true
+	return "", false
 }
 
 func isContextKind(b byte) bool {

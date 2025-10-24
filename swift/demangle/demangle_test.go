@@ -1,7 +1,6 @@
 package demangle
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -27,10 +26,8 @@ func TestNormalizeIdentifierTuples(t *testing.T) {
 func TestNormalizeIdentifierSymbol(t *testing.T) {
 	in := "func _$s13lockdownmoded18LockdownModeServerC8listener_25shouldAcceptNewConnectionSbSo13NSXPCListenerC_So15NSXPCConnectionCtF"
 	got := NormalizeIdentifier(in)
-	if !strings.HasPrefix(got, "func ") {
-		t.Fatalf("NormalizeIdentifier(%q) = %q, want func prefix", in, got)
-	}
-	if !strings.Contains(got, "LockdownModeServer.listener") {
-		t.Fatalf("NormalizeIdentifier(%q) = %q, want listener symbol", in, got)
+	want := "func lockdownmoded.LockdownModeServer.listener(_: __C.NSXPCListener, shouldAcceptNewConnection: __C.NSXPCConnection) -> Swift.Bool"
+	if got != want {
+		t.Fatalf("NormalizeIdentifier(%q) = %q, want %q", in, got, want)
 	}
 }

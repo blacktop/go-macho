@@ -25,6 +25,7 @@ const (
 	KindExistential   NodeKind = "existential"
 	KindGenericArgs   NodeKind = "genericArguments"
 	KindBoundGeneric  NodeKind = "boundGeneric"
+	KindArgument      NodeKind = "argument"
 
 	// Sugared forms.
 	KindOptional                    NodeKind = "optional"

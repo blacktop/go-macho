@@ -21,6 +21,7 @@ func TestNormalizeIdentifier(t *testing.T) {
 		{name: "Dictionary", in: "_$sSDySSSiG", out: "[Swift.String : Swift.Int]"},
 		{name: "Tuple", in: "Si_SSt", out: "(Swift.Int, Swift.String)"},
 		{name: "OptionalTuple", in: "Si_SStSg", out: "(Swift.Int, Swift.String)?"},
+		{name: "SymbolFunction", in: "$s13lockdownmoded18LockdownModeServerC8listener_25shouldAcceptNewConnectionSbSo13NSXPCListenerC_So15NSXPCConnectionCtF", out: "lockdownmoded.LockdownModeServer.listener(_: __C.NSXPCListener, shouldAcceptNewConnection: __C.NSXPCConnection) -> Swift.Bool"},
 		{name: "PlainASCII", in: "lockdownmoded.LockdownModeServer", out: "lockdownmoded.LockdownModeServer"},
 	}
 

@@ -201,6 +201,22 @@ func TestDemangleStringHelper(t *testing.T) {
 	}
 }
 
+func TestDemangleSymbolFunction(t *testing.T) {
+	d := New(nil)
+	symbol := "$s13lockdownmoded18LockdownModeServerC8listener_25shouldAcceptNewConnectionSbSo13NSXPCListenerC_So15NSXPCConnectionCtF"
+	out, node, err := d.DemangleString([]byte(symbol))
+	if err != nil {
+		t.Fatalf("DemangleString failed: %v", err)
+	}
+	want := "lockdownmoded.LockdownModeServer.listener(_: __C.NSXPCListener, shouldAcceptNewConnection: __C.NSXPCConnection) -> Swift.Bool"
+	if out != want {
+		t.Fatalf("unexpected symbol output: got %q want %q", out, want)
+	}
+	if node == nil || node.Kind != KindFunction {
+		t.Fatalf("unexpected node kind %#v", node)
+	}
+}
+
 func TestDemangleOptionalTupleType(t *testing.T) {
 	d := New(nil)
 	out, _, err := d.DemangleString([]byte("Si_SStSg"))
