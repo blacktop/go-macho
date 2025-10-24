@@ -29,6 +29,9 @@ const (
 	// Sugared forms.
 	KindOptional                    NodeKind = "optional"
 	KindImplicitlyUnwrappedOptional NodeKind = "implicitlyUnwrappedOptional"
+	KindArray                       NodeKind = "array"
+	KindDictionary                  NodeKind = "dictionary"
+	KindSet                         NodeKind = "set"
 )
 
 // NodeFlags holds auxiliary attributes that tweak formatting semantics.

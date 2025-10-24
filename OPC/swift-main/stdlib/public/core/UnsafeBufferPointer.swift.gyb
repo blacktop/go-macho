@@ -1,0 +1,1489 @@
+//===--- UnsafeBufferPointer.swift.gyb ------------------------*- swift -*-===//
+//
+// This source file is part of the Swift.org open source project
+//
+// Copyright (c) 2014 - 2025 Apple Inc. and the Swift project authors
+// Licensed under Apache License v2.0 with Runtime Library Exception
+//
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+//
+//===----------------------------------------------------------------------===//
+
+
+% for mutable in (True, False):
+%  Self = 'UnsafeMutableBufferPointer' if mutable else 'UnsafeBufferPointer'
+%  Mutable = 'Mutable' if mutable else ''
+/// A nonowning collection interface to a buffer of ${Mutable.lower()}
+/// elements stored contiguously in memory.
+///
+/// You can use an `${Self}` instance in low level operations to eliminate
+/// uniqueness checks and, in release mode, bounds checks. Bounds checks are
+/// always performed in debug mode.
+///
+/// ${Self} Semantics
+/// =================
+///
+/// An `${Self}` instance is a view into memory and does not own the memory
+/// that it references. Copying a value of type `${Self}` does not copy the
+/// instances stored in the underlying memory. However, initializing another
+/// collection with an `${Self}` instance copies the instances out of the
+/// referenced memory and into the new collection.
+@frozen // unsafe-performance
+@unsafe
+public struct Unsafe${Mutable}BufferPointer<Element: ~Copyable>: Copyable {
+
+  @usableFromInline
+  @_preInverseGenerics
+  @safe
+  let _position: Unsafe${Mutable}Pointer<Element>?
+
+  /// The number of elements in the buffer.
+  ///
+  /// If the `baseAddress` of this buffer is `nil`, the count is zero. However,
+  /// a buffer can have a `count` of zero even with a non-`nil` base address.
+  @_preInverseGenerics
+  @safe
+  public let count: Int
+
+  // This works around _debugPrecondition() impacting the performance of
+  // optimized code. (rdar://72246338)
+  @_alwaysEmitIntoClient
+  internal init(
+    @_nonEphemeral _uncheckedStart start: Unsafe${Mutable}Pointer<Element>?,
+    count: Int
+  ) {
+    _position = unsafe start
+    self.count = count
+  }
+
+  /// Creates a new buffer pointer over the specified number of contiguous
+  /// instances beginning at the given pointer.
+  ///
+  /// - Parameters:
+  ///   - start: A pointer to the start of the buffer, or `nil`. If `start` is
+  ///     `nil`, `count` must be zero. However, `count` may be zero even for a
+  ///     non-`nil` `start`. The pointer passed as `start` must be aligned to
+  ///     `MemoryLayout<Element>.alignment`.
+  ///   - count: The number of instances in the buffer. `count` must not be
+  ///     negative.
+  @inlinable // unsafe-performance
+  @_preInverseGenerics
+  public init(
+    @_nonEphemeral start: Unsafe${Mutable}Pointer<Element>?, count: Int
+  ) {
+    _debugPrecondition(
+      count >= 0, "Unsafe${Mutable}BufferPointer with negative count")
+    unsafe _debugPrecondition(
+      count == 0 || start != nil,
+      "Unsafe${Mutable}BufferPointer has a nil start and nonzero count")
+    unsafe self.init(_uncheckedStart: start, count: _assumeNonNegative(count))
+  }
+
+  @inlinable // unsafe-performance
+  @_preInverseGenerics
+  @safe
+  public init(_empty: ()) {
+    _position = nil
+    count = 0
+  }
+
+% if Mutable:
+  /// Creates a mutable typed buffer pointer referencing the same memory as the 
+  /// given immutable buffer pointer.
+  ///
+  /// - Parameter other: The immutable buffer pointer to convert.
+  @inlinable // unsafe-performance
+  @_preInverseGenerics
+  public init(mutating other: UnsafeBufferPointer<Element>) {
+    _position = unsafe UnsafeMutablePointer<Element>(mutating: other._position)
+    count = other.count
+  }
+% else:
+  /// Creates an immutable typed buffer pointer referencing the same memory as the 
+  /// given mutable buffer pointer.
+  ///
+  /// - Parameter other: The mutable buffer pointer to convert.
+  @inlinable // unsafe-performance
+  @_preInverseGenerics
+  @safe
+  public init(_ other: UnsafeMutableBufferPointer<Element>) {
+    _position = unsafe UnsafePointer<Element>(other._position)
+    count = other.count
+  }
+% end
+}
+
+// FIXME: The ASTPrinter should print this synthesized conformance.
+// rdar://140291657
+extension Unsafe${Mutable}BufferPointer: BitwiseCopyable where Element: ~Copyable {}
+
+@available(*, unavailable)
+extension Unsafe${Mutable}BufferPointer: Sendable where Element: ~Copyable {}
+
+extension Unsafe${Mutable}BufferPointer where Element: ~Copyable {
+  /// A pointer to the first element of the buffer.
+  ///
+  /// If the `baseAddress` of this buffer is `nil`, the count is zero. However,
+  /// a buffer can have a `count` of zero even with a non-`nil` base address.
+  @_transparent
+  @_preInverseGenerics
+  @safe
+  public var baseAddress: Unsafe${Mutable}Pointer<Element>? {
+    _position
+  }
+}
+
+%if not mutable:
+extension UnsafeBufferPointer {
+  /// An iterator for the elements in the buffer referenced by an
+  /// `UnsafeBufferPointer` or `UnsafeMutableBufferPointer` instance.
+  @frozen // unsafe-performance
+  @unsafe
+  public struct Iterator {
+    @usableFromInline
+    internal var _position, _end: UnsafePointer<Element>?
+
+    @inlinable // unsafe-performance
+    public init(
+      _position: UnsafePointer<Element>?,
+      _end: UnsafePointer<Element>?
+    ) {
+        unsafe self._position = _position
+        unsafe self._end = _end
+    }
+  }
+}
+
+@available(*, unavailable)
+extension UnsafeBufferPointer.Iterator: Sendable {}
+
+extension UnsafeBufferPointer.Iterator: @unsafe IteratorProtocol {
+  /// Advances to the next element and returns it, or `nil` if no next element
+  /// exists.
+  ///
+  /// Once `nil` has been returned, all subsequent calls return `nil`.
+  @inlinable // unsafe-performance
+  public mutating func next() -> Element? {
+    guard let start = unsafe _position else {
+      return nil
+    }
+    _internalInvariant(unsafe _end != nil, "inconsistent _position, _end pointers")
+
+    if unsafe start == _end._unsafelyUnwrappedUnchecked { return nil }
+
+    let result = unsafe start.pointee
+    unsafe _position  = start + 1
+    return result
+  }
+}
+%else:
+extension UnsafeMutableBufferPointer {
+  public typealias Iterator = UnsafeBufferPointer<Element>.Iterator
+}
+%end
+
+extension Unsafe${Mutable}BufferPointer: @unsafe Sequence {
+  /// Returns an iterator over the elements of this buffer.
+  ///
+  /// - Returns: An iterator over the elements of this buffer.
+  @inlinable // unsafe-performance
+  public func makeIterator() -> Iterator {
+    guard let start = _position else {
+      return unsafe Iterator(_position: nil, _end: nil)
+    }
+    return unsafe Iterator(_position: start, _end: start + count)
+  }
+
+  /// Initializes the memory at `destination.baseAddress` with elements of
+  /// `self`, stopping when either `self` or `destination` is exhausted.
+  ///
+  /// - Returns: an iterator over any remaining elements of `self` and the
+  ///   number of elements initialized.
+  @inlinable // unsafe-performance
+  public func _copyContents(
+    initializing destination: UnsafeMutableBufferPointer<Element>
+  ) -> (Iterator, UnsafeMutableBufferPointer<Element>.Index) {
+    guard !isEmpty && !destination.isEmpty else { return (unsafe makeIterator(), 0) }
+    let s = unsafe self.baseAddress._unsafelyUnwrappedUnchecked
+    let d = unsafe destination.baseAddress._unsafelyUnwrappedUnchecked
+    let n = Swift.min(destination.count, self.count)
+    unsafe d.initialize(from: s, count: n)
+    return (unsafe Iterator(_position: s + n, _end: s + count), n)
+  }
+
+  @inlinable @_transparent
+  @safe
+  public func withContiguousStorageIfAvailable<R>(
+    _ body: (UnsafeBufferPointer<Element>) throws -> R
+  ) rethrows -> R? {
+%if Mutable:
+    return try unsafe body(UnsafeBufferPointer(self))
+%else:
+    return try unsafe body(self)
+%end
+  }
+}
+
+extension Unsafe${Mutable}BufferPointer where Element: ~Copyable {
+  public typealias Index = Int
+
+  /// A Boolean value indicating whether the buffer is empty.
+  ///
+  /// - Complexity: O(1)
+  @_alwaysEmitIntoClient
+  @_preInverseGenerics
+  @safe
+  public var isEmpty: Bool { count == 0 }
+
+  /// The index of the first element in a nonempty buffer.
+  ///
+  /// The `startIndex` property of an `Unsafe${Mutable}BufferPointer` instance
+  /// is always zero.
+  @_transparent
+  @_preInverseGenerics
+  @safe
+  public var startIndex: Int { 0 }
+
+  /// The "past the end" position---that is, the position one greater than the
+  /// last valid subscript argument.
+  ///
+  /// The `endIndex` property of an `Unsafe${Mutable}BufferPointer` instance is
+  /// always identical to `count`.
+  @_transparent
+  @_preInverseGenerics
+  @safe
+  public var endIndex: Int { count }
+
+  @_transparent
+  @_preInverseGenerics
+  @safe
+  public var indices: Range<Int> {
+    // Not checked because init forbids negative count.
+    unsafe Range(uncheckedBounds: (0, count))
+  }
+
+  @_transparent
+  @_preInverseGenerics
+  public func index(after i: Int) -> Int {
+    // NOTE: this is a manual specialization of index movement for a Strideable
+    // index that is required for UnsafeBufferPointer performance. The
+    // optimizer is not capable of creating partial specializations yet.
+    // NOTE: Range checks are not performed here, because it is done later by
+    // the subscript function.
+    // NOTE: Wrapping math because we allow unsafe buffer pointers not to verify
+    // index preconditions in release builds. Our (optimistic) assumption is
+    // that the caller is already ensuring that indices are valid, so we can
+    // elide the usual checks to help the optimizer generate better code.
+    // However, we still check for overflow in debug mode.
+    let result = i.addingReportingOverflow(1)
+    _debugPrecondition(!result.overflow)
+    return result.partialValue
+  }
+
+  @_transparent
+  @_preInverseGenerics
+  public func formIndex(after i: inout Int) {
+    // NOTE: this is a manual specialization of index movement for a Strideable
+    // index that is required for UnsafeBufferPointer performance. The
+    // optimizer is not capable of creating partial specializations yet.
+    // NOTE: Range checks are not performed here, because it is done later by
+    // the subscript function.
+    // See note on wrapping arithmetic in `index(after:)` above.
+    let result = i.addingReportingOverflow(1)
+    _debugPrecondition(!result.overflow)
+    i = result.partialValue
+  }
+
+  @_transparent
+  @_preInverseGenerics
+  public func index(before i: Int) -> Int {
+    // NOTE: this is a manual specialization of index movement for a Strideable
+    // index that is required for UnsafeBufferPointer performance. The
+    // optimizer is not capable of creating partial specializations yet.
+    // NOTE: Range checks are not performed here, because it is done later by
+    // the subscript function.
+    // See note on wrapping arithmetic in `index(after:)` above.
+    let result = i.subtractingReportingOverflow(1)
+    _debugPrecondition(!result.overflow)
+    return result.partialValue
+  }
+
+  @_transparent
+  @_preInverseGenerics
+  public func formIndex(before i: inout Int) {
+    // NOTE: this is a manual specialization of index movement for a Strideable
+    // index that is required for UnsafeBufferPointer performance. The
+    // optimizer is not capable of creating partial specializations yet.
+    // NOTE: Range checks are not performed here, because it is done later by
+    // the subscript function.
+    // See note on wrapping arithmetic in `index(after:)` above.
+    let result = i.subtractingReportingOverflow(1)
+    _debugPrecondition(!result.overflow)
+    i = result.partialValue
+  }
+
+  @_transparent
+  @_preInverseGenerics
+  public func index(_ i: Int, offsetBy n: Int) -> Int {
+    // NOTE: this is a manual specialization of index movement for a Strideable
+    // index that is required for UnsafeBufferPointer performance. The
+    // optimizer is not capable of creating partial specializations yet.
+    // NOTE: Range checks are not performed here, because it is done later by
+    // the subscript function.
+    // See note on wrapping arithmetic in `index(after:)` above.
+    let result = i.addingReportingOverflow(n)
+    _debugPrecondition(!result.overflow)
+    return result.partialValue
+  }
+
+  @inlinable
+  @_preInverseGenerics
+  public func index(_ i: Int, offsetBy n: Int, limitedBy limit: Int) -> Int? {
+    // NOTE: this is a manual specialization of index movement for a Strideable
+    // index that is required for UnsafeBufferPointer performance. The
+    // optimizer is not capable of creating partial specializations yet.
+    // NOTE: Range checks are not performed here, because it is done later by
+    // the subscript function.
+    // See note on wrapping arithmetic in `index(after:)` above.
+    let maxOffset = limit.subtractingReportingOverflow(i)
+    _debugPrecondition(!maxOffset.overflow)
+    let l = maxOffset.partialValue
+
+    if n > 0 ? l >= 0 && l < n : l <= 0 && n < l {
+      return nil
+    }
+
+    let result = i.addingReportingOverflow(n)
+    _debugPrecondition(!result.overflow)
+    return result.partialValue
+  }
+
+  @inlinable
+  @_preInverseGenerics
+  public func distance(from start: Int, to end: Int) -> Int {
+    // NOTE: this is a manual specialization of index movement for a Strideable
+    // index that is required for UnsafeBufferPointer performance. The
+    // optimizer is not capable of creating partial specializations yet.
+    // NOTE: Range checks are not performed here, because it is done later by
+    // the subscript function.
+    // NOTE: We allow the subtraction to silently overflow in release builds
+    // to eliminate a superfluous check when `start` and `end` are both valid
+    // indices. (The operation can only overflow if `start` is negative, which
+    // implies it's an invalid index.) `Collection` does not specify what
+    // `distance` should return when given an invalid index pair.
+    let result = end.subtractingReportingOverflow(start)
+    _debugPrecondition(!result.overflow)
+    return result.partialValue
+  }
+
+  /// Accesses the element at the specified position.
+  ///
+%if Mutable:
+  /// The following example uses the buffer pointer's subscript to access and
+  /// modify the elements of a mutable buffer pointing to the contiguous
+  /// contents of an array:
+  ///
+  ///     var numbers = [1, 2, 3, 4, 5]
+  ///     numbers.withUnsafeMutableBufferPointer { buffer in
+  ///         for i in stride(from: buffer.startIndex, to: buffer.endIndex - 1, by: 2) {
+  ///             let x = buffer[i]
+  ///             buffer[i + 1] = buffer[i]
+  ///             buffer[i] = x
+  ///         }
+  ///     }
+  ///     print(numbers)
+  ///     // Prints "[2, 1, 4, 3, 5]"
+  ///
+  /// Uninitialized memory cannot be initialized to a nontrivial type
+  /// using this subscript. Instead, use an initializing method, such as
+  /// `initializeElement(at:to:)`
+%else:
+  /// The following example uses the buffer pointer's subscript to access every
+  /// other element of the buffer:
+  ///
+  ///     let numbers = [1, 2, 3, 4, 5]
+  ///     let sum = numbers.withUnsafeBufferPointer { buffer -> Int in
+  ///         var result = 0
+  ///         for i in stride(from: buffer.startIndex, to: buffer.endIndex, by: 2) {
+  ///             result += buffer[i]
+  ///         }
+  ///         return result
+  ///     }
+  ///     // 'sum' == 9
+%end
+  ///
+  /// - Note: Bounds checks for `i` are performed only in debug mode.
+  ///
+  /// - Parameter i: The position of the element to access. `i` must be in the
+  ///   range `0..<count`.
+  @_alwaysEmitIntoClient
+  public subscript(i: Int) -> Element {
+    @_transparent
+    unsafeAddress {
+      _debugPrecondition(i >= 0)
+      _debugPrecondition(i < endIndex)
+      return unsafe UnsafePointer(_position._unsafelyUnwrappedUnchecked) + i
+    }
+%if Mutable:
+    @_transparent
+    nonmutating unsafeMutableAddress {
+      _debugPrecondition(i >= 0)
+      _debugPrecondition(i < endIndex)
+      return unsafe _position._unsafelyUnwrappedUnchecked + i
+    }
+%end
+  }
+
+  // Skip all debug and runtime checks
+  @_alwaysEmitIntoClient
+  internal subscript(_unchecked i: Int) -> Element {
+    @_transparent
+    unsafeAddress {
+      _internalInvariant(i >= 0)
+      _internalInvariant(i < endIndex)
+      return unsafe UnsafePointer(_position._unsafelyUnwrappedUnchecked) + i
+    }
+%if Mutable:
+    nonmutating unsafeMutableAddress {
+      _internalInvariant(i >= 0)
+      _internalInvariant(i < endIndex)
+      return unsafe _position._unsafelyUnwrappedUnchecked + i
+    }
+%end
+  }
+
+% if mutable:
+  /// Exchanges the values at the specified indices of the buffer.
+  ///
+  /// Both parameters must be valid indices of the buffer, and not
+  /// equal to `endIndex`. Passing the same index as both `i` and `j` has no
+  /// effect.
+  ///
+  /// - Parameters:
+  ///   - i: The index of the first value to swap.
+  ///   - j: The index of the second value to swap.
+  @inlinable
+  @_preInverseGenerics
+  public func swapAt(_ i: Int, _ j: Int) {
+    guard i != j else { return }
+    _debugPrecondition(i >= 0 && j >= 0)
+    _debugPrecondition(i < endIndex && j < endIndex)
+    let pi = unsafe (_position! + i)
+    let pj = unsafe (_position! + j)
+    let tmp = unsafe pi.move()
+    unsafe pi.moveInitialize(from: pj, count: 1)
+    unsafe pj.initialize(to: tmp)
+  }
+% end # mutable
+
+}
+
+extension Unsafe${Mutable}BufferPointer where Element: ~Copyable {
+  /// Constructs a standalone buffer pointer over the items within the supplied
+  /// range of positions in the memory region addressed by this buffer pointer.
+  ///
+  /// The returned buffer's first item is always at index 0; unlike buffer
+  /// slices, extracted buffers do not generally share their indices with the
+  /// original buffer pointer.
+  ///
+  ///     withUnsafeTemporaryAllocation(of: Int.self, capacity: 5) { buffer in
+  ///       buffer.initialize(repeating: 0)
+  ///       // buffer contains [0, 0, 0, 0, 0]
+  ///       let part = buffer.extracting(2 ..< 4)
+  ///       part[0] = 1
+  ///       part[1] = 2
+  ///       // buffer now contains [0, 0, 1, 2, 0]
+  ///     }
+  ///
+  /// When `Element` is copyable, the `extracting` operation is equivalent to
+  /// slicing the buffer then rebasing the resulting buffer slice:
+  ///
+  ///     let a = buffer.extracting(i ..< j)
+  ///     let b = UnsafeBufferPointer(rebasing: buffer[i ..< j])
+  ///     // `a` and `b` are now holding the same buffer
+  ///
+  /// However, unlike slicing, the `extracting` operation remains available even
+  /// if `Element` happens to be noncopyable.
+  ///
+  /// - Parameter bounds: A valid range of indices within this buffer.
+  /// - Returns: A new buffer pointer over the items at `bounds`.
+  @_alwaysEmitIntoClient
+  @safe
+  public func extracting(_ bounds: Range<Int>) -> Self {
+    _precondition(bounds.lowerBound >= 0 && bounds.upperBound <= count,
+      "Index out of range")
+    guard let start = self.baseAddress else {
+      return unsafe Self(start: nil, count: 0)
+    }
+    return unsafe Self(start: start + bounds.lowerBound, count: bounds.count)
+  }
+
+  /// Constructs a standalone buffer pointer over the items within the supplied
+  /// range of positions in the memory region addressed by this buffer pointer.
+  ///
+  /// The returned buffer's first item is always at index 0; unlike buffer
+  /// slices, extracted buffers do not generally share their indices with the
+  /// original buffer pointer.
+  ///
+  ///     withUnsafeTemporaryAllocation(of: Int.self, capacity: 5) { buffer in
+  ///       buffer.initialize(repeating: 0)
+  ///       // buffer contains [0, 0, 0, 0, 0]
+  ///       let part = buffer.extracting(2...)
+  ///       part[0] = 1
+  ///       part[1] = 2
+  ///       // buffer now contains [0, 0, 1, 2, 0]
+  ///     }
+  ///
+  /// When `Element` is copyable, the `extracting` operation is equivalent to
+  /// slicing the buffer then rebasing the resulting buffer slice:
+  ///
+  ///     let a = buffer.extracting(i ..< j)
+  ///     let b = UnsafeBufferPointer(rebasing: buffer[i ..< j])
+  ///     // `a` and `b` are now holding the same buffer
+  ///
+  /// However, unlike slicing, the `extracting` operation remains available even
+  /// if `Element` happens to be noncopyable.
+  ///
+  /// - Parameter bounds: A valid range of indices within this buffer.
+  /// - Returns: A new buffer pointer over the items at `bounds`.
+  @_alwaysEmitIntoClient
+  @safe
+  public func extracting(_ bounds: some RangeExpression<Int>) -> Self {
+    extracting(bounds.relative(to: unsafe Range(uncheckedBounds: (0, count))))
+  }
+
+  /// Extracts and returns a copy of the entire buffer.
+  ///
+  /// When `Element` is copyable, the `extracting` operation is equivalent to
+  /// slicing the buffer then rebasing the resulting buffer slice:
+  ///
+  ///     let a = buffer
+  ///     let b = buffer.extracting(...)
+  ///     let c = UnsafeBufferPointer(rebasing: buffer[...])
+  ///     // `a`, `b` and `c` are now all referring to the same buffer
+  ///
+  /// Note that unlike slicing, the `extracting` operation remains available
+  /// even if `Element` happens to be noncopyable.
+  //
+  /// - Returns: The same buffer as `self`.
+  @_alwaysEmitIntoClient
+  @safe
+  public func extracting(_ bounds: UnboundedRange) -> Self {
+    unsafe self
+  }
+}
+
+@available(SwiftCompatibilitySpan 5.0, *)
+@_originallyDefinedIn(module: "Swift;CompatibilitySpan", SwiftCompatibilitySpan 6.2)
+extension Unsafe${Mutable}BufferPointer where Element: ~Copyable {
+  @unsafe
+  @_alwaysEmitIntoClient
+  public var span: Span<Element> {
+    @lifetime(borrow self)
+    @_transparent
+    get {
+      unsafe Span(_unsafeElements: self)
+    }
+  }
+%if Mutable:
+
+  @unsafe
+  @_alwaysEmitIntoClient
+  public var mutableSpan: MutableSpan<Element> {
+    @lifetime(borrow self)
+    @_transparent
+    get {
+      unsafe MutableSpan(_unsafeElements: self)
+    }
+  }
+%end
+}
+
+extension Unsafe${Mutable}BufferPointer {
+  /// Accesses the element at the specified position.
+  ///
+%if Mutable:
+  /// The following example uses the buffer pointer's subscript to access and
+  /// modify the elements of a mutable buffer pointing to the contiguous
+  /// contents of an array:
+  ///
+  ///     var numbers = [1, 2, 3, 4, 5]
+  ///     numbers.withUnsafeMutableBufferPointer { buffer in
+  ///         for i in stride(from: buffer.startIndex, to: buffer.endIndex - 1, by: 2) {
+  ///             let x = buffer[i]
+  ///             buffer[i + 1] = buffer[i]
+  ///             buffer[i] = x
+  ///         }
+  ///     }
+  ///     print(numbers)
+  ///     // Prints "[2, 1, 4, 3, 5]"
+  ///
+  ///     Uninitialized memory cannot be initialized to a nontrivial type
+  ///     using this subscript. Instead, use an initializing method, such as
+  ///     `initializeElement(at:to:)`
+%else:
+  /// The following example uses the buffer pointer's subscript to access every
+  /// other element of the buffer:
+  ///
+  ///     let numbers = [1, 2, 3, 4, 5]
+  ///     let sum = numbers.withUnsafeBufferPointer { buffer -> Int in
+  ///         var result = 0
+  ///         for i in stride(from: buffer.startIndex, to: buffer.endIndex, by: 2) {
+  ///             result += buffer[i]
+  ///         }
+  ///         return result
+  ///     }
+  ///     // 'sum' == 9
+%end
+  ///
+  /// - Note: Bounds checks for `i` are performed only in debug mode.
+  ///
+  /// - Parameter i: The position of the element to access. `i` must be in the
+  ///   range `0..<count`.
+  @inlinable
+  public subscript(i: Int) -> Element {
+    // Note: This is the original, copyable subscript.
+    // It is still used to fulfill the collection conformance requirements,
+    // and to maintain full ABI parity with pre-6.0 Swifts.
+    @_transparent
+    get {
+      _debugPrecondition(i >= 0)
+      _debugPrecondition(i < endIndex)
+      return unsafe _position._unsafelyUnwrappedUnchecked[i]
+    }
+%if Mutable:
+    @_transparent
+    nonmutating _modify {
+      _debugPrecondition(i >= 0)
+      _debugPrecondition(i < endIndex)
+      yield unsafe &_position._unsafelyUnwrappedUnchecked[i]
+    }
+%end
+  }
+
+  @_spi(SwiftStdlibLegacyABI) @available(swift, obsoleted: 1)
+  @usableFromInline
+  internal subscript(_unchecked i: Int) -> Element {
+    get {
+      _internalInvariant(i >= 0)
+      _internalInvariant(i < endIndex)
+      return unsafe _position._unsafelyUnwrappedUnchecked[i]
+    }
+%if Mutable:
+    nonmutating _modify {
+      _internalInvariant(i >= 0)
+      _internalInvariant(i < endIndex)
+      yield unsafe &_position._unsafelyUnwrappedUnchecked[i]
+    }
+%end
+  }
+}
+
+extension Unsafe${Mutable}BufferPointer:
+  @unsafe Collection,
+%if Mutable:
+  @unsafe MutableCollection,
+%end
+  @unsafe BidirectionalCollection,
+  @unsafe RandomAccessCollection
+{
+  public typealias Indices = Range<Int>
+  public typealias SubSequence = Slice<Unsafe${Mutable}BufferPointer<Element>>
+
+  @inlinable // unsafe-performance
+  @safe
+  public func _failEarlyRangeCheck(_ index: Int, bounds: Range<Int>) {
+    // NOTE: In release mode, this method is a no-op for performance reasons.
+    _debugPrecondition(index >= bounds.lowerBound)
+    _debugPrecondition(index < bounds.upperBound)
+  }
+
+  @inlinable // unsafe-performance
+  @safe
+  public func _failEarlyRangeCheck(_ range: Range<Int>, bounds: Range<Int>) {
+    // NOTE: In release mode, this method is a no-op for performance reasons.
+    _debugPrecondition(range.lowerBound >= bounds.lowerBound)
+    _debugPrecondition(range.upperBound <= bounds.upperBound)
+  }
+
+  /// Accesses a contiguous subrange of the buffer's elements.
+  ///
+  /// The accessed slice uses the same indices for the same elements as the
+  /// original buffer uses. Always use the slice's `startIndex` property
+  /// instead of assuming that its indices start at a particular value.
+  ///
+  /// This example demonstrates getting a slice from a buffer of strings,
+  /// finding the index of one of the strings in the slice, and then using that
+  /// index in the original buffer.
+  ///
+%if Mutable:
+  ///     var streets = ["Adams", "Bryant", "Channing", "Douglas", "Evarts"]
+  ///     streets.withUnsafeMutableBufferPointer { buffer in
+  ///         let streetSlice = buffer[2..<buffer.endIndex]
+  ///         print(Array(streetSlice))
+  ///         // Prints "["Channing", "Douglas", "Evarts"]"
+  ///         let index = streetSlice.firstIndex(of: "Evarts")    // 4
+  ///         buffer[index!] = "Eustace"
+  ///     }
+  ///     print(streets.last!)
+  ///     // Prints "Eustace"
+%else:
+  ///     let streets = ["Adams", "Bryant", "Channing", "Douglas", "Evarts"]
+  ///     streets.withUnsafeBufferPointer { buffer in
+  ///         let streetSlice = buffer[2..<buffer.endIndex]
+  ///         print(Array(streetSlice))
+  ///         // Prints "["Channing", "Douglas", "Evarts"]"
+  ///         let index = streetSlice.firstIndex(of: "Evarts")    // 4
+  ///         print(buffer[index!])
+  ///         // Prints "Evarts"
+  ///     }
+%end
+  ///
+  /// - Note: Bounds checks for `bounds` are performed only in debug mode.
+  ///
+  /// - Parameter bounds: A range of the buffer's indices. The bounds of
+  ///   the range must be valid indices of the buffer.
+  @inlinable // unsafe-performance
+  public subscript(
+    bounds: Range<Int>
+  ) -> Slice<Unsafe${Mutable}BufferPointer<Element>> {
+    get {
+      _debugPrecondition(bounds.lowerBound >= startIndex)
+      _debugPrecondition(bounds.upperBound <= endIndex)
+      return unsafe Slice(
+        base: self, bounds: bounds)
+    }
+%  if Mutable:
+    nonmutating set {
+      _debugPrecondition(bounds.lowerBound >= startIndex)
+      _debugPrecondition(bounds.upperBound <= endIndex)
+      unsafe _debugPrecondition(bounds.count == newValue.count)
+
+      // FIXME: swift-3-indexing-model: tests.
+      if unsafe !newValue.isEmpty {
+        unsafe (_position! + bounds.lowerBound).update(
+          from: newValue.base._position! + newValue.startIndex,
+          count: newValue.count)
+      }
+    }
+%  end
+  }
+
+%  if Mutable:
+  @inlinable
+  @available(*, deprecated, renamed: "withContiguousMutableStorageIfAvailable")
+  @safe
+  public mutating func _withUnsafeMutableBufferPointerIfSupported<R>(
+    _ body: (inout UnsafeMutableBufferPointer<Element>) throws -> R
+  ) rethrows -> R? {
+    return try unsafe body(&self)
+  }
+
+  @inlinable @_transparent
+  @safe
+  public mutating func withContiguousMutableStorageIfAvailable<R>(
+    _ body: (inout UnsafeMutableBufferPointer<Element>) throws -> R
+  ) rethrows -> R? {
+    let (oldBase, oldCount) = (self.baseAddress, self.count)
+    defer {
+      _debugPrecondition(unsafe (oldBase, oldCount) == (self.baseAddress, self.count),
+      "UnsafeMutableBufferPointer.withContiguousMutableStorageIfAvailable: replacing the buffer is not allowed")
+    }
+    return try unsafe body(&self)
+  }
+%  end
+}
+
+extension Unsafe${Mutable}BufferPointer where Element: ~Copyable {
+  @safe
+  @_alwaysEmitIntoClient
+  public func _isWellAligned() -> Bool {
+    guard let p = baseAddress else { return true }
+    return p._isWellAligned()
+  }
+}
+
+extension Unsafe${Mutable}BufferPointer {
+%  if not Mutable:
+  /// Creates a buffer over the same memory as the given buffer slice.
+  ///
+  /// The new buffer represents the same region of memory as `slice`, but is
+  /// indexed starting at zero instead of sharing indices with the original
+  /// buffer. For example:
+  ///
+  ///     let buffer = returnsABuffer()
+  ///     let n = 5
+  ///     let slice = buffer[n...]
+  ///     let rebased = UnsafeBufferPointer(rebasing: slice)
+  ///
+  /// After rebasing `slice` as the `rebased` buffer, the following are true:
+  ///
+  /// - `rebased.startIndex == 0`
+  /// - `rebased[0] == slice[n]`
+  /// - `rebased[0] == buffer[n]`
+  /// - `rebased.count == slice.count`
+  ///
+  /// - Parameter slice: The buffer slice to rebase.
+  @inlinable @_transparent // unsafe-performance
+  public init(rebasing slice: Slice<UnsafeBufferPointer<Element>>) {
+    // NOTE: `Slice` does not guarantee that its start/end indices are valid
+    // in `base` -- it merely ensures that `startIndex <= endIndex`.
+    // We need manually check that we aren't given an invalid slice,
+    // or the resulting collection would allow access that was
+    // out-of-bounds with respect to the original base buffer.
+    // We only do this in debug builds to prevent a measurable performance
+    // degradation wrt passing around pointers not wrapped in a BufferPointer
+    // construct.
+    _debugPrecondition(
+      unsafe slice.startIndex >= 0 && slice.endIndex <= slice.base.count,
+      "Invalid slice")
+    let base = unsafe slice.base.baseAddress?.advanced(by: slice.startIndex)
+    let count = unsafe slice.endIndex &- slice.startIndex
+    unsafe self.init(start: base, count: count)
+  }
+
+%  end
+
+  /// Creates a buffer over the same memory as the given buffer slice.
+  ///
+  /// The new buffer represents the same region of memory as `slice`, but is
+  /// indexed starting at zero instead of sharing indices with the original
+  /// buffer. For example:
+  ///
+  ///     let buffer = returnsABuffer()
+  ///     let n = 5
+  ///     let slice = buffer[n...]
+  ///     let rebased = Unsafe${Mutable}BufferPointer(rebasing: slice)
+  ///
+  /// After rebasing `slice` as the `rebased` buffer, the following are true:
+  ///
+  /// - `rebased.startIndex == 0`
+  /// - `rebased[0] == slice[n]`
+  /// - `rebased[0] == buffer[n]`
+  /// - `rebased.count == slice.count`
+  ///
+  /// - Parameter slice: The buffer slice to rebase.
+  @inlinable @_transparent // unsafe-performance
+  public init(rebasing slice: Slice<UnsafeMutableBufferPointer<Element>>) {
+    let base = unsafe slice.base.baseAddress?.advanced(by: slice.startIndex)
+    let count = unsafe slice.endIndex &- slice.startIndex
+    unsafe self.init(start: base, count: count)
+  }
+}
+
+extension Unsafe${Mutable}BufferPointer where Element: ~Copyable {
+  /// Deallocates the memory block previously allocated at this buffer pointer’s
+  /// base address.
+  ///
+  /// This buffer pointer's `baseAddress` must be `nil` or a pointer to a memory
+  /// block previously returned by a Swift allocation method. If `baseAddress`
+  /// is `nil`, this function does nothing. Otherwise, the memory must not be
+  /// initialized or `Pointee` must be a trivial type. This buffer pointer's
+  /// `count` must be equal to the originally allocated size of the memory
+  /// block.
+  @inlinable
+  @_preInverseGenerics
+  public func deallocate() {
+    unsafe _position?.deallocate()
+  }
+}
+
+% if Mutable:
+extension UnsafeMutableBufferPointer where Element: ~Copyable {
+  /// Allocates uninitialized memory for the specified number of instances of
+  /// type `Element`.
+  ///
+  /// The resulting buffer references a region of memory that is bound to
+  /// `Element` and is `count * MemoryLayout<Element>.stride` bytes in size.
+  ///
+  /// The following example allocates a buffer that can store four `Int`
+  /// instances and then initializes that memory with the elements of a range:
+  ///
+  ///     let buffer = UnsafeMutableBufferPointer<Int>.allocate(capacity: 4)
+  ///     _ = buffer.initialize(from: 1...4)
+  ///     print(buffer[2])
+  ///     // Prints "3"
+  ///
+  /// When you allocate memory, always remember to deallocate once you're
+  /// finished.
+  ///
+  ///     buffer.deallocate()
+  ///
+  /// - Parameter count: The amount of memory to allocate, counted in instances
+  ///   of `Element`.
+  @inlinable
+  @_preInverseGenerics
+  @safe
+  public static func allocate(
+    capacity count: Int
+  ) -> UnsafeMutableBufferPointer<Element> {
+    let base  = UnsafeMutablePointer<Element>.allocate(capacity: count)
+    return unsafe UnsafeMutableBufferPointer(start: base, count: count)
+  }
+}
+
+extension UnsafeMutableBufferPointer {
+  /// Initializes every element in this buffer's memory to a copy of the given
+  /// value.
+  ///
+  /// The destination memory must be uninitialized or the buffer's `Element`
+  /// must be a trivial type. After a call to `initialize(repeating:)`, the
+  /// entire region of memory referenced by this buffer is initialized.
+  ///
+  /// - Parameters:
+  ///   - repeatedValue: The instance to initialize this buffer's memory with.
+  @inlinable // unsafe-performance
+  public func initialize(repeating repeatedValue: Element) {
+    guard let dstBase = _position else {
+      return
+    }
+
+    unsafe dstBase.initialize(repeating: repeatedValue, count: count)
+  }
+
+  /// Initializes the buffer's memory with the given elements.
+  ///
+  /// Prior to calling the `initialize(from:)` method on a buffer, the memory it
+  /// references must be uninitialized, or its `Element` type must be a trivial
+  /// type. After the call, the memory referenced by the buffer up to, but not
+  /// including, the returned index is initialized. The buffer must contain
+  /// sufficient memory to accommodate `source.underestimatedCount`.
+  ///
+  /// The returned index is the position of the next uninitialized element in
+  /// the buffer, which is one past the last element written. If `source`
+  /// contains no elements, the returned index is equal to the buffer's
+  /// `startIndex`. If `source` contains an equal or greater number of elements
+  /// than the buffer can hold, the returned index is equal to the buffer's
+  /// `endIndex`.
+  ///
+  /// - Parameter source: A sequence of elements with which to initialize the
+  ///   buffer.
+  /// - Returns: An iterator to any elements of `source` that didn't fit in the
+  ///   buffer, and an index to the next uninitialized element in the buffer.
+  @inlinable // unsafe-performance
+  @_silgen_name("$sSr10initialize4from8IteratorQyd___Sitqd___t7ElementQyd__RszSTRd__lF")
+  public func initialize<S: Sequence>(
+    from source: S
+  ) -> (unwritten: S.Iterator, index: Index) where S.Element == Element {
+    return unsafe source._copyContents(initializing: self)
+  }
+
+  /// Initializes the buffer's memory with every element of the source.
+  ///
+  /// Prior to calling the `initialize(fromContentsOf:)` method on a buffer, the
+  /// memory referenced by the buffer must be uninitialized, or the `Element`
+  /// type must be a trivial type. After the call, the memory referenced by the
+  /// buffer up to, but not including, the returned index is initialized. The
+  /// buffer must reference enough memory to accommodate `source.count`
+  /// elements.
+  ///
+  /// The returned index is the position of the next uninitialized element in
+  /// the buffer, one past the index of the last element written. If `source`
+  /// contains no elements, the returned index is equal to the buffer's
+  /// `startIndex`. If `source` contains as many elements as the buffer can
+  /// hold, the returned index is equal to the buffer's `endIndex`.
+  ///
+  /// - Precondition: `self.count` >= `source.count`
+  ///
+  /// - Note: The memory regions referenced by `source` and this buffer
+  ///     must not overlap.
+  ///
+  /// - Parameter source: A collection of elements to be used to
+  ///     initialize the buffer's storage.
+  /// - Returns: The index one past the last element of the buffer initialized
+  ///     by this function.
+  @_alwaysEmitIntoClient @_transparent 
+  public func initialize(
+    fromContentsOf source: some Collection<Element>
+  ) -> Index {
+    let count = source.withContiguousStorageIfAvailable {
+      guard let sourceAddress = $0.baseAddress, !$0.isEmpty else {
+        return 0
+      }
+      _precondition(
+        $0.count <= self.count,
+        "buffer cannot contain every element from source."
+      )
+      unsafe baseAddress.unsafelyUnwrapped.initialize(
+        from: sourceAddress, count: $0.count
+      )
+      return $0.count
+    }
+    if let count {
+      return startIndex.advanced(by: count)
+    }
+
+    var (iterator, copied) = unsafe source._copyContents(initializing: self)
+    _precondition(
+      iterator.next() == nil,
+      "buffer cannot contain every element from source."
+    )
+    return startIndex.advanced(by: copied)
+  }
+}
+
+extension UnsafeMutableBufferPointer {
+  /// Updates every element of this buffer's initialized memory.
+  ///
+  /// The buffer’s memory must be initialized or its `Element` type
+  /// must be a trivial type.
+  ///
+  /// - Note: All buffer elements must already be initialized.
+  ///
+  /// - Parameters:
+  ///   - repeatedValue: The value used when updating this pointer's memory.
+  @inlinable // unsafe-performance
+  @_silgen_name("$sSr6assign9repeatingyx_tF")
+  public func update(repeating repeatedValue: Element) {
+    guard let dstBase = _position else {
+      return
+    }
+
+    unsafe dstBase.update(repeating: repeatedValue, count: count)
+  }
+
+  @_alwaysEmitIntoClient
+  @available(*, deprecated, renamed: "update(repeating:)")
+  @_silgen_name("_swift_se0370_UnsafeMutableBufferPointer_assign_repeating")
+  public func assign(repeating repeatedValue: Element) {
+    unsafe update(repeating: repeatedValue)
+  }
+}
+
+extension UnsafeMutableBufferPointer {
+  /// Updates the buffer's initialized memory with the given elements.
+  ///
+  /// The buffer’s memory must be initialized or its `Element` type
+  /// must be a trivial type.
+  ///
+  /// - Parameter source: A sequence of elements to be used to update
+  ///   the buffer's contents.
+  /// - Returns: An iterator to any elements of `source` that didn't fit in the
+  ///   buffer, and the index one past the last updated element in the buffer.
+  @_alwaysEmitIntoClient
+  public func update<S: Sequence>(
+    from source: S
+  ) -> (unwritten: S.Iterator, index: Index) where S.Element == Element {
+    var iterator = source.makeIterator()
+    guard !self.isEmpty else { return (iterator, startIndex) }
+    _internalInvariant(unsafe _position != nil)
+    var index = startIndex
+    while index < endIndex {
+      guard let element = iterator.next() else { break }
+      unsafe _position._unsafelyUnwrappedUnchecked[index] = element
+      unsafe formIndex(after: &index)
+    }
+    return (iterator, index)
+  }
+
+  /// Updates the buffer's initialized memory with every element of the source.
+  ///
+  /// Prior to calling the `update(fromContentsOf:)` method on a buffer, the
+  /// first `source.count` elements of the buffer's memory must be initialized,
+  /// or the buffer's `Element` type must be a trivial type. The buffer must
+  /// reference enough initialized memory to accommodate `source.count`
+  /// elements.
+  ///
+  /// The returned index is one past the index of the last element updated. If
+  /// `source` contains no elements, the returned index is equal to the buffer's
+  /// `startIndex`. If `source` contains as many elements as the buffer can
+  /// hold, the returned index is equal to the buffer's `endIndex`.
+  ///
+  /// - Note: The memory regions referenced by `source` and this buffer
+  ///     may overlap.
+  ///
+  /// - Precondition: `self.count` >= `source.count`
+  ///
+  /// - Parameter source: A collection of elements to be used to update
+  ///   the buffer's contents.
+  /// - Returns: An index one past the index of the last element updated.
+  @_alwaysEmitIntoClient
+  public func update(
+    fromContentsOf source: some Collection<Element>
+  ) -> Index {
+    let count = source.withContiguousStorageIfAvailable {
+      guard let sourceAddress = $0.baseAddress else {
+        return 0
+      }
+      _precondition(
+        $0.count <= self.count,
+        "buffer cannot contain every element from source."
+      )
+      unsafe baseAddress.unsafelyUnwrapped.update(from: sourceAddress, count: $0.count)
+      return $0.count
+    }
+    if let count {
+      return startIndex.advanced(by: count)
+    }
+
+    if self.isEmpty {
+      _precondition(
+        source.isEmpty,
+        "buffer cannot contain every element from source."
+      )
+      return startIndex
+    }
+    _internalInvariant(unsafe _position != nil)
+    var iterator = source.makeIterator()
+    var index = startIndex
+    while let value = iterator.next() {
+      guard index < endIndex else {
+        _preconditionFailure(
+          "buffer cannot contain every element from source."
+        )
+        break
+      }
+      unsafe _position._unsafelyUnwrappedUnchecked[index] = value
+      unsafe formIndex(after: &index)
+    }
+    return index
+  }
+}
+
+extension UnsafeMutableBufferPointer where Element: ~Copyable {
+  /// Moves every element of an initialized source buffer into the uninitialized
+  /// memory referenced by this buffer, leaving the source memory uninitialized
+  /// and this buffer's memory initialized.
+  ///
+  /// Prior to calling the `moveInitialize(fromContentsOf:)` method on a buffer,
+  /// the memory it references must be uninitialized, or its `Element` type must
+  /// be a trivial type. After the call, the memory referenced by the buffer up
+  /// to, but not including, the returned index is initialized. The memory
+  /// referenced by `source` is uninitialized after the function returns. The
+  /// buffer must reference enough memory to accommodate `source.count`
+  /// elements.
+  ///
+  /// The returned index is the position of the next uninitialized element in
+  /// the buffer, one past the index of the last element written. If `source`
+  /// contains no elements, the returned index is equal to the buffer's
+  /// `startIndex`. If `source` contains as many elements as the buffer can
+  /// hold, the returned index is equal to the buffer's `endIndex`.
+  ///
+  /// - Precondition: `self.count` >= `source.count`
+  ///
+  /// - Note: The memory regions referenced by `source` and this buffer
+  ///     may overlap.
+  ///
+  /// - Parameter source: A buffer containing the values to copy. The memory
+  ///     region underlying `source` must be initialized.
+  /// - Returns: The index one past the last element of the buffer initialized
+  ///     by this function.
+  @_alwaysEmitIntoClient
+  public func moveInitialize(fromContentsOf source: Self) -> Index {
+    guard let sourceAddress = source.baseAddress, !source.isEmpty else {
+      return startIndex
+    }
+    _precondition(
+      source.count <= self.count,
+      "buffer cannot contain every element from source."
+    )
+    unsafe baseAddress.unsafelyUnwrapped.moveInitialize(
+      from: sourceAddress, count: source.count
+    )
+    return startIndex.advanced(by: source.count)
+  }
+}
+
+extension UnsafeMutableBufferPointer {
+  /// Moves every element of an initialized source buffer into the
+  /// uninitialized memory referenced by this buffer, leaving the source memory
+  /// uninitialized and this buffer's memory initialized.
+  ///
+  /// Prior to calling the `moveInitialize(fromContentsOf:)` method on a buffer,
+  /// the memory it references must be uninitialized,
+  /// or its `Element` type must be a trivial type. After the call,
+  /// the memory referenced by the buffer up to, but not including,
+  /// the returned index is initialized. The memory referenced by
+  /// `source` is uninitialized after the function returns.
+  /// The buffer must reference enough memory to accommodate
+  /// `source.count` elements.
+  ///
+  /// The returned index is the position of the next uninitialized element
+  /// in the buffer, one past the index of the last element written.
+  /// If `source` contains no elements, the returned index is equal to the
+  /// buffer's `startIndex`. If `source` contains as many elements as the buffer
+  /// can hold, the returned index is equal to the buffer's `endIndex`.
+  ///
+  /// - Precondition: `self.count` >= `source.count`
+  ///
+  /// - Note: The memory regions referenced by `source` and this buffer
+  ///     may overlap.
+  ///
+  /// - Parameter source: A buffer containing the values to copy. The memory
+  ///     region underlying `source` must be initialized.
+  /// - Returns: The index one past the last element of the buffer initialized
+  ///     by this function.
+  @_alwaysEmitIntoClient
+  public func moveInitialize(fromContentsOf source: Slice<Self>) -> Index {
+    return unsafe moveInitialize(fromContentsOf: Self(rebasing: source))
+  }
+}
+
+extension UnsafeMutableBufferPointer where Element: ~Copyable {
+  /// Updates this buffer's initialized memory by moving
+  /// every element from the source buffer, leaving the source memory
+  /// uninitialized.
+  ///
+  /// Prior to calling the `moveUpdate(fromContentsOf:)` method on a buffer,
+  /// the first `source.count` elements of the buffer's memory must be
+  /// initialized, or the buffer's `Element` type must be a trivial type.
+  /// The memory referenced by `source` is uninitialized after the function
+  /// returns. The buffer must reference enough initialized memory
+  /// to accommodate `source.count` elements.
+  ///
+  /// The returned index is one past the index of the last element updated.
+  /// If `source` contains no elements, the returned index is equal to the
+  /// buffer's `startIndex`. If `source` contains as many elements as the buffer
+  /// can hold, the returned index is equal to the buffer's `endIndex`.
+  ///
+  /// - Note: The memory regions referenced by `source` and this buffer
+  ///     must not overlap.
+  ///
+  /// - Precondition: `self.count` >= `source.count`
+  ///
+  /// - Parameter source: A buffer containing the values to move.
+  ///     The memory region underlying `source` must be initialized.
+  /// - Returns: An index one past the index of the last element updated.
+  @_alwaysEmitIntoClient
+  public func moveUpdate(fromContentsOf source: Self) -> Index {
+    guard let sourceAddress = source.baseAddress, !source.isEmpty else {
+      return startIndex
+    }
+    _precondition(
+      source.count <= self.count,
+      "buffer cannot contain every element from source."
+    )
+    unsafe baseAddress.unsafelyUnwrapped.moveUpdate(
+      from: sourceAddress, count: source.count
+    )
+    return startIndex.advanced(by: source.count)
+  }
+}
+
+extension UnsafeMutableBufferPointer {
+  /// Updates this buffer's initialized memory initialized memory by
+  /// moving every element from the source buffer slice,
+  /// leaving the source memory uninitialized.
+  ///
+  /// Prior to calling the `moveUpdate(fromContentsOf:)` method on a buffer,
+  /// the first `source.count` elements of the buffer's memory must be
+  /// initialized, or the buffer's `Element` type must be a trivial type.
+  /// The memory referenced by `source` is uninitialized after the function
+  /// returns. The buffer must reference enough initialized memory
+  /// to accommodate `source.count` elements.
+  ///
+  /// The returned index is one past the index of the last element updated.
+  /// If `source` contains no elements, the returned index is equal to the
+  /// buffer's `startIndex`. If `source` contains as many elements as the buffer
+  /// can hold, the returned index is equal to the buffer's `endIndex`.
+  ///
+  /// - Note: The memory regions referenced by `source` and this buffer
+  ///     must not overlap.
+  ///
+  /// - Precondition: `self.count` >= `source.count`
+  ///
+  /// - Parameter source: A buffer slice containing the values to move.
+  ///     The memory region underlying `source` must be initialized.
+  /// - Returns: An index one past the index of the last element updated.
+  @_alwaysEmitIntoClient
+  public func moveUpdate(fromContentsOf source: Slice<Self>) -> Index {
+    return unsafe moveUpdate(fromContentsOf: Self(rebasing: source))
+  }
+}
+
+extension UnsafeMutableBufferPointer where Element: ~Copyable {
+  /// Deinitializes every instance in this buffer.
+  ///
+  /// The region of memory underlying this buffer must be fully initialized.
+  /// After calling `deinitialize(count:)`, the memory is uninitialized,
+  /// but still bound to the `Element` type.
+  ///
+  /// - Note: All buffer elements must already be initialized.
+  ///
+  /// - Returns: A raw buffer to the same range of memory as this buffer.
+  ///   The range of memory is still bound to `Element`.
+  @discardableResult
+  @_alwaysEmitIntoClient
+  public func deinitialize() -> UnsafeMutableRawBufferPointer {
+    guard let rawValue = baseAddress?._rawValue
+      else { return unsafe .init(start: nil, count: 0) }
+    Builtin.destroyArray(Element.self, rawValue, count._builtinWordValue)
+    return unsafe .init(start: UnsafeMutableRawPointer(rawValue),
+                        count: count*MemoryLayout<Element>.stride)
+   }
+
+  /// Initializes the element at `index` to the given value.
+  ///
+  /// The memory underlying the destination element must be uninitialized,
+  /// or `Element` must be a trivial type. After a call to `initialize(to:)`,
+  /// the memory underlying this element of the buffer is initialized.
+  ///
+  /// - Parameters:
+  ///   - value: The value used to initialize the buffer element's memory.
+  ///   - index: The index of the element to initialize
+  @_alwaysEmitIntoClient
+  public func initializeElement(at index: Index, to value: consuming Element) {
+    _debugPrecondition(startIndex <= index && index < endIndex)
+    let p = unsafe baseAddress._unsafelyUnwrappedUnchecked.advanced(by: index)
+    unsafe p.initialize(to: value)
+  }
+
+  /// Retrieves and returns the element at `index`, leaving that element's
+  /// underlying memory uninitialized.
+  ///
+  /// The memory underlying the element at `index` must be initialized.
+  /// After calling `moveElement(from:)`, the memory underlying this element
+  /// of the buffer is uninitialized, and still bound to type `Element`.
+  ///
+  /// - Parameters:
+  ///   - index: The index of the buffer element to retrieve and deinitialize.
+  /// - Returns: The instance referenced by this index in this buffer.
+  @_alwaysEmitIntoClient
+  public func moveElement(from index: Index) -> Element {
+    _debugPrecondition(startIndex <= index && index < endIndex)
+    return unsafe baseAddress._unsafelyUnwrappedUnchecked.advanced(by: index).move()
+  }
+
+  /// Deinitializes the memory underlying the element at `index`.
+  ///
+  /// The memory underlying the element at `index` must be initialized.
+  /// After calling `deinitializeElement()`, the memory underlying this element
+  /// of the buffer is uninitialized, and still bound to type `Element`.
+  ///
+  /// - Parameters:
+  ///   - index: The index of the buffer element to deinitialize.
+  @_alwaysEmitIntoClient
+  public func deinitializeElement(at index: Index) {
+    _debugPrecondition(startIndex <= index && index < endIndex)
+    let p = unsafe baseAddress._unsafelyUnwrappedUnchecked.advanced(by: index)
+    unsafe p.deinitialize(count: 1)
+  }
+}
+% end
+
+extension Unsafe${Mutable}BufferPointer where Element: ~Copyable {
+  /// Executes the given closure while temporarily binding the memory referenced
+  /// by this buffer to the given type.
+  ///
+  /// Use this method when you have a buffer of memory bound to one type and
+  /// you need to access that memory as a buffer of another type. Accessing
+  /// memory as type `T` requires that the memory be bound to that type. A
+  /// memory location may only be bound to one type at a time, so accessing
+  /// the same memory as an unrelated type without first rebinding the memory
+  /// is undefined.
+  ///
+  /// The number of instances of `T` referenced by the rebound buffer may be
+  /// different than the number of instances of `Element` referenced by the
+  /// original buffer. The number of instances of `T` will be calculated
+  /// at runtime.
+  /// 
+  /// Any instance of `T` within the re-bound region may be initialized or
+  /// uninitialized. Every instance of `Pointee` overlapping with a given
+  /// instance of `T` should have the same initialization state (i.e.
+  /// initialized or uninitialized.) Accessing a `T` whose underlying
+  /// `Pointee` storage is in a mixed initialization state shall be
+  /// undefined behaviour.
+  ///
+  /// Because this buffer's memory is no longer bound to its `Element` type
+  /// while the `body` closure executes, do not access memory using the
+  /// original buffer from within `body`. Instead, use the `body` closure's
+  /// buffer argument to access the values in memory as instances of type
+  /// `T`.
+  ///
+  /// After executing `body`, this method rebinds memory back to the original
+  /// `Element` type.
+  ///
+  /// - Note: Only use this method to rebind the buffer's memory to a type
+  ///   that is layout compatible with the currently bound `Element` type.
+  ///   The stride of the temporary type (`T`) may be an integer multiple
+  ///   or a whole fraction of `Element`'s stride.
+  ///   To bind a region of memory to a type that does not match these
+  ///   requirements, convert the buffer to a raw buffer and use the
+  ///   raw buffer's `withMemoryRebound(to:)` method.
+  ///   If `T` and `Element` have different alignments, this buffer's
+  ///   `baseAddress` must be aligned with the larger of the two alignments.
+  ///
+  /// - Parameters:
+  ///   - type: The type to temporarily bind the memory referenced by this
+  ///     buffer. The type `T` must be layout compatible
+  ///     with the pointer's `Element` type.
+  ///   - body: A closure that takes a ${Mutable.lower()} typed buffer to the
+  ///     same memory as this buffer, only bound to type `T`. The buffer
+  ///     parameter contains a number of complete instances of `T` based
+  ///     on the capacity of the original buffer and the stride of `Element`.
+  ///     The closure's buffer argument is valid only for the duration of the
+  ///     closure's execution. If `body` has a return value, that value
+  ///     is also used as the return value for the `withMemoryRebound(to:_:)`
+  ///     method.
+  ///   - buffer: The buffer temporarily bound to `T`.
+  /// - Returns: The return value, if any, of the `body` closure parameter.
+  @_alwaysEmitIntoClient @_transparent
+  public func withMemoryRebound<T: ~Copyable, E: Error, Result: ~Copyable>(
+    to type: T.Type,
+    _ body: (_ buffer: ${Self}<T>) throws(E) -> Result
+  ) throws(E) -> Result {
+    guard let base = _position?._rawValue else {
+      return try unsafe body(.init(start: nil, count: 0))
+    }
+
+    _debugPrecondition(
+      unsafe Int(bitPattern: .init(base)) & (MemoryLayout<T>.alignment-1) == 0,
+      "baseAddress must be a properly aligned pointer for types Element and T"
+    )
+
+    let newCount: Int
+    if MemoryLayout<T>.stride == MemoryLayout<Element>.stride {
+      newCount = count
+    } else {
+      newCount = count * MemoryLayout<Element>.stride / MemoryLayout<T>.stride
+      _debugPrecondition(
+        MemoryLayout<T>.stride > MemoryLayout<Element>.stride
+        ? MemoryLayout<T>.stride % MemoryLayout<Element>.stride == 0
+        : MemoryLayout<Element>.stride % MemoryLayout<T>.stride == 0,
+        "Buffer must contain a whole number of Element instances"
+      )
+    }
+    let binding = Builtin.bindMemory(base, newCount._builtinWordValue, T.self)
+    defer { Builtin.rebindMemory(base, binding) }
+    return try unsafe body(unsafe .init(start: .init(base), count: newCount))
+  }
+}
+
+extension Unsafe${Mutable}BufferPointer {
+  // This unavailable implementation uses the expected mangled name
+  // of `withMemoryRebound<T, Result>(to:_:)`, and provides
+  // an entry point for any binary linked against the stdlib binary
+  // for Swift 5.6 and older.
+  @_spi(SwiftStdlibLegacyABI) @available(swift, obsoleted: 1)
+% if Mutable:
+  @_silgen_name("$sSr17withMemoryRebound2to_qd_0_qd__m_qd_0_Sryqd__GKXEtKr0_lF")
+% else:
+  @_silgen_name("$sSR17withMemoryRebound2to_qd_0_qd__m_qd_0_SRyqd__GKXEtKr0_lF")
+% end
+  @usableFromInline
+  internal func _legacy_se0333_withMemoryRebound<T, Result>(
+    to type: T.Type,
+    _ body: (${Self}<T>) throws -> Result
+  ) rethrows -> Result {
+    return try unsafe withMemoryRebound(to: T.self, body)
+  }
+}
+
+@_unavailableInEmbedded
+@_preInverseGenerics
+extension Unsafe${Mutable}BufferPointer: CustomDebugStringConvertible
+where Element: ~Copyable {
+  /// A textual representation of the buffer, suitable for debugging.
+  @_preInverseGenerics
+  @safe
+  public var debugDescription: String {
+    return unsafe "Unsafe${Mutable}BufferPointer"
+      + "(start: \(_position.map(String.init(describing:)) ?? "nil"), count: \(count))"
+  }
+}
+%end
+
+// ${'Local Variables'}:
+// eval: (read-only-mode 1)
+// End:

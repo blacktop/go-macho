@@ -1,0 +1,150 @@
+//===--- EnvironmentVariables.def - Debug variables. ------------*- C++ -*-===//
+//
+// This source file is part of the Swift.org open source project
+//
+// Copyright (c) 2014 - 2020 Apple Inc. and the Swift project authors
+// Licensed under Apache License v2.0 with Runtime Library Exception
+//
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+//
+//===----------------------------------------------------------------------===//
+//
+// This file defines x-macros used for metaprogramming with the set of
+// environment variables used for configuring or enabling debug features in the
+// runtime.
+//
+//===----------------------------------------------------------------------===//
+
+// #define VARIABLE(name, type, defaultValue, help)
+
+#ifndef VARIABLE
+#error "Must define VARIABLE to include EnvironmentVariables.def"
+#endif
+
+VARIABLE(SWIFT_DEBUG_ENABLE_METADATA_ALLOCATION_ITERATION, bool, false,
+         "Enable additional metadata allocation tracking for swift-inspect to "
+         "use.")
+
+VARIABLE(SWIFT_DEBUG_ENABLE_METADATA_BACKTRACE_LOGGING, bool, false,
+         "Enable logging of backtraces for each metadata allocation. Requires "
+         "SWIFT_DEBUG_ENABLE_METADATA_ALLOCATION_ITERATION to be enabled.")
+
+VARIABLE(SWIFT_DEBUG_IMPLICIT_OBJC_ENTRYPOINT, uint8_t, 2,
+         "Print warnings when using implicit @objc entrypoints. Set to "
+         "desired reporting level, 0-3.")
+
+VARIABLE(SWIFT_DETERMINISTIC_HASHING, bool, false,
+         "Disable randomized hash seeding.")
+
+VARIABLE(SWIFT_ENABLE_MANGLED_NAME_VERIFICATION, bool, false,
+         "Enable verification that metadata can roundtrip through a mangled "
+         "name each time metadata is instantiated.")
+
+VARIABLE(SWIFT_DEBUG_ENABLE_MALLOC_SCRIBBLE, bool, false,
+         "Scribble on runtime allocations such as metadata allocations.")
+
+VARIABLE(SWIFT_DEBUG_ENABLE_COW_CHECKS, bool, false,
+         "Enable internal checks for copy-on-write operations.")
+
+VARIABLE(SWIFT_DEBUG_VALIDATE_UNCHECKED_CONTINUATIONS, bool, false,
+         "Check for and error on double-calls of unchecked continuations.")
+
+#if defined(__APPLE__) && defined(__MACH__)
+
+VARIABLE(SWIFT_DEBUG_VALIDATE_SHARED_CACHE_PROTOCOL_CONFORMANCES, bool, false,
+         "Validate shared cache protocol conformance results against the "
+         "lists of conformances in the shared cache images.")
+
+VARIABLE(SWIFT_DEBUG_ENABLE_SHARED_CACHE_PROTOCOL_CONFORMANCES, bool, true,
+         "Enable querying precomputed protocol conformances in the shared "
+         "cache.")
+
+#endif
+
+VARIABLE(SWIFT_DEBUG_ENABLE_CACHE_PROTOCOL_CONFORMANCES_BY_TYPE_DESCRIPTOR,
+         bool, true,
+         "Enable caching protocol conformances by type descriptor in addition "
+         "to the cache by metadata.")
+
+VARIABLE(SWIFT_DEBUG_CONCURRENCY_ENABLE_COOPERATIVE_QUEUES, bool, true,
+         "Enable dispatch cooperative queues in the global executor.")
+
+#ifndef NDEBUG
+
+VARIABLE(SWIFT_DEBUG_RUNTIME_EXCLUSIVITY_LOGGING, bool, false,
+         "Enable the an asserts runtime to emit logging as it works.")
+
+VARIABLE(SWIFT_DEBUG_ENABLE_PROTOCOL_CONFORMANCES_LOOKUP_LOG,
+         bool, false,
+         "Enable logs for the conformance lookup routine.")
+
+#endif
+
+VARIABLE(SWIFT_BINARY_COMPATIBILITY_VERSION, uint32_t, 0,
+        "Set the binary compatibility level of the Swift Standard Library")
+
+VARIABLE(SWIFT_DEBUG_FAILED_TYPE_LOOKUP, bool, false,
+         "Enable warnings when we fail to look up a type by name.")
+
+VARIABLE(SWIFT_DEBUG_ENABLE_LIB_PRESPECIALIZED_METADATA, bool, true,
+         "Enable use of metadata in prespecializations library.")
+
+VARIABLE(SWIFT_DEBUG_ENABLE_LIB_PRESPECIALIZED_DESCRIPTOR_LOOKUP, bool, true,
+         "Enable use of descriptor map in prespecializations library.")
+
+VARIABLE(SWIFT_DEBUG_VALIDATE_LIB_PRESPECIALIZED_DESCRIPTOR_LOOKUP, bool, false,
+         "Validate results from the prespecializations map descriptor map by "
+         "comparing to a full scan.")
+
+VARIABLE(SWIFT_DEBUG_LIB_PRESPECIALIZED_PATH, string, "",
+         "A path to a prespecializations library to use at runtime. In order "
+         "to be used, this library must be loaded into the process by other "
+         "means (such as DYLD_INSERT_LIBRARIES) before Swift tries to use it.")
+
+VARIABLE(SWIFT_DEBUG_LIB_PRESPECIALIZED_DISABLED_PROCESSES, string, "",
+         "A colon-separated list of process names where the prespecializations "
+         "library will be forcibly disabled.")
+
+VARIABLE(SWIFT_DEBUG_LIB_PRESPECIALIZED_ENABLED_PROCESSES, string, "",
+         "A colon-separated list of process names where the prespecializations "
+         "library will be forcibly enabled. This overrides the disabled "
+         "processes list in the prespecializations library, as well as the "
+         "list in SWIFT_DEBUG_LIB_PRESPECIALIZED_DISABLED_PROCESSES.")
+
+VARIABLE(SWIFT_DEBUG_ENABLE_LIB_PRESPECIALIZED_LOGGING, bool, false,
+         "Enable debug logging of prespecializations library use.")
+
+VARIABLE(SWIFT_ROOT, string, "",
+         "Overrides the root directory of the Swift installation. "
+         "This is used to locate auxiliary files relative to the runtime "
+         "itself.")
+
+VARIABLE(SWIFT_BACKTRACE, string, "",
+         "A comma-separated list of key=value pairs that controls the "
+         "crash catching and backtracing support in the runtime. "
+         "See docs/Backtracing.rst in the Swift repository for details.")
+
+VARIABLE(SWIFT_IS_CURRENT_EXECUTOR_LEGACY_MODE_OVERRIDE, string, "",
+         "Allows for suppressing 'is current executor' equality check crashes. "
+         "As since Swift 6.0 checking for current executor equality, may crash "
+         "and will never return 'false' because we are calling into library "
+         "implemented SerialExecutor.checkIsolation which should crash if the "
+         "isolation is not the expected one. Some old code may rely on the "
+         "non-crashing behavior. This flag enables temporarily restoring the "
+         "legacy 'nocrash' behavior until adopting code has been adjusted. "
+         "It is possible to force the use of Swift 6.2's "
+         "isIsolatingCurrentContext instead of checkIsolated by passing "
+         " the 'isIsolatingCurrentContext' configuration value. "
+         "Legal values are: "
+         " 'legacy' (Legacy behavior), "
+         " 'swift6' (Swift 6.0-6.1 behavior)"
+         " 'isIsolatingCurrentContext' (Swift 6.2 behavior)")
+
+VARIABLE(SWIFT_DUMP_ACCESSIBLE_FUNCTIONS, bool, false,
+         "Dump a listing of all 'AccessibleFunctionRecord's upon first access. "
+         "These are used to obtain function pointers from accessible function "
+         "record names, e.g. by the Distributed runtime to invoke distributed "
+         "functions.")
+
+#undef VARIABLE

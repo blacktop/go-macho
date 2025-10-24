@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+
+import argparse
+import filecmp
+import os
+import os.path
+import shutil
+
+from swift_build_support.swift_build_support import shell
+
+
+def merge_file_lists(src_root_dirs, skip_files):
+    """Merges the file lists recursively from all src_root_dirs supplied,
+    returning the union of all file paths found.
+    Files matching skip_files are ignored and skipped.
+    """
+    file_list = []
+    for src_root_dir in src_root_dirs:
+        for src_dir, dirs, files in os.walk(src_root_dir):
+            rel_dir = os.path.relpath(src_dir, src_root_dir)
+            rel_files = [
+                os.path.join(rel_dir, file) for file in files + dirs
+                if file not in skip_files]
+            file_list.extend(
+                filter(lambda file: file not in file_list, rel_files))
+
+    return file_list
+
+
+# Determine if the file paths contain any overlapping architectures.
+def overlapping_lipo_architectures(file_paths, lipo_executable):
+    lipo_cmd = [lipo_executable, "-archs"]
+
+    known_archs = []
+    for file in file_paths:
+        archs = shell.capture(lipo_cmd + [file], echo=False).split(' ')
+        for arch in archs:
+            arch = arch.strip()
+            if arch in known_archs:
+                return True
+            known_archs.append(arch)
+    return False
+
+
+# Determine whether we should consider a file as installable.
+def is_installable(file):
+    return os.path.exists(file) or os.path.islink(file)
+
+
+# Determine the path to the first file and where it should be installed.
+def get_first_file_and_dest_path(file, src_root_dirs, dest_root_dir):
+    for dir in src_root_dirs:
+        orig_file = os.path.join(dir, file)
+        if is_installable(orig_file):
+            dest_path = os.path.join(
+                dest_root_dir, os.path.relpath(orig_file, dir))
+            return (orig_file, dest_path)
+
+    return None
+
+
+def merge_lipo_files(src_root_dirs, file_list, dest_root_dir, verbose=False,
+                     lipo_executable="lipo"):
+    """Recursively merges and runs lipo on all files from file_list in
+    src_root_dirs to destRoorDir.
+
+    Any path in file_list that's a regular file or symlink is copied or lipo'ed
+    into the corresponding location in dest_root_dir. If the file is unique or
+    identical in all src_root_dirs, it's copied verbatim. If it's different,
+    it's lipo'ed together from all src_root_dirs into a fat binary.
+
+    Any path in file_list that's a directory in src_root_dirs results in a
+    corresponding subdirectory in dest_root_dir.
+    """
+    lipo_cmd = [lipo_executable, "-create"]
+
+    for file in file_list:
+        file_paths = [
+            os.path.join(dir, file) for dir in src_root_dirs
+            if is_installable(os.path.join(dir, file))]
+        if len(file_paths) == 0:
+            print("-- Warning: Can't locate source file %s" % file)
+            continue
+
+        first_file_and_dest = get_first_file_and_dest_path(
+            file, src_root_dirs, dest_root_dir)
+        orig_file = first_file_and_dest[0]
+        dest_path = first_file_and_dest[1]
+
+        if all([os.path.islink(item) for item in file_paths]):
+            # It's a symlink in all found instances, copy the link.
+            print("-- Creating symlink %s" % dest_path)
+            # Remove symlink if it already exists
+            if os.path.islink(dest_path):
+                os.remove(dest_path)
+            os.symlink(os.readlink(file_paths[0]), dest_path)
+        elif all([os.path.isdir(item) for item in file_paths]):
+            # It's a subdir in all found instances. Create the destination
+            # subdir.
+            print("-- Creating subdir %s" % dest_path)
+            if not os.path.isdir(dest_path):
+                os.makedirs(dest_path)
+        elif all([os.path.isfile(item) for item in file_paths]):
+            # It's a regular file in all found instances, see if they're
+            # identical.
+            if all([filecmp.cmp(item, file_paths[0]) for item in file_paths]):
+                # All instances are identical, just copy the unique file.
+                print("-- Copying file %s" % dest_path)
+                shutil.copy2(orig_file, dest_path)
+            elif all([os.access(item, os.X_OK) for item in file_paths]):
+                if overlapping_lipo_architectures(file_paths, lipo_executable):
+                    # lipo will fail due to overlapping architectures, so
+                    # copy the file directly.
+                    print("-- Copying file verbatim %s" % dest_path)
+                    shutil.copy2(orig_file, dest_path)
+                else:
+                    # Multiple instances are different and executable, try lipo.
+                    if verbose:
+                        print("-- Running lipo %s to %s" %
+                              (file_paths, dest_path))
+                    else:
+                        print("-- Running lipo %s" % dest_path)
+                    shell.call((lipo_cmd + ["-output", dest_path] + file_paths),
+                               echo=verbose)
+            else:
+                # Multiple instances are different, and they're not executable.
+                print(
+                    "-- Warning: non-executable source files are different, " +
+                    "skipping: %s" % file_paths)
+        else:
+            print("-- Warning: Unsupported file type, skipping: %s" % file_paths)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+This script merges and applies 'lipo' to directories. For each file present in
+any source directory, it will create a file in the destination directory.
+
+If all the copies of the file in the source directories are the same,
+the file is copied directly to the destination. If there are different
+files in different directories, but the files are executable,
+lipo is run to merge the files together. Otherwise, a warning is produced.
+""")
+
+    parser.add_argument("-v", "--verbose", action='store_true',
+                        help="Verbose output and logging")
+    parser.add_argument("--lipo", metavar="<path-to-lipo>",
+                        default="lipo",
+                        help="Path to lipo executable, default is \"lipo\"")
+    parser.add_argument("--skip-files", metavar="<skip-files>",
+                        default=".DS_Store",
+                        help="Files to ignore and skip merge/copy, default " +
+                             "is \".DS_Store\"")
+
+    required_group = parser.add_argument_group("required arguments")
+    required_group.add_argument("--destination", metavar="<dest-path>",
+                                required=True,
+                                help="The merge destination directory")
+    required_group.add_argument("src_root_dirs", metavar="<src-path>",
+                                nargs='+',
+                                help="The source directories to merge-lipo")
+
+    args = parser.parse_args()
+
+    skip_files = args.skip_files.split()
+
+    file_list = merge_file_lists(args.src_root_dirs, skip_files)
+
+    if args.verbose:
+        print("Discovered files and dirs: %s" % file_list)
+
+    merge_lipo_files(
+        args.src_root_dirs, file_list, args.destination, args.verbose,
+        args.lipo)
+
+    return 0
+
+
+if __name__ == '__main__':
+    main()

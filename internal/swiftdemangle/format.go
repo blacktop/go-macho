@@ -37,6 +37,21 @@ func Format(node *Node) string {
 			return Format(node.Children[0]) + "!"
 		}
 		return "!"
+	case KindArray:
+		if len(node.Children) == 0 {
+			return "[]"
+		}
+		return "[" + Format(node.Children[0]) + "]"
+	case KindDictionary:
+		if len(node.Children) < 2 {
+			return "[:]"
+		}
+		return "[" + Format(node.Children[0]) + " : " + Format(node.Children[1]) + "]"
+	case KindSet:
+		if len(node.Children) == 0 {
+			return "Set<>"
+		}
+		return "Set<" + Format(node.Children[0]) + ">"
 	case KindGenericArgs:
 		var elems []string
 		for _, child := range node.Children {

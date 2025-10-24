@@ -1,0 +1,3256 @@
+#!/usr/bin/env bash
+#===--- build-script-impl - Implementation details of build-script ---------===#
+#
+## This source file is part of the Swift.org open source project
+##
+## Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
+## Licensed under Apache License v2.0 with Runtime Library Exception
+##
+## See https://swift.org/LICENSE.txt for license information
+## See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+#
+#===------------------------------------------------------------------------===#
+
+#
+# This script is an implementation detail of other build scripts and should not
+# be called directly.
+#
+# Note: This script will NOT auto-clean before building.
+#
+
+set -o pipefail
+set -e
+
+umask 0022
+
+# Declare the set of known settings along with each one's description
+#
+# If you add a user-settable variable, add it to this list.
+#
+# A default value of "" indicates that the corresponding variable
+# will remain unset unless set explicitly.
+#
+# The --skip-build parameter, with no product name, does not affect the
+# configuration (CMake parameters). You can turn this option on and
+# off in different invocations of the script for the same build
+# directory without affecting configuration.
+#
+# skip-build-* and build-* parameters affect the CMake configuration
+# (enable/disable those components).
+#
+# Each variable name is re-exported into this script in uppercase, where dashes
+# are substituted by underscores. For example, `swift-install-components` is
+# referred to as `SWIFT_INSTALL_COMPONENTS` in the remainder of this script.
+
+    # name                                        default           description
+KNOWN_SETTINGS=(
+    ## Debugging Options
+    dry-run                                       ""                "print the commands that would be executed, but do not execute them"
+    verbose-build                                 ""                "print the commands executed during the build"
+    check-args-only                               ""                "set to check all arguments are known. Exit with status 0 if success, non zero otherwise"
+    only-execute                                  "all"             "Only execute the named action (see implementation)"
+    check-incremental-compilation                 "0"               "set to 1 to compile swift libraries multiple times to check if incremental compilation works"
+    enable-array-cow-checks                       "0"               "set tp 1 compile the stdlib with Array COW checks enabled (only relevant for assert builds)"
+
+    ## Build Mode Options
+    enable-asan                                   ""                "enable Address Sanitizer"
+    enable-ubsan                                  ""                "enable Undefined Behavior Sanitizer"
+    clang-profile-instr-use                       ""                "If set, profile file to use for clang PGO while building llvm/clang"
+    swift-profile-instr-use                       ""                "If set, profile file to use for clang PGO while building swift"
+
+    ## Build Tool Settings
+    build-args                                    ""                "arguments to the build tool; defaults to -j8 when CMake generator is \"Unix Makefiles\""
+    build-dir                                     ""                "out-of-tree build directory; default is in-tree. **This argument is required**"
+    build-jobs                                    ""                "The number of parallel build jobs to use"
+    lit-jobs                                      ""                "The number of workers to use when testing with lit"
+    build-runtime-with-host-compiler              ""                "use the host c++ compiler to build everything"
+    build-stdlib-deployment-targets               "all"             "space-separated list that filters which of the configured targets to build the Swift standard library for, or 'all'"
+    build-toolchain-only                          ""                "If set, only build the necessary tools to build an external toolchain"
+    bootstrapping                                 ""                "the bootstrapping build mode for the swift compiler modules"
+    cmake-generator                               "Unix Makefiles"  "kind of build system to generate; see output of 'cmake --help' for choices"
+    llvm-num-parallel-lto-link-jobs               ""                "The number of parallel link jobs to use when compiling llvm"
+    reconfigure                                   ""                "force a CMake configuration run even if CMakeCache.txt already exists"
+    skip-reconfigure                              ""                "set to skip reconfigure"
+    swift-tools-num-parallel-lto-link-jobs        ""                "The number of parallel link jobs to use when compiling swift tools"
+    use-gold-linker                               ""                "Enable using the gold linker"
+    workspace                                     "${HOME}/src"     "source directory containing llvm, clang, swift"
+    dsymutil-jobs                                 "1"               "number of parallel invocations of dsymutil"
+    extra-dsymutil-args                           ""                "additional arguments to pass to dsymutil"
+
+    ## Build Tools
+    host-cc                                       ""                "the path to CC, the 'clang' compiler for the host platform. **This argument is required**"
+    host-cxx                                      ""                "the path to CXX, the 'clang++' compiler for the host platform. **This argument is required**"
+    host-libtool                                  ""                "the path to libtool"
+    host-lipo                                     ""                "the path to lipo for creating universal binaries on Darwin"
+    cmake                                         ""                "path to the cmake binary"
+    distcc                                        ""                "use distcc in pump mode"
+    distcc-pump                                   ""                "the path to distcc pump executable. This argument is required if distcc is set."
+    ninja-bin                                     ""                "the path to Ninja tool"
+
+    ## Android Options
+    android-api-level                             ""                "The Android API level to target when building for Android. Currently only 21 or above is supported"
+    android-arch                                  "armv7"           "The Android target architecture when building for Android"
+    android-deploy-device-path                    ""                "Path on an Android device to which built Swift stdlib products will be deployed"
+    android-ndk                                   ""                "An absolute path to the NDK that will be used as a libc implementation for Android builds"
+
+    ## Linux Options
+    musl-path                                     "/usr/local/musl" "The path to the Musl headers and libraries"
+    linux-archs                                   ""                "The Linux target architecture(s)"
+    linux-static-archs                            ""                "The fully static Linux target architecture(s)"
+    build-linux-static                            ""                "set to build Swift stdlibs for statically linked Linux"
+
+    ## Darwin Options
+    darwin-crash-reporter-client                  ""                "whether to enable CrashReporter integration, default is 1 on Darwin platforms, 0 otherwise"
+    darwin-deployment-version-ios                 "16.0"            "minimum deployment target version for iOS"
+    darwin-deployment-version-osx                 "13.0"            "minimum deployment target version for OS X"
+    darwin-deployment-version-tvos                "16.0"            "minimum deployment target version for tvOS"
+    darwin-deployment-version-watchos             "6.0"             "minimum deployment target version for watchOS"
+    darwin-deployment-version-xros                "1.0"             "minimum deployment target version for xrOS"
+    darwin-install-extract-symbols                ""                "whether to extract symbols with dsymutil during installations"
+    darwin-install-extract-symbols-use-just-built-dsymutil "1"       "whether we should extract symbols using the just built dsymutil"
+    darwin-symroot-path-filters                   ""                "space-separated list of path patterns to consider for symbol generation"
+    darwin-overlay-target                         ""                "single overlay target to build, dependencies are computed later"
+    darwin-sdk-deployment-targets                 "xctest-ios-8.0"  "semicolon-separated list of triples like 'fookit-ios-9.0;barkit-watchos-9.0'"
+    darwin-stdlib-install-name-dir                ""                "the directory of the install_name for standard library dylibs"
+    darwin-toolchain-alias                        ""                "Swift alias for toolchain"
+    darwin-toolchain-application-cert             ""                "Application Cert name to codesign xctoolchain"
+    darwin-toolchain-bundle-identifier            ""                "CFBundleIdentifier for xctoolchain info plist"
+    darwin-toolchain-display-name                 ""                "Display Name for xctoolcain info plist"
+    darwin-toolchain-display-name-short           ""                "Display Name with out date for xctoolchain info plist"
+    darwin-toolchain-installer-cert               ""                "Installer Cert name to create installer pkg"
+    darwin-toolchain-installer-package            ""                "The path to installer pkg"
+    darwin-toolchain-name                         ""                "Directory name for xctoolchain"
+    darwin-toolchain-version                      ""                "Version for xctoolchain info plist and installer pkg"
+    darwin-toolchain-require-use-os-runtime       "0"               "When setting up a plist for a toolchain, require the users of the toolchain to link against the OS instead of the packaged toolchain runtime. 0 for false, 1 for true"
+    darwin-xcrun-toolchain                        "default"         "the name of the toolchain to use on Darwin"
+
+    ## OpenBSD options
+    openbsd-btcfi                                 ""                "enables BTCFI when possible. May cause stability problems."
+
+    ## Runtime options
+    min-runtime-version                ""                "Used to specify the minimum host runtime version when building the compiler on non-Darwin platforms"
+
+    ## WebAssembly/WASI Options
+    wasi-sysroot                                  ""                "An absolute path to the wasi-sysroot that will be used as a libc implementation for Wasm builds"
+
+    ## Build Types for Components
+    swift-stdlib-build-type                       "Debug"           "the CMake build variant for Swift"
+
+    ## Skip Build ...
+    skip-build                                    ""                "set to configure as usual while skipping the build step"
+    skip-build-android                            ""                "set to skip building Swift stdlibs for Android"
+    skip-build-linux                              ""                "set to skip building Swift stdlibs for Linux"
+    skip-build-wasm                               ""                "set to skip building Swift stdlibs for WebAssembly"
+    skip-build-benchmarks                         ""                "set to skip building Swift Benchmark Suite"
+    skip-build-clang-tools-extra                  ""                "set to skip building clang-tools-extra as part of llvm"
+    skip-build-compiler-rt                        ""                "set to skip building Compiler-RT"
+    skip-build-lld                                ""                "set to skip building lld as part of llvm (linux only)"
+
+    ## Skip Test ...
+    skip-test-benchmarks                          ""                "set to skip running Swift Benchmark Suite"
+    skip-test-sourcekit                           ""                "set to skip testing SourceKit"
+
+    ## Extra ... CMake Options
+    common-cmake-options                          ""                "CMake options used for all targets, including LLVM/Clang"
+    extra-cmake-options                           ""                "Extra options to pass to CMake for all targets"
+    ninja-cmake-options                           ""                "CMake options used for all ninja targets"
+
+    ## Build ...
+    build-llvm                                    "1"               "set to 1 to build LLVM and Clang"
+    build-sil-debugging-stdlib                    "0"               "set to 1 to build the Swift standard library with -sil-based-debuginfo to enable debugging and profiling on SIL level"
+    build-swift-clang-overlays                    "1"               "set to 1 to build the Swift overlays for the clang builtin modules"
+    build-swift-dynamic-sdk-overlay               ""                "set to 1 to build dynamic variants of the Swift SDK overlay"
+    build-swift-dynamic-stdlib                    ""                "set to 1 to build dynamic variants of the Swift standard library"
+    build-swift-examples                          "1"               "set to 1 to build examples"
+    build-swift-remote-mirror                     "1"               "set to 1 to build the Swift Remote Mirror library"
+    build-swift-static-sdk-overlay                ""                "set to 1 to build static variants of the Swift SDK overlay"
+    build-swift-static-stdlib                     ""                "set to 1 to build static variants of the Swift standard library"
+    build-swift-stdlib-unittest-extra             "0"               "set to 1 to build optional StdlibUnittest components"
+    build-swift-tools                             "1"               "set to 1 to build Swift host tools"
+    build-swift-libexec                           "1"               "set to 1 to build auxiliary executables"
+
+    ## Skip cleaning build directories ...
+    skip-clean-libdispatch                        "0"               "skip cleaning the libdispatch build"
+    skip-clean-foundation                         "0"               "skip cleaning the foundation build"
+    skip-clean-xctest                             "0"               "skip cleaning the xctest build"
+
+    ## Test Options
+    long-test                                     "0"               "set to run the long test suite"
+    only-executable-test                          ""                "only run the executable variant of the swift lit tests"
+    stress-test                                   "0"               "set to run the stress test suite"
+    stress-test-sourcekit                         ""                "set to run the stress-SourceKit target"
+    swift-include-tests                           "1"               "Set to true to generate testing targets for Swift. This allows the build to proceed when 'test' directory is missing (required for B&I builds)"
+    validation-test                               "0"               "set to run the validation test suite"
+
+    ## llbuild Options
+    llbuild-enable-assertions                     "1"               "enable assertions in llbuild"
+    skip-clean-llbuild                            "0"               "skip cleaning up llbuild"
+
+    ## LLDB Options
+    lldb-assertions                               "1"               "build lldb with assertions enabled"
+    lldb-extra-cmake-args                         ""                "extra command line args to pass to lldb cmake"
+    lldb-test-cc                                  ""                "CC to use for building LLDB testsuite test inferiors.  Defaults to just-built, in-tree clang.  If set to 'host-toolchain', sets it to same as host-cc."
+    lldb-test-swift-compatibility                 ""                "specify additional Swift compilers to test lldb with"
+    lldb-test-swift-only                          "0"               "when running lldb tests, only include Swift-specific tests"
+    lldb-use-system-debugserver                   ""                "don't try to codesign debugserver, and use the system's debugserver instead"
+    lldb-configure-tests                          "1"               "if set, will make sure we configure LLDB's test target without running the tests"
+
+    ## LLVM Options
+    llvm-enable-lto                               ""                "Must be set to one of 'thin' or 'full'"
+    llvm-enable-modules                           "0"               "enable building llvm using modules"
+    llvm-install-components                       ""                "a semicolon-separated list of LLVM components to install"
+    llvm-lit-args                                 ""                "If set, override the lit args passed to LLVM"
+    enable-llvm-assertions                        "1"               "set to enable llvm assertions"
+    llvm-ninja-targets                            ""                "list of ninja targets to build for LLVM"
+    llvm-ninja-targets-for-cross-compile-hosts    ""                "list of ninja targets to build for LLVM for hosts that are cross-compiled"
+
+    ## Swift Options
+    swift-source-dirname                          ""                "The name of the Swift source directory"
+    swift-analyze-code-coverage                   "not-merged"      "Code coverage analysis mode for Swift (false, not-merged, merged). Defaults to false if the argument is not present, and not-merged if the argument is present without a modifier."
+    swift-enable-assertions                       "1"               "enable assertions in Swift"
+    swift-enable-ast-verifier                     "1"               "If enabled, and the assertions are enabled, the built Swift compiler will run the AST verifier every time it is invoked"
+    swift-install-components                      ""                "a semicolon-separated list of Swift components to install"
+    swift-primary-variant-arch                    ""                "default arch for target binaries"
+    swift-primary-variant-sdk                     ""                "default SDK for target binaries"
+    swift-runtime-enable-leak-checker             "0"               "Enable leaks checking routines in the runtime"
+    swift-stdlib-enable-assertions                "1"               "enable assertions in Swift"
+    swift-stdlib-enable-debug-preconditions-in-release "0"          "Enable _debugPrecondition checks in the stdlib in Release configurations"
+    swift-stdlib-enable-strict-availability       "0"               "enable strict availability checking in the stdlib"
+    swift-tools-enable-lto                        ""                "enable LTO compilation of Swift tools. *NOTE* This does not include the swift standard library and runtime. Must be set to one of 'thin' or 'full'"
+    extra-swift-args                              ""                "Extra arguments to pass to swift modules which match regex. Assumed to be a flattened cmake list consisting of [module_regexp, args, module_regexp, args, ...]"
+    report-statistics                             "0"               "set to 1 to generate compilation statistics files for swift libraries"
+    sil-verify-all                                "0"               "If enabled, run the SIL verifier after each transform when building Swift files during this build process"
+    sil-verify-all-macos-only                     "0"               "If enabled, run the SIL verifier after each transform when building Swift files during this build process when building a macos stdlib"
+    stdlib-deployment-targets                     ""                "space-separated list of targets to configure the Swift standard library to be compiled or cross-compiled for"
+    swift-objc-interop                            ""                "whether to enable interoperability with Objective-C, default is 1 on Darwin platforms, 0 otherwise"
+    swift-enable-dispatch                         "1"               "whether to enable use of libdispatch"
+    swift-implicit-concurrency-import             "1"               "whether to implicitly import the Swift concurrency module"
+    swift-stdlib-support-back-deployment          "1"               "whether to support back-deployment of built binaries to older OS versions"
+    swift-enable-reflection                       "1"               "whether to support reflection and mirrors"
+    swift-stdlib-reflection-metadata              "enabled"         "whether to build stdlib with runtime metadata (valid options are 'enabled', 'disabled' and 'debugger-only')"
+    swift-stdlib-has-dladdr                       "1"               "whether to build stdlib assuming the runtime environment provides dladdr API"
+    swift-stdlib-has-dlsym                        "1"               "whether to build stdlib assuming the runtime environment provides the dlsym API"
+    swift-stdlib-has-filesystem                   "1"               "whether to build stdlib assuming the runtime environment provides a filesystem"
+    swift-stdlib-supports-backtrace-reporting     ""                "whether to build stdlib assuming the runtime environment provides the backtrace(3) API, if not set defaults to true on all platforms except for Cygwin, Haiku and wasm"
+    swift-runtime-static-image-inspection         "0"               "whether to build stdlib assuming the runtime environment only supports a single runtime image with Swift code"
+    swift-threading-package                       ""                "override the threading package for the host build; this is either a single package or a semicolon-separated list of sdk:package pairs.  Valid packages are empty string (no override), 'pthreads', 'darwin', 'linux', 'win32', 'c11', 'none'"
+    swift-stdlib-single-threaded-concurrency      "0"               "build Swift concurrency in single-threaded mode"
+    swift-stdlib-task-to-thread-model-concurrency "0"               "build Swift concurrency with task-to-thread mode"
+    swift-stdlib-tracing                          ""                "whether to enable tracing signposts for the stdlib; default is 1 on Darwin platforms, 0 otherwise"
+    swift-stdlib-concurrency-tracing              ""                "whether to enable tracing signposts for concurrency; default is 1 on Darwin platforms, 0 otherwise"
+    swift-stdlib-use-relative-protocol-witness-tables "0"            "whether to use relative protocol witness table"
+    swift-stdlib-use-fragile-resilient-protocol-witness-tables "0"            "whether to use fragile resilient protocol witness table"
+    swift-enable-runtime-function-counters        ""                "whether to enable runtime function counters"
+    swift-stdlib-os-versioning                    "1"               "whether to build stdlib with availability based on OS versions (Darwin only)"
+    swift-stdlib-has-commandline                  "1"               "whether to build stdlib with the CommandLine enum and support for argv/argc"
+    swift-stdlib-stable-abi                       ""                "should stdlib be built with stable ABI, if not set defaults to true on Darwin, false otherwise"
+    swift-stdlib-has-darwin-libmalloc             "1"               "whether the Darwin build of stdlib can use extended libmalloc APIs"
+    swift-stdlib-has-asl                          ""                "whether the stdlib can use the asl_log API, defaults to true on Darwin, false otherwise"
+    swift-stdlib-has-stdin                        "1"               "whether to build stdlib assuming the platform supports stdin and getline API"
+    swift-stdlib-has-environ                      "1"               "whether to build stdlib assuming the platform supports environment variables"
+    swift-stdlib-has-locale                       ""                "whether to build stdlib assuming the platform has locale support"
+    swift-stdlib-lto                              ""                "enable LLVM LTO on the stdlib, valid values are empty string (no LTO), 'full' and 'thin'"
+    swift-stdlib-enable-prespecialization         ""                "whether stdlib should be built with generic metadata prespecialization enabled, defaults to true on Darwin and Linux, false otherwise"
+    swift-stdlib-passthrough-metadata-allocator   "0"               "whether stdlib should be built without a custom implementation of MetadataAllocator, relying on malloc+free instead"
+    swift-stdlib-short-mangling-lookups           "1"               "whether to build stdlib with fast-path context descriptor lookups based on well-known short manglings"
+    swift-stdlib-enable-vector-types              "1"               "whether to build stdlib with support for SIMD and vector types"
+    swift-stdlib-experimental-hermetic-seal-at-link     "0"         "whether stdlib should be built with -experimental-hermetic-seal-at-link"
+    swift-stdlib-disable-instantiation-caches     "0"               "whether to build stdlib with -disable-preallocated-instantiation-caches"
+    swift-stdlib-has-type-printing                "1"               "whether stdlib should support printing user-friendly type name as strings at runtime"
+    swift-stdlib-trap-function                    ""                "Name of function to call instead of emitting a trap instruction"
+    swift-disable-dead-stripping                  "0"               "turns off Darwin-specific dead stripping for Swift host tools"
+    common-swift-flags                            ""                "Flags used for Swift targets other than the stdlib, like the corelibs"
+    swift-enable-experimental-string-processing   "1"               "whether to build experimental string processing feature"
+    swift-earlyswiftsyntax                        "0"               "use the early SwiftSyntax"
+    swift-enable-backtracing                      "1"               "whether to build the backtracing support"
+    swift-runtime-fixed-backtracer-path           ""                "if set, use a fixed path for the backtracer"
+    swift-stdlib-overridable-retain-release       "1"               "whether to allow retain/release functions to be overridden by indirecting through function pointers"
+
+    ## FREESTANDING Stdlib Options
+    swift-freestanding-flavor                     ""                "when building the FREESTANDING stdlib, which build style to use (options: apple, linux)"
+    swift-freestanding-sdk                        ""                "which SDK to use when building the FREESTANDING stdlib"
+    swift-freestanding-triple-name                ""                "which triple name (e.g. 'none-macho') to use when building the FREESTANDING stdlib"
+    swift-freestanding-module-name                ""                "which .swiftmodule name (e.g. 'freestanding') to use when building the FREESTANDING stdlib"
+    swift-freestanding-archs                      ""                "space-separated list of which architectures to build when building the FREESTANDING stdlib"
+
+    ## Uncategorised
+    install-prefix                                ""                "installation prefix"
+    toolchain-prefix                              ""                "the path to the .xctoolchain directory that houses the install prefix path"
+    install-destdir                               ""                "the path to use as the filesystem root for the installation"
+    install-symroot                               ""                "the path to install debug symbols into"
+    installable-package                           ""                "the path to the archive of the installation directory"
+    test-installable-package                      ""                "whether to run post-packaging tests on the produced package"
+    skip-local-build                              ""                "set to skip building for the current host (useful when crosscompiling)"
+    test-paths                                    ""                "run tests located in specific directories and/or files"
+    native-llvm-tools-path                        ""                "directory that contains LLVM tools that are executable on the build machine"
+    native-clang-tools-path                       ""                "directory that contains Clang tools that are executable on the build machine"
+    native-swift-tools-path                       ""                "directory that contains Swift tools that are executable on the build machine"
+    embed-bitcode-section                         "0"               "embed an LLVM bitcode section in stdlib/overlay binaries for supported platforms"
+    host-target                                   ""                "The host target. LLVM, Clang, and Swift will be built for this target. The built LLVM and Clang will be used to compile Swift for the cross-compilation targets. **This argument is required**"
+    cross-compile-hosts                           ""                "space-separated list of targets to cross-compile host Swift tools for"
+    cross-compile-with-host-tools                 ""                "set to use the clang we build for the host to then build the cross-compile hosts"
+    cross-compile-install-prefixes                ""                "semicolon-separated list of install prefixes to use for the cross-compiled hosts. The list expands, so if there are more cross-compile hosts than prefixes, unmatched hosts use the last prefix in the list"
+    cross-compile-deps-path                       ""                "path for CMake to look for cross-compiled library dependencies, such as libXML2"
+    cross-compile-append-host-target-to-destdir   "1"               "turns on appending the host target name of each cross-compiled toolchain to its install-destdir, to keep them separate from the natively-built toolchain"
+    cross-compile-build-swift-tools               "1"               "set to 1 to cross-compile the Swift host tools, like the Swift compiler"
+    skip-merge-lipo-cross-compile-tools           ""                "set to skip running merge-lipo after installing cross-compiled host Swift tools"
+    coverage-db                                   ""                "If set, coverage database to use when prioritizing testing"
+    skip-local-host-install                       ""                "If we are cross-compiling multiple targets, skip an install pass locally if the hosts match"
+    enable-extract-symbol-dry-run-test            ""                "If we are dry-running, still run the extract symbol phase so that we can test it"
+)
+
+components=(
+  foundation
+  libcxx
+  libdispatch
+  libxml2
+  zlib
+  curl
+  llbuild
+  lldb
+  llvm
+  static-foundation
+  static-libdispatch
+  swift
+  xctest
+)
+for component in ${components[@]} ; do
+  component_skip_test_default=""
+  KNOWN_SETTINGS+=(
+    ${component}-build-type                       "Debug"                              "the build variant for ${component}"
+    ${component}-cmake-options                    ""                                   "CMake options used for ${component}"
+    skip-build-${component}                       ""                                   "set to skip building ${component}"
+    skip-test-${component}                        "${component_skip_test_default}"     "set to skip testing ${component}"
+    install-${component}                          ""                                   "whether to install ${component}"
+  )
+done
+
+
+# Centralized access point for traced command invocation.
+# Every operation that might mutates file system should be called via
+# these functions.
+
+function call() {
+    if [[ ${DRY_RUN} ]] || [[ "${VERBOSE_BUILD}" ]]; then
+        echo "${PS4}"$(quoted_print "$@")
+    fi
+
+    SECONDS=0
+    if [[ ! ${DRY_RUN} ]]; then
+        { set -x; } 2>/dev/null
+        "$@"
+        { set +x; } 2>/dev/null
+    fi
+}
+
+function with_pushd() {
+    local dir=$1
+    shift
+    if [[ "$1" == "call" ]]; then
+        shift
+    fi
+    if [[ ${DRY_RUN} ]]; then
+        echo ${PS4}pushd "${dir}"
+        echo "${PS4}"$(quoted_print "$@")
+        echo ${PS4}popd
+    else
+        set -x
+        pushd "${dir}"
+        "$@"
+        { set -x; } 2>/dev/null # because $@ might includes { set +x; }
+        popd
+        { set +x; } 2>/dev/null
+    fi
+}
+
+function quoted_print() {
+    python3 -c 'import shlex; import sys; print(" ".join(shlex.quote(arg) for arg in sys.argv[1:]))' "$@"
+}
+
+function toupper() {
+    echo "$@" | tr '[:lower:]' '[:upper:]'
+}
+
+function tolower() {
+    echo "$@" | tr '[:upper:]' '[:lower:]'
+}
+
+function true_false() {
+    case "$1" in
+        false | FALSE | 0 | "")
+            echo "FALSE"
+            ;;
+        true | TRUE | 1)
+            echo "TRUE"
+            ;;
+        *)
+            echo "true_false: unknown value: $1" >&2
+            exit 1
+            ;;
+    esac
+}
+
+function to_varname() {
+    # Uses `tr` because it is orders of magnitude faster than ${1//-/_} on long
+    # strings, which happens when translating KNOWN_SETTINGS.
+    toupper "$(echo $1 | tr '-' '_')"
+}
+
+function is_llvm_lto_enabled() {
+    if [[ "${LLVM_ENABLE_LTO}" == "thin" ]] ||
+       [[ "${LLVM_ENABLE_LTO}" == "full" ]]; then
+        echo "TRUE"
+    else
+        echo "FALSE"
+    fi
+}
+
+function is_swift_lto_enabled() {
+    if [[ "${SWIFT_TOOLS_ENABLE_LTO}" == "thin" ]] ||
+       [[ "${SWIFT_TOOLS_ENABLE_LTO}" == "full" ]]; then
+        echo "TRUE"
+    else
+        echo "FALSE"
+    fi
+}
+
+# Support for performing isolated actions.
+#
+# This is part of refactoring more work to be done or controllable via
+# `build-script` itself. For additional information, see:
+# https://github.com/apple/swift/issues/42859
+#
+# To use this functionality, the script is invoked with:
+#   ONLY_EXECUTE=<action name>
+# where <action name> is one of:
+#   all                          -- execute all actions
+#   ${host}-${product}-build     -- the build of the product
+#   ${host}-${product}-test      -- the test of the product
+#   ${host}-${product}-install   -- the install of the product
+#   ${host}-package              -- the package construction and test
+#   merged-hosts-lipo            -- the lipo step, if used
+# and if used, only the one individual action will be performed.
+#
+# If not set, the default is `all`.
+
+# should_execute_action(name) -> 1 or nil
+#
+# Check if the named action should be run in the given script invocation.
+function should_execute_action() {
+    local name="$1"
+
+    if [[ "${ONLY_EXECUTE}" = "all" ]] ||
+           [[ "${ONLY_EXECUTE}" = "${name}" ]]; then
+        echo 1
+    fi
+}
+
+# should_execute_host_actions_for_phase(host, phase-name) -> 1 or nil
+#
+# Check if the there are any actions to execute for this host and phase (i.e.,
+# "build", "test", or "install")
+function should_execute_host_actions_for_phase() {
+    local host="$1"
+    local phase_name="$2"
+
+    if [[ "${ONLY_EXECUTE}" = "all" ]] ||
+           [[ "${ONLY_EXECUTE}" == ${host}-*-${phase_name} ]]; then
+        echo 1
+    fi
+}
+
+function verify_host_is_supported() {
+    local host="$1"
+    case ${host} in
+      freebsd-aarch64           \
+      | freebsd-x86_64          \
+      | openbsd-x86_64          \
+      | openbsd-aarch64         \
+      | cygwin-x86_64           \
+      | haiku-x86_64            \
+      | linux-x86_64            \
+      | linux-i686              \
+      | linux-armv5             \
+      | linux-armv6             \
+      | linux-armv7             \
+      | linux-aarch64           \
+      | linux-powerpc           \
+      | linux-powerpc64         \
+      | linux-powerpc64le       \
+      | linux-riscv64           \
+      | linux-s390x             \
+      | linux-static-aarch64    \
+      | linux-static-x86_64     \
+      | macosx-x86_64           \
+      | macosx-arm64            \
+      | macosx-arm64e           \
+      | iphonesimulator-x86_64  \
+      | iphonesimulator-arm64   \
+      | iphoneos-arm64          \
+      | iphoneos-arm64e         \
+      | appletvsimulator-x86_64 \
+      | appletvsimulator-arm64  \
+      | appletvos-arm64         \
+      | watchsimulator-x86_64   \
+      | watchsimulator-arm64    \
+      | watchos-armv7k          \
+      | watchos-arm64_32        \
+      | xrsimulator-arm64  \
+      | xros-arm64         \
+      | xros-arm64e        \
+      | wasi-wasm32             \
+      | android-armv7           \
+      | android-aarch64         \
+      | android-x86_64)
+        ;;
+      *)
+        echo "Unknown host tools target: ${host}"
+        exit 1
+        ;;
+    esac
+}
+
+function set_build_options_for_host() {
+    llvm_cmake_options=()
+    swift_cmake_options=()
+    lldb_cmake_options=()
+    llbuild_cmake_options=()
+    SWIFT_HOST_VARIANT=
+    SWIFT_HOST_VARIANT_SDK=
+    SWIFT_HOST_VARIANT_ARCH=
+    SWIFT_HOST_TRIPLE=
+    local host="$1"
+
+    # Hosts which can be cross-compiled must specify:
+    # SWIFT_HOST_TRIPLE and llvm_target_arch.
+    # Hosts which have differing platform names from their
+    # SWIFT_HOST_VARIANT_* values should change them here as well.
+
+    verify_host_is_supported $host
+
+    local platform=${host%%-*}
+    local architecture=${host##*-}
+
+    SWIFT_HOST_VARIANT=$platform
+    SWIFT_HOST_VARIANT_SDK=$(toupper $platform)
+    SWIFT_HOST_VARIANT_ARCH=$architecture
+
+    case ${host} in
+        android-*)
+            # Clang uses a different sysroot natively on Android in the Termux
+            # app, which the Termux build scripts pass in through a $PREFIX
+            # variable.
+            if [[ "${PREFIX}" ]] ; then
+                llvm_cmake_options+=(
+                    -DCLANG_DEFAULT_LINKER:STRING="lld"
+                    -DDEFAULT_SYSROOT:STRING="$(dirname ${PREFIX})"
+                )
+            fi
+            # Android doesn't support building all of compiler-rt yet.
+            if [[ ! $(is_cross_tools_host "${host}") ]] ; then
+                llvm_cmake_options+=(
+                    -DCOMPILER_RT_INCLUDE_TESTS:BOOL=FALSE
+                )
+            fi
+            case ${host} in
+                android-aarch64)
+                    SWIFT_HOST_TRIPLE="aarch64-unknown-linux-android${ANDROID_API_LEVEL}"
+                    llvm_target_arch="AArch64"
+                    ;;
+                android-armv7)
+                    SWIFT_HOST_TRIPLE="armv7-unknown-linux-androideabi${ANDROID_API_LEVEL}"
+                    llvm_target_arch="ARM"
+                    ;;
+                android-x86_64)
+                    SWIFT_HOST_TRIPLE="x86_64-unknown-linux-android${ANDROID_API_LEVEL}"
+                    llvm_target_arch="X86"
+                    ;;
+            esac
+            ;;
+        linux-armv5)
+            SWIFT_HOST_TRIPLE="armv5-unknown-linux-gnueabi"
+            llvm_target_arch="ARM"
+            ;;
+        linux-armv6)
+            SWIFT_HOST_TRIPLE="armv6-unknown-linux-gnueabihf"
+            llvm_target_arch="ARM"
+            ;;
+        linux-armv7)
+            SWIFT_HOST_TRIPLE="armv7-unknown-linux-gnueabihf"
+            llvm_target_arch="ARM"
+            ;;
+        macosx-*            | \
+        iphoneos-*          | \
+        iphonesimulator-*   | \
+        appletvos-*         | \
+        appletvsimulator-*  | \
+        watchos-*           | \
+        watchsimulator-*    | \
+        xros-*              | \
+        xrsimulator-*)
+            case ${host} in
+                macosx-x86_64)
+                    SWIFT_HOST_TRIPLE="x86_64-apple-macosx${DARWIN_DEPLOYMENT_VERSION_OSX}"
+                    llvm_target_arch=""
+
+                    SWIFT_HOST_VARIANT_SDK="OSX"
+                    cmake_osx_deployment_target="${DARWIN_DEPLOYMENT_VERSION_OSX}"
+                    ;;
+                macosx-arm64)
+                    xcrun_sdk_name="macosx"
+                    llvm_target_arch="AArch64"
+                    SWIFT_HOST_TRIPLE="arm64-apple-macosx${DARWIN_DEPLOYMENT_VERSION_OSX}"
+                    SWIFT_HOST_VARIANT="macosx"
+                    SWIFT_HOST_VARIANT_SDK="OSX"
+                    SWIFT_HOST_VARIANT_ARCH="arm64"
+                    cmake_osx_deployment_target="${DARWIN_DEPLOYMENT_VERSION_OSX}"
+                    ;;
+                macosx-arm64e)
+                    xcrun_sdk_name="macosx"
+                    llvm_target_arch="AArch64"
+                    SWIFT_HOST_TRIPLE="arm64e-apple-macosx${DARWIN_DEPLOYMENT_VERSION_OSX}"
+                    SWIFT_HOST_VARIANT="macosx"
+                    SWIFT_HOST_VARIANT_SDK="OSX"
+                    SWIFT_HOST_VARIANT_ARCH="arm64e"
+                    cmake_osx_deployment_target="${DARWIN_DEPLOYMENT_VERSION_OSX}"
+                    ;;
+                iphonesimulator-x86_64)
+                    SWIFT_HOST_TRIPLE="x86_64-apple-ios${DARWIN_DEPLOYMENT_VERSION_IOS}-simulator"
+                    llvm_target_arch="X86"
+
+                    SWIFT_HOST_VARIANT_SDK="IOS_SIMULATOR"
+                    cmake_osx_deployment_target=""
+                    ;;
+                iphonesimulator-arm64)
+                    xcrun_sdk_name="iphonesimulator"
+                    llvm_target_arch="AArch64"
+                    SWIFT_HOST_TRIPLE="arm64-apple-ios${DARWIN_DEPLOYMENT_VERSION_IOS}-simulator"
+                    SWIFT_HOST_VARIANT="iphonesimulator"
+                    SWIFT_HOST_VARIANT_SDK="IOS_SIMULATOR"
+                    SWIFT_HOST_VARIANT_ARCH="arm64"
+
+                    cmake_osx_deployment_target=""
+                    ;;
+                iphoneos-arm64)
+                    SWIFT_HOST_TRIPLE="arm64-apple-ios${DARWIN_DEPLOYMENT_VERSION_IOS}"
+                    llvm_target_arch="AArch64"
+
+                    SWIFT_HOST_VARIANT_SDK="IOS"
+                    cmake_osx_deployment_target=""
+                    ;;
+                iphoneos-arm64e)
+                    SWIFT_HOST_TRIPLE="arm64e-apple-ios${DARWIN_DEPLOYMENT_VERSION_IOS}"
+                    llvm_target_arch="AArch64"
+
+                    SWIFT_HOST_VARIANT_SDK="IOS"
+                    cmake_osx_deployment_target=""
+                    ;;
+                appletvsimulator-x86_64)
+                    SWIFT_HOST_TRIPLE="x86_64-apple-tvos${DARWIN_DEPLOYMENT_VERSION_TVOS}-simulator"
+                    llvm_target_arch="X86"
+
+                    SWIFT_HOST_VARIANT_SDK="TVOS_SIMULATOR"
+                    cmake_osx_deployment_target=""
+                    ;;
+                appletvsimulator-arm64)
+                    xcrun_sdk_name="appletvsimulator"
+                    llvm_target_arch="AArch64"
+                    SWIFT_HOST_TRIPLE="arm64-apple-tvos${DARWIN_DEPLOYMENT_VERSION_IOS}-simulator"
+                    SWIFT_HOST_VARIANT="appletvsimulator"
+                    SWIFT_HOST_VARIANT_SDK="TVOS_SIMULATOR"
+                    SWIFT_HOST_VARIANT_ARCH="arm64"
+
+                    cmake_osx_deployment_target=""
+                    ;;
+                appletvos-arm64)
+                    SWIFT_HOST_TRIPLE="arm64-apple-tvos${DARWIN_DEPLOYMENT_VERSION_TVOS}"
+                    llvm_target_arch="AArch64"
+
+                    SWIFT_HOST_VARIANT_SDK="TVOS"
+                    cmake_osx_deployment_target=""
+                    ;;
+                watchsimulator-x86_64)
+                    SWIFT_HOST_TRIPLE="x86_64-apple-watchos${DARWIN_DEPLOYMENT_VERSION_WATCHOS}-simulator"
+                    llvm_target_arch="X86"
+
+                    SWIFT_HOST_VARIANT_SDK="WATCHOS_SIMULATOR"
+                    cmake_osx_deployment_target=""
+                    ;;
+                watchsimulator-arm64)
+                    xcrun_sdk_name="watchsimulator"
+                    llvm_target_arch="AArch64"
+                    SWIFT_HOST_TRIPLE="arm64-apple-watchos${DARWIN_DEPLOYMENT_VERSION_IOS}-simulator"
+                    SWIFT_HOST_VARIANT="watchsimulator"
+                    SWIFT_HOST_VARIANT_SDK="WATCHOS_SIMULATOR"
+                    SWIFT_HOST_VARIANT_ARCH="arm64"
+
+                    cmake_osx_deployment_target=""
+                    ;;
+                watchos-armv7k)
+                    SWIFT_HOST_TRIPLE="armv7k-apple-watchos${DARWIN_DEPLOYMENT_VERSION_WATCHOS}"
+                    llvm_target_arch="ARM"
+
+                    SWIFT_HOST_VARIANT_SDK="WATCHOS"
+                    cmake_osx_deployment_target=""
+                    ;;
+                watchos-arm64_32)
+                    SWIFT_HOST_TRIPLE="arm64_32-apple-watchos${DARWIN_DEPLOYMENT_VERSION_WATCHOS}"
+                    llvm_target_arch="AArch64"
+
+                    SWIFT_HOST_VARIANT_SDK="WATCHOS"
+                    cmake_osx_deployment_target=""
+                    ;;
+                xrsimulator-arm64)
+                    SWIFT_HOST_TRIPLE="arm64-apple-xros${DARWIN_DEPLOYMENT_VERSION_XROS}-simulator"
+                    llvm_target_arch="AArch64"
+
+                    SWIFT_HOST_VARIANT_SDK="XROS_SIMULATOR"
+                    cmake_osx_deployment_target=""
+                    ;;
+                xros-arm64)
+                    SWIFT_HOST_TRIPLE="arm64-apple-xros${DARWIN_DEPLOYMENT_VERSION_XROS}"
+                    llvm_target_arch="AArch64"
+
+                    SWIFT_HOST_VARIANT_SDK="XROS"
+                    cmake_osx_deployment_target=""
+                    ;;
+                xros-arm64e)
+                    SWIFT_HOST_TRIPLE="arm64e-apple-xros${DARWIN_DEPLOYMENT_VERSION_XROS}"
+                    llvm_target_arch="AArch64"
+
+                    SWIFT_HOST_VARIANT_SDK="XROS"
+                    cmake_osx_deployment_target=""
+                    ;;
+            esac
+
+            if [[ "${DARWIN_SDK_DEPLOYMENT_TARGETS}" != "" ]]; then
+                # IFS is immediately unset after its use to avoid unwanted
+                # replacement of characters in subsequent lines.
+                local IFS=";"; DARWIN_SDK_DEPLOYMENT_TARGETS=($DARWIN_SDK_DEPLOYMENT_TARGETS); unset IFS
+
+                for target in "${DARWIN_SDK_DEPLOYMENT_TARGETS[@]}"; do
+                    # IFS is immediately unset after its use to avoid unwanted
+                    # replacement of characters in subsequent lines.
+                    local IFS="-"; triple=($target); unset IFS
+                    sdk_target=$(toupper ${triple[0]}_${triple[1]})
+                    swift_cmake_options+=(
+                        "-DSWIFTLIB_DEPLOYMENT_VERSION_${sdk_target}=${triple[2]}"
+                    )
+                done
+            fi
+
+            cmake_os_sysroot="$(xcrun --sdk ${platform} --show-sdk-path)"
+
+            llvm_cmake_options=(
+                -DCMAKE_OSX_DEPLOYMENT_TARGET:STRING="${cmake_osx_deployment_target}"
+                -DCMAKE_OSX_SYSROOT:PATH="${cmake_os_sysroot}"
+                -DCOMPILER_RT_ENABLE_IOS:BOOL=FALSE
+                -DCOMPILER_RT_ENABLE_WATCHOS:BOOL=FALSE
+                -DCOMPILER_RT_ENABLE_XROS:BOOL=FALSE
+                -DCOMPILER_RT_ENABLE_TVOS:BOOL=FALSE
+                -DLLVM_ENABLE_MODULES:BOOL="$(true_false ${LLVM_ENABLE_MODULES})"
+                -DCMAKE_OSX_ARCHITECTURES="${architecture}"
+            )
+            if [[ $(is_llvm_lto_enabled) == "TRUE" ]]; then
+                llvm_cmake_options+=(
+                    "-DLLVM_PARALLEL_LINK_JOBS=${LLVM_NUM_PARALLEL_LTO_LINK_JOBS}"
+                )
+            fi
+
+            if [[ $(is_swift_lto_enabled) == "TRUE" ]]; then
+                llvm_cmake_options+=(
+                    -DLLVM_ENABLE_MODULE_DEBUGGING:BOOL=NO
+                )
+
+                swift_cmake_options+=(
+                    -DLLVM_ENABLE_MODULE_DEBUGGING:BOOL=NO
+                    "-DSWIFT_PARALLEL_LINK_JOBS=${SWIFT_TOOLS_NUM_PARALLEL_LTO_LINK_JOBS}"
+                )
+            fi
+
+            if [[ ! -z "${MIN_RUNTIME_VERSION}" ]]; then
+                swift_cmake_options+=(
+                    -DSWIFT_MIN_RUNTIME_VERSION="${MIN_RUNTIME_VERSION}"
+                )
+            fi
+
+            swift_cmake_options+=(
+                -DSWIFT_DARWIN_DEPLOYMENT_VERSION_OSX="${DARWIN_DEPLOYMENT_VERSION_OSX}"
+                -DSWIFT_DARWIN_DEPLOYMENT_VERSION_IOS="${DARWIN_DEPLOYMENT_VERSION_IOS}"
+                -DSWIFT_DARWIN_DEPLOYMENT_VERSION_TVOS="${DARWIN_DEPLOYMENT_VERSION_TVOS}"
+                -DSWIFT_DARWIN_DEPLOYMENT_VERSION_WATCHOS="${DARWIN_DEPLOYMENT_VERSION_WATCHOS}"
+                -DSWIFT_DARWIN_DEPLOYMENT_VERSION_XROS="${DARWIN_DEPLOYMENT_VERSION_XROS}"
+                -DCMAKE_OSX_SYSROOT:PATH="${cmake_os_sysroot}"
+                # This is needed to make sure to avoid using the wrong architecture
+                # in the compiler checks CMake performs
+                -DCMAKE_OSX_ARCHITECTURES="${architecture}"
+            )
+
+            # Avoid building the embedded stdlib and other embedded libraries when cross-compiling.
+            # Those are already provided by the local host build, and are identical and only cause
+            # trouble when lipo-ing if they are produced in cross-compile builds too.
+            if [[ $(is_cross_tools_host "${host}") ]] ; then
+                swift_cmake_options+=(
+                    -DSWIFT_SHOULD_BUILD_EMBEDDED_STDLIB:BOOL=FALSE
+                )
+            fi
+
+            lldb_cmake_options+=(
+                -DCMAKE_OSX_DEPLOYMENT_TARGET:STRING="${cmake_osx_deployment_target}"
+                -DCMAKE_OSX_SYSROOT:PATH="${cmake_os_sysroot}"
+                -DCMAKE_OSX_ARCHITECTURES="${architecture}"
+            )
+            llbuild_cmake_options+=(
+                -DCMAKE_OSX_ARCHITECTURES="${architecture}"
+            )
+            ;;
+    esac
+
+
+    # If we are asked to not generate test targets for LLVM and or Swift,
+    # disable as many LLVM tools as we can. This improves compile time when
+    # compiling with LTO.
+    #
+    # *NOTE* Currently we do not support testing LLVM via build-script. But in a
+    # future commit we will.
+    #for arg in "$(compute_cmake_llvm_tool_disable_flags)"; do
+    #    llvm_cmake_options+=( ${arg} )
+    #done
+
+    if [[ "${llvm_target_arch}" ]] ; then
+        llvm_cmake_options+=(
+            -DLLVM_TARGET_ARCH="${llvm_target_arch}"
+        )
+    fi
+
+    # For cross-compilable hosts, we need to know the triple
+    # and it must be the same for both LLVM and Swift
+
+    if [[ "${SWIFT_HOST_TRIPLE}" ]] ; then
+        # Adding this until we can configure these corelibs repos with a CMake
+        # toolchain file
+        SWIFT_TARGET_CMAKE_OPTIONS+=(
+            -DCMAKE_Swift_COMPILER_TARGET:STRING="${SWIFT_HOST_TRIPLE}"
+        )
+
+        llvm_cmake_options+=(
+            -DLLVM_HOST_TRIPLE:STRING="${SWIFT_HOST_TRIPLE}"
+        )
+        swift_cmake_options+=(
+            -DSWIFT_HOST_TRIPLE:STRING="${SWIFT_HOST_TRIPLE}"
+        )
+        lldb_cmake_options+=(
+            -DLLVM_HOST_TRIPLE:STRING="${SWIFT_HOST_TRIPLE}"
+        )
+    fi
+    swift_cmake_options+=(
+        -DSWIFT_HOST_VARIANT="${SWIFT_HOST_VARIANT}"
+        -DSWIFT_HOST_VARIANT_SDK="${SWIFT_HOST_VARIANT_SDK}"
+        -DSWIFT_HOST_VARIANT_ARCH="${SWIFT_HOST_VARIANT_ARCH}"
+    )
+
+    llvm_cmake_options+=(
+        -DLLVM_LIT_ARGS="${LLVM_LIT_ARGS} -j ${LIT_JOBS}"
+    )
+    swift_cmake_options+=(
+        -DLLVM_LIT_ARGS="${LLVM_LIT_ARGS} -j ${LIT_JOBS}"
+    )
+    lldb_cmake_options+=(
+        -DLLVM_LIT_ARGS="${LLVM_LIT_ARGS} -j ${LIT_JOBS}"
+    )
+
+    if [[ "${CLANG_PROFILE_INSTR_USE}" ]]; then
+        llvm_cmake_options+=(
+            -DLLVM_PROFDATA_FILE="${CLANG_PROFILE_INSTR_USE}"
+        )
+    fi
+
+    if [[ "${SWIFT_PROFILE_INSTR_USE}" ]]; then
+        swift_cmake_options+=(
+            -DSWIFT_PROFDATA_FILE="${SWIFT_PROFILE_INSTR_USE}"
+        )
+    fi
+    swift_cmake_options+=(
+        -DCOVERAGE_DB="${COVERAGE_DB}"
+    )
+
+    if [[ "${OPENBSD_BTCFI}" ]]; then
+        swift_cmake_options+=(
+            -DSWIFT_OPENBSD_BTCFI:BOOL=TRUE
+        )
+    fi
+}
+
+function configure_default_options() {
+    # Build a table of all of the known setting variables names.
+    #
+    # This is an optimization to do the argument to variable conversion (which is
+    # slow) in a single pass.
+    local all_settings=()
+    for ((i = 0; i < ${#KNOWN_SETTINGS[@]}; i += 3)); do
+        all_settings+=("${KNOWN_SETTINGS[i]}")
+    done
+    local known_setting_varnames=($(to_varname "${all_settings[*]}"))
+
+    # Build up an "associative array" mapping setting names to variable names
+    # (we use this for error checking to identify "known options", and as a fast
+    # way to map the setting name to a variable name). See the code for scanning
+    # command line arguments.
+    #
+    # This loop also sets (or unsets) each corresponding variable to its default
+    # value.
+    #
+    # NOTE: If the Mac's bash were not stuck in the past, we could "declare -A"
+    # an associative array, but instead we have to hack it by defining variables.
+    for ((i = 0; i < ${#KNOWN_SETTINGS[@]}; i += 3)); do
+        local setting="${KNOWN_SETTINGS[i]}"
+        local default_value="${KNOWN_SETTINGS[$((i+1))]}"
+
+        # Find the variable name in our lookup table.
+        local varname="${known_setting_varnames[$((i/3))]}"
+
+        # Establish the associative array mapping.
+        eval "${setting//-/_}_VARNAME=${varname}"
+
+        if [[ "${default_value}" ]] ; then
+            # For an explanation of the backslash see http://stackoverflow.com/a/9715377
+            eval ${varname}=$\default_value
+        else
+            unset ${varname}
+        fi
+    done
+}
+configure_default_options
+
+COMMAND_NAME="$(basename "$0")"
+
+# Print instructions for using this script to stdout
+usage() {
+    echo "Usage: ${COMMAND_NAME} [--help|-h] [ --SETTING=VALUE | --SETTING VALUE | --SETTING ]*"
+    echo
+    echo "  Available settings. Each setting corresponds to a variable,"
+    echo "  obtained by upcasing its name, in this script.  A variable"
+    echo "  with no default listed here will be unset in the script if"
+    echo "  not explicitly specified.  A setting passed in the 3rd form"
+    echo "  will set its corresponding variable to \"1\"."
+    echo
+
+    setting_list="
+ | |Setting| Default|Description
+ | |-------| -------|-----------
+"
+
+    for ((i = 0; i < ${#KNOWN_SETTINGS[@]}; i += 3)); do
+        setting_list+="\
+ | |--${KNOWN_SETTINGS[i]}| ${KNOWN_SETTINGS[$((i+1))]}|${KNOWN_SETTINGS[$((i+2))]}
+"
+    done
+    echo "${setting_list}" | column -x -s'|' -t
+    echo
+    echo "Note: when using the form --SETTING VALUE, VALUE must not begin "
+    echo "      with a hyphen."
+    echo "Note: the \"--release\" option creates a pre-packaged combination"
+    echo "      of settings used by the buildbot."
+    echo
+    echo "Cross-compiling Swift host tools"
+    echo "  When building cross-compiled tools, it first builds for the native"
+    echo "  build host machine. Then it proceeds to build the specified cross-compile"
+    echo "  targets. It currently builds the requested variants of stdlib each"
+    echo "  time around, so once for the native build, then again each time for"
+    echo "  the cross-compile tool targets."
+    echo
+    echo "  When installing cross-compiled tools, it first installs each target"
+    echo "  arch into a separate subdirectory under install-destdir, since you"
+    echo "  can cross-compile for multiple targets at the same time. It then runs"
+    echo "  recursive-lipo to produce fat binaries by merging the cross-compiled"
+    echo "  targets, installing the merged result into the expected location of"
+    echo "  install-destdir. After that, any remaining steps to extract dsyms and"
+    echo "  create an installable package operates on install-destdir as normal."
+}
+
+# Scan all command-line arguments
+while [[ "$1" ]] ; do
+    case "$1" in
+        -h | --help )
+            usage
+            exit
+            ;;
+
+        --* )
+            dashless="${1:2}"
+
+            # drop suffix beginning with the first "="
+            setting="${dashless%%=*}"
+
+            # compute the variable to set, using the cached map set up by
+            # configure_default_options().
+            varname_var="${setting//-/_}_VARNAME"
+            varname=${!varname_var}
+
+            # check to see if this is a known option
+            if [[ "${varname}" = "" ]] ; then
+                echo "error: unknown setting: ${setting}" 1>&2
+                usage 1>&2
+                exit 1
+            fi
+
+            # find the intended value
+            if [[ "${dashless}" == *=* ]] ; then              # if there's an '=', the value
+                value="${dashless#*=}"                        #   is everything after the first '='
+            elif [[ "$2" ]] && [[ "${2:0:1}" != "-" ]] ; then # else if the next parameter exists
+                value="$2"                                    #   but isn't an option, use that
+                shift
+            else                                              # otherwise, the value is 1
+                value=1
+            fi
+
+            # For explanation of backslash see http://stackoverflow.com/a/9715377
+            eval ${varname}=$\value
+            ;;
+
+        *)
+            echo "Error: Invalid argument: $1" 1>&2
+            usage 1>&2
+            exit 1
+    esac
+    shift
+done
+
+# TODO: Rename this argument
+LOCAL_HOST=$HOST_TARGET
+
+if [[ "${CHECK_ARGS_ONLY}" ]]; then
+    exit 0
+fi
+
+if [[ "${SKIP_RECONFIGURE}" ]]; then
+    RECONFIGURE=""
+fi
+
+# WORKSPACE, BUILD_DIR, and INSTALLABLE_PACKAGE must be absolute paths
+if ! [[ ${WORKSPACE} =~ ^/ ]] ; then
+  echo "workspace must be an absolute path (was '${WORKSPACE}')"
+  exit 1
+fi
+if ! [[ ${BUILD_DIR} =~ ^/ ]] ; then
+  echo "build-dir must be an absolute path (was '${BUILD_DIR}')"
+  exit 1
+fi
+if ! [[ ${INSTALLABLE_PACKAGE:-/} =~ ^/ ]] ; then
+  echo "installable-package must be an absolute path (was '${INSTALLABLE_PACKAGE}')"
+  exit 1
+fi
+
+# WORKSPACE must exist
+if [ ! -e "${WORKSPACE}" ] ; then
+    echo "Workspace does not exist (tried ${WORKSPACE})"
+    exit 1
+fi
+
+# FIXME: HOST_CC and CMAKE are set, and their presence is validated by,
+#        utils/build-script. These checks are redundant, but must remain until
+#        build-script-impl is merged completely with utils/build-script.
+#        For additional information, see: https://github.com/apple/swift/issues/42859
+if [ -z "${HOST_CC}" ] ; then
+    echo "Can't find clang.  Please install clang-3.5 or a later version."
+    exit 1
+fi
+if [ -z "${CMAKE}" ] ; then
+    echo "Environment variable CMAKE must be specified."
+    exit 1
+fi
+
+function xcrun_find_tool() {
+  if [[ "${DRY_RUN}" ]]; then
+    echo echo "$@"
+  else
+    xcrun --sdk macosx --toolchain "${DARWIN_XCRUN_TOOLCHAIN}" --find "$@"
+  fi
+}
+
+function find_just_built_local_host_llvm_tool() {
+  if [[ "${DRY_RUN}" ]]; then
+    echo echo "$1"
+  else
+    find $(build_directory "${LOCAL_HOST}" llvm) -name "$1" -type f -print
+  fi
+}
+
+function not() {
+    if [[ ! "$1" ]] ; then
+        echo 1
+    fi
+}
+
+function join {
+    local IFS="$1"; shift; echo "$*";
+}
+
+function false_true() {
+    if [[ $(true_false "$1") = "TRUE" ]]; then
+        echo "FALSE"
+    else
+        echo "TRUE"
+    fi
+}
+
+# Sanitize the list of cross-compilation targets.
+#
+# In the Build/Host/Target paradigm:
+# - "LOCAL_HOST" is Build (local machine running this script)
+# - "CROSS_COMPILE_HOSTS" are the Hosts (implicitly includes LOCAL_HOST)
+# - "STDLIB_DEPLOYMENT_TARGETS" are the Targets (for configuration)
+# - "BUILD_STDLIB_DEPLOYMENT_TARGETS" are the Targets to build in this invocation
+
+CROSS_COMPILE_HOSTS=($CROSS_COMPILE_HOSTS)
+for t in "${CROSS_COMPILE_HOSTS[@]}"; do
+    case ${t} in
+        macosx* | iphone* | appletv* | watch* | linux-armv5 | linux-armv6 | linux-armv7 | android-* | openbsd-* | linux-static-* )
+            ;;
+        *)
+            echo "Unknown host to cross-compile for: ${t}"
+            exit 1
+            ;;
+    esac
+done
+
+ALL_HOSTS=()
+if [[ ! "${SKIP_LOCAL_BUILD}" ]] ; then
+    ALL_HOSTS=("${ALL_HOSTS[@]}" "${LOCAL_HOST}")
+fi
+ALL_HOSTS=("${ALL_HOSTS[@]}" "${CROSS_COMPILE_HOSTS[@]}")
+
+function has_cross_compile_hosts() {
+    if [[ ${#CROSS_COMPILE_HOSTS[@]} -ge 1 ]]; then
+        echo "1"
+    fi
+}
+
+# We install in to host-specific directories when building more than one host.
+# Other users will expect their products at INSTALL_DESTDIR.
+function get_host_install_destdir() {
+   local host="$1"
+
+    if [[ $(has_cross_compile_hosts) ]]; then
+        # If cross compiling tools, install into a host-specific subdirectory.
+        if [[ $(should_include_host_in_lipo ${host}) ]]; then
+            # If this is one of the hosts we should lipo, install in to a temporary subdirectory.
+            local host_install_destdir="${BUILD_DIR}/intermediate-install/${host}"
+        elif [[ "${host}" == "merged-hosts" ]] ||
+             [[ "$(true_false ${CROSS_COMPILE_APPEND_HOST_TARGET_TO_DESTDIR})" == "FALSE" ]]; then
+            # This assumes that all hosts are merged to the lipo, or the build
+            # was told not to append anything.
+            local host_install_destdir="${INSTALL_DESTDIR}"
+        else
+            local host_install_destdir="${INSTALL_DESTDIR}/${host}"
+        fi
+    else
+        local host_install_destdir="${INSTALL_DESTDIR}"
+    fi
+
+    echo "${host_install_destdir}/" # Should always end in a '/'; it's a directory.
+}
+
+function splitSemicolonDelimitedInstallPrefixes() {
+    local IFS=";"; CROSS_COMPILE_INSTALL_PREFIXES=($CROSS_COMPILE_INSTALL_PREFIXES)
+}
+splitSemicolonDelimitedInstallPrefixes
+
+function get_host_install_prefix() {
+    local host="$1"
+
+    if [[ $(is_cross_tools_host ${host}) ]] && [[ ${#CROSS_COMPILE_INSTALL_PREFIXES[@]} -gt 0 ]]; then
+
+        # Find the host's index in CROSS_COMPILE_HOSTS.
+        for i in "${!CROSS_COMPILE_HOSTS[@]}"; do
+           if [[ "${CROSS_COMPILE_HOSTS[$i]}" == "${host}" ]]; then
+               local host_index=i
+           fi
+        done
+
+        if [[ ${host_index} -lt ${#CROSS_COMPILE_INSTALL_PREFIXES[@]} ]]; then
+            local host_install_prefix="${CROSS_COMPILE_INSTALL_PREFIXES[${host_index}]}"
+        else
+            # If there is no explicit install prefix for this host, use the last one
+            # in the list.
+            local host_install_prefix="${CROSS_COMPILE_INSTALL_PREFIXES[${#CROSS_COMPILE_INSTALL_PREFIXES[@]}-1]}"
+        fi
+    else
+        local host_install_prefix="${INSTALL_PREFIX}"
+    fi
+
+    # Should always begin with a '/'; otherwise CMake will expand it as a relative path from the build folder.
+    if [[ "${host_install_prefix:0:1}" != "/" ]]; then
+        host_install_prefix="/${host_install_prefix}"
+    fi
+
+    echo "${host_install_prefix}/" # Should always end in a '/'; it's a directory.
+}
+
+function is_cross_tools_host() {
+    local host="$1"
+    for t in "${CROSS_COMPILE_HOSTS[@]}" ; do
+        if [ "${host}" == "${t}" ] ; then
+            echo 1
+        fi
+    done
+}
+
+# When building cross-compilers for these hosts,
+# merge all of their contents together with lipo
+function should_include_host_in_lipo() {
+    local host="$1"
+    if [[ $(has_cross_compile_hosts) ]] && [[ -z "${SKIP_MERGE_LIPO_CROSS_COMPILE_TOOLS}" ]]; then
+        case ${host} in
+            macosx* | iphone* | appletv* | watch* )
+                echo 1
+                ;;
+        esac
+    fi
+}
+
+function host_has_darwin_symbols() {
+    local host="$1"
+    case ${host} in
+        macosx* | iphone* | appletv* | watch* )
+            echo 1
+            ;;
+    esac
+}
+
+#
+# Calculate source directories for each product.
+#
+NINJA_SOURCE_DIR="${WORKSPACE}/ninja"
+SWIFT_SOURCE_DIR="${WORKSPACE}/${SWIFT_SOURCE_DIRNAME}"
+LLVM_SOURCE_DIR="${WORKSPACE}/llvm-project/llvm"
+CMARK_SOURCE_DIR="${WORKSPACE}/cmark"
+LLDB_SOURCE_DIR="${WORKSPACE}/llvm-project/lldb"
+LLBUILD_SOURCE_DIR="${WORKSPACE}/llbuild"
+STRESSTEST_PACKAGE_DIR="${WORKSPACE}/swift-stress-tester"
+XCTEST_SOURCE_DIR="${WORKSPACE}/swift-corelibs-xctest"
+FOUNDATION_SOURCE_DIR="${WORKSPACE}/swift-corelibs-foundation"
+FOUNDATION_STATIC_SOURCE_DIR="${WORKSPACE}/swift-corelibs-foundation"
+FOUNDATION_MACROS_SOURCE_DIR="${WORKSPACE}/swift-foundation/Sources/FoundationMacros"
+FOUNDATION_SWIFTFOUNDATION_SOURCE_DIR="${WORKSPACE}/swift-foundation"
+FOUNDATION_SWIFTFOUNDATIONICU_SOURCE_DIR="${WORKSPACE}/swift-foundation-icu"
+LIBDISPATCH_SOURCE_DIR="${WORKSPACE}/swift-corelibs-libdispatch"
+LIBDISPATCH_STATIC_SOURCE_DIR="${WORKSPACE}/swift-corelibs-libdispatch"
+LIBCXX_SOURCE_DIR="${WORKSPACE}/llvm-project/runtimes"
+SWIFT_COLLECTIONS_SOURCE_DIR="${WORKSPACE}/swift-collections"
+SWIFT_PATH_TO_STRING_PROCESSING_SOURCE="${WORKSPACE}/swift-experimental-string-processing"
+SWIFTSYNTAX_SOURCE_DIR="${WORKSPACE}/swift-syntax"
+SWIFT_SYNTAX_SOURCE_DIR="${WORKSPACE}/swift-syntax"
+
+[[ "${SKIP_BUILD_LIBCXX}" ]] || PRODUCTS+=(libcxx)
+[[ "${SKIP_BUILD_SWIFT}" ]] || PRODUCTS+=(swift)
+[[ "${SKIP_BUILD_LLDB}" ]] || PRODUCTS+=(lldb)
+[[ "${SKIP_BUILD_LIBDISPATCH}" ]] || PRODUCTS+=(libdispatch)
+[[ "${SKIP_BUILD_STATIC_LIBDISPATCH}" ]] || PRODUCTS+=(libdispatch_static)
+# llbuild and XCTest depend on Foundation, so Foundation must
+# be added to the list of build products first.
+[[ "${SKIP_BUILD_FOUNDATION}" ]] || PRODUCTS+=(foundation_macros)
+[[ "${SKIP_BUILD_FOUNDATION}" ]] || PRODUCTS+=(foundation)
+[[ "${SKIP_BUILD_STATIC_FOUNDATION}" ]] || PRODUCTS+=(foundation_static)
+[[ "${SKIP_BUILD_LLBUILD}" ]] || PRODUCTS+=(llbuild)
+[[ "${SKIP_BUILD_XCTEST}" ]] || PRODUCTS+=(xctest)
+
+# get_host_specific_variable(host, name)
+#
+# Get the value of a host-specific variable expected to have been passed by the
+# `build-script`.
+#
+# This is a total hack, and is part of the https://github.com/apple/swift/issues/42859 migration.
+function get_host_specific_variable() {
+    local host="$1"
+    local name="$2"
+    local envvar_name="HOST_VARIABLE_${host//-/_}__${name}"
+    echo "${!envvar_name}"
+}
+
+function calculate_targets_for_host() {
+    # Get the values passed by `build-script`.
+    SWIFT_STDLIB_TARGETS=($(get_host_specific_variable ${host} SWIFT_STDLIB_TARGETS))
+    SWIFT_LIBEXEC_TARGETS=($(get_host_specific_variable ${host} SWIFT_LIBEXEC_TARGETS))
+    SWIFT_SDKS=($(get_host_specific_variable ${host} SWIFT_SDKS))
+    SWIFT_BENCHMARK_TARGETS=($(get_host_specific_variable ${host} SWIFT_BENCHMARK_TARGETS))
+    SWIFT_RUN_BENCHMARK_TARGETS=($(get_host_specific_variable ${host} SWIFT_RUN_BENCHMARK_TARGETS))
+    SWIFT_TEST_TARGETS=($(get_host_specific_variable ${host} SWIFT_TEST_TARGETS))
+    SWIFT_FLAGS=($(get_host_specific_variable ${host} SWIFT_FLAGS))
+    SWIFT_TARGET_CMAKE_OPTIONS=($(get_host_specific_variable ${host} SWIFT_TARGET_CMAKE_OPTIONS))
+}
+
+
+COMMON_C_FLAGS=" -Wno-unknown-warning-option -Werror=unguarded-availability-new"
+
+# Convert to an array.
+eval COMMON_CMAKE_OPTIONS=(${COMMON_CMAKE_OPTIONS})
+eval EXTRA_CMAKE_OPTIONS=(${EXTRA_CMAKE_OPTIONS})
+eval BUILD_ARGS=(${BUILD_ARGS})
+
+eval CMAKE_BUILD=("${DISTCC_PUMP}" "${CMAKE}" "--build")
+
+
+function build_directory() {
+    host=$1
+    product=$2
+    echo "${BUILD_DIR}/${product}-${host}"
+}
+
+function build_directory_bin() {
+    host=$1
+    product=$2
+    root="$(build_directory ${host} ${product})"
+    echo "${root}/bin"
+}
+
+function is_cmake_release_build_type() {
+    if [[ "$1" == "Release" || "$1" == "RelWithDebInfo" ]] ; then
+        echo 1
+    fi
+}
+
+function is_cmake_debuginfo_build_type() {
+    if [[ "$1" == "Debug" || "$1" == "RelWithDebInfo" ]] ; then
+        echo 1
+    fi
+}
+
+function common_cross_c_flags() {
+    echo -n "${COMMON_C_FLAGS}"
+
+    local host=$1
+    local arch=${host##*-}
+
+    case $host in
+        macosx-*)
+            echo -n " -arch ${arch} -target ${arch}-apple-macosx${SWIFT_DARWIN_DEPLOYMENT_VERSION_OSX}"
+            ;;
+        iphonesimulator-*)
+            echo -n " -arch ${arch} -target ${arch}-apple-ios${DARWIN_DEPLOYMENT_VERSION_IOS}-simulator"
+            ;;
+        iphoneos-*)
+            echo -n " -arch ${arch} -target ${arch}-apple-ios${DARWIN_DEPLOYMENT_VERSION_IOS}"
+            ;;
+        appletvsimulator-*)
+            echo -n " -arch ${arch} -target ${arch}-apple-tvos${DARWIN_DEPLOYMENT_VERSION_TVOS}-simulator"
+            ;;
+        appletvos-*)
+            echo -n " -arch ${arch} -target ${arch}-apple-tvos${DARWIN_DEPLOYMENT_VERSION_TVOS}"
+            ;;
+        watchsimulator-*)
+            echo -n " -arch ${arch} -target ${arch}-apple-watchos${DARWIN_DEPLOYMENT_VERSION_WATCHOS}-simulator"
+            ;;
+        watchos-*)
+            echo -n " -arch ${arch} -target ${arch}-apple-watchos${DARWIN_DEPLOYMENT_VERSION_WATCHOS}"
+            ;;
+        xrsimulator-*)
+            echo -n " -arch ${arch}  -target ${arch}-apple-xros${DARWIN_DEPLOYMENT_VERSION_XROS}-simulator"
+            ;;
+        xros-*)
+            echo -n " -arch ${arch}  -target ${arch}-apple-xros${DARWIN_DEPLOYMENT_VERSION_XROS}"
+            ;;
+    esac
+
+    local build_type=$2
+    if [[ $(is_cmake_release_build_type ${build_type}) ]] ; then
+      echo -n " -fno-stack-protector"
+    fi
+}
+
+function llvm_c_flags() {
+    echo -n " $(common_cross_c_flags $1 ${LLVM_BUILD_TYPE})"
+    if [[ $(is_cmake_debuginfo_build_type "${LLVM_BUILD_TYPE}") ]] ; then
+        if [[ $(is_llvm_lto_enabled) == "TRUE" ]] ; then
+            echo -n " -gline-tables-only"
+        else
+            echo -n " -g"
+        fi
+    fi
+}
+
+function swift_c_flags() {
+    # Don't pass common_cross_c_flags to Swift because CMake code in the Swift
+    # project is itself aware of cross-compilation for the host tools and
+    # standard library.
+    echo -n "${COMMON_C_FLAGS}"
+    if [[ $(is_cmake_release_build_type "${SWIFT_BUILD_TYPE}") ]] ; then
+        echo -n " -fno-stack-protector"
+    fi
+
+    local host=$1
+
+    case $host in
+        linux-static-*)
+            echo -n " -D_GNU_SOURCE -DHAVE_DECL_PROGRAM_INVOCATION_SHORT_NAME"
+            ;;
+        openbsd-aarch64)
+            if [[ "${OPENBSD_BTCFI}" ]]; then
+                echo -n " -Xclang=-msign-return-address=non-leaf -Xclang=-msign-return-address-key=a_key -Xclang=-mbranch-target-enforce"
+            fi
+            ;;
+    esac
+}
+
+function maybe_lfts() {
+    local host=$1
+
+    case $host in
+        linux-static-*)
+            echo -n "-lfts"
+            ;;
+    esac
+}
+
+function common_swift_flags() {
+    if [ "${module_cache}" == "" ] ; then
+        echo "error: a module cache path has not been set"
+        exit 1
+    fi
+    echo -n "${SWIFT_FLAGS[@]} ${COMMON_SWIFT_FLAGS} -module-cache-path \"${module_cache}\" "
+}
+
+#
+# Configure and build each product
+#
+# Start with native deployment targets because the resulting tools are used during cross-compilation.
+
+
+for host in "${ALL_HOSTS[@]}"; do
+    # Skip this pass when the only action to execute can't match.
+    if ! [[ $(should_execute_host_actions_for_phase ${host} build) ]]; then
+        continue
+    fi
+
+    calculate_targets_for_host $host
+
+    set_build_options_for_host $host
+
+    # Don't echo anything if only executing an individual action.
+    if [[ "${ONLY_EXECUTE}" = "all" ]]; then
+        echo "Building the standard library for: ${SWIFT_STDLIB_TARGETS[@]}"
+        if [[ "${SWIFT_TEST_TARGETS[@]}" ]] && ! [[ "${SKIP_TEST_SWIFT}" ]]; then
+            echo "Running Swift tests for: ${SWIFT_TEST_TARGETS[@]}"
+        fi
+        if ! [[ "${SKIP_TEST_BENCHMARKS}" ]] &&
+             [[ "${SWIFT_RUN_BENCHMARK_TARGETS[@]}" ]]; then
+            echo "Running Swift benchmarks for: ${SWIFT_RUN_BENCHMARK_TARGETS[@]}"
+        fi
+        if [ $(true_false "${BUILD_SWIFT_LIBEXEC}") == "TRUE" ]; then
+            echo "Building the auxiliary executables for: ${SWIFT_LIBEXEC_TARGETS[@]}"
+        fi
+    fi
+
+    common_cmake_options_host=("${COMMON_CMAKE_OPTIONS[@]}")
+
+    if [[ $(is_cross_tools_host ${host}) ]] ; then
+
+        if [[ "${CROSS_COMPILE_WITH_HOST_TOOLS}" ]]; then
+            # Optionally use the freshly-built host copy of clang to build
+            # for foreign hosts.
+            common_cmake_options_host+=(
+                -DCMAKE_C_COMPILER="$(build_directory ${LOCAL_HOST} llvm)/bin/clang"
+                -DCMAKE_CXX_COMPILER="$(build_directory ${LOCAL_HOST} llvm)/bin/clang++"
+            )
+        fi
+
+        # CMake can't relink when using Ninja, but that's okay -
+        # we don't need a build-local rpath because we can't run cross-compiled products
+        if [[ "${CMAKE_GENERATOR}" == "Ninja" ]]; then
+            common_cmake_options_host+=(
+                -DCMAKE_BUILD_WITH_INSTALL_RPATH="1"
+            )
+        fi
+
+        if [[ "${host}" == "openbsd-"* && -n "${OPENBSD_USE_TOOLCHAIN_FILE}" ]]; then
+            llvm_cmake_options=(
+                "${llvm_cmake_options[@]}"
+                -DCMAKE_TOOLCHAIN_FILE="${OPENBSD_USE_TOOLCHAIN_FILE}"
+            )
+        fi
+    fi
+
+    llvm_cmake_options=(
+        "${llvm_cmake_options[@]}"
+        -DCMAKE_INSTALL_PREFIX:PATH="$(get_host_install_prefix ${host})"
+        -DINTERNAL_INSTALL_PREFIX="local"
+    )
+
+    if [[ "$(uname -s)" == "Linux" ]] ; then
+        if [[ $(is_cmake_debuginfo_build_type "${LLVM_BUILD_TYPE}") ]] ; then
+            # On Linux build LLVM and subprojects with -gsplit-dwarf which is more
+            # space/time efficient than -g on that platform.
+            llvm_cmake_options=(
+                "${llvm_cmake_options[@]}"
+                -DLLVM_USE_SPLIT_DWARF:BOOL=YES
+            )
+        fi
+    fi
+
+    if [[ "${DARWIN_TOOLCHAIN_VERSION}" ]] ; then
+        swift_cmake_options=(
+            "${swift_cmake_options[@]}"
+            -DDARWIN_TOOLCHAIN_VERSION="${DARWIN_TOOLCHAIN_VERSION}"
+        )
+    fi
+
+    if [[ "${ENABLE_ASAN}" || "$(uname -s)" == "Linux" ]] ; then
+        swift_cmake_options=(
+            "${swift_cmake_options[@]}"
+            -DSWIFT_SOURCEKIT_USE_INPROC_LIBRARY:BOOL=TRUE
+        )
+    fi
+
+    if [[ "${DARWIN_CRASH_REPORTER_CLIENT}" ]] ; then
+        swift_cmake_options=(
+            "${swift_cmake_options[@]}"
+            -DSWIFT_RUNTIME_CRASH_REPORTER_CLIENT:BOOL=$(true_false "${DARWIN_CRASH_REPORTER_CLIENT}")
+        )
+    fi
+
+    swift_cmake_options=(
+        "${swift_cmake_options[@]}"
+        -DSWIFT_DARWIN_XCRUN_TOOLCHAIN:STRING="${DARWIN_XCRUN_TOOLCHAIN}"
+    )
+
+    if [[ "${DARWIN_STDLIB_INSTALL_NAME_DIR}" ]] ; then
+        swift_cmake_options=(
+            "${swift_cmake_options[@]}"
+            -DSWIFT_DARWIN_STDLIB_INSTALL_NAME_DIR:STRING="${DARWIN_STDLIB_INSTALL_NAME_DIR}"
+        )
+    fi
+
+    if [[ "${SWIFT_RUNTIME_FIXED_BACKTRACER_PATH}" ]] ; then
+        swift_cmake_options=(
+            "${swift_cmake_options[@]}"
+            -DSWIFT_RUNTIME_FIXED_BACKTRACER_PATH:STRING="${SWIFT_RUNTIME_FIXED_BACKTRACER_PATH}"
+        )
+    fi
+
+    if [[ "${EXTRA_SWIFT_ARGS}" ]] ; then
+        swift_cmake_options=(
+            "${swift_cmake_options[@]}"
+            -DSWIFT_EXPERIMENTAL_EXTRA_REGEXP_FLAGS="${EXTRA_SWIFT_ARGS}"
+        )
+    fi
+
+    swift_cmake_options=(
+        "${swift_cmake_options[@]}"
+        -DSWIFT_AST_VERIFIER:BOOL=$(true_false "${SWIFT_ENABLE_AST_VERIFIER}")
+        -DSWIFT_SIL_VERIFY_ALL:BOOL=$(true_false "${SIL_VERIFY_ALL}")
+        -DSWIFT_SIL_VERIFY_ALL_MACOS_ONLY:BOOL=$(true_false "${SIL_VERIFY_ALL_MACOS_ONLY}")
+        -DSWIFT_RUNTIME_ENABLE_LEAK_CHECKER:BOOL=$(true_false "${SWIFT_RUNTIME_ENABLE_LEAK_CHECKER}")
+    )
+
+    if [[ "${TEST_PATHS}" ]]; then
+        build_dir=$(build_directory ${host} "swift")
+
+        test_paths=()
+        for path in ${TEST_PATHS}; do
+            test_paths+=(
+                "${build_dir}/$(echo ${path} | sed -E "s/^(validation-test|test)/\1-${host}/")"
+            )
+        done
+
+        swift_cmake_options=(
+            "${swift_cmake_options[@]}"
+            -DSWIFT_LIT_TEST_PATHS="${test_paths}")
+    fi
+
+    if [[ "${SKIP_TEST_SOURCEKIT}" ]] ; then
+        swift_cmake_options=(
+            "${swift_cmake_options[@]}"
+            -DSWIFT_ENABLE_SOURCEKIT_TESTS:BOOL=FALSE
+        )
+    fi
+
+    if [[ "${BOOTSTRAPPING}" ]] ; then
+        swift_cmake_options=(
+            "${swift_cmake_options[@]}"
+            -DBOOTSTRAPPING_MODE:STRING=`toupper ${BOOTSTRAPPING}`
+        )
+    fi
+
+    if [[ "${NATIVE_CLANG_TOOLS_PATH}" ]] ; then
+        CLANG_BIN="${NATIVE_CLANG_TOOLS_PATH}"
+        if [[ ! -f "${CLANG_BIN}/clang" ]] ; then
+            echo "error: clang does not exist at the specified native tools path: ${CLANG_BIN}/clang"
+            exit 1
+        fi
+    else
+        CLANG_BIN="$(build_directory_bin ${LOCAL_HOST} llvm)"
+    fi
+
+    if [[ -f "${CLANG_BIN}/clang" ]] && [[ -z ${ENABLE_ASAN+x} ]]; then
+      export SWIFT_DRIVER_CLANG_EXEC="${CLANG_BIN}/clang"
+      export SWIFT_DRIVER_CLANGXX_EXEC="${CLANG_BIN}/clang++"
+    fi
+
+    if [[ "${NATIVE_SWIFT_TOOLS_PATH}" ]] ; then
+        SWIFTC_BIN="${NATIVE_SWIFT_TOOLS_PATH}/swiftc"
+        if [[ ! -f "${SWIFTC_BIN}" ]] ; then
+            echo "error: swiftc does not exist at the specified native tools path: ${SWIFTC_BIN}"
+            exit 1
+        fi
+    else
+        SWIFTC_BIN="$(build_directory_bin ${LOCAL_HOST} swift)/swiftc"
+    fi
+
+    for product in "${PRODUCTS[@]}"; do
+        [[ $(should_execute_action "${host}-${product%%_*}-build") ]] || continue
+
+        source_dir_var="$(toupper ${product})_SOURCE_DIR"
+        source_dir=${!source_dir_var}
+        build_dir=$(build_directory ${host} ${product})
+        build_targets=(all)
+
+        cmake_options=("${common_cmake_options_host[@]}")
+
+        llvm_build_dir=$(build_directory ${host} llvm)
+        module_cache="${build_dir}/module-cache"
+
+        # Add any specific cmake options specified by build-script
+        product_cmake_options_name=$(to_varname "${product%%_*}")_CMAKE_OPTIONS
+        product_cmake_options=(${!product_cmake_options_name}) # convert to array
+        cmake_options+=("${product_cmake_options[@]}")
+
+        case ${product} in
+            libcxx)
+                build_targets=(cxx)
+                cmake_options=(
+                    -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;libunwind" -DLIBCXX_INSTALL_LIBRARY=OFF
+                    "${cmake_options[@]}"
+                    "${llvm_cmake_options[@]}"
+                )
+                ;;
+
+            swift)
+
+                if [[ "${ANDROID_API_LEVEL}" ]]; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_ANDROID_API_LEVEL:STRING="${ANDROID_API_LEVEL}"
+                    )
+                fi
+
+                if [[ ! "${SKIP_BUILD_ANDROID}" ]] ||
+                   [[ $(is_cross_tools_host ${host}) && "${host}" == "android-"* ]]; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_ANDROID_NDK_PATH:STRING="${ANDROID_NDK}"
+                        -DSWIFT_ANDROID_DEPLOY_DEVICE_PATH:STRING="${ANDROID_DEPLOY_DEVICE_PATH}"
+                        -DSWIFT_SDK_ANDROID_ARCHITECTURES:STRING="${ANDROID_ARCH}"
+                    )
+                fi
+
+                if [[ $(is_cross_tools_host ${host}) && "${host}" == "openbsd-"* && -n "${OPENBSD_USE_TOOLCHAIN_FILE}" ]]; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DCMAKE_TOOLCHAIN_FILE="${OPENBSD_USE_TOOLCHAIN_FILE}"
+                    )
+                fi
+
+                if [[ ! "${SKIP_BUILD_LINUX}" ]]; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_SDK_LINUX_ARCHITECTURES:STRING="${LINUX_ARCHS}"
+                    )
+                fi
+
+                if [[ "${BUILD_LINUX_STATIC}" ]]; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_MUSL_PATH:STRING="${MUSL_PATH}"
+                        -DSWIFT_SDK_LINUX_STATIC_ARCHITECTURES:STRING="${LINUX_STATIC_ARCHS}"
+                    )
+                fi
+
+                if [[ "${DARWIN_OVERLAY_TARGET}" != "" ]]; then
+                    # Split LOCAL_HOST into a pair ``arch-sdk``
+                    # Example LOCAL_HOST: macosx-x86_64
+                    [[ ${LOCAL_HOST} =~ (.*)-(.*) ]]
+                    overlay_target_closure_cmd="${SWIFT_SOURCE_DIR}/utils/find-overlay-deps-closure.sh ${DARWIN_OVERLAY_TARGET} ${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+                    overlay_target_closure=$($overlay_target_closure_cmd)
+                    swift_cmake_options=(
+                        "${swift_cmake_options[@]}"
+                        "-DSWIFT_OVERLAY_TARGETS:STRING=${overlay_target_closure}"
+                    )
+                fi
+
+                native_llvm_tools_path=""
+                native_clang_tools_path=""
+                native_swift_tools_path=""
+                if [[ $(is_cross_tools_host ${host}) ]] ; then
+
+                    # Don't build benchmarks and tests when building cross compiler.
+                    build_perf_testsuite_this_time=false
+                    build_tests_this_time=false
+
+                    native_llvm_tools_path="$(build_directory "${LOCAL_HOST}" llvm)/bin"
+                    native_clang_tools_path="$(build_directory "${LOCAL_HOST}" llvm)/bin"
+                    native_swift_tools_path="$(build_directory "${LOCAL_HOST}" swift)/bin"
+                else
+                    # FIXME: Why is the next line not using false_true?
+                    build_perf_testsuite_this_time=$(true_false "$(not ${SKIP_BUILD_BENCHMARKS})")
+                    build_tests_this_time=${SWIFT_INCLUDE_TESTS}
+                fi
+
+                if [[ $(is_cross_tools_host ${host}) ]] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DLLVM_TABLEGEN=$(build_directory "${LOCAL_HOST}" llvm)/bin/llvm-tblgen
+                        -DSWIFT_INCLUDE_TEST_BINARIES:BOOL=FALSE
+                        -DSWIFT_INCLUDE_TOOLS:BOOL=$(true_false "${CROSS_COMPILE_BUILD_SWIFT_TOOLS}")
+                    )
+                else
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_INCLUDE_TOOLS:BOOL=$(true_false "${BUILD_SWIFT_TOOLS}")
+                    )
+                fi
+
+                # Command-line parameters override any autodetection that we
+                # might have done.
+                if [[ "${NATIVE_LLVM_TOOLS_PATH}" ]] ; then
+                    native_llvm_tools_path="${NATIVE_LLVM_TOOLS_PATH}"
+                fi
+                if [[ "${NATIVE_CLANG_TOOLS_PATH}" ]] ; then
+                    native_clang_tools_path="${NATIVE_CLANG_TOOLS_PATH}"
+                fi
+                if [[ "${NATIVE_SWIFT_TOOLS_PATH}" ]] ; then
+                    native_swift_tools_path="${NATIVE_SWIFT_TOOLS_PATH}"
+                fi
+
+                if [ "${BUILD_LLVM}" == "0" ] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DLLVM_TOOLS_BINARY_DIR:PATH=/tmp/dummy
+                    )
+                fi
+
+                if [ "${HOST_LIPO}" ] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_LIPO:PATH="${HOST_LIPO}"
+                    )
+                fi
+
+                if [ "${SWIFT_ENABLE_RUNTIME_FUNCTION_COUNTERS}" == "" ] ; then
+                    SWIFT_ENABLE_RUNTIME_FUNCTION_COUNTERS="${SWIFT_STDLIB_ENABLE_ASSERTIONS}"
+                fi
+
+                cmake_options=(
+                    "${cmake_options[@]}"
+                    -DCMAKE_C_FLAGS="$(swift_c_flags ${host})"
+                    -DCMAKE_CXX_FLAGS="$(swift_c_flags ${host})"
+                    -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O2 -DNDEBUG"
+                    -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O2 -DNDEBUG"
+                    -DCMAKE_BUILD_TYPE:STRING="${SWIFT_BUILD_TYPE}"
+                    -DLLVM_ENABLE_ASSERTIONS:BOOL=$(true_false "${SWIFT_ENABLE_ASSERTIONS}")
+                    -DSWIFT_ANALYZE_CODE_COVERAGE:STRING=$(toupper "${SWIFT_ANALYZE_CODE_COVERAGE}")
+                    -DSWIFT_STDLIB_BUILD_TYPE:STRING="${SWIFT_STDLIB_BUILD_TYPE}"
+                    -DSWIFT_STDLIB_ASSERTIONS:BOOL=$(true_false "${SWIFT_STDLIB_ENABLE_ASSERTIONS}")
+                    -DSWIFT_STDLIB_ENABLE_DEBUG_PRECONDITIONS_IN_RELEASE=$(true_false "${SWIFT_STDLIB_ENABLE_DEBUG_PRECONDITIONS_IN_RELEASE}")
+                    -DSWIFT_STDLIB_ENABLE_STRICT_AVAILABILITY:BOOL=$(true_false "${SWIFT_STDLIB_ENABLE_STRICT_AVAILABILITY}")
+                    -DSWIFT_ENABLE_DISPATCH:BOOL=$(true_false "${SWIFT_ENABLE_DISPATCH}")
+                    -DSWIFT_IMPLICIT_CONCURRENCY_IMPORT:BOOL=$(true_false "${SWIFT_IMPLICIT_CONCURRENCY_IMPORT}")
+                    -DSWIFT_STDLIB_SUPPORT_BACK_DEPLOYMENT:BOOL=$(true_false "${SWIFT_STDLIB_SUPPORT_BACK_DEPLOYMENT}")
+                    -DSWIFT_STDLIB_SINGLE_THREADED_CONCURRENCY:BOOL=$(true_false "${SWIFT_STDLIB_SINGLE_THREADED_CONCURRENCY}")
+                    -DSWIFT_STDLIB_TASK_TO_THREAD_MODEL_CONCURRENCY:BOOL=$(true_false "${SWIFT_STDLIB_TASK_TO_THREAD_MODEL_CONCURRENCY}")
+                    -DSWIFT_ENABLE_RUNTIME_FUNCTION_COUNTERS:BOOL=$(true_false "${SWIFT_ENABLE_RUNTIME_FUNCTION_COUNTERS}")
+                    -DSWIFT_STDLIB_HAS_DLADDR:BOOL=$(true_false "${SWIFT_STDLIB_HAS_DLADDR}")
+                    -DSWIFT_STDLIB_HAS_DLSYM:BOOL=$(true_false "${SWIFT_STDLIB_HAS_DLSYM}")
+                    -DSWIFT_STDLIB_HAS_FILESYSTEM:BOOL=$(true_false "${SWIFT_STDLIB_HAS_FILESYSTEM}")
+                    -DSWIFT_RUNTIME_STATIC_IMAGE_INSPECTION:BOOL=$(true_false "${SWIFT_RUNTIME_STATIC_IMAGE_INSPECTION}")
+                    -DSWIFT_STDLIB_OS_VERSIONING:BOOL=$(true_false "${SWIFT_STDLIB_OS_VERSIONING}")
+                    -DSWIFT_STDLIB_HAS_COMMANDLINE:BOOL=$(true_false "${SWIFT_STDLIB_HAS_COMMANDLINE}")
+                    -DSWIFT_STDLIB_HAS_DARWIN_LIBMALLOC:BOOL=$(true_false "${SWIFT_STDLIB_HAS_DARWIN_LIBMALLOC}")
+                    -DSWIFT_STDLIB_HAS_STDIN:BOOL=$(true_false "${SWIFT_STDLIB_HAS_STDIN}")
+                    -DSWIFT_STDLIB_HAS_ENVIRON:BOOL=$(true_false "${SWIFT_STDLIB_HAS_ENVIRON}")
+                    -DSWIFT_STDLIB_ENABLE_LTO:STRING="${SWIFT_STDLIB_LTO}"
+                    -DSWIFT_STDLIB_PASSTHROUGH_METADATA_ALLOCATOR:BOOL=$(true_false "${SWIFT_STDLIB_PASSTHROUGH_METADATA_ALLOCATOR}")
+                    -DSWIFT_STDLIB_SHORT_MANGLING_LOOKUPS:BOOL=$(true_false "${SWIFT_STDLIB_SHORT_MANGLING_LOOKUPS}")
+                    -DSWIFT_STDLIB_ENABLE_VECTOR_TYPES:BOOL=$(true_false "${SWIFT_STDLIB_ENABLE_VECTOR_TYPES}")
+                    -DSWIFT_STDLIB_HAS_TYPE_PRINTING:BOOL=$(true_false "${SWIFT_STDLIB_HAS_TYPE_PRINTING}")
+                    -DSWIFT_STDLIB_TRAP_FUNCTION:STRING="${SWIFT_STDLIB_TRAP_FUNCTION}"
+                    -DSWIFT_STDLIB_EXPERIMENTAL_HERMETIC_SEAL_AT_LINK:BOOL=$(true_false "${SWIFT_STDLIB_EXPERIMENTAL_HERMETIC_SEAL_AT_LINK}")
+                    -DSWIFT_STDLIB_DISABLE_INSTANTIATION_CACHES:BOOL=$(true_false "${SWIFT_STDLIB_DISABLE_INSTANTIATION_CACHES}")
+                    -DSWIFT_STDLIB_REFLECTION_METADATA:STRING="${SWIFT_STDLIB_REFLECTION_METADATA}"
+                    -DSWIFT_NATIVE_LLVM_TOOLS_PATH:STRING="${native_llvm_tools_path}"
+                    -DSWIFT_NATIVE_CLANG_TOOLS_PATH:STRING="${native_clang_tools_path}"
+                    -DSWIFT_NATIVE_SWIFT_TOOLS_PATH:STRING="${native_swift_tools_path}"
+                    -DSWIFT_BUILD_CLANG_OVERLAYS:BOOL=$(true_false "${BUILD_SWIFT_CLANG_OVERLAYS}")
+                    -DSWIFT_BUILD_REMOTE_MIRROR:BOOL=$(true_false "${BUILD_SWIFT_REMOTE_MIRROR}")
+                    -DSWIFT_STDLIB_SIL_DEBUGGING:BOOL=$(true_false "${BUILD_SIL_DEBUGGING_STDLIB}")
+                    -DSWIFT_CHECK_INCREMENTAL_COMPILATION:BOOL=$(true_false "${CHECK_INCREMENTAL_COMPILATION}")
+                    -DSWIFT_ENABLE_ARRAY_COW_CHECKS:BOOL=$(true_false "${ENABLE_ARRAY_COW_CHECKS}")
+                    -DSWIFT_REPORT_STATISTICS:BOOL=$(true_false "${REPORT_STATISTICS}")
+                    -DSWIFT_BUILD_DYNAMIC_STDLIB:BOOL=$(true_false "${BUILD_SWIFT_DYNAMIC_STDLIB}")
+                    -DSWIFT_BUILD_STATIC_STDLIB:BOOL=$(true_false "${BUILD_SWIFT_STATIC_STDLIB}")
+                    -DSWIFT_BUILD_DYNAMIC_SDK_OVERLAY:BOOL=$(true_false "${BUILD_SWIFT_DYNAMIC_SDK_OVERLAY}")
+                    -DSWIFT_BUILD_STATIC_SDK_OVERLAY:BOOL=$(true_false "${BUILD_SWIFT_STATIC_SDK_OVERLAY}")
+                    -DSWIFT_BUILD_PERF_TESTSUITE:BOOL=$(true_false "${build_perf_testsuite_this_time}")
+                    -DSWIFT_BUILD_EXAMPLES:BOOL=$(true_false "${BUILD_SWIFT_EXAMPLES}")
+                    -DSWIFT_BUILD_LIBEXEC:BOOL=$(true_false "${BUILD_SWIFT_LIBEXEC}")
+                    -DSWIFT_INCLUDE_TESTS:BOOL=$(true_false "${build_tests_this_time}")
+                    -DSWIFT_EMBED_BITCODE_SECTION:BOOL=$(true_false "${EMBED_BITCODE_SECTION}")
+                    -DSWIFT_TOOLS_ENABLE_LTO:STRING="${SWIFT_TOOLS_ENABLE_LTO}"
+                    -DSWIFT_BUILD_RUNTIME_WITH_HOST_COMPILER:BOOL=$(true_false "${BUILD_RUNTIME_WITH_HOST_COMPILER}")
+                    -DLIBDISPATCH_CMAKE_BUILD_TYPE:STRING="${LIBDISPATCH_BUILD_TYPE}"
+                    -DSWIFT_PATH_TO_SWIFT_SYNTAX_SOURCE:PATH="${SWIFT_SYNTAX_SOURCE_DIR}"
+                    -DSWIFT_ENABLE_BACKTRACING:BOOL=$(true_false "${SWIFT_ENABLE_BACKTRACING}")
+                    -DSWIFT_STDLIB_OVERRIDABLE_RETAIN_RELEASE:BOOL=$(true_false "${SWIFT_STDLIB_OVERRIDABLE_RETAIN_RELEASE}")
+                    "${swift_cmake_options[@]}"
+                )
+
+                # NOTE: This is not a dead option! It is relied upon for certain
+                # bots/build-configs!
+                #
+                # TODO: In the future when we are always cross compiling and
+                # using Toolchain files, we should put this in either a
+                # toolchain file or a cmake cache.
+                if [[ "${BUILD_TOOLCHAIN_ONLY}" ]]; then
+                    cmake_options+=(
+                    -DSWIFT_TOOL_SIL_OPT_BUILD=FALSE
+                    -DSWIFT_TOOL_SWIFT_IDE_TEST_BUILD=FALSE
+                    -DSWIFT_TOOL_SWIFT_REMOTEAST_TEST_BUILD=FALSE
+                    -DSWIFT_TOOL_LLDB_MODULEIMPORT_TEST_BUILD=FALSE
+                    -DSWIFT_TOOL_SIL_EXTRACT_BUILD=FALSE
+                    -DSWIFT_TOOL_SWIFT_LLVM_OPT_BUILD=FALSE
+                    -DSWIFT_TOOL_SWIFT_SDK_ANALYZER_BUILD=FALSE
+                    -DSWIFT_TOOL_SWIFT_SDK_DIGESTER_BUILD=FALSE
+                    -DSWIFT_TOOL_SOURCEKITD_TEST_BUILD=FALSE
+                    -DSWIFT_TOOL_SOURCEKITD_REPL_BUILD=FALSE
+                    -DSWIFT_TOOL_COMPLETE_TEST_BUILD=FALSE
+                    -DSWIFT_TOOL_SWIFT_REFLECTION_DUMP_BUILD=FALSE
+                    )
+                fi
+
+                cmake_options=(
+                    "${cmake_options[@]}"
+                    -DCMAKE_INSTALL_PREFIX:PATH="$(get_host_install_prefix ${host})"
+                    -DClang_DIR:PATH=${llvm_build_dir}/lib/cmake/clang
+                    -DLLVM_DIR:PATH=${llvm_build_dir}/lib/cmake/llvm
+                    -DSWIFT_PATH_TO_CMARK_SOURCE:PATH="${CMARK_SOURCE_DIR}"
+                    -DSWIFT_PATH_TO_CMARK_BUILD:PATH="$(build_directory ${host} cmark)"
+                    -DSWIFT_PATH_TO_LIBDISPATCH_SOURCE:PATH="${LIBDISPATCH_SOURCE_DIR}"
+                    -DSWIFT_PATH_TO_LIBDISPATCH_BUILD:PATH="$(build_directory ${host} libdispatch)"
+                    -DSWIFT_PATH_TO_LIBDISPATCH_STATIC_BUILD:PATH="$(build_directory ${host} swift)/$(basename $(build_directory ${host} libdispatch))-static-prefix"
+                )
+
+                if [[ "${SWIFT_SDKS}" ]] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_SDKS:STRING="$(join ";" ${SWIFT_SDKS[@]})"
+                    )
+                fi
+
+                if [[ "${SWIFT_OBJC_INTEROP}" ]] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_STDLIB_ENABLE_OBJC_INTEROP:BOOL=$(true_false "${SWIFT_OBJC_INTEROP}")
+                    )
+                fi
+
+                if [[ "${SWIFT_ENABLE_REFLECTION}" == "0" ]] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_ENABLE_REFLECTION:BOOL=FALSE
+                    )
+                fi
+
+                if [[ "${SWIFT_PRIMARY_VARIANT_SDK}" ]] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_PRIMARY_VARIANT_SDK:STRING="${SWIFT_PRIMARY_VARIANT_SDK}"
+                    )
+                fi
+
+                if [[ "${SWIFT_PRIMARY_VARIANT_ARCH}" ]] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_PRIMARY_VARIANT_ARCH:STRING="${SWIFT_PRIMARY_VARIANT_ARCH}"
+                    )
+                fi
+
+                if [[ "${SWIFT_STDLIB_STABLE_ABI}" ]] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_STDLIB_STABLE_ABI:BOOL=$(true_false "${SWIFT_STDLIB_STABLE_ABI}")
+                    )
+                fi
+
+                if [[ "${SWIFT_STDLIB_ENABLE_PRESPECIALIZATION}" ]] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_STDLIB_ENABLE_PRESPECIALIZATION:BOOL=$(true_false "${SWIFT_STDLIB_ENABLE_PRESPECIALIZATION}")
+                    )
+                fi
+
+                if [[ "${SWIFT_STDLIB_SUPPORTS_BACKTRACE_REPORTING}" ]] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_STDLIB_SUPPORTS_BACKTRACE_REPORTING:BOOL=$(true_false "${SWIFT_STDLIB_SUPPORTS_BACKTRACE_REPORTING}")
+                    )
+                fi
+
+                if [[ "${SWIFT_STDLIB_HAS_ASL}" ]] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_STDLIB_HAS_ASL:BOOL=$(true_false "${SWIFT_STDLIB_HAS_ASL}")
+                    )
+                fi
+
+                if [[ "${SWIFT_STDLIB_HAS_LOCALE}" ]] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_STDLIB_HAS_LOCALE:BOOL=$(true_false "${SWIFT_STDLIB_HAS_LOCALE}")
+                    )
+                fi
+
+                if [ "${SWIFT_INSTALL_COMPONENTS}" ] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_INSTALL_COMPONENTS:STRING="${SWIFT_INSTALL_COMPONENTS}"
+                    )
+                fi
+
+                if [ "${SWIFT_FREESTANDING_FLAVOR}" ] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_FREESTANDING_FLAVOR:STRING="${SWIFT_FREESTANDING_FLAVOR}"
+                    )
+                fi
+
+                if [ "${SWIFT_FREESTANDING_SDK}" ] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_FREESTANDING_SDK:STRING="${SWIFT_FREESTANDING_SDK}"
+                    )
+                fi
+
+                if [ "${SWIFT_FREESTANDING_TRIPLE_NAME}" ] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_FREESTANDING_TRIPLE_NAME:STRING="${SWIFT_FREESTANDING_TRIPLE_NAME}"
+                    )
+                fi
+
+                if [ "${SWIFT_FREESTANDING_AVAILABILITY_NAME}" ] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_FREESTANDING_TRIPLE_NAME:STRING="${SWIFT_FREESTANDING_TRIPLE_NAME}"
+                    )
+                fi
+
+                if [ "${SWIFT_FREESTANDING_MODULE_NAME}" ] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_FREESTANDING_MODULE_NAME:STRING="${SWIFT_FREESTANDING_MODULE_NAME}"
+                    )
+                fi
+
+                if [[ "${SWIFT_FREESTANDING_ARCHS}" ]] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_FREESTANDING_ARCHS:STRING="$(join ";" ${SWIFT_FREESTANDING_ARCHS[@]})"
+                    )
+                fi
+
+                if [[ ! "${SKIP_BUILD_LLDB}" ]] ; then
+                    lldb_build_dir=$(build_directory ${host} lldb)
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DLLDB_ENABLE:BOOL=TRUE
+                        -DLLDB_BUILD_DIR:STRING="${lldb_build_dir}"
+                    )
+                fi
+
+                if [[ -d "${SWIFT_PATH_TO_STRING_PROCESSING_SOURCE}" && \
+                      -n "$(ls -A "${SWIFT_PATH_TO_STRING_PROCESSING_SOURCE}")" ]] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_PATH_TO_STRING_PROCESSING_SOURCE="${SWIFT_PATH_TO_STRING_PROCESSING_SOURCE}"
+                    )
+                    if [[ $(true_false "${SWIFT_ENABLE_EXPERIMENTAL_STRING_PROCESSING}") == "TRUE" ]] ; then
+                        cmake_options=(
+                            "${cmake_options[@]}"
+                            -DSWIFT_ENABLE_EXPERIMENTAL_STRING_PROCESSING:BOOL=TRUE
+                        )
+                    fi
+                else
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_BUILD_REGEX_PARSER_IN_COMPILER:BOOL=FALSE
+                    )
+                fi
+
+                if [[ "${SWIFT_STDLIB_TRACING}" ]] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_STDLIB_TRACING:BOOL=$(true_false "${SWIFT_STDLIB_TRACING}")
+                    )
+                fi
+
+                if [[ "${SWIFT_STDLIB_CONCURRENCY_TRACING}" ]] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_STDLIB_CONCURRENCY_TRACING:BOOL=$(true_false "${SWIFT_STDLIB_CONCURRENCY_TRACING}")
+                    )
+                fi
+
+                if [[ "${SWIFT_STDLIB_USE_RELATIVE_PROTOCOL_WITNESS_TABLES}" ]] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_STDLIB_USE_RELATIVE_PROTOCOL_WITNESS_TABLES:BOOL=$(true_false "${SWIFT_STDLIB_USE_RELATIVE_PROTOCOL_WITNESS_TABLES}")
+                    )
+                fi
+
+                if [[ "${SWIFT_STDLIB_USE_FRAGILE_RESILIENT_PROTOCOL_WITNESS_TABLES}" ]] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_STDLIB_USE_FRAGILE_RESILIENT_PROTOCOL_WITNESS_TABLES:BOOL=$(true_false "${SWIFT_STDLIB_USE_FRAGILE_RESILIENT_PROTOCOL_WITNESS_TABLES}")
+                    )
+                fi
+
+                if [[ "${SWIFT_RUNTIME_FIXED_BACKTRACER_PATH}" ]] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_RUNTIME_FIXED_BACKTRACER_PATH:STRING="${SWIFT_RUNTIME_FIXED_BACKTRACER_PATH}"
+                    )
+                fi
+
+                # SWIFT_THREADING_PACKAGE can be:
+                #
+                #    - Empty
+                #    - A single package name
+                #    - A semicolon separated sequence of sdk:package pairs
+                #
+                OFS=$IFS
+                IFS=';'
+                for elt in $SWIFT_THREADING_PACKAGE; do
+                    if [[ $elt == *:* ]]; then
+                        sdk=${elt/:*/}
+                        package=${elt/*:/}
+                    else
+                        sdk='<any>'
+                        package=$elt
+                    fi
+
+                    case $package in
+                        "" | pthreads | darwin | linux | win32 | c11 | none) ;;
+                        *)
+                        echo "build-script: unknown threading package $package for sdk $sdk; must be one of 'pthreads', 'darwin', 'linux', 'win32', 'c11', 'none', or empty for sdk default"
+                        exit 1
+                        ;;
+                    esac
+                done
+                IFS=$OFS
+
+                if [[ "$SWIFT_THREADING_PACKAGE" ]] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_THREADING_PACKAGE:STRING="${SWIFT_THREADING_PACKAGE}"
+                    )
+                fi
+
+                build_targets=(
+                    all
+                    "${SWIFT_STDLIB_TARGETS[@]}"
+                    "${SWIFT_LIBEXEC_TARGETS[@]}"
+                )
+                if [[ $(true_false "${build_perf_testsuite_this_time}") == "TRUE" ]]; then
+                    native_swift_tools_path="$(build_directory_bin ${LOCAL_HOST} swift)"
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DSWIFT_EXEC:STRING="${native_swift_tools_path}/swiftc"
+                    )
+                    build_targets=("${build_targets[@]}"
+                                   "${SWIFT_BENCHMARK_TARGETS[@]}")
+                fi
+                ;;
+            lldb)
+                if [ ! -d "${LLDB_SOURCE_DIR}" ]; then
+                    echo "error: lldb not found in ${LLDB_SOURCE_DIR}"
+                    exit 1
+                fi
+                if [[ "${CMAKE_GENERATOR}" != "Ninja" ]] ; then
+                    echo "error: lldb can only build with ninja"
+                    exit 1
+                fi
+                cmark_build_dir=$(build_directory ${host} cmark)
+                lldb_build_dir=$(build_directory ${host} lldb)
+                swift_build_dir=$(build_directory ${host} swift)
+                libcxx_build_dir=$(build_directory ${host} libcxx)
+
+                # Add any lldb extra cmake arguments here.
+
+                cmake_options=(
+                    "${cmake_options[@]}"
+                    "${lldb_cmake_options[@]}"
+                    )
+
+                # Pick the right cache.
+                if [[ "$(uname -s)" == "Darwin" ]] ; then
+                  cmake_cache="Apple-lldb-macOS.cmake"
+                else
+                  cmake_cache="Apple-lldb-Linux.cmake"
+                fi
+
+                # Options to find the just-built libddispatch and Foundation.
+                if [[ "$(uname -s)" == "Darwin" || "${SKIP_BUILD_FOUNDATION}" ]] ; then
+                    DOTEST_EXTRA=""
+                else
+                    # This assumes that there are no spaces in any on these paths.
+                    LIBDISPATCH_BUILD_DIR="$(build_directory ${host} libdispatch)"
+                    FOUNDATION_BUILD_DIR=$(build_directory ${host} foundation)
+                    DOTEST_EXTRA="-I${FOUNDATION_BUILD_DIR}"
+                    DOTEST_EXTRA="${DOTEST_EXTRA} -F${FOUNDATION_BUILD_DIR}"
+                    DOTEST_EXTRA="${DOTEST_EXTRA} -I${FOUNDATION_BUILD_DIR}/swift"
+                    DOTEST_EXTRA="${DOTEST_EXTRA} -I${LIBDISPATCH_SOURCE_DIR}"
+                    DOTEST_EXTRA="${DOTEST_EXTRA} -L${LIBDISPATCH_BUILD_DIR}"
+                    DOTEST_EXTRA="${DOTEST_EXTRA} -L${LIBDISPATCH_BUILD_DIR}/src"
+                    DOTEST_EXTRA="${DOTEST_EXTRA} -L${FOUNDATION_BUILD_DIR}"
+                    DOTEST_EXTRA="${DOTEST_EXTRA} -L${FOUNDATION_BUILD_DIR}/Foundation"
+                    DOTEST_EXTRA="${DOTEST_EXTRA} -L${FOUNDATION_BUILD_DIR}/Sources/Foundation"
+                    DOTEST_EXTRA="${DOTEST_EXTRA} -L${FOUNDATION_BUILD_DIR}/Sources/FoundationNetworking"
+                    DOTEST_EXTRA="${DOTEST_EXTRA} -L${FOUNDATION_BUILD_DIR}/Sources/FoundationXML"
+                    DOTEST_EXTRA="${DOTEST_EXTRA} -L${FOUNDATION_BUILD_DIR}/lib"
+                    DOTEST_EXTRA="${DOTEST_EXTRA} -Xlinker -rpath -Xlinker ${LIBDISPATCH_BUILD_DIR}"
+                    DOTEST_EXTRA="${DOTEST_EXTRA} -Xlinker -rpath -Xlinker ${LIBDISPATCH_BUILD_DIR}/src"
+                    DOTEST_EXTRA="${DOTEST_EXTRA} -Xlinker -rpath -Xlinker ${FOUNDATION_BUILD_DIR}"
+                    DOTEST_EXTRA="${DOTEST_EXTRA} -Xlinker -rpath -Xlinker ${FOUNDATION_BUILD_DIR}/Foundation"
+                    DOTEST_EXTRA="${DOTEST_EXTRA} -Xlinker -rpath -Xlinker ${FOUNDATION_BUILD_DIR}/Sources/Foundation"
+                    DOTEST_EXTRA="${DOTEST_EXTRA} -Xlinker -rpath -Xlinker ${FOUNDATION_BUILD_DIR}/Sources/FoundationNetworking"
+                    DOTEST_EXTRA="${DOTEST_EXTRA} -Xlinker -rpath -Xlinker ${FOUNDATION_BUILD_DIR}/Sources/FoundationXML"
+                    DOTEST_EXTRA="${DOTEST_EXTRA} -Xlinker -rpath -Xlinker ${FOUNDATION_BUILD_DIR}/lib"
+                fi
+
+                # Watchpoint testing is currently disabled: see rdar://38566150.
+                LLDB_TEST_CATEGORIES="--skip-category=watchpoint"
+
+                # Skip DWO to speed up swift testing.
+                if [[ "$(true_false ${LLDB_TEST_SWIFT_ONLY})" == "TRUE" ]]; then
+                    LLDB_TEST_CATEGORIES="${LLDB_TEST_CATEGORIES};--skip-category=dwo"
+                fi
+
+                # Construct dotest arguments. We use semicolons so CMake interprets this as a list.
+                DOTEST_ARGS="--build-dir;${lldb_build_dir}/lldb-test-build.noindex;${LLDB_TEST_CATEGORIES}"
+
+                # Only set the extra arguments if they're not empty.
+                if [[ -n "${DOTEST_EXTRA}" ]]; then
+                    DOTEST_ARGS="${DOTEST_ARGS};-E;${DOTEST_EXTRA}"
+                fi
+
+                if [[ $(true_false "${LLDB_CONFIGURE_TESTS}") == "FALSE" ]]; then
+                    should_configure_tests="FALSE"
+                else
+                    should_configure_tests=$(false_true ${BUILD_TOOLCHAIN_ONLY})
+                fi
+
+                cmake_options=(
+                    "${cmake_options[@]}"
+                    -C${LLDB_SOURCE_DIR}/cmake/caches/${cmake_cache}
+                    -DCMAKE_C_FLAGS="$(llvm_c_flags ${host})"
+                    -DCMAKE_CXX_FLAGS="$(llvm_c_flags ${host})"
+                    -DCMAKE_BUILD_TYPE:STRING="${LLDB_BUILD_TYPE}"
+                    -DLLDB_SWIFTC:PATH=${SWIFTC_BIN}
+                    -DLLDB_SWIFT_LIBS:PATH="$(build_directory ${LOCAL_HOST} swift)/lib/swift"
+                    -DCMAKE_INSTALL_PREFIX:PATH="$(get_host_install_prefix ${host})"
+                    -DLLDB_FRAMEWORK_INSTALL_DIR="$(get_host_install_prefix ${host})../System/Library/PrivateFrameworks"
+                    -DLLVM_DIR:PATH=${llvm_build_dir}/lib/cmake/llvm
+                    -DClang_DIR:PATH=${llvm_build_dir}/lib/cmake/clang
+                    -DSwift_DIR:PATH=${swift_build_dir}/lib/cmake/swift
+                    -DLLDB_ENABLE_CURSES=ON
+                    -DLLDB_ENABLE_LIBEDIT=ON
+                    -DLLDB_ENABLE_PYTHON=ON
+                    -DLLDB_ENABLE_LZMA=OFF
+                    -DLLDB_ENABLE_LUA=OFF
+                    -DLLDB_INCLUDE_TESTS:BOOL="${should_configure_tests}"
+                    -DLLDB_TEST_LIBCXX_ROOT_DIR:STRING="${libcxx_build_dir}"
+                    -DLLDB_TEST_USER_ARGS="${DOTEST_ARGS}"
+                )
+
+                if [[ $(is_cross_tools_host ${host}) ]] ; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        -DLLVM_TABLEGEN=$(build_directory "${LOCAL_HOST}" llvm)/bin/llvm-tblgen
+                        -DCLANG_TABLEGEN=$(build_directory "${LOCAL_HOST}" llvm)/bin/clang-tblgen
+                        -DLLDB_TABLEGEN=$(build_directory "${LOCAL_HOST}" lldb)/bin/lldb-tblgen
+                        -DLLDB_TABLEGEN_EXE=$(build_directory "${LOCAL_HOST}" lldb)/bin/lldb-tblgen
+                        -DLLVM_NATIVE_BUILD=$(build_directory "${LOCAL_HOST}" llvm)
+                    )
+                fi
+
+                if [[ "$(uname -s)" == "Darwin" && "$(true_false ${LLDB_USE_SYSTEM_DEBUGSERVER})" == "TRUE" ]]; then
+                  cmake_options+=(
+                    -DLLDB_USE_SYSTEM_DEBUGSERVER:BOOL="${LLDB_USE_SYSTEM_DEBUGSERVER}"
+                  )
+                fi
+
+                # Add the extra CMake args at the end so they can override
+                # values set earlier.
+                if [ ! -z "${LLDB_EXTRA_CMAKE_ARGS}" ]; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+                        ${LLDB_EXTRA_CMAKE_ARGS}
+                        )
+                fi
+                ;;
+            llbuild)
+                cmake_options=(
+                    "${cmake_options[@]}"
+                    "${llbuild_cmake_options[@]}"
+
+                    -DCMAKE_BUILD_TYPE:STRING="${LLBUILD_BUILD_TYPE}"
+                    -DCMAKE_C_COMPILER:PATH="${CLANG_BIN}/clang"
+                    -DCMAKE_CXX_COMPILER:PATH="${CLANG_BIN}/clang++"
+                    -DCMAKE_INSTALL_PREFIX:PATH="$(get_host_install_prefix ${host})"
+                    -DCMAKE_Swift_COMPILER:PATH=${SWIFTC_BIN}
+                    -DCMAKE_Swift_FLAGS:STRING="$(common_swift_flags)"
+
+                    -DLLBUILD_ENABLE_ASSERTIONS:BOOL=$(true_false "${LLBUILD_ENABLE_ASSERTIONS}")
+                    -DLLBUILD_SUPPORT_BINDINGS:=Swift
+
+                    -DLIT_EXECUTABLE:PATH="${LLVM_SOURCE_DIR}/utils/lit/lit.py"
+                    -DFILECHECK_EXECUTABLE:PATH="$(build_directory_bin ${LOCAL_HOST} llvm)/FileCheck"
+                    -DSWIFTC_EXECUTABLE:PATH=${SWIFTC_BIN}
+                    -DFOUNDATION_BUILD_DIR:PATH="$(build_directory ${host} foundation)"
+                    -DLIBDISPATCH_BUILD_DIR:PATH="$(build_directory ${host} libdispatch)"
+                    -DLIBDISPATCH_SOURCE_DIR:PATH="${LIBDISPATCH_SOURCE_DIR}"
+
+                    -Ddispatch_DIR:PATH=$(build_directory ${host} libdispatch)/cmake/modules
+                    -DFoundation_DIR:PATH=$(build_directory ${host} foundation)/cmake/modules
+                )
+
+                if [[ $(is_cross_tools_host ${host}) ]] ; then
+                    cmake_options+=("${SWIFT_TARGET_CMAKE_OPTIONS[@]}")
+
+                    # llbuild looks for the SQlite3 library using find_package(),
+                    # so search for it in CROSS_COMPILE_DEPS_PATH using the CMake
+                    # process for doing so and don't use cross-compiled
+                    # executables, see the linked CMake docs for more info:
+                    #
+                    # https://cmake.org/cmake/help/latest/command/find_package.html
+                    # https://cmake.org/cmake/help/latest/command/find_program.html
+                    cmake_options+=(
+                        -DCMAKE_FIND_ROOT_PATH:PATH="${CROSS_COMPILE_DEPS_PATH}"
+                        -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER
+                    )
+                fi
+
+                # Ensure on Darwin platforms that we consider only the SQLite headers
+                # from the SDK instead of picking ones found elsewhere
+                # (e.g. in /usr/include )
+                # Also consider only the SQLite dylib shipped with the OS
+                # to avoid mismatch with the headers
+                if [[ "$(uname -s)" = "Darwin" ]]; then
+                    cmake_options=(
+                        "${cmake_options[@]}"
+
+                        -DSQLite3_INCLUDE_DIR:PATH="$(xcrun -sdk macosx -show-sdk-path)/usr/include"
+                    )
+                fi
+
+                if [[ "${SKIP_CLEAN_LLBUILD}" == "0" ]]
+                then
+                  # Ensure llbuild will rebuild from scratch, since
+                  # arbitrary changes to the compiler can prevent
+                  # a successful incremental build
+                  echo "Cleaning the llbuild build directory"
+                  call rm -rf "$(build_directory ${host} llbuild)"
+                fi
+                ;;
+            xctest)
+                XCTEST_BUILD_DIR=$(build_directory ${host} xctest)
+                FOUNDATION_BUILD_DIR=$(build_directory ${host} foundation)
+                SWIFT_BUILD_DIR=$(build_directory ${host} swift)
+
+                if [[ "${SKIP_CLEAN_XCTEST}" == "0" ]]
+                then
+                  # The Swift project might have been changed, but CMake might
+                  # not be aware and will not rebuild.
+                  echo "Cleaning the XCTest build directory"
+                  call rm -rf "${XCTEST_BUILD_DIR}"
+                fi
+
+                case "${host}" in
+                macosx-*)
+                  # Staging: require opt-in for building with dispatch
+                  if [[ ! "${SKIP_BUILD_LIBDISPATCH}" ]] ; then
+                      LIBDISPATCH_BUILD_DIR="$(build_directory ${host} libdispatch)"
+                      LIBDISPATCH_BUILD_ARGS="--libdispatch-src-dir=${LIBDISPATCH_SOURCE_DIR} --libdispatch-build-dir=${LIBDISPATCH_BUILD_DIR}"
+                  fi
+
+                  # Use XCTEST_BUILD_TYPE to build either --debug or --release.
+                  if [[ "${XCTEST_BUILD_TYPE}" ==  "Debug" ]] ; then
+                      XCTEST_BUILD_ARGS="--debug"
+                  else
+                      XCTEST_BUILD_ARGS="--release"
+                  fi
+
+                  call python3 "${XCTEST_SOURCE_DIR}"/build_script.py \
+                      --swiftc="${SWIFTC_BIN}" \
+                      --build-dir="${XCTEST_BUILD_DIR}" \
+                      --foundation-build-dir="${FOUNDATION_BUILD_DIR}" \
+                      --swift-build-dir="${SWIFT_BUILD_DIR}" \
+                      $LIBDISPATCH_BUILD_ARGS \
+                      $XCTEST_BUILD_ARGS
+
+                  # XCTest builds itself and doesn't rely on cmake
+                  continue
+                ;;
+                *)
+                  cmake_options=(
+                    ${cmake_options[@]}
+                    -DCMAKE_BUILD_TYPE:STRING="${XCTEST_BUILD_TYPE}"
+                    -DCMAKE_C_COMPILER:PATH="${CLANG_BIN}/clang"
+                    -DCMAKE_CXX_COMPILER:PATH="${CLANG_BIN}/clang++"
+                    -DCMAKE_Swift_COMPILER:PATH=${SWIFTC_BIN}
+                    -DCMAKE_Swift_FLAGS:STRING="$(common_swift_flags)"
+                    -DCMAKE_INSTALL_PREFIX:PATH="$(get_host_install_prefix ${host})"
+                    -DCMAKE_INSTALL_LIBDIR:PATH="lib"
+
+                    -Ddispatch_DIR=$(build_directory ${host} libdispatch)/cmake/modules
+                    -DFoundation_DIR=$(build_directory ${host} foundation)/cmake/modules
+                    -DLLVM_DIR=$(build_directory ${host} llvm)/lib/cmake/llvm
+
+                    -DXCTEST_PATH_TO_LIBDISPATCH_SOURCE:PATH=${LIBDISPATCH_SOURCE_DIR}
+                    -DXCTEST_PATH_TO_LIBDISPATCH_BUILD:PATH=$(build_directory ${host} libdispatch)
+                    -DXCTEST_PATH_TO_FOUNDATION_BUILD:PATH=${FOUNDATION_BUILD_DIR}
+                    -DCMAKE_SWIFT_COMPILER:PATH=${SWIFTC_BIN}
+                    -DCMAKE_PREFIX_PATH:PATH=$(build_directory ${host} llvm)
+
+                    -DENABLE_TESTING=YES
+                  )
+                  if [[ $(is_cross_tools_host ${host}) ]] ; then
+                      cmake_options+=("${SWIFT_TARGET_CMAKE_OPTIONS[@]}")
+                  fi
+                ;;
+                esac
+
+                ;;
+            foundation_macros)
+                if [[ ${host} == "macosx"* ]]; then
+                    echo "Skipping Foundation Macros on OS X -- Foundation is part of the OS on this platform"
+                    continue
+                fi
+
+                if [[ "$(true_false ${CROSS_COMPILE_BUILD_SWIFT_TOOLS})" == "FALSE" ]]; then
+                    echo "Skipping building Foundation Macros for ${host}, because the host tools are not being built"
+                    continue
+                fi
+
+                if [[ "${SKIP_CLEAN_FOUNDATION}" == "0" ]]
+                then
+                  # The Swift project might have been changed, but CMake might
+                  # not be aware and will not rebuild.
+                  echo "Cleaning the Foundation Macros build directory"
+                  call rm -rf "${build_dir}"
+                fi
+
+                cmake_options=(
+                    ${cmake_options[@]}
+                    -DCMAKE_BUILD_TYPE:STRING=${FOUNDATION_BUILD_TYPE}
+                    -DCMAKE_C_COMPILER:PATH=${CLANG_BIN}/clang
+                    -DCMAKE_CXX_COMPILER:PATH=${CLANG_BIN}/clang++
+                    -DCMAKE_Swift_COMPILER:PATH=${SWIFTC_BIN}
+                    -DCMAKE_Swift_FLAGS:STRING="$(common_swift_flags)"
+                    -DCMAKE_INSTALL_PREFIX:PATH=$(get_host_install_prefix ${host})
+
+                    -DSwiftSyntax_DIR=$(build_directory ${host} swift)/cmake/modules
+
+                    -DBUILD_SHARED_LIBS=YES
+                    -DCMAKE_C_FLAGS="$(swift_c_flags ${host}) $(maybe_lfts ${host})"
+                )
+
+                if [[ $(is_cross_tools_host ${host}) ]] ; then
+                    cmake_options+=("${SWIFT_TARGET_CMAKE_OPTIONS[@]}")
+                fi
+
+                ;;
+            foundation|foundation_static)
+                # The configuration script requires knowing about XCTest's
+                # location for building and running the tests. Note that XCTest
+                # is not yet built at this point.
+                XCTEST_BUILD_DIR=$(build_directory ${host} xctest)
+
+                if [[ ${host} == "macosx"* ]]; then
+                    echo "Skipping Foundation on OS X -- Foundation is part of the OS on this platform"
+                    continue
+                fi
+
+                if [[ ! "${SKIP_BUILD_LIBXML2}" ]]; then
+                    BASE_INSTALL_DIR="$(get_host_install_destdir ${host})"
+                    LIBXML2_HEADERS="${BASE_INSTALL_DIR}/usr/include/libxml2"
+                    LIBXML2_LIBRARY="${BASE_INSTALL_DIR}/usr/lib/libxml2.a"
+
+                    if [[ -z "${DRY_RUN}" && ! -d "${LIBXML2_HEADERS}" ]]; then
+                        echo "Error: '${LIBXML2_HEADERS}' does not exist" 1>&2
+                        exit 1
+                    fi
+
+                    if [[ -z "${DRY_RUN}" && ! -e "${LIBXML2_LIBRARY}" ]]; then
+                        echo "Error: '${LIBXML2_LIBRARY}' does not exist" 1>&2
+                        exit 1
+                    fi
+
+                    LIBXML2_BUILD_ARGS=(
+                        -DLIBXML2_INCLUDE_DIR:PATH="${LIBXML2_HEADERS}"
+                        -DLIBXML2_LIBRARY:PATH="${LIBXML2_LIBRARY}"
+                        -DLIBXML2_DEFINITIONS="-DLIBXML_STATIC"
+                    )
+                else
+                    LIBXML2_BUILD_ARGS=()
+                fi
+
+                if [[ ! "${SKIP_BUILD_ZLIB}" ]]; then
+                    BASE_INSTALL_DIR="$(get_host_install_destdir ${host})"
+                    ZLIB_HEADERS="${BASE_INSTALL_DIR}/usr/include"
+                    # Note: On Windows, the spelling is 'zlibstatic.lib',
+                    #       so if this is ported to python, that case will need
+                    #       to be handled.
+                    ZLIB_LIBRARY="${BASE_INSTALL_DIR}/usr/lib/libz.a"
+
+                    if [[ -z "${DRY_RUN}" && ! -d "${ZLIB_HEADERS}" ]]; then
+                        echo "Error: '${ZLIB_HEADERS}' does not exist" 1>&2
+                        exit 1
+                    fi
+
+                    if [[ -z "${DRY_RUN}" && ! -e "${ZLIB_LIBRARY}" ]]; then
+                        echo "Error: '${ZLIB_LIBRARY}' does not exist" 1>&2
+                        exit 1
+                    fi
+
+                    ZLIB_BUILD_ARGS=(
+                        -DZLIB_INCLUDE_DIR:PATH="${ZLIB_HEADERS}"
+                        -DZLIB_LIBRARY:PATH="${ZLIB_LIBRARY}"
+                    )
+                fi
+
+                if [[ ! "${SKIP_BUILD_CURL}" ]]; then
+                    BASE_INSTALL_DIR="$(get_host_install_destdir ${host})"
+                    CURL_BUILD_ARGS=(
+                        -DCURL_DIR="${BASE_INSTALL_DIR}/usr/lib/cmake/CURL"
+                    )
+                fi
+
+                if [[ "${SKIP_CLEAN_FOUNDATION}" == "0" ]]
+                then
+                  # The Swift project might have been changed, but CMake might
+                  # not be aware and will not rebuild.
+                  echo "Cleaning the Foundation build directory"
+                  call rm -rf "${build_dir}"
+                fi
+
+                cmake_options=(
+                  ${cmake_options[@]}
+                  -DCMAKE_BUILD_TYPE:STRING=${FOUNDATION_BUILD_TYPE}
+                  -DCMAKE_C_COMPILER:PATH=${CLANG_BIN}/clang
+                  -DCMAKE_CXX_COMPILER:PATH=${CLANG_BIN}/clang++
+                  -DCMAKE_SWIFT_COMPILER:PATH=${SWIFTC_BIN}
+                  -DCMAKE_Swift_COMPILER:PATH=${SWIFTC_BIN}
+                  -DCMAKE_Swift_FLAGS:STRING="$(common_swift_flags)"
+                  -DCMAKE_INSTALL_PREFIX:PATH=$(get_host_install_prefix ${host})
+
+                  ${LIBXML2_BUILD_ARGS[@]}
+
+                  ${ZLIB_BUILD_ARGS[@]}
+
+                  ${CURL_BUILD_ARGS[@]}
+
+                  -DFOUNDATION_PATH_TO_LIBDISPATCH_SOURCE=${LIBDISPATCH_SOURCE_DIR}
+                  -DFOUNDATION_PATH_TO_LIBDISPATCH_BUILD=$(build_directory ${host} libdispatch)
+                  -Ddispatch_DIR=$(build_directory ${host} libdispatch)/cmake/modules
+
+                  -DSwiftFoundation_MACRO=$(build_directory ${LOCAL_HOST} foundation_macros)/lib
+
+                  -D_SwiftFoundation_SourceDIR=${FOUNDATION_SWIFTFOUNDATION_SOURCE_DIR}
+                  -D_SwiftFoundationICU_SourceDIR=${FOUNDATION_SWIFTFOUNDATIONICU_SOURCE_DIR}
+                  -D_SwiftCollections_SourceDIR=${SWIFT_COLLECTIONS_SOURCE_DIR}
+
+                  # NOTE(compnerd) we disable tests because XCTest is not ready
+                  # yet, but we will reconfigure when the time comes.
+                  -DENABLE_TESTING:BOOL=NO
+
+                  -DBUILD_SHARED_LIBS=$([[ ${product} == foundation_static ]] && echo "NO" || echo "YES")
+                  -DCMAKE_C_FLAGS="$(swift_c_flags ${host}) $(maybe_lfts ${host})"
+                )
+
+                if [[ $(is_cross_tools_host ${host}) ]] ; then
+                    cmake_options+=("${SWIFT_TARGET_CMAKE_OPTIONS[@]}")
+
+                    # Foundation looks for the libXML2 and libcurl libraries
+                    # using find_package(), so search for them in
+                    # CROSS_COMPILE_DEPS_PATH using the CMake process for doing
+                    # so, see the linked CMake docs for more info:
+                    #
+                    # https://cmake.org/cmake/help/latest/command/find_package.html
+                    cmake_options+=(
+                        -DCMAKE_FIND_ROOT_PATH:PATH="${CROSS_COMPILE_DEPS_PATH}"
+                    )
+                fi
+                ;;
+            libdispatch|libdispatch_static)
+                LIBDISPATCH_BUILD_DIR=$(build_directory ${host} ${product})
+                SWIFT_BUILD_PATH="$(build_directory ${host} swift)"
+
+                case "${host}" in
+                macosx-*)
+                  echo "Error: build-script does not support building libdispatch on macOS?!"
+                  usage 1>&2
+                  exit 1
+                ;;
+                *)
+                  if [[ "${SKIP_CLEAN_LIBDISPATCH}" == "0" ]]
+                  then
+                    # The Swift project might have been changed, but CMake might
+                    # not be aware and will not rebuild.
+                    echo "Cleaning the libdispatch build directory"
+                    call rm -rf "${LIBDISPATCH_BUILD_DIR}"
+                  fi
+
+                  cmake_options=(
+                    -DENABLE_SWIFT=YES
+                    ${cmake_options[@]}
+
+                    -DCMAKE_BUILD_TYPE:STRING="${LIBDISPATCH_BUILD_TYPE}"
+                    -DCMAKE_C_COMPILER:PATH="${CLANG_BIN}/clang"
+                    -DCMAKE_CXX_COMPILER:PATH="${CLANG_BIN}/clang++"
+                    -DCMAKE_C_FLAGS="$(swift_c_flags ${host})"
+                    -DCMAKE_SWIFT_COMPILER:PATH="${SWIFTC_BIN}"
+                    -DCMAKE_Swift_COMPILER:PATH="${SWIFTC_BIN}"
+                    -DCMAKE_Swift_FLAGS:STRING="$(common_swift_flags)"
+                    -DCMAKE_INSTALL_PREFIX:PATH="$(get_host_install_prefix ${host})"
+                    -DCMAKE_INSTALL_LIBDIR:PATH="lib"
+
+                    -DSwift_DIR="${SWIFT_BUILD_PATH}/lib/cmake/swift"
+
+                    -DENABLE_TESTING=YES
+                    -DBUILD_SHARED_LIBS=$([[ ${product} == libdispatch_static ]] && echo "NO" || echo "YES")
+                  )
+                  if [[ $(is_cross_tools_host ${host}) ]] ; then
+                      cmake_options+=("${SWIFT_TARGET_CMAKE_OPTIONS[@]}")
+                  fi
+                ;;
+                esac
+
+                ;;
+            *)
+                echo "error: unknown product: ${product}"
+                exit 1
+                ;;
+        esac
+
+        # Compute the generator output file to check for, to determine if we
+        # must reconfigure. We only handle Ninja for now.
+        #
+        # This is important for ensuring that if a CMake configuration fails in
+        # CI, that we will still be willing to rerun the configuration process.
+        generator_output_path=""
+        if [[ "${CMAKE_GENERATOR}" == "Ninja" ]] ; then
+            generator_output_path="${build_dir}/build.ninja"
+        fi
+
+        # Configure if necessary.
+        cmake_cache_path="${build_dir}/CMakeCache.txt"
+        if [[  "${RECONFIGURE}" || ! -f "${cmake_cache_path}" || \
+                    ( ! -z "${generator_output_path}" && ! -f "${generator_output_path}" ) ]] ; then
+            call mkdir -p "${build_dir}"
+
+            # Use `cmake-file-api` in case it is available.
+            call mkdir -p "${build_dir}/.cmake/api/v1/query"
+            call touch "${build_dir}/.cmake/api/v1/query/codemodel-v2" "${build_dir}/.cmake/api/v1/query/cache-v2"
+
+            if [[ -n "${DISTCC}" ]]; then
+                EXTRA_DISTCC_OPTIONS=("DISTCC_HOSTS=localhost,lzo,cpp")
+            fi
+            with_pushd "${build_dir}" \
+                call env "${EXTRA_DISTCC_OPTIONS[@]}" "${CMAKE}" "${cmake_options[@]}" "${EXTRA_CMAKE_OPTIONS[@]}" "${source_dir}"
+        fi
+
+        # Build.
+        if [[ $(not ${SKIP_BUILD}) ]]; then
+            call "${CMAKE_BUILD[@]}" "${build_dir}" -- "${BUILD_ARGS[@]}" ${build_targets[@]}
+        fi
+    done
+done
+# END OF BUILD PHASE
+
+# Trap function to print the current test configuration when tests fail.
+# This is a function so the text is not unnecessarily displayed when running -x.
+tests_busted ()
+{
+    echo "*** Failed while running tests for $1 $2"
+}
+
+for host in "${ALL_HOSTS[@]}"; do
+    # Skip this pass when the only action to execute can't match.
+    if ! [[ $(should_execute_host_actions_for_phase ${host} test) ]]; then
+        continue
+    fi
+
+    # Calculate test targets
+    calculate_targets_for_host $host
+
+    set_build_options_for_host $host
+
+    if [[ "${NATIVE_CLANG_TOOLS_PATH}" ]] ; then
+        CLANG_BIN="${NATIVE_CLANG_TOOLS_PATH}"
+    else
+        CLANG_BIN="$(build_directory_bin ${LOCAL_HOST} llvm)"
+    fi
+
+    if [[ -f "${CLANG_BIN}/clang" ]] && [[ -z ${ENABLE_ASAN+x} ]]; then
+      export SWIFT_DRIVER_CLANG_EXEC="${CLANG_BIN}/clang"
+      export SWIFT_DRIVER_CLANGXX_EXEC="${CLANG_BIN}/clang++"
+    fi
+
+    if [[ "${NATIVE_SWIFT_TOOLS_PATH}" ]] ; then
+        SWIFTC_BIN="${NATIVE_SWIFT_TOOLS_PATH}/swiftc"
+    else
+        SWIFTC_BIN="$(build_directory_bin ${LOCAL_HOST} swift)/swiftc"
+    fi
+
+    # Run the tests for each product
+    for product in "${PRODUCTS[@]}"; do
+        # Check if we should perform this action.
+        if ! [[ $(should_execute_action "${host}-${product}-test") ]]; then
+            continue
+        fi
+
+        case ${product} in
+            libcxx)
+                continue # We don't test libc++
+                ;;
+            swift)
+                executable_target=
+                results_targets=
+                if ! [[ "${SKIP_TEST_SWIFT}" ]]; then
+                    if ! [[ $(is_cross_tools_host ${host}) ]] ; then
+                       executable_target=SwiftUnitTests
+                       results_targets=("${SWIFT_TEST_TARGETS[@]}")
+                       if [[ "${STRESS_TEST_SOURCEKIT}" ]]; then
+                          results_targets=(
+                               "${results_targets[@]}"
+                               stress-SourceKit
+                          )
+                       fi
+                    fi
+                fi
+                if ! [[ "${SKIP_TEST_BENCHMARKS}" ]]; then
+                    results_targets=(
+                        "${results_targets[@]}"
+                        "${SWIFT_RUN_BENCHMARK_TARGETS[@]}"
+                    )
+                fi
+                if [[ -z "${results_targets[@]}" ]]; then
+                    continue
+                fi
+                ;;
+            lldb)
+                if [[ "${SKIP_TEST_LLDB}" ]]; then
+                    continue
+                fi
+                if [[ $(is_cross_tools_host ${host}) ]]; then
+                    echo "--- Can't execute tests for ${host}, skipping... ---"
+                    continue
+                fi
+                llvm_build_dir=$(build_directory ${host} llvm)
+                lldb_build_dir=$(build_directory ${host} lldb)
+                results_dir="${lldb_build_dir}/test-results"
+
+                call mkdir -p "${results_dir}"
+                LLVM_LIT_ARGS="${LLVM_LIT_ARGS} --xunit-xml-output=${results_dir}/results.xml"
+
+                if test "${ENABLE_ASAN}" -o "$(echo ${LLDB_EXTRA_CMAKE_ARGS}|grep Address)"; then
+                    # Limit the number of parallel tests
+                    LLVM_LIT_ARGS="${LLVM_LIT_ARGS} -j $(sysctl hw.physicalcpu | awk -v N=${LIT_JOBS} '{ print (N < int($2/1.5)) ? N : int($2/1.5) }')"
+                fi
+
+                FILTER_SWIFT_OPTION="--filter=[sS]wift"
+                FILTER_SWIFT_API_OPTION="--filter=lang/swift"
+                LLVM_LIT_FILTER_ARG=""
+                if [[ "$(true_false ${LLDB_TEST_SWIFT_ONLY})" == "TRUE" ]]; then
+                    LLVM_LIT_FILTER_ARG="${FILTER_SWIFT_OPTION}"
+                fi
+
+                echo "--- Running LLDB unit tests ---"
+                with_pushd ${lldb_build_dir} \
+                    call ${NINJA_BIN} -j ${BUILD_JOBS} unittests/LLDBUnitTests
+                echo "--- Running LLDB tests (Swift Config: ClangImporter) ---"
+                with_pushd ${lldb_build_dir} \
+                    call ${NINJA_BIN} -j ${BUILD_JOBS} lldb-test-deps
+                with_pushd ${results_dir} \
+                    call "${llvm_build_dir}/bin/llvm-lit" \
+                         "${lldb_build_dir}/test" \
+                         ${LLVM_LIT_ARGS} ${LLVM_LIT_FILTER_ARG} \
+                         --param dotest-args="--setting symbols.use-swift-clangimporter=true"
+                echo "--- Rerun LLDB Swift API tests (Swift Config: DWARFImporter) ---"
+                with_pushd ${results_dir} \
+                    call "${llvm_build_dir}/bin/llvm-lit" \
+                         "${lldb_build_dir}/test" \
+                         ${LLVM_LIT_ARGS} ${FILTER_SWIFT_API_OPTION} \
+                         --param dotest-args="--setting symbols.use-swift-clangimporter=false"
+
+                if [[ -x "${LLDB_TEST_SWIFT_COMPATIBILITY}" ]] ; then
+                    echo "Running LLDB swift compatibility tests against" \
+                         "${LLDB_TEST_SWIFT_COMPATIBILITY}"
+                    DOTEST_ARGS="-G swift-history --swift-compiler \"${LLDB_TEST_SWIFT_COMPATIBILITY}\""
+                    with_pushd ${results_dir} \
+                       call "${llvm_build_dir}/bin/llvm-lit" \
+                            "${lldb_build_dir}/test" \
+                            ${LLVM_LIT_ARGS} \
+                            --param dotest-args="${DOTEST_ARGS}" \
+                            --filter=compat
+                fi
+                continue
+                ;;
+            llbuild)
+                if [[ "${SKIP_TEST_LLBUILD}" ]]; then
+                    continue
+                fi
+                results_targets=("test")
+                executable_target=""
+                ;;
+            xctest)
+                if [[ "${SKIP_TEST_XCTEST}" ]]; then
+                    continue
+                fi
+
+                case ${host} in
+                macosx-*)
+                  # If libdispatch is being built then XCTest will need access to it
+                  if [[ ! "${SKIP_BUILD_LIBDISPATCH}" ]] ; then
+                      LIBDISPATCH_BUILD_DIR="$(build_directory ${host} libdispatch)"
+                      LIBDISPATCH_BUILD_ARGS="--libdispatch-src-dir=${LIBDISPATCH_SOURCE_DIR} --libdispatch-build-dir=${LIBDISPATCH_BUILD_DIR}"
+                  fi
+
+                  # Use XCTEST_BUILD_TYPE to build either --debug or --release.
+                  if [[ "${XCTEST_BUILD_TYPE}" ==  "Debug" ]] ; then
+                      XCTEST_BUILD_ARGS="--debug"
+                  else
+                      XCTEST_BUILD_ARGS="--release"
+                  fi
+
+                  echo "--- Running tests for ${product} ---"
+                  FOUNDATION_BUILD_DIR=$(build_directory ${host} foundation)
+                  XCTEST_BUILD_DIR=$(build_directory ${host} xctest)
+                  call python3 "${XCTEST_SOURCE_DIR}"/build_script.py test \
+                      --swiftc="${SWIFTC_BIN}" \
+                      --lit="${LLVM_SOURCE_DIR}/utils/lit/lit.py" \
+                      --foundation-build-dir="${FOUNDATION_BUILD_DIR}" \
+                      ${LIBDISPATCH_BUILD_ARGS} \
+                      $XCTEST_BUILD_ARGS \
+                      "${XCTEST_BUILD_DIR}"
+                  echo "--- Finished tests for ${product} ---"
+                  continue
+                ;;
+                *)
+                  results_targets=( "check-xctest" )
+                  executable_target=""
+                ;;
+                esac
+                ;;
+            foundation|foundation_static|foundation_macros)
+              continue
+            ;;
+            libdispatch)
+                if [[ "${SKIP_TEST_LIBDISPATCH}" ]]; then
+                    continue
+                fi
+
+                case "${host}" in
+                macosx-*)
+                  LIBDISPATCH_BUILD_DIR=$(build_directory ${host} ${product})
+                  echo "--- Running tests for ${product} ---"
+                  with_pushd "${LIBDISPATCH_BUILD_DIR}" \
+                      call env VERBOSE=1 make check
+                  echo "--- Finished tests for ${product} ---"
+                  continue
+                ;;
+                *)
+                  results_targets=( "test" )
+                  executable_target=""
+                ;;
+                esac
+                ;;
+            libdispatch_static)
+              # FIXME: merge with libdispatch once the unit tests work with
+              # libdispatch_static
+              continue
+            ;;
+            *)
+                echo "error: unknown product: ${product}"
+                exit 1
+                ;;
+        esac
+
+        trap "tests_busted ${product} ''" ERR
+        build_dir=$(build_directory ${host} ${product})
+        build_cmd=("${CMAKE_BUILD[@]}" "${build_dir}" -- "${BUILD_ARGS[@]}")
+
+        if [[ "${executable_target}" != "" ]]; then
+            echo "--- Building tests for ${product} ---"
+            call "${build_cmd[@]}" "${executable_target}"
+        fi
+
+        # We can only run tests built for the host machine, because
+        # cross-compiled hosts only build their native target.
+        if [[ $(is_cross_tools_host ${host}) ]]; then
+            echo "--- Can't execute tests for ${host}, skipping... ---"
+            continue
+        fi
+
+        echo "--- Running tests for ${product} ---"
+        for target in "${results_targets[@]}"; do
+            if [[ "${target}" != "" ]]; then
+                echo "--- ${target} ---"
+                trap "tests_busted ${product} '(${target})'" ERR
+
+                test_target="$target"
+                if [[ ${test_target} == check-swift* ]] && [[ "${TEST_PATHS}" ]]; then
+                    test_target="${test_target}-custom"
+                fi
+
+                call "${build_cmd[@]}" ${test_target}
+
+                echo "-- ${target} finished --"
+            fi
+        done
+
+        trap - ERR
+        echo "--- Finished tests for ${product} ---"
+    done
+done
+# END OF TEST PHASE
+
+
+LIPO_SRC_DIRS=()
+
+for host in "${ALL_HOSTS[@]}"; do
+    # Calculate the directory to install products in to.
+    host_install_destdir=$(get_host_install_destdir ${host})
+    host_install_prefix=$(get_host_install_prefix ${host})
+
+    # Skip this pass if flag is set and we are cross compiling and it's the local host.
+    if [[ "${SKIP_LOCAL_HOST_INSTALL}" ]] && [[ $(has_cross_compile_hosts) ]] && [[ ${host} == ${LOCAL_HOST} ]]; then
+        continue
+    fi
+
+    # Identify the destdirs to pass to lipo. Must happen even if the install action
+    # is to be skipped.
+    if [[ $(should_include_host_in_lipo ${host}) ]]; then
+        LIPO_SRC_DIRS+=( "${host_install_destdir}" )
+    fi
+
+    # Skip this pass when the only action to execute can't match.
+    if ! [[ $(should_execute_host_actions_for_phase ${host} install) ]]; then
+        continue
+    fi
+
+    # Have to set the clang path or the driver will try to link with the wrong
+    # clang
+    if [[ "${NATIVE_CLANG_TOOLS_PATH}" ]] ; then
+        CLANG_BIN="${NATIVE_CLANG_TOOLS_PATH}"
+        if [[ ! -f "${CLANG_BIN}/clang" ]] ; then
+            echo "error: clang does not exist at the specified native tools path: ${CLANG_BIN}/clang"
+            exit 1
+        fi
+    else
+        CLANG_BIN="$(build_directory_bin ${LOCAL_HOST} llvm)"
+    fi
+
+    if [[ -f "${CLANG_BIN}/clang" ]] && [[ -z ${ENABLE_ASAN+x} ]]; then
+      export SWIFT_DRIVER_CLANG_EXEC="${CLANG_BIN}/clang"
+      export SWIFT_DRIVER_CLANGXX_EXEC="${CLANG_BIN}/clang++"
+    fi
+
+    # Set the build options for this host
+    set_build_options_for_host $host
+
+    for product in "${PRODUCTS[@]}"; do
+        [[ $(should_execute_action "${host}-${product%%_*}-install") ]] || continue
+        if [[ -z "${INSTALL_DESTDIR}" ]] ; then
+            echo "--install-destdir is required to install products."
+            exit 1
+        fi
+
+        INSTALL_TARGETS="install"
+
+        case ${product} in
+            libcxx)
+                if [[ -z "${INSTALL_LIBCXX}" ]] ; then
+                    continue
+                fi
+                INSTALL_TARGETS=install-cxx-headers
+                ;;
+            swift)
+                if [[ -z "${INSTALL_SWIFT}" ]] ; then
+                    continue
+                fi
+                INSTALL_TARGETS=install-swift-components
+                ;;
+            llbuild)
+                if [[ -z "${INSTALL_LLBUILD}" ]] ; then
+                    continue
+                fi
+                INSTALL_TARGETS="install-swift-build-tool"
+                ;;
+            # Products from this here install themselves; they don't fall-through.
+            lldb)
+                if [[ -z "${INSTALL_LLDB}" ]] ; then
+                    continue
+                fi
+                INSTALL_TARGETS="install-distribution"
+                ;;
+            xctest)
+                if [[ -z "${INSTALL_XCTEST}" ]] ; then
+                    continue
+                fi
+
+                case ${host} in
+                  linux-*|freebsd-*|openbsd-*|cygwin-*|haiku-*|android-*|linux-static-*) ;;
+                  *)
+                    echo "error: --install-xctest is not supported on this platform"
+                    exit 1
+                  ;;
+                esac
+
+                ;;
+            foundation|foundation_static|foundation_macros)
+                # FIXME: Foundation doesn't build from the script on OS X
+                if [[ ${host} == "macosx"* ]]; then
+                    echo "Skipping Foundation on OS X -- Foundation does not build for this platform"
+                    continue
+                fi
+
+                if [[ "$(true_false ${CROSS_COMPILE_BUILD_SWIFT_TOOLS})" == "FALSE" && "${product}" == "foundation_macros" ]]; then
+                    echo "Skipping installing Foundation Macros for ${host}, because the host tools are not being built"
+                    continue
+                fi
+
+                if [[ -z "${INSTALL_FOUNDATION}" ]] ; then
+                    continue
+                fi
+
+                ;;
+            libdispatch|libdispatch_static)
+                if [[ -z "${INSTALL_LIBDISPATCH}" ]] ; then
+                    continue
+                fi
+
+                case "${host}" in
+                macosx-*)
+                  if [[ -z "${INSTALL_DESTDIR}" ]] ; then
+                      echo "--install-destdir is required to install products."
+                      exit 1
+                  fi
+                  echo "--- Installing ${product} ---"
+                  LIBDISPATCH_BUILD_DIR=$(build_directory ${host} ${product})
+                  with_pushd "${LIBDISPATCH_BUILD_DIR}" \
+                      call make install
+                  DISPATCH_LIBDIR="${host_install_destdir}${host_install_prefix}/lib/swift/${SWIFT_HOST_VARIANT}"
+                  DISPATCH_LIBDIR_STATIC="${host_install_destdir}${host_install_prefix}/lib/swift_static/${SWIFT_HOST_VARIANT}"
+                  if [ -f "$DISPATCH_LIBDIR/libdispatch.a" ]; then
+                      mv "$DISPATCH_LIBDIR/libdispatch.a" "$DISPATCH_LIBDIR_STATIC"
+                  fi
+
+                  # As libdispatch installation is self-contained, we break early here.
+                  continue
+                ;;
+                *)
+                ;;
+                esac
+                ;;
+            *)
+                echo "error: unknown product: ${product}"
+                exit 1
+                ;;
+        esac
+
+        echo "--- Installing ${product} ---"
+        build_dir=$(build_directory ${host} ${product})
+
+        call env DESTDIR="${host_install_destdir}" "${CMAKE_BUILD[@]}" "${build_dir}" -- ${INSTALL_TARGETS}
+    done
+done
+
+function printJSONTimestamp() {
+    local command=$1
+    local kind=$2
+
+    echo "{ \"command\": \"${command}\", \"${kind}\": \"$(date "+%Y-%m-%dT%H:%M:%S")\" }"
+}
+
+function printJSONStartTimestamp() {
+    local command=$1
+
+    printJSONTimestamp ${command} "start"
+}
+
+function printJSONEndTimestamp() {
+    local command=$1
+
+    printJSONTimestamp ${command} "end"
+}
+
+function grep_that_allows_no_matches() {
+    # This will not cause the script to fail
+    # if no line in the input matches the pattern
+    grep "$@" || test $? = 1
+}
+
+function filter_paths() {
+    if [[ -n "$1" ]]; then
+        local -a filters
+        filters=($1)
+        local -a grep_arguments
+        for cfilter in "${filters[@]}"; do
+            grep_arguments+=('-e' "$cfilter")
+        done
+        grep_that_allows_no_matches "${grep_arguments[@]}"
+    else
+        cat
+    fi
+}
+
+for host in "${ALL_HOSTS[@]}"; do
+    # Check if we should perform this action.
+    if ! [[ $(should_execute_action "${host}-extractsymbols") ]]; then
+        continue
+    fi
+
+    # Skip this pass if flag is set and we are cross compiling and it's the local host.
+    if [[ "${SKIP_LOCAL_HOST_INSTALL}" ]] && [[ $(has_cross_compile_hosts) ]] && [[ ${host} == ${LOCAL_HOST} ]]; then
+        continue
+    fi
+
+    # Calculate the directory to install products in to.
+    host_install_destdir=$(get_host_install_destdir ${host})
+    host_install_prefix=$(get_host_install_prefix ${host})
+
+    if [[ "${DARWIN_INSTALL_EXTRACT_SYMBOLS}" ]] && [[ $(host_has_darwin_symbols ${host}) ]]; then
+        echo "--- Extracting symbols ---"
+
+        # The usage for this script says that lipo happens before
+        # dsym extraction but that's not really what happens.  At this point,
+        # we're processing an individual host (eg macosx-x86_64) but targeting
+        # the (shared) SYMROOT which can cause multiple hosts to stomp on each
+        # other.  As a hack, I'm segregating the hosts in the symroot but it
+        # would probably be better to make the script behave as the usage
+        # describes
+        host_symroot="${INSTALL_SYMROOT}/${host}"
+
+        set -x
+
+        CURRENT_INSTALL_DIR=${host_install_destdir}
+        CURRENT_PREFIX="${TOOLCHAIN_PREFIX}"
+
+        # Copy executables and shared libraries from the `host_install_destdir` to
+        # INSTALL_SYMROOT and run dsymutil on them.
+        if [[ -n "${DRY_RUN}" ]] && [[ -z "${ENABLE_EXTRACT_SYMBOL_DRY_RUN_TEST}" ]]; then
+            echo "DRY_RUN! Coping executables and shared libraries from the `host_install_destdir` to
+                  INSTALL_SYMROOT and running dsymutil on them."
+        else
+          (cd "${CURRENT_INSTALL_DIR}" &&
+           find ./"${CURRENT_PREFIX}" -perm -0111 -type f -print | \
+           filter_paths "${DARWIN_SYMROOT_PATH_FILTERS}" | \
+           cpio --insecure -pdm -v "${host_symroot}")
+
+            dsymutil_path=
+            if [[ -n "${DARWIN_INSTALL_EXTRACT_SYMBOLS_USE_JUST_BUILT_DSYMUTIL}" ]]; then
+                dsymutil_path=$(find_just_built_local_host_llvm_tool dsymutil)
+            else
+                dsymutil_path=$(xcrun_find_tool dsymutil)
+            fi
+
+            # Run dsymutil on executables and shared libraries.
+            #
+            # Exclude shell scripts and static archives.
+            # Tweak carefully the amount of parallelism -- dsymutil can be memory intensive and
+            # as such too many instance can exhaust the memory and slow down/panic the machine
+            printJSONStartTimestamp dsymutil
+            (cd "${host_symroot}" &&
+             find ./"${CURRENT_PREFIX}" -perm -0111 -type f -not -name "*.a" -not -name "*.py" -print | \
+               xargs -t -n 1 -P ${DSYMUTIL_JOBS} ${dsymutil_path} ${EXTRA_DSYMUTIL_ARGS[@]})
+            printJSONEndTimestamp dsymutil
+
+            # Strip executables, shared libraries and static libraries in
+            # `host_install_destdir`. Avoid touching .a clang builtins and embedded libraries.
+            find "${CURRENT_INSTALL_DIR}${CURRENT_PREFIX}/" \
+              '(' -perm -0111 -or -name "*.a" ')' -type f -print | \
+              grep_that_allows_no_matches -v "/clang/lib/darwin/" | \
+              grep_that_allows_no_matches -v "/lib/swift/embedded/" | \
+              xargs -t -n 1 -P ${BUILD_JOBS} $(xcrun_find_tool strip) -S
+
+            # Codesign dylibs and executables in usr/bin after strip tool
+            # rdar://45388785
+            find "${CURRENT_INSTALL_DIR}${CURRENT_PREFIX}/" \
+              '(' '(' -path "*/usr/bin/*" -and -perm -0111 ')' -or -name "*.dylib" ')' -type f -print | \
+              xargs -t -n 1 -P ${BUILD_JOBS} $(xcrun_find_tool codesign) -f -s -
+        fi
+
+        { set +x; } 2>/dev/null
+    fi
+done
+# Everything is 'installed', but some products may be awaiting lipo.
+
+
+function build_and_test_installable_package() {
+
+    local host="$1"
+
+    if [[ "${INSTALLABLE_PACKAGE}" ]] ; then
+
+        # Get the directory where the products where installed.
+        # If INSTALL_DESTDIR not given, we couldn't have installed anything.
+
+        if [[ -z "${INSTALL_DESTDIR}" ]] ; then
+            echo "--install-destdir required to build a package. Skipping."
+            return
+        fi
+        local host_install_destdir="$(get_host_install_destdir ${host})"
+        local host_install_prefix="$(get_host_install_prefix ${host})"
+
+        package_for_host="${INSTALLABLE_PACKAGE}"
+
+        echo "--- Creating installable package ---"
+        echo "-- Package file: ${package_for_host} --"
+
+        # Assume the lipo builds are (or include) an OS X host and build an xctoolchain
+        if [[ "${host}" == "macosx-"* ]] || [[ "${host}" == "merged-hosts" ]]; then
+          # Create plist for xctoolchain.
+          echo "-- Create Info.plist --"
+          PLISTBUDDY_BIN="/usr/libexec/PlistBuddy"
+
+          DARWIN_TOOLCHAIN_INSTALL_LOCATION="/Library/Developer/Toolchains/${DARWIN_TOOLCHAIN_NAME}.xctoolchain"
+          DARWIN_TOOLCHAIN_INFO_PLIST="${host_install_destdir}${TOOLCHAIN_PREFIX}/Info.plist"
+          DARWIN_TOOLCHAIN_REPORT_URL="https://bugs.swift.org/"
+          COMPATIBILITY_VERSION=2
+          DARWIN_TOOLCHAIN_CREATED_DATE="$(date -u +'%a %b %d %T GMT %Y')"
+          TOOLCHAIN_PLUGIN_PATH_DESCRIPTOR='$(TOOLCHAIN_DIR)/usr/lib/swift/host/plugins'
+
+          SWIFT_USE_DEVELOPMENT_TOOLCHAIN_RUNTIME="YES"
+          if [[ "${DARWIN_TOOLCHAIN_REQUIRE_USE_OS_RUNTIME}" -eq "1" ]]; then
+              SWIFT_USE_DEVELOPMENT_TOOLCHAIN_RUNTIME="NO"
+          fi
+
+          echo "-- Removing: ${DARWIN_TOOLCHAIN_INFO_PLIST}"
+          call rm -f ${DARWIN_TOOLCHAIN_INFO_PLIST}
+
+          call ${PLISTBUDDY_BIN} -c "Add DisplayName string '${DARWIN_TOOLCHAIN_DISPLAY_NAME}'" "${DARWIN_TOOLCHAIN_INFO_PLIST}"
+          call ${PLISTBUDDY_BIN} -c "Add ShortDisplayName string '${DARWIN_TOOLCHAIN_DISPLAY_NAME_SHORT}'" "${DARWIN_TOOLCHAIN_INFO_PLIST}"
+          call ${PLISTBUDDY_BIN} -c "Add CreatedDate date '${DARWIN_TOOLCHAIN_CREATED_DATE}'" "${DARWIN_TOOLCHAIN_INFO_PLIST}"
+          call ${PLISTBUDDY_BIN} -c "Add CompatibilityVersion integer ${COMPATIBILITY_VERSION}" "${DARWIN_TOOLCHAIN_INFO_PLIST}"
+          call ${PLISTBUDDY_BIN} -c "Add Version string '${DARWIN_TOOLCHAIN_VERSION}'" "${DARWIN_TOOLCHAIN_INFO_PLIST}"
+          call ${PLISTBUDDY_BIN} -c "Add CFBundleIdentifier string '${DARWIN_TOOLCHAIN_BUNDLE_IDENTIFIER}'" "${DARWIN_TOOLCHAIN_INFO_PLIST}"
+          call ${PLISTBUDDY_BIN} -c "Add ReportProblemURL string '${DARWIN_TOOLCHAIN_REPORT_URL}'" "${DARWIN_TOOLCHAIN_INFO_PLIST}"
+          call ${PLISTBUDDY_BIN} -c "Add Aliases array" "${DARWIN_TOOLCHAIN_INFO_PLIST}"
+
+          aliases_count=0
+          local IFS=","
+          for alias_name in ${DARWIN_TOOLCHAIN_ALIAS}
+          do
+            call ${PLISTBUDDY_BIN} -c "Add Aliases:${aliases_count} string '${alias_name}'" "${DARWIN_TOOLCHAIN_INFO_PLIST}"
+            aliases_count=$[$aliases_count +1]
+          done
+          unset IFS
+
+          call ${PLISTBUDDY_BIN} -c "Add OverrideBuildSettings dict" "${DARWIN_TOOLCHAIN_INFO_PLIST}"
+          call ${PLISTBUDDY_BIN} -c "Add OverrideBuildSettings:SWIFT_DEVELOPMENT_TOOLCHAIN string 'YES'" "${DARWIN_TOOLCHAIN_INFO_PLIST}"
+          call ${PLISTBUDDY_BIN} -c "Add OverrideBuildSettings:SWIFT_USE_DEVELOPMENT_TOOLCHAIN_RUNTIME string '${SWIFT_USE_DEVELOPMENT_TOOLCHAIN_RUNTIME}'" "${DARWIN_TOOLCHAIN_INFO_PLIST}"
+          call ${PLISTBUDDY_BIN} -c "Add OverrideBuildSettings:OTHER_SWIFT_FLAGS string '\$(inherited) -plugin-path ${TOOLCHAIN_PLUGIN_PATH_DESCRIPTOR}'" "${DARWIN_TOOLCHAIN_INFO_PLIST}"
+
+          call chmod a+r "${DARWIN_TOOLCHAIN_INFO_PLIST}"
+
+          if [[ "${DARWIN_TOOLCHAIN_APPLICATION_CERT}" ]] ; then
+            echo "-- Codesign xctoolchain --"
+            call "${SWIFT_SOURCE_DIR}/utils/toolchain-codesign" "${DARWIN_TOOLCHAIN_APPLICATION_CERT}" "${host_install_destdir}${TOOLCHAIN_PREFIX}/"
+          fi
+          if [[ "${DARWIN_TOOLCHAIN_INSTALLER_PACKAGE}" ]] ; then
+            echo "-- Create Installer --"
+            call "${SWIFT_SOURCE_DIR}/utils/toolchain-installer" "${host_install_destdir}${TOOLCHAIN_PREFIX}/" "${DARWIN_TOOLCHAIN_BUNDLE_IDENTIFIER}" \
+                "${DARWIN_TOOLCHAIN_INSTALLER_CERT}" "${DARWIN_TOOLCHAIN_INSTALLER_PACKAGE}" "${DARWIN_TOOLCHAIN_INSTALL_LOCATION}" \
+                "${DARWIN_TOOLCHAIN_VERSION}" "${SWIFT_SOURCE_DIR}/utils/darwin-installer-scripts" "${DARWIN_DEPLOYMENT_VERSION_OSX}"
+          fi
+
+          # host_install_destdir contains the toolchain prefix.
+          # We want to create the package in host_install_destdir_nonprefixed.
+          with_pushd "${host_install_destdir}" \
+              call tar -c -z -f "${package_for_host}" "${TOOLCHAIN_PREFIX/#\/}"
+        else
+            # BSD tar doesn't support --owner/--group.
+            if [[ "$(uname -s)" == "Darwin" || "$(uname -s)" == "FreeBSD" ]] ; then
+                with_pushd "${host_install_destdir}" \
+                    tar -c -z -f "${package_for_host}" "${host_install_prefix/#\/}"
+            else
+                with_pushd "${host_install_destdir}" \
+                    tar -c -z -f "${package_for_host}" --owner=0 --group=0 "${host_install_prefix/#\/}"
+            fi
+        fi
+        if [[ "${TEST_INSTALLABLE_PACKAGE}" ]] ; then
+            PKG_TESTS_SOURCE_DIR="${WORKSPACE}/swift-integration-tests"
+            PKG_TESTS_SANDBOX_PARENT="$(build_directory swift_package_sandbox_${host} none)"
+            PKG_TESTS_TEMPS="${PKG_TESTS_SANDBOX_PARENT}"/"tests"
+
+            if [[ "${host}" == "macosx-"* ]] || [[ "${host}" == "merged-hosts" ]]; then
+                PKG_TESTS_SANDBOX="${PKG_TESTS_SANDBOX_PARENT}"/"${TOOLCHAIN_PREFIX}"
+            else # Linux
+                PKG_TESTS_SANDBOX="${PKG_TESTS_SANDBOX_PARENT}"
+            fi
+
+            LIT_EXECUTABLE_PATH="${LLVM_SOURCE_DIR}/utils/lit/lit.py"
+            LLVM_BIN_DIR="$(build_directory_bin ${LOCAL_HOST} llvm)"
+            echo "-- Test Installable Package --"
+            call rm -rf "${PKG_TESTS_SANDBOX_PARENT}"
+            call mkdir -p "${PKG_TESTS_SANDBOX}"
+            with_pushd "${PKG_TESTS_SANDBOX_PARENT}" \
+                call tar xzf "${package_for_host}"
+
+            if python3 -c "import psutil" ; then
+              TIMEOUT_ARGS=--timeout=600 # 10 minutes
+            fi
+            with_pushd "${PKG_TESTS_SOURCE_DIR}" \
+                call python3 "${LIT_EXECUTABLE_PATH}" . ${LLVM_LIT_ARGS} --param package-path="${PKG_TESTS_SANDBOX}" --param test-exec-root="${PKG_TESTS_TEMPS}" --param llvm-bin-dir="${LLVM_BIN_DIR}" ${TIMEOUT_ARGS}
+        fi
+    fi
+}
+
+# Build and test packages.
+for host in "${ALL_HOSTS[@]}"; do
+
+    # Check if we should perform this action.
+    if ! [[ $(should_execute_action "${host}-package") ]]; then
+        continue
+    fi
+
+    if [[ $(should_include_host_in_lipo ${host}) ]]; then
+            continue
+    fi
+
+    build_and_test_installable_package ${host}
+done
+
+# Lipo those products which require it, optionally build and test an installable package.
+mergedHost="merged-hosts"
+if [[ ${#LIPO_SRC_DIRS[@]} -gt 0 ]]; then
+    # This is from multiple hosts; Which host should we say it is?
+    # Let's call it 'merged-hosts' so that we can identify it.
+
+    if [[ $(should_execute_action "${mergedHost}-lipo") || $(should_execute_action "${mergedHost}-lipo-core") ]]; then
+        # Allow passing lipo with --host-lipo
+        if [[ -z "${HOST_LIPO}" ]] ; then
+            LIPO_PATH=$(xcrun_find_tool lipo)
+        else
+            LIPO_PATH="${HOST_LIPO}"
+        fi
+        call "${SWIFT_SOURCE_DIR}"/utils/recursive-lipo --lipo=${LIPO_PATH} --destination="$(get_host_install_destdir ${mergedHost})" ${LIPO_SRC_DIRS[@]}
+
+        if [[ $(should_execute_action "${mergedHost}-lipo") ]]; then
+            # Build and test the lipo-ed package.
+            build_and_test_installable_package ${mergedHost}
+        fi
+    fi
+fi
+# END

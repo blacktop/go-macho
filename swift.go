@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/blacktop/go-macho/swift/demangle"
 	"github.com/blacktop/go-macho/types"
 	"github.com/blacktop/go-macho/types/swift"
 )
@@ -221,6 +222,7 @@ func (f *File) readField(r io.ReadSeeker, addr uint64) (field *swift.Field, err 
 		if err != nil {
 			return nil, fmt.Errorf("failed to read swift field mangled type name: %w", err)
 		}
+		field.Type = demangle.NormalizeIdentifier(field.Type)
 	}
 
 	if field.SuperclassOffset.IsSet() {
@@ -228,6 +230,7 @@ func (f *File) readField(r io.ReadSeeker, addr uint64) (field *swift.Field, err 
 		if err != nil {
 			return nil, fmt.Errorf("failed to read swift field super class mangled name: %w", err)
 		}
+		field.SuperClass = demangle.NormalizeIdentifier(field.SuperClass)
 	}
 
 	for idx, rec := range field.Records {
@@ -241,6 +244,7 @@ func (f *File) readField(r io.ReadSeeker, addr uint64) (field *swift.Field, err 
 			if err != nil {
 				return nil, fmt.Errorf("failed to read swift field record mangled type name; %w", err)
 			}
+			field.Records[idx].MangledType = demangle.NormalizeIdentifier(field.Records[idx].MangledType)
 		}
 	}
 
@@ -555,7 +559,7 @@ func (f *File) GetSwiftDynamicReplacementInfoForOpaqueTypes() (*swift.AutomaticD
 }
 
 // GetSwiftAccessibleFunctions parses the __TEXT.__swift5_acfuncs section
-func (f *File) GetSwiftAccessibleFunctions() (funcs []swift.TargetAccessibleFunctionRecord, err error) {
+func (f *File) GetSwiftAccessibleFunctions() (funcs []swift.AccessibleFunction, err error) {
 	if sec := f.Section("__TEXT", "__swift5_acfuncs"); sec != nil {
 		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
 		if err != nil {
@@ -579,7 +583,41 @@ func (f *File) GetSwiftAccessibleFunctions() (funcs []swift.TargetAccessibleFunc
 				}
 				return nil, fmt.Errorf("failed to read swift %T: %w", afr, err)
 			}
-			funcs = append(funcs, afr)
+
+			name := ""
+			if afr.Name.IsSet() {
+				if s, err := f.GetCString(afr.Name.GetAddress()); err == nil {
+					name = demangle.NormalizeIdentifier(s)
+				} else {
+					name = fmt.Sprintf("(name %#x)", afr.Name.GetAddress())
+				}
+			}
+
+			functionType := ""
+			if afr.FunctionType.IsSet() {
+				if s, err := f.makeSymbolicMangledNameStringRef(afr.FunctionType.GetAddress()); err == nil {
+					functionType = demangle.NormalizeIdentifier(s)
+				} else if raw, err := f.GetCString(afr.FunctionType.GetAddress()); err == nil {
+					functionType = demangle.NormalizeIdentifier(raw)
+				} else {
+					functionType = fmt.Sprintf("(type %#x)", afr.FunctionType.GetAddress())
+				}
+			}
+
+			fnAddr := afr.Function.GetAddress()
+			if f.vma != nil {
+				if converted := f.vma.Convert(fnAddr); converted != 0 {
+					fnAddr = converted
+				}
+			}
+
+			funcs = append(funcs, swift.AccessibleFunction{
+				Name:               name,
+				FunctionType:       functionType,
+				FunctionAddress:    fnAddr,
+				GenericEnvironment: afr.GenericEnvironment.GetAddress(),
+				Flags:              afr.Flags,
+			})
 		}
 
 		return funcs, nil
@@ -1260,6 +1298,7 @@ func (f *File) readProtocolConformance(r io.ReadSeeker, addr uint64) (pcd *swift
 			pcd.Protocol = ctx.Parent + "." + pcd.Protocol
 		}
 	}
+	pcd.Protocol = demangle.NormalizeIdentifier(pcd.Protocol)
 
 	// parse type reference
 	switch pcd.Flags.GetTypeReferenceKind() {
@@ -2550,6 +2589,13 @@ func (f *File) swiftSymbolicName(addr uint64) (string, error) {
 	return "", fmt.Errorf("swift symbolic reference offset %d out of expected range", offset)
 }
 
+func (f *File) readObjCProtocolName(addr uint64) (string, error) {
+	if name, ok := f.ResolveObjCProtocolName(addr); ok {
+		return name, nil
+	}
+	return fmt.Sprintf("objc.protocol@%#x", addr), nil
+}
+
 func isPrintableASCII(s string) bool {
 	if len(s) == 0 {
 		return false
@@ -2896,35 +2942,39 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 			if part == "" {
 				continue
 			}
+			appendNormalized := func(val string) {
+				out = append(out, demangle.NormalizeIdentifier(val))
+			}
 			if regexp.MustCompile("So[0-9]+").MatchString(part) {
 				if strings.Contains(part, "OS_dispatch_queue") {
-					out = append(out, "DispatchQueue")
+					appendNormalized("DispatchQueue")
 				} else {
-					out = append(out, "_$s"+part)
+					appendNormalized("_$s" + part)
 				}
 			} else if regexp.MustCompile("^[0-9]+").MatchString(part) {
 				// remove leading numbers
 				for i, c := range part {
 					if !unicode.IsNumber(c) {
-						out = append(out, part[i:])
+						appendNormalized(part[i:])
 						break
 					}
 				}
 			} else if strings.HasPrefix(part, "$s") {
-				out = append(out, "_"+part)
+				appendNormalized("_" + part)
 			} else {
 				if demangled, ok := swift.MangledType[part]; ok {
-					out = append(out, demangled)
+					appendNormalized(demangled)
 				} else if strings.HasPrefix(part, "s") {
 					if demangled, ok := swift.MangledKnownTypeKind[part[1:]]; ok {
-						out = append(out, demangled)
+						appendNormalized(demangled)
 					}
 				} else {
 					if isBoundGeneric {
-						out = append(out, []string{"_$s" + part, "->"}...)
+						appendNormalized("_$s" + part)
+						out = append(out, "->")
 						isBoundGeneric = false
 					} else {
-						out = append(out, "_$s"+part)
+						appendNormalized("_$s" + part)
 					}
 				}
 			}
@@ -2946,7 +2996,7 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				// if symbolic {
 				// 	name += "()"
 				// }
-				out = append(out, name)
+				out = append(out, demangle.NormalizeIdentifier(name))
 			case 0x02: // symbolic reference to a context descriptor
 				var name string
 				ptr, err := f.GetPointerAtAddress(part.Addr)
@@ -2979,7 +3029,7 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				// if symbolic {
 				// 	name += "()"
 				// }
-				out = append(out, name)
+				out = append(out, demangle.NormalizeIdentifier(name))
 			case 0x09: // DIRECT symbolic reference to an accessor function, which can be executed in the process to get a pointer to the referenced entity.
 				// AccessorFunctionReference
 				out = append(out, fmt.Sprintf("(accessor function sub_%x)", part.Addr))
@@ -3003,7 +3053,7 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				// if symbolic {
 				// 	name += "()"
 				// }
-				out = append(out, name)
+				out = append(out, demangle.NormalizeIdentifier(name))
 			case 0x0b: // DIRECT symbolic reference to a non-unique extended existential type shape.
 				// NonUniqueExtendedExistentialTypeShape
 				var name string
@@ -3024,10 +3074,14 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				// if symbolic {
 				// 	name += "()"
 				// }
-				out = append(out, name)
+				out = append(out, demangle.NormalizeIdentifier(name))
 			case 0x0c: // DIRECT symbolic reference to a objective C protocol ref.
 				// ObjectiveCProtocol
-				return "", fmt.Errorf("symbolic reference to a objective C protocol ref kind %x (at %#x) is not implemented (please open an issue on Github)", part.Kind, part.Addr)
+				name, err := f.readObjCProtocolName(part.Addr)
+				if err != nil {
+					return "", fmt.Errorf("failed to resolve objective-c protocol reference at %#x: %w", part.Addr, err)
+				}
+				out = append(out, demangle.NormalizeIdentifier(name))
 			/* These are all currently reserved but unused. */
 			case 0x03: // DIRECT to protocol conformance descriptor
 				fallthrough

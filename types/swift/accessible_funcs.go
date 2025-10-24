@@ -2,6 +2,7 @@ package swift
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 )
 
@@ -66,4 +67,16 @@ type AccessibleFunctionCacheEntry struct {
 type AccessibleFunctionsState struct {
 	Cache          AccessibleFunctionCacheEntry
 	SectionsToScan AccessibleFunctionsSection
+}
+
+type AccessibleFunction struct {
+	Name               string
+	FunctionType       string
+	FunctionAddress    uint64
+	GenericEnvironment uint64
+	Flags              AccessibleFunctionFlags
+}
+
+func (af AccessibleFunction) String() string {
+	return fmt.Sprintf("%s : %s (fn: %#x, env: %#x, flags: %#x)", af.Name, af.FunctionType, af.FunctionAddress, af.GenericEnvironment, uint32(af.Flags))
 }

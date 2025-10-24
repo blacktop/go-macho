@@ -1,0 +1,808 @@
+#!/usr/bin/env python3
+
+# This source file is part of the Swift.org open source project
+#
+# Copyright (c) 2014 - 2020 Apple Inc. and the Swift project authors
+# Licensed under Apache License v2.0 with Runtime Library Exception
+#
+# See https://swift.org/LICENSE.txt for license information
+# See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+
+
+"""
+The ultimate tool for building Swift.
+"""
+
+
+from argparse import Namespace
+import json
+import os
+import platform
+import re
+import sys
+import time
+
+from build_swift.build_swift import argparse
+from build_swift.build_swift import defaults
+from build_swift.build_swift import driver_arguments
+from build_swift.build_swift import migration
+from build_swift.build_swift import presets
+from build_swift.build_swift.constants import BUILD_SCRIPT_IMPL_PATH
+from build_swift.build_swift.constants import SWIFT_BUILD_ROOT
+from build_swift.build_swift.constants import SWIFT_REPO_NAME
+from build_swift.build_swift.constants import SWIFT_SOURCE_ROOT
+
+from swift_build_support.swift_build_support import build_script_invocation
+from swift_build_support.swift_build_support import shell
+from swift_build_support.swift_build_support import targets
+from swift_build_support.swift_build_support import workspace
+from swift_build_support.swift_build_support.cmake import CMake
+from swift_build_support.swift_build_support.targets import StdlibDeploymentTarget
+from swift_build_support.swift_build_support.toolchain import host_toolchain
+from swift_build_support.swift_build_support.utils \
+    import exit_rejecting_arguments
+from swift_build_support.swift_build_support.utils import fatal_error
+from swift_build_support.swift_build_support.utils import log_analyzer
+
+
+# -----------------------------------------------------------------------------
+# Helpers
+
+
+def print_note(message, stream=sys.stdout):
+    """Writes a diagnostic message to the given stream. By default this
+    function outputs to stdout.
+    """
+
+    stream.write('[{}] NOTE: {}\n'.format(sys.argv[0], message))
+    stream.flush()
+
+
+def print_warning(message, stream=sys.stdout):
+    """Writes a warning to the given stream. By default this function outputs
+    to stdout.
+    """
+
+    warning = "[{}] WARNING: {}\n".format(sys.argv[0], message)
+    magenta_warning = "\033[35m" + warning + "\033[0m"
+
+    stream.write(magenta_warning)
+    stream.flush()
+
+
+def clean_delay():
+    """Provide a short delay so accidentally invoked clean builds can be
+    canceled.
+    """
+
+    sys.stdout.write('Starting clean build in  ')
+    for i in range(3, 0, -1):
+        sys.stdout.write('\b%d' % i)
+        sys.stdout.flush()
+        time.sleep(1)
+    print('\b\b\b\bnow.')
+
+
+def initialize_runtime_environment():
+    """Change the program environment for building.
+    """
+
+    # Set an appropriate default umask.
+    os.umask(0o022)
+
+    # Unset environment variables that might affect how tools behave.
+    for v in [
+            'MAKEFLAGS',
+            'SDKROOT',
+            'MACOSX_DEPLOYMENT_TARGET',
+            'IPHONEOS_DEPLOYMENT_TARGET',
+            'TVOS_DEPLOYMENT_TARGET',
+            'WATCHOS_DEPLOYMENT_TARGET',
+            'XROS_DEPLOYMENT_TARGET']:
+        os.environ.pop(v, None)
+
+    # Provide a default NINJA_STATUS to format ninja output.
+    if 'NINJA_STATUS' not in os.environ:
+        os.environ['NINJA_STATUS'] = '[%f/%t][%p][%es] '
+
+
+class JSONDumper(json.JSONEncoder):
+    def __init__(self, *args, **kwargs):
+        json.JSONEncoder.__init__(
+            self, indent=2, separators=(',', ': '), sort_keys=True,
+            *args, **kwargs)
+
+    def default(self, o):
+        if hasattr(o, '__dict__'):
+            return vars(o)
+        return str(o)
+
+
+def print_xcodebuild_versions(file=sys.stdout):
+    """
+    Print the host machine's `xcodebuild` version, as well as version
+    information for all available SDKs.
+    """
+    version = shell.capture(
+        ['xcodebuild', '-version'], dry_run=False, echo=False).rstrip()
+    # Allow non-zero exit codes.  Under certain obscure circumstances
+    # xcodebuild can exit with a non-zero exit code even when the SDK is
+    # usable.
+    sdks = shell.capture(
+        ['xcodebuild', '-version', '-sdk'], dry_run=False, echo=False,
+        allow_non_zero_exit=True).rstrip()
+    fmt = '{version}\n\n--- SDK versions ---\n{sdks}\n'
+
+    print(fmt.format(version=version, sdks=sdks), file=file)
+    file.flush()
+
+
+def validate_xcode_compatibility():
+    if sys.platform != 'darwin':
+        return
+
+    if os.getenv("SKIP_XCODE_VERSION_CHECK"):
+        print("note: skipping Xcode version check")
+        return
+
+    output = shell.capture(
+        ['xcodebuild', '-version'], dry_run=False, echo=False).strip()
+    # Capture only version ex: '14.x' from full output
+    match = re.match(r"Xcode (\d+\.\d+(?:\.\d)?)", output)
+    if not match:
+        print(f"warning: unexpected xcodebuild output format: '{output}', "
+              "skipping Xcode compatibility check, please report this issue",
+              file=sys.stderr)
+        return
+
+    version_match = match.group(1)
+    current_version = tuple(int(v) for v in version_match.replace('.', ' ').split())
+    minimum_version = (13, 0)
+    if current_version < minimum_version:
+        raise SystemExit(
+            f"error: using unsupported Xcode version '{version_match}'. "
+            f"Install Xcode {'.'.join(str(x) for x in minimum_version)} or newer, "
+            "or set 'SKIP_XCODE_VERSION_CHECK=1' in the environment"
+        )
+
+
+def tar(source, destination):
+    """
+    Create a gzip archive of the file at 'source' at the given
+    'destination' path.
+    """
+    # We do not use `tarfile` here because:
+    #  - We wish to support LZMA2 compression while also supporting Python 2.7.
+    #  - We wish to explicitly set the owner and group of the archive.
+    args = ['tar', '-c', '-z', '-f', destination]
+
+    if platform.system() != 'Darwin' and platform.system() != 'Windows':
+        args += ['--owner=0', '--group=0']
+
+    # Discard stderr output such as 'tar: Failed to open ...'. We'll detect
+    # these cases using the exit code, which should cause 'shell.call' to
+    # raise.
+    shell.call(args + [source], stderr=shell.DEVNULL)
+
+
+# -----------------------------------------------------------------------------
+# Argument Validation
+
+def validate_arguments(toolchain, args: Namespace):
+    if toolchain.cc is None or toolchain.cxx is None:
+        fatal_error(
+            "can't find clang (please install clang-3.5 or a "
+            "later version)")
+
+    if toolchain.cmake is None:
+        fatal_error("can't find CMake (please install CMake)")
+
+    if args.distcc:
+        if toolchain.distcc is None:
+            fatal_error(
+                "can't find distcc (please install distcc)")
+        if toolchain.distcc_pump is None:
+            fatal_error(
+                "can't find distcc-pump (please install distcc-pump)")
+
+    if args.sccache:
+        if toolchain.sccache is None:
+            fatal_error(
+                "can't find sccache (please install sccache)")
+
+    # Xcode project generation is no longer supported.
+    if args.cmake_generator == "Xcode":
+        fatal_error(
+            "build-script no longer supports Xcode project generation, you "
+            "should use utils/generate-xcode instead, see "
+            "https://github.com/swiftlang/swift/blob/main/docs/HowToGuides/"
+            "GettingStarted.md#using-ninja-with-xcode for more info"
+        )
+
+    if args.host_target is None or args.stdlib_deployment_targets is None:
+        fatal_error("unknown operating system")
+
+    if args.symbols_package:
+        if not os.path.isabs(args.symbols_package):
+            print(
+                '--symbols-package must be an absolute path '
+                '(was \'{}\')'.format(args.symbols_package))
+            return 1
+        if not args.install_symroot:
+            fatal_error(
+                "--install-symroot is required when specifying "
+                "--symbols-package.")
+
+    if args.android:
+        if args.android_ndk is None or \
+                args.android_api_level is None:
+            fatal_error(
+                "when building for Android, --android-ndk "
+                "and --android-api-level must be specified")
+
+    targets_needing_toolchain = [
+        'build_indexstoredb',
+        'build_playgroundsupport',
+        'build_sourcekitlsp',
+        'build_toolchainbenchmarks',
+        'build_swift_inspect',
+        'tsan_libdispatch_test',
+    ]
+    has_target_needing_toolchain = \
+        bool(sum(getattr(args, x) for x in targets_needing_toolchain))
+    if args.legacy_impl and has_target_needing_toolchain:
+        fatal_error(
+            "--legacy-impl is incompatible with building packages needing "
+            "a toolchain (%s)" % ", ".join(targets_needing_toolchain))
+
+
+def default_stdlib_deployment_targets(args):
+    """
+    Return targets for the Swift stdlib, based on the build machine.
+    If the build machine is not one of the recognized ones, return None.
+    """
+
+    host_target = StdlibDeploymentTarget.host_target()
+    if host_target is None:
+        return None
+
+    targets = [host_target]
+
+    # OS X build machines configure all Darwin platforms by default.
+    # Put iOS native targets last so that we test them last
+    # (it takes a long time).
+    if host_target == StdlibDeploymentTarget.OSX.x86_64 or \
+            host_target == StdlibDeploymentTarget.OSX.arm64:
+        if args.build_ios and args.build_ios_simulator:
+            targets.extend(StdlibDeploymentTarget.iOSSimulator.targets)
+        if args.build_ios and args.build_ios_device:
+            targets.extend(StdlibDeploymentTarget.iOS.targets)
+        if args.build_tvos and args.build_tvos_simulator:
+            targets.extend(StdlibDeploymentTarget.AppleTVSimulator.targets)
+        if args.build_tvos and args.build_tvos_device:
+            targets.extend(StdlibDeploymentTarget.AppleTV.targets)
+        if args.build_watchos and args.build_watchos_simulator:
+            targets.extend(StdlibDeploymentTarget
+                           .AppleWatchSimulator.targets)
+        if args.build_watchos and args.build_watchos_device:
+            targets.extend(StdlibDeploymentTarget.AppleWatch.targets)
+        if StdlibDeploymentTarget.XROSSimulator and \
+           args.build_xros and args.build_xros_simulator:
+            targets.extend(StdlibDeploymentTarget.XROSSimulator.targets)
+        if StdlibDeploymentTarget.XROS and \
+           args.build_xros and args.build_xros_device:
+            targets.extend(StdlibDeploymentTarget.XROS.targets)
+        return targets
+    elif host_target.platform.name == 'linux':
+        if args.build_linux_static:
+            targets.append(getattr(StdlibDeploymentTarget.Musl,
+                                   host_target.arch))
+
+    return targets
+
+
+def apply_default_arguments(toolchain, args):
+    # Infer if ninja is required
+    ninja_required = (
+        args.build_foundation or
+        args.build_indexstoredb or
+        args.build_sourcekitlsp or
+        args.cmake_generator == 'Ninja'
+    )
+    if ninja_required and toolchain.ninja is None:
+        args.build_ninja = True
+
+    # Enable test colors if we're on a tty.
+    if args.color_in_tests and sys.stdout.isatty():
+        args.lit_args += " --param color_output"
+
+    # Set the default stdlib-deployment-targets, if none were provided.
+    if args.stdlib_deployment_targets is None:
+        stdlib_targets = default_stdlib_deployment_targets(args)
+        args.stdlib_deployment_targets = [
+            target.name for target in stdlib_targets]
+
+    # SwiftPM and XCTest have a dependency on Foundation.
+    # On OS X, Foundation is built automatically using xcodebuild.
+    # On Linux, we must ensure that it is built manually.
+    if ((args.build_swiftpm or args.build_xctest) and
+            platform.system() != "Darwin"):
+        args.build_foundation = True
+
+    # Foundation has a dependency on libdispatch.
+    # On OS X, libdispatch is provided by the OS.
+    # On Linux, we must ensure that it is built manually.
+    if (args.build_foundation and
+            platform.system() != "Darwin"):
+        args.build_libdispatch = True
+
+    if args.build_subdir is None:
+        args.build_subdir = \
+            workspace.compute_build_subdir(args)
+
+    if args.relocate_xdg_cache_home_under_build_subdir:
+        cache_under_build_subdir = os.path.join(
+            SWIFT_BUILD_ROOT, args.build_subdir, '.cache')
+        if args.verbose_build:
+            print("Relocating XDG_CACHE_HOME to {}".format(cache_under_build_subdir))
+        workspace.relocate_xdg_cache_home_under(cache_under_build_subdir)
+
+    if args.install_destdir is None:
+        args.install_destdir = os.path.join(
+            SWIFT_BUILD_ROOT, args.build_subdir,
+            '{}-{}'.format('toolchain', args.host_target))
+
+    # Add optional stdlib-deployment-targets
+    if args.android:
+        if args.android_arch == "armv7":
+            args.stdlib_deployment_targets.append(
+                StdlibDeploymentTarget.Android.armv7.name)
+        elif args.android_arch == "aarch64":
+            args.stdlib_deployment_targets.append(
+                StdlibDeploymentTarget.Android.aarch64.name)
+        elif args.android_arch == "x86_64":
+            args.stdlib_deployment_targets.append(
+                StdlibDeploymentTarget.Android.x86_64.name)
+
+    # Infer platform flags from manually-specified configure targets.
+    # This doesn't apply to Darwin platforms, as they are
+    # already configured. No building without the platform flag, though.
+
+    android_tgts = [tgt for tgt in args.stdlib_deployment_targets
+                    if StdlibDeploymentTarget.Android.contains(tgt)]
+    if not args.android and len(android_tgts) > 0:
+        # If building natively on an Android host, avoid the NDK
+        # cross-compilation configuration.
+        if not StdlibDeploymentTarget.Android.contains(StdlibDeploymentTarget
+                                                       .host_target().name):
+            args.android = True
+        args.build_android = False
+
+    # Include the Darwin supported architectures in the CMake options.
+    if args.swift_darwin_supported_archs:
+        args.extra_cmake_options.append(
+            '-DSWIFT_DARWIN_SUPPORTED_ARCHS:STRING={}'.format(
+                args.swift_darwin_supported_archs))
+
+        # Remove unsupported Darwin archs from the standard library
+        # deployment targets.
+        supported_archs = args.swift_darwin_supported_archs.split(';')
+        targets = StdlibDeploymentTarget.get_targets_by_name(
+            args.stdlib_deployment_targets)
+
+        args.stdlib_deployment_targets = [
+            target.name
+            for target in targets
+            if (target.platform.is_darwin and
+                target.arch in supported_archs)
+        ]
+    else:
+        # Clear the value explicitly from CMakeCache.txt
+        # to avoid picking up a stale value that can cause
+        # build failures
+        args.extra_cmake_options.append(
+            '-USWIFT_DARWIN_SUPPORTED_ARCHS')
+
+    # Filter out any macOS stdlib deployment targets that are not supported
+    # by the macOS SDK.
+    targets = StdlibDeploymentTarget.get_targets_by_name(
+        args.stdlib_deployment_targets)
+    args.stdlib_deployment_targets = [
+        target.name
+        for target in targets
+        if (not target.platform.is_darwin or
+            target.platform.sdk_supports_architecture(
+                target.arch, args.darwin_xcrun_toolchain, args))
+    ]
+
+    # Include the Darwin module-only architectures in the CMake options.
+    if args.swift_darwin_module_archs:
+        args.extra_cmake_options.append(
+            '-DSWIFT_DARWIN_MODULE_ARCHS:STRING={}'.format(
+                args.swift_darwin_module_archs))
+    if (args.infer_cross_compile_hosts_on_darwin and
+            platform.system() == "Darwin"):
+        args.cross_compile_hosts = _infer_cross_compile_hosts_on_darwin(
+            get_running_arch(args.dry_run))
+        print("Inferred the following hosts for cross compilations: "
+              f"{args.cross_compile_hosts}")
+        sys.stdout.flush()
+
+
+def _infer_cross_compile_hosts_on_darwin(arch_we_are_running_on):
+    if arch_we_are_running_on == "x86_64":
+        return ["macosx-arm64"]
+    else:
+        return ["macosx-x86_64"]
+
+
+def get_running_arch(dry_run):
+    # We can override the detected arch to support
+    # BuildSystem/infer-cross-compile-hosts-on-darwin-macosx.test
+    # Given the narrow scenario, we preferred using
+    # an environment variable instead of a build-script
+    # argument to make this less discoverable on purpose
+    if dry_run:
+        injected_arch = os.environ.get(
+            'ARCH_FOR_BUILDSYSTEM_TESTS',
+            platform.machine())
+        print("DRY RUN: assume build-script is being run on a "
+              f"{injected_arch} machine")
+        return injected_arch
+    else:
+        return platform.machine()
+
+
+# -----------------------------------------------------------------------------
+# Main (preset)
+
+
+def parse_preset_args():
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""Builds Swift using a preset.""")
+    parser.add_argument(
+        "-n", "--dry-run",
+        help="print the commands that would be executed, but do not execute "
+             "them",
+        action="store_true",
+        default=False)
+    parser.add_argument(
+        "--preset-file",
+        help="load presets from the specified file",
+        metavar="PATH",
+        action="append",
+        dest="preset_file_names",
+        default=[])
+    parser.add_argument(
+        "--preset",
+        help="use the specified option preset",
+        metavar="NAME")
+    parser.add_argument(
+        "--show-presets",
+        help="list all presets and exit",
+        action=argparse.actions.StoreTrueAction,
+        nargs=argparse.Nargs.OPTIONAL)
+    parser.add_argument(
+        "--preset-vars-file",
+        help="load preset vars from the specified file",
+        metavar="PATH",
+        action="append",
+        dest="preset_vars_file_names",
+        default=[])
+    parser.add_argument(
+        "--distcc",
+        help="use distcc",
+        action=argparse.actions.StoreTrueAction,
+        nargs=argparse.Nargs.OPTIONAL,
+        default=os.environ.get('USE_DISTCC') == '1')
+    parser.add_argument(
+        "--sccache",
+        help="use sccache",
+        action=argparse.actions.StoreTrueAction,
+        nargs=argparse.Nargs.OPTIONAL,
+        default=os.environ.get('SWIFT_USE_SCCACHE') == '1')
+    parser.add_argument(
+        "--cmake-c-launcher",
+        help="the absolute path to set CMAKE_C_COMPILER_LAUNCHER",
+        metavar="PATH")
+    parser.add_argument(
+        "--cmake-cxx-launcher",
+        help="the absolute path to set CMAKE_CXX_COMPILER_LAUNCHER",
+        metavar="PATH")
+    parser.add_argument(
+        "-j", "--jobs",
+        help="the number of parallel build jobs to use",
+        type=int,
+        dest="build_jobs")
+    parser.add_argument(
+        "--lit-jobs",
+        help="the number of workers to use when testing with lit",
+        type=int,
+        dest="lit_jobs")
+    parser.add_argument(
+        "preset_substitutions_raw",
+        help="'name=value' pairs that are substituted in the preset",
+        nargs="*",
+        metavar="SUBSTITUTION")
+    parser.add_argument(
+        "--expand-invocation", "--expand-build-script-invocation",
+        help="Print the expanded build-script invocation generated "
+             "by the preset, but do not run the preset",
+        action=argparse.actions.StoreTrueAction,
+        nargs=argparse.Nargs.OPTIONAL)
+    parser.add_argument(
+        "--swiftsyntax-install-prefix",
+        help="specify the directory to where SwiftSyntax should be installed")
+    parser.add_argument(
+        "--build-dir",
+        help="specify the directory where build artifact should be stored")
+    parser.add_argument(
+        "--dump-config",
+        help="instead of building, write JSON to stdout containing "
+             "various values used to build in this configuration",
+        action="store_true",
+        default=False)
+    parser.add_argument(
+        "--reconfigure",
+        help="Reconfigure all projects as we build",
+        action="store_true",
+        default=False)
+
+    return parser.parse_args()
+
+
+def main_preset():
+    args = parse_preset_args()
+
+    if len(args.preset_file_names) == 0:
+        args.preset_file_names = [
+            os.path.join(
+                SWIFT_SOURCE_ROOT, SWIFT_REPO_NAME, "utils",
+                "build-presets.ini")
+        ]
+
+        user_presets_file = os.path.join(os.path.expanduser("~"),
+                                         '.swift-build-presets')
+        if os.path.isfile(user_presets_file):
+            args.preset_file_names.append(user_presets_file)
+
+    preset_parser = presets.PresetParser()
+
+    try:
+        preset_parser.read_files(args.preset_file_names)
+    except presets.PresetError as e:
+        fatal_error(str(e))
+
+    if args.show_presets:
+        for name in sorted(preset_parser.preset_names,
+                           key=lambda name: name.lower()):
+            print(name)
+        return 0
+
+    if not args.preset:
+        fatal_error("missing --preset option")
+
+    args.preset_substitutions = {}
+    for file in args.preset_vars_file_names:
+        if os.path.isfile(file):
+            with open(file, 'r') as f:
+                for _, line in enumerate(f):
+                    name, value = line.split("=", 1)
+                    args.preset_substitutions[name] = value.strip()
+
+    for arg in args.preset_substitutions_raw:
+        name, value = arg.split("=", 1)
+        args.preset_substitutions[name] = value
+
+    try:
+        preset = preset_parser.get_preset(
+            args.preset,
+            vars=args.preset_substitutions)
+    except presets.PresetError as e:
+        fatal_error(str(e))
+
+    preset_args = migration.migrate_swift_sdks(preset.args)
+
+    if args.distcc and (args.cmake_c_launcher or args.cmake_cxx_launcher):
+        fatal_error(
+            '--distcc can not be used with' +
+            ' --cmake-c-launcher or --cmake-cxx-launcher')
+    if args.sccache and (args.cmake_c_launcher or args.cmake_cxx_launcher):
+        fatal_error(
+            '--sccache can not be used with' +
+            ' --cmake-c-launcher or --cmake-cxx-launcher')
+
+    build_script_args = [sys.argv[0]]
+    if args.dry_run:
+        build_script_args += ["--dry-run"]
+    if args.dump_config:
+        build_script_args += ["--dump-config"]
+
+    build_script_args += preset_args
+    if args.distcc:
+        build_script_args += ["--distcc"]
+    if args.sccache:
+        build_script_args += ["--sccache"]
+    if args.build_jobs:
+        build_script_args += ["--jobs", str(args.build_jobs)]
+    if args.lit_jobs:
+        build_script_args += ["--lit-jobs", str(args.lit_jobs)]
+    if args.swiftsyntax_install_prefix:
+        build_script_args += ["--install-swiftsyntax",
+                              "--install-destdir",
+                              args.swiftsyntax_install_prefix]
+    if args.build_dir:
+        build_script_args += ["--build-dir", args.build_dir]
+    if args.cmake_c_launcher:
+        build_script_args += ["--cmake-c-launcher", args.cmake_c_launcher]
+    if args.cmake_cxx_launcher:
+        build_script_args += ["--cmake-cxx-launcher", args.cmake_cxx_launcher]
+    printable_command = shell.quote_command(build_script_args)
+    if args.expand_invocation:
+        print(printable_command)
+        return 0
+
+    if args.reconfigure:
+        build_script_args += ["--reconfigure"]
+
+    print_note('using preset "{}", which expands to \n\n{}\n'.format(
+        args.preset, printable_command))
+    shell.call_without_sleeping(build_script_args)
+    return 0
+
+
+# -----------------------------------------------------------------------------
+# Main (normal)
+
+def main_normal():
+    parser = driver_arguments.create_argument_parser()
+
+    args = migration.parse_args(parser, sys.argv[1:])
+
+    if args.build_script_impl_args:
+        # If we received any impl args, check if `build-script-impl` would
+        # accept them or not before any further processing.
+        try:
+            migration.check_impl_args(BUILD_SCRIPT_IMPL_PATH,
+                                      args.build_script_impl_args)
+        except ValueError as e:
+            exit_rejecting_arguments(e, parser)
+
+        if '--check-args-only' in args.build_script_impl_args:
+            return 0
+
+    shell.dry_run = args.dry_run
+
+    # Prepare and validate toolchain
+    if args.darwin_xcrun_toolchain is None:
+        xcrun_toolchain = os.environ.get('TOOLCHAINS',
+                                         defaults.DARWIN_XCRUN_TOOLCHAIN)
+
+        print_note('Using toolchain {}'.format(xcrun_toolchain))
+        args.darwin_xcrun_toolchain = xcrun_toolchain
+
+    toolchain = host_toolchain(xcrun_toolchain=args.darwin_xcrun_toolchain)
+    os.environ['TOOLCHAINS'] = args.darwin_xcrun_toolchain
+
+    if args.host_cc is not None:
+        toolchain.cc = args.host_cc
+    if args.host_cxx is not None:
+        toolchain.cxx = args.host_cxx
+    if args.host_lipo is not None:
+        toolchain.lipo = args.host_lipo
+    if args.host_libtool is not None:
+        toolchain.libtool = args.host_libtool
+    if args.cmake is not None:
+        toolchain.cmake = args.cmake
+
+    # Preprocess the arguments to apply defaults.
+    apply_default_arguments(toolchain, args)
+
+    cmake = CMake(args=args, toolchain=toolchain)
+    toolchain.cmake = cmake.get_cmake_path(source_root=SWIFT_SOURCE_ROOT,
+                                           build_root=SWIFT_BUILD_ROOT)
+    args.cmake = toolchain.cmake
+
+    # Create the build script invocation.
+    invocation = build_script_invocation.BuildScriptInvocation(toolchain, args)
+
+    # Validate the arguments.
+    validate_arguments(toolchain, args)
+
+    if args.sccache:
+        print("Ensuring the sccache server is running...")
+        # Use --show-stats to ensure the server is started, because using
+        # --start-server will fail if the server is already running.
+        # Capture the output because we don't want to see the stats.
+        shell.capture([toolchain.sccache, "--show-stats"])
+
+    # Sanitize the runtime environment.
+    initialize_runtime_environment()
+
+    # Show SDKs, if requested.
+    if args.show_sdks:
+        print_xcodebuild_versions()
+
+    if args.dump_config:
+        print(JSONDumper().encode(invocation))
+        return 0
+
+    # Clean build directory if requested.
+    if args.clean:
+        clean_delay()
+        shell.rmtree(invocation.workspace.build_root)
+
+    # Create build directory.
+    shell.makedirs(invocation.workspace.build_root)
+
+    # Create .build_script_log
+    if not args.dry_run:
+        build_script_log = os.path.join(invocation.workspace.build_root,
+                                        ".build_script_log")
+        open(build_script_log, 'w').close()
+
+    if args.clean_install_destdir:
+        sys.stdout.write("Cleaning install destdir!\n")
+        shell.rmtree(args.install_destdir)
+
+    # Execute the underlying build script implementation.
+    invocation.execute()
+
+    if args.symbols_package:
+        print('--- Creating symbols package ---')
+        print('-- Package file: {} --'.format(args.symbols_package))
+
+        if platform.system() == 'Darwin':
+            prefix = targets.darwin_toolchain_prefix(args.install_prefix)
+            prefix = os.path.join(args.host_target, prefix.lstrip('/'))
+        else:
+            prefix = args.install_prefix
+
+        # As a security measure, `tar` normally strips leading '/' from paths
+        # it is archiving. To stay safe, we change working directories, then
+        # run `tar` without the leading '/' (we remove it ourselves to keep
+        # `tar` from emitting a warning).
+        with shell.pushd(args.install_symroot):
+            tar(source=prefix.lstrip('/'),
+                destination=args.symbols_package)
+
+    return 0
+
+
+# -----------------------------------------------------------------------------
+
+def main():
+    if not SWIFT_SOURCE_ROOT:
+        fatal_error(
+            "could not infer source root directory " +
+            "(forgot to set $SWIFT_SOURCE_ROOT environment variable?)")
+
+    if not os.path.isdir(SWIFT_SOURCE_ROOT):
+        fatal_error(
+            "source root directory \'" + SWIFT_SOURCE_ROOT +
+            "\' does not exist " +
+            "(forgot to set $SWIFT_SOURCE_ROOT environment variable?)")
+
+    validate_xcode_compatibility()
+
+    # Determine if we are invoked in the preset mode and dispatch accordingly.
+    if any([(opt.startswith("--preset") or opt == "--show-presets")
+            for opt in sys.argv[1:]]):
+        return main_preset()
+    else:
+        return main_normal()
+
+
+if __name__ == "__main__":
+    try:
+        exit_code = main()
+        log_analyzer()
+    except SystemExit:
+        raise
+    except KeyboardInterrupt:
+        sys.exit(1)
+    except Exception:
+        log_analyzer()
+        raise
+    sys.exit(exit_code)

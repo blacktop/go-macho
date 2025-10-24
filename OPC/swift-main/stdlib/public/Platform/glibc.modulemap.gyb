@@ -1,0 +1,56 @@
+//===--- glibc.modulemap.gyb ----------------------------------------------===//
+//
+// This source file is part of the Swift.org open source project
+//
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
+// Licensed under Apache License v2.0 with Runtime Library Exception
+//
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+//
+//===----------------------------------------------------------------------===//
+
+/// This is a semi-complete modulemap that maps glibc's headers in a roughly
+/// similar way to the Darwin SDK modulemap. We do not take care to list every
+/// single header which may be included by a particular submodule, so there can
+/// still be issues if imported into the same context as one in which someone
+/// included those headers directly.
+///
+/// It's not named just Glibc so that it doesn't conflict in the event of a
+/// future official glibc modulemap.
+module SwiftGlibc [system] {
+% if CMAKE_SDK in ["LINUX", "FREEBSD", "OPENBSD"]:
+      link "m"
+% end
+% if CMAKE_SDK in ["LINUX", "FREEBSD", "OPENBSD", "CYGWIN"]:
+  link "pthread"
+  // FIXME: util contains rarely used functions and not usually needed. Unfortunately
+  // link directive doesn't work in the submodule yet.
+% if CMAKE_SDK != "OPENBSD":
+  link "util"
+% end
+% end
+
+% if CMAKE_SDK not in ["FREEBSD", "OPENBSD", "HAIKU"]:
+  link "dl"
+% end
+
+% if CMAKE_SDK == "HAIKU":
+  link "network"
+  link "bsd"
+  link "execinfo"
+% end
+
+  header "SwiftGlibc.h"
+
+  // <assert.h>'s use of NDEBUG requires textual inclusion. 
+  textual header "assert.h"
+
+  export *
+}
+
+module CUUID [system] {
+  header "uuid/uuid.h"
+  link "uuid"
+  export *
+}

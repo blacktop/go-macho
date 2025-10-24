@@ -1,0 +1,2 @@
+// RUN: %target-sil-opt %s
+sil public_external@a:$()->()

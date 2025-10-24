@@ -1,0 +1,84 @@
+//===--- DiagnosticsRefactoring.def - Diagnostics Text ----------*- C++ -*-===//
+//
+// This source file is part of the Swift.org open source project
+//
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
+// Licensed under Apache License v2.0 with Runtime Library Exception
+//
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+//
+//===----------------------------------------------------------------------===//
+//
+//  This file defines diagnostics emitted during refactoring.
+//  Each diagnostic is described using one of three kinds (error, warning, or
+//  note) along with a unique identifier, category, options, and text, and is
+//  followed by a signature describing the diagnostic argument kinds.
+//
+//===----------------------------------------------------------------------===//
+
+#define DEFINE_DIAGNOSTIC_MACROS
+#include "DefineDiagnosticMacros.h"
+
+//==============================================================================
+// Refactoring diagnostics
+//==============================================================================
+
+ERROR(invalid_name, none, "'%0' is not a valid name", (StringRef))
+
+ERROR(extract_function_not_supported_swiftsyntax_missing, none, "Extract Function is not supported because sourcekitd was built without swift-syntax", ())
+
+ERROR(arity_mismatch, none, "the given new name '%0' does not match the arity of the old name '%1'", (StringRef, StringRef))
+
+ERROR(name_not_functionlike, none, "the 'call' name usage cannot be used with a non-function-like name '%0'", (StringRef))
+
+ERROR(unresolved_location, none, "cannot rename due to unresolved location", ())
+
+ERROR(value_decl_no_loc, none, "cannot rename %0 as it has no declaration location", (DeclName))
+
+ERROR(decl_is_system_symbol, none, "cannot rename system symbol %0", (DeclName))
+
+ERROR(decl_has_no_name, none, "cannot rename as no declaration name was found", ())
+
+ERROR(decl_no_accessibility, none, "cannot rename as accessibility could not be determined", ())
+
+ERROR(decl_from_clang, none, "cannot rename a Clang symbol from its Swift reference", ())
+
+ERROR(decl_in_macro, none, "cannot rename a symbol defined in a macro", ())
+
+ERROR(value_decl_referenced_out_of_range, none, "value decl '%0' is referenced out of range", (DeclName))
+
+ERROR(multi_entry_range, none, "selected range has more than one entry point", ())
+
+ERROR(orphan_loop_keyword, none, "selected range contains %0 but not its target loop", (StringRef))
+
+ERROR(invalid_default_location, none, "given location is not on a default statement", ())
+
+ERROR(no_parent_switch, none, "cannot find enclosing switch statement", ())
+
+ERROR(no_remaining_cases, none, "no remaining cases to expand", ())
+
+WARNING(mismatched_rename, none, "the name at the given location cannot be renamed to '%0'", (StringRef))
+
+ERROR(no_insert_position, none, "cannot find inserting position", ())
+
+ERROR(missing_callback_arg, none, "cannot refactor as callback closure argument missing", ())
+
+ERROR(mismatched_callback_args, none, "cannot refactor as callback arguments do not match declaration", ())
+
+ERROR(unknown_callback_conditions, none, "cannot refactor complex if conditions", ())
+
+ERROR(mixed_callback_conditions, none, "cannot refactor mixed nil and not-nil conditions", ())
+
+ERROR(callback_with_fallthrough, none, "cannot refactor switch with fallthrough", ())
+
+ERROR(callback_with_default, none, "cannot refactor switch with default case", ())
+
+ERROR(callback_multiple_case_items, none, "cannot refactor switch using a case with multiple items", ())
+
+ERROR(callback_where_case_item, none, "cannot refactor switch using a case with where clause", ())
+
+ERROR(unknown_callback_case_item, none, "cannot refactor complex case conditions", ())
+
+#define UNDEFINE_DIAGNOSTIC_MACROS
+#include "DefineDiagnosticMacros.h"

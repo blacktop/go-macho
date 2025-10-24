@@ -120,7 +120,7 @@ func TestDemangleGenericArray(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DemangleType failed: %v", err)
 	}
-	if got, want := Format(node), "Swift.Array<Swift.Int>"; got != want {
+	if got, want := Format(node), "[Swift.Int]"; got != want {
 		t.Fatalf("Format mismatch: got %q, want %q", got, want)
 	}
 }
@@ -132,6 +132,31 @@ func TestDemangleOptional(t *testing.T) {
 		t.Fatalf("DemangleType failed: %v", err)
 	}
 	if got, want := Format(node), "Swift.Int?"; got != want {
+		t.Fatalf("Format mismatch: got %q, want %q", got, want)
+	}
+}
+
+func TestFormatSetSugar(t *testing.T) {
+	base := NewNode(KindStructure, "Set")
+	base.Append(NewNode(KindModule, "Swift"))
+	element := NewNode(KindStructure, "String")
+	element.Append(NewNode(KindModule, "Swift"))
+	args := NewNode(KindGenericArgs, "")
+	args.Append(element)
+	bound := NewNode(KindBoundGeneric, "")
+	bound.Append(base, args)
+	sugared := applyTypeSugar(bound)
+	if got, want := Format(sugared), "Set<Swift.String>"; got != want {
+		t.Fatalf("Format mismatch: got %q, want %q", got, want)
+	}
+}
+func TestDemangleDictionary(t *testing.T) {
+	d := New(nil)
+	node, err := d.DemangleType([]byte("SDySSSiG"))
+	if err != nil {
+		t.Fatalf("DemangleType failed: %v", err)
+	}
+	if got, want := Format(node), "[Swift.String : Swift.Int]"; got != want {
 		t.Fatalf("Format mismatch: got %q, want %q", got, want)
 	}
 }

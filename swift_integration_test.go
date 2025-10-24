@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/blacktop/go-macho/types/objc"
 	"github.com/blacktop/go-macho/types/swift"
 )
 
@@ -80,7 +81,7 @@ func TestSwiftDemanglerIntegration(t *testing.T) {
 	if demoClass == nil {
 		t.Fatalf("failed to locate field descriptor for DemangleFixtures.DemoClass")
 	}
-	if len(demoClass.Records) != 1 || demoClass.Records[0].MangledType != "Swift.Array<Swift.Int>" {
+	if len(demoClass.Records) != 1 || demoClass.Records[0].MangledType != "[Swift.Int]" {
 		t.Fatalf("DemoClass.numbers type mismatch: %+v", demoClass.Records)
 	}
 
@@ -139,27 +140,44 @@ func TestSwiftDemanglerIntegration(t *testing.T) {
 	}
 	foundCombine := false
 	for _, fn := range funcs {
-		name, err := f.GetCString(fn.Name.GetAddress())
-		if err != nil {
-			t.Fatalf("failed to read accessible function name: %v", err)
-		}
-		if !fn.FunctionType.IsSet() {
-			continue
-		}
-		ty, err := f.makeSymbolicMangledNameStringRef(fn.FunctionType.GetAddress())
-		if err != nil {
-			t.Fatalf("failed to demangle accessible function type: %v", err)
-		}
-		if strings.Contains(name, "combine") {
+		if strings.Contains(fn.Name, "combine") {
 			foundCombine = true
 			wantTy := "(DemangleFixtures.Outer.Inner, DemangleFixtures.Outer.Inner) async throws -> DemangleFixtures.Outer.Inner"
-			normalized := strings.Join(strings.Fields(ty), " ")
+			normalized := strings.Join(strings.Fields(fn.FunctionType), " ")
 			if normalized != wantTy {
-				t.Fatalf("combine function type mismatch: got %q", ty)
+				t.Fatalf("combine function type mismatch: got %q", fn.FunctionType)
 			}
 		}
 	}
 	if !foundCombine {
 		t.Fatalf("combine accessible function not found")
+	}
+
+	classes, err := f.GetObjCClasses()
+	if err != nil {
+		t.Fatalf("GetObjCClasses failed: %v", err)
+	}
+	var bridge *objc.Class
+	for idx := range classes {
+		if classes[idx].Name == "DemangleFixtures.ObjCBridgeClass" {
+			bridge = &classes[idx]
+			break
+		}
+	}
+	if bridge == nil {
+		t.Fatalf("ObjC bridge class not found; available classes: %d", len(classes))
+	}
+	if bridge.SuperClass != "NSObject" {
+		t.Fatalf("ObjC bridge superclass mismatch: got %q", bridge.SuperClass)
+	}
+	foundSelector := false
+	for _, method := range bridge.InstanceMethods {
+		if method.Name == "updateLabelWith:" {
+			foundSelector = true
+			break
+		}
+	}
+	if !foundSelector {
+		t.Fatalf("ObjC bridge class missing updateLabelWith: selector; methods: %+v", bridge.InstanceMethods)
 	}
 }

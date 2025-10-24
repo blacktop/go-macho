@@ -384,33 +384,45 @@ func (p *parser) parseBoundGeneric(base *Node) (*Node, error) {
 	bound := NewNode(KindBoundGeneric, "")
 	bound.Append(base, genericArgs)
 
-	sugared := applyOptionalSugar(bound)
+	sugared := applyTypeSugar(bound)
 	p.pushSubstitution(sugared)
 	return sugared, nil
 }
 
-func applyOptionalSugar(node *Node) *Node {
+func applyTypeSugar(node *Node) *Node {
 	if node == nil || node.Kind != KindBoundGeneric || len(node.Children) < 2 {
 		return node
 	}
 
 	base := node.Children[0]
 	argsNode := node.Children[1]
-	if base == nil || argsNode == nil || len(argsNode.Children) != 1 {
+	if base == nil || argsNode == nil || len(argsNode.Children) == 0 {
 		return node
 	}
 
-	arg := argsNode.Children[0]
+	args := argsNode.Children
 
 	switch {
-	case isSwiftNominal(base, "Swift.Optional"):
+	case isSwiftNominal(base, "Swift.Optional") && len(args) == 1:
 		opt := NewNode(KindOptional, "")
-		opt.Append(arg)
+		opt.Append(args[0])
 		return opt
-	case isSwiftNominal(base, "Swift.ImplicitlyUnwrappedOptional"):
+	case isSwiftNominal(base, "Swift.ImplicitlyUnwrappedOptional") && len(args) == 1:
 		opt := NewNode(KindImplicitlyUnwrappedOptional, "")
-		opt.Append(arg)
+		opt.Append(args[0])
 		return opt
+	case isSwiftNominal(base, "Swift.Array") && len(args) == 1:
+		arr := NewNode(KindArray, "")
+		arr.Append(args[0])
+		return arr
+	case isSwiftNominal(base, "Swift.Dictionary") && len(args) == 2:
+		dict := NewNode(KindDictionary, "")
+		dict.Append(args[0], args[1])
+		return dict
+	case isSwiftNominal(base, "Swift.Set") && len(args) == 1:
+		setNode := NewNode(KindSet, "")
+		setNode.Append(args[0])
+		return setNode
 	default:
 		return node
 	}

@@ -1,0 +1,19 @@
+// This file is processed by CMake.
+// See https://cmake.org/cmake/help/v3.0/command/configure_file.html.
+
+#ifndef SWIFT_CONFIG_H
+#define SWIFT_CONFIG_H
+
+#cmakedefine HAVE_WAIT4 1
+
+#cmakedefine HAVE_PROC_PID_RUSAGE 1
+
+#cmakedefine01 SWIFT_IMPLICIT_CONCURRENCY_IMPORT
+
+#cmakedefine01 SWIFT_ENABLE_EXPERIMENTAL_DISTRIBUTED
+
+#cmakedefine01 SWIFT_ENABLE_GLOBAL_ISEL_ARM64
+
+#cmakedefine01 SWIFT_ENABLE_EXPERIMENTAL_PARSER_VALIDATION
+
+#endif // SWIFT_CONFIG_H
