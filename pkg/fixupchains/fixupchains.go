@@ -859,6 +859,23 @@ func (dcf *DyldChainedFixups) LookupByTarget(targetOffset uint64) []Fixup {
 	return nil
 }
 
+// Lookup returns the fixup associated with the given target address.
+// Only rebases (including authenticated rebases) are stored in the fixup map.
+func (dcf *DyldChainedFixups) Lookup(targetOffset uint64) (Fixup, bool) {
+	if !dcf.chainsParsed {
+		if _, err := dcf.Parse(); err != nil {
+			return nil, false
+		}
+	}
+
+	if dcf.fixups == nil {
+		return nil, false
+	}
+
+	fixup, ok := dcf.fixups[targetOffset]
+	return fixup, ok
+}
+
 // LookupByOffset returns the fixup at the given file offset (where the fixup is located).
 // Note: This requires the chains to be walked first (calls Parse if needed).
 func (dcf *DyldChainedFixups) LookupByOffset(fileOffset uint64) (Fixup, bool) {

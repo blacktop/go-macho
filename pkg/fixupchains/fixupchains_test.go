@@ -100,6 +100,7 @@ func TestLookupFunctionality(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dcf := tt.setupFixups()
+			dcf.chainsParsed = true
 
 			// Test the original Lookup function
 			fixup, found := dcf.Lookup(tt.targetOffset)
@@ -168,6 +169,7 @@ func TestLookupByOffset(t *testing.T) {
 			},
 		},
 	}
+	dcf.chainsParsed = true
 
 	tests := []struct {
 		offset    uint64
