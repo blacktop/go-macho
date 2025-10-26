@@ -11,8 +11,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/blacktop/go-macho/internal/swiftdemangle"
-	"github.com/blacktop/go-macho/swift/demangle"
+	swiftpkg "github.com/blacktop/go-macho/pkg/swift"
 	"github.com/blacktop/go-macho/types"
 	"github.com/blacktop/go-macho/types/swift"
 )
@@ -223,7 +222,7 @@ func (f *File) readField(r io.ReadSeeker, addr uint64) (field *swift.Field, err 
 		if err != nil {
 			return nil, fmt.Errorf("failed to read swift field mangled type name: %w", err)
 		}
-		field.Type = demangle.NormalizeIdentifier(field.Type)
+		field.Type = swiftpkg.NormalizeIdentifier(field.Type)
 	}
 
 	if field.SuperclassOffset.IsSet() {
@@ -231,7 +230,7 @@ func (f *File) readField(r io.ReadSeeker, addr uint64) (field *swift.Field, err 
 		if err != nil {
 			return nil, fmt.Errorf("failed to read swift field super class mangled name: %w", err)
 		}
-		field.SuperClass = demangle.NormalizeIdentifier(field.SuperClass)
+		field.SuperClass = swiftpkg.NormalizeIdentifier(field.SuperClass)
 	}
 
 	for idx, rec := range field.Records {
@@ -245,7 +244,7 @@ func (f *File) readField(r io.ReadSeeker, addr uint64) (field *swift.Field, err 
 			if err != nil {
 				return nil, fmt.Errorf("failed to read swift field record mangled type name; %w", err)
 			}
-			field.Records[idx].MangledType = demangle.NormalizeIdentifier(field.Records[idx].MangledType)
+			field.Records[idx].MangledType = swiftpkg.NormalizeIdentifier(field.Records[idx].MangledType)
 		}
 	}
 
@@ -1299,7 +1298,7 @@ func (f *File) readProtocolConformance(r io.ReadSeeker, addr uint64) (pcd *swift
 			pcd.Protocol = ctx.Parent + "." + pcd.Protocol
 		}
 	}
-	pcd.Protocol = demangle.NormalizeIdentifier(pcd.Protocol)
+	pcd.Protocol = f.demangleSwiftString(pcd.Protocol)
 
 	// parse type reference
 	switch pcd.Flags.GetTypeReferenceKind() {
@@ -1457,6 +1456,9 @@ func (f *File) readProtocolConformance(r io.ReadSeeker, addr uint64) (pcd *swift
 		default:
 			return nil, fmt.Errorf("unknown conditional requirement kind: %v", req.Flags.Kind())
 		}
+
+		pcd.ConditionalRequirements[idx].Param = f.demangleSwiftString(pcd.ConditionalRequirements[idx].Param)
+		pcd.ConditionalRequirements[idx].Kind = f.demangleSwiftString(pcd.ConditionalRequirements[idx].Kind)
 	}
 
 	for idx, wit := range pcd.ResilientWitnesses {
@@ -1504,7 +1506,12 @@ func (f *File) readProtocolConformance(r io.ReadSeeker, addr uint64) (pcd *swift
 						}
 					}
 				}
+
 			}
+		}
+
+		if pcd.ResilientWitnesses[idx].Symbol != "" && pcd.ResilientWitnesses[idx].Symbol != "<stripped>" {
+			pcd.ResilientWitnesses[idx].Symbol = f.demangleSwiftString(pcd.ResilientWitnesses[idx].Symbol)
 		}
 	}
 
@@ -2602,10 +2609,10 @@ func (f *File) demangleSwiftString(input string) string {
 	if trimmed == "" {
 		return input
 	}
-	if out, _, err := swiftdemangle.New(nil).DemangleString([]byte(trimmed)); err == nil && out != "" {
+	if out, err := swiftpkg.Demangle(trimmed); err == nil && out != "" {
 		return out
 	}
-	return demangle.NormalizeIdentifier(input)
+	return swiftpkg.NormalizeIdentifier(input)
 }
 
 func isPrintableASCII(s string) bool {
@@ -2955,7 +2962,7 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				continue
 			}
 			appendNormalized := func(val string) {
-				out = append(out, demangle.NormalizeIdentifier(val))
+				out = append(out, swiftpkg.NormalizeIdentifier(val))
 			}
 			if regexp.MustCompile("So[0-9]+").MatchString(part) {
 				if strings.Contains(part, "OS_dispatch_queue") {
@@ -3008,7 +3015,7 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				// if symbolic {
 				// 	name += "()"
 				// }
-				out = append(out, demangle.NormalizeIdentifier(name))
+				out = append(out, swiftpkg.NormalizeIdentifier(name))
 			case 0x02: // symbolic reference to a context descriptor
 				var name string
 				ptr, err := f.GetPointerAtAddress(part.Addr)
@@ -3041,7 +3048,7 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				// if symbolic {
 				// 	name += "()"
 				// }
-				out = append(out, demangle.NormalizeIdentifier(name))
+				out = append(out, swiftpkg.NormalizeIdentifier(name))
 			case 0x09: // DIRECT symbolic reference to an accessor function, which can be executed in the process to get a pointer to the referenced entity.
 				// AccessorFunctionReference
 				out = append(out, fmt.Sprintf("(accessor function sub_%x)", part.Addr))
@@ -3065,7 +3072,7 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				// if symbolic {
 				// 	name += "()"
 				// }
-				out = append(out, demangle.NormalizeIdentifier(name))
+				out = append(out, swiftpkg.NormalizeIdentifier(name))
 			case 0x0b: // DIRECT symbolic reference to a non-unique extended existential type shape.
 				// NonUniqueExtendedExistentialTypeShape
 				var name string
@@ -3086,14 +3093,14 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				// if symbolic {
 				// 	name += "()"
 				// }
-				out = append(out, demangle.NormalizeIdentifier(name))
+				out = append(out, swiftpkg.NormalizeIdentifier(name))
 			case 0x0c: // DIRECT symbolic reference to a objective C protocol ref.
 				// ObjectiveCProtocol
 				name, err := f.readObjCProtocolName(part.Addr)
 				if err != nil {
 					return "", fmt.Errorf("failed to resolve objective-c protocol reference at %#x: %w", part.Addr, err)
 				}
-				out = append(out, demangle.NormalizeIdentifier(name))
+				out = append(out, swiftpkg.NormalizeIdentifier(name))
 			/* These are all currently reserved but unused. */
 			case 0x03: // DIRECT to protocol conformance descriptor
 				fallthrough

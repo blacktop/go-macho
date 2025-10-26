@@ -79,11 +79,23 @@ func (d *Demangler) DemangleType(mangled []byte) (*Node, error) {
 }
 
 func (p *parser) parseType() (*Node, error) {
-	return p.parseTypeWithOptions(false)
+	node, err := p.parseTypeWithOptions(false)
+	if err != nil {
+		return nil, err
+	}
+	if node != nil {
+		p.pushSubstitution(node)
+	}
+	return node, nil
 }
 
 func (p *parser) parseTypeWithOptions(allowTrailing bool) (*Node, error) {
 	node, err := p.parsePrimaryType()
+	if err != nil {
+		return nil, err
+	}
+
+	node, err = p.parseContextualSuffix(node)
 	if err != nil {
 		return nil, err
 	}
@@ -93,57 +105,29 @@ func (p *parser) parseTypeWithOptions(allowTrailing bool) (*Node, error) {
 		return nil, err
 	}
 
-	for {
-		fn, ok, err := p.tryParseFunctionType(node)
-		if err != nil {
-			return nil, err
+	if tuple, ok, err := p.tryParseTuple(node); err != nil {
+		return nil, err
+	} else if ok {
+		node = tuple
+		if !allowTrailing {
+			if fn, fnOK, err := p.tryParseFunctionAfterTuple(node); err != nil {
+				return nil, err
+			} else if fnOK {
+				node = fn
+			}
 		}
-		if !ok {
-			break
-		}
-		node = fn
 	}
 
-	parsedTuple := false
-	if !p.eof() && p.peek() == '_' {
-		savePos := p.pos
-		elements := []*Node{node}
-
-		for !p.eof() && p.peek() == '_' {
-			p.consume()
-			if p.eof() {
-				p.pos = savePos
-				break
-			}
-			if p.peek() == 't' {
-				p.consume()
-				tuple := NewNode(KindTuple, "")
-				tuple.Append(elements...)
-				p.pushSubstitution(tuple)
-				node = tuple
-				parsedTuple = true
-				break
-			}
-
-			elem, err := p.parseTypeWithOptions(true)
+	if !allowTrailing {
+		for {
+			fn, ok, err := p.tryParseFunctionType(node)
 			if err != nil {
-				p.pos = savePos
+				return nil, err
+			}
+			if !ok {
 				break
 			}
-			elements = append(elements, elem)
-		}
-
-		if !parsedTuple && !p.eof() && p.peek() == 't' {
-			p.consume()
-			tuple := NewNode(KindTuple, "")
-			tuple.Append(elements...)
-			p.pushSubstitution(tuple)
-			node = tuple
-			parsedTuple = true
-		}
-
-		if !parsedTuple {
-			p.pos = savePos
+			node = fn
 		}
 	}
 
@@ -156,6 +140,15 @@ func (p *parser) parseTypeWithOptions(allowTrailing bool) (*Node, error) {
 }
 
 func (p *parser) parsePrimaryType() (*Node, error) {
+	if len(p.pending) > p.pendingFloor {
+		idx := len(p.pending) - 1
+		node := p.pending[idx]
+		p.pending = p.pending[:idx]
+		if debugEnabled {
+			debugf("parsePrimaryType returning pending node %s (pos=%d)\n", Format(node), p.pos)
+		}
+		return node, nil
+	}
 	if p.eof() {
 		return nil, fmt.Errorf("unexpected end while parsing type")
 	}
@@ -190,8 +183,39 @@ func (p *parser) parsePrimaryType() (*Node, error) {
 	}
 	for l := maxLookup; l >= 1; l-- {
 		if node, ok := p.lookupKnownType(l); ok {
+			if debugEnabled {
+				debugf("parsePrimaryType: lookupKnownType hit %q -> %s\n", string(p.data[p.pos-l:p.pos]), Format(node))
+			}
 			return node, nil
 		}
+	}
+
+	if ok, err := p.tryParseMultiSubstitution(); err != nil {
+		return nil, err
+	} else if ok {
+		return p.parsePrimaryType()
+	}
+
+	// Standard library known types (Si, SS, Sb, etc.)
+	if node, ok := p.parseStandardType(); ok {
+		if debugEnabled {
+			debugf("parsePrimaryType: standard type %s at pos=%d\n", Format(node), p.pos)
+		}
+		return node, nil
+	}
+
+	// Special stdlib nominal short-hands (e.g. s4Int8V -> Swift.Int8).
+	if !p.eof() && p.peek() == 's' {
+		if node, ok, err := p.tryParseStdlibNominal(); err != nil {
+			return nil, err
+		} else if ok {
+			return node, nil
+		}
+	}
+
+	// Length-prefixed identifiers (modules / nominal types).
+	if c := p.peek(); c >= '0' && c <= '9' {
+		return p.parseNominalOrIdentifier()
 	}
 
 	// Explicit substitution references.
@@ -201,16 +225,14 @@ func (p *parser) parsePrimaryType() (*Node, error) {
 		return node, nil
 	}
 
-	// Standard library known types (Si, SS, Sb, etc.)
-	if node, ok := p.parseStandardType(); ok {
-		return node, nil
+	if debugEnabled {
+		debugf("parsePrimaryType unsupported at pos=%d char=%q remaining=%s\n", p.pos, func() byte {
+			if p.pos < len(p.data) {
+				return p.data[p.pos]
+			}
+			return 0
+		}(), string(p.data[p.pos:]))
 	}
-
-	// Length-prefixed identifiers (modules / nominal types).
-	if c := p.peek(); c >= '0' && c <= '9' {
-		return p.parseNominalOrIdentifier()
-	}
-
 	return nil, fmt.Errorf("unsupported mangled sequence starting at %d", p.pos)
 }
 
@@ -231,6 +253,16 @@ func (p *parser) parseStandardType() (*Node, bool) {
 	}
 
 	prefix := p.data[p.pos]
+	if len(p.data)-p.pos >= 3 && (prefix == 'S' || prefix == 's') && p.data[p.pos+1] == 'c' {
+		key := string(p.data[p.pos+2 : p.pos+3])
+		if text, ok := swift.MangledKnownTypeKind2[key]; ok {
+			p.pos += 3
+			node := NewNode(KindIdentifier, text)
+			p.pushSubstitution(node)
+			return node, true
+		}
+	}
+
 	if prefix == 'S' && p.data[p.pos+1] == 'o' {
 		start := p.pos
 		p.pos += 2
@@ -295,9 +327,7 @@ func (p *parser) parseNominalOrIdentifier() (*Node, error) {
 
 	if p.eof() {
 		p.pos = firstEnd
-		node := NewNode(KindIdentifier, name)
-		p.pushSubstitution(node)
-		return node, nil
+		return NewNode(KindIdentifier, name), nil
 	}
 
 	kindChar := p.peek()
@@ -310,9 +340,50 @@ func (p *parser) parseNominalOrIdentifier() (*Node, error) {
 
 	// Not a recognized nominal type; treat as plain identifier.
 	p.pos = firstEnd
-	node := NewNode(KindIdentifier, name)
+	return NewNode(KindIdentifier, name), nil
+}
+
+func (p *parser) tryParseStdlibNominal() (*Node, bool, error) {
+	if p.peek() != 's' {
+		return nil, false, nil
+	}
+	savePos := p.pos
+	p.consume() // consume 's'
+
+	names := []string{"Swift"}
+	name, err := p.readIdentifier()
+	if err != nil {
+		p.pos = savePos
+		return nil, false, nil
+	}
+	names = append(names, name)
+
+	for !p.eof() {
+		if c := p.peek(); c < '0' || c > '9' {
+			break
+		}
+		next, err := p.readIdentifier()
+		if err != nil {
+			p.pos = savePos
+			return nil, false, nil
+		}
+		names = append(names, next)
+	}
+
+	if p.eof() {
+		p.pos = savePos
+		return nil, false, nil
+	}
+	kindChar := p.peek()
+	nodeKind, ok := nominalTypeKinds[kindChar]
+	if !ok {
+		p.pos = savePos
+		return nil, false, nil
+	}
+	p.consume()
+	node := buildNominal(nodeKind, names)
 	p.pushSubstitution(node)
-	return node, nil
+	return node, true, nil
 }
 
 func buildNominal(kind NodeKind, names []string) *Node {
@@ -329,6 +400,70 @@ func buildNominal(kind NodeKind, names []string) *Node {
 			node.Append(NewNode(KindIdentifier, parent))
 		}
 		return node
+	}
+}
+
+func collectContextNames(node *Node) []string {
+	if node == nil {
+		return nil
+	}
+	switch node.Kind {
+	case KindModule:
+		return []string{node.Text}
+	case KindIdentifier:
+		return []string{node.Text}
+	case KindStructure, KindClass, KindEnum, KindProtocol, KindTypeAlias:
+		names := []string{}
+		if len(node.Children) > 0 && node.Children[0].Kind == KindModule {
+			names = append(names, node.Children[0].Text)
+		}
+		for i := 1; i < len(node.Children); i++ {
+			names = append(names, node.Children[i].Text)
+		}
+		names = append(names, node.Text)
+		return names
+	default:
+		if node.Text != "" {
+			return []string{node.Text}
+		}
+		return nil
+	}
+}
+
+func (p *parser) parseContextualSuffix(base *Node) (*Node, error) {
+	current := base
+	for {
+		if p.eof() {
+			return current, nil
+		}
+		save := p.pos
+		if !isDigit(p.peek()) {
+			return current, nil
+		}
+		name, err := p.readIdentifierNoSubst()
+		if err != nil {
+			p.pos = save
+			return current, nil
+		}
+		if p.eof() {
+			p.pos = save
+			return current, nil
+		}
+		kindChar := p.peek()
+		nodeKind, ok := nominalTypeKinds[kindChar]
+		if !ok {
+			p.pos = save
+			return current, nil
+		}
+		p.consume()
+		names := append(collectContextNames(current), name)
+		if len(names) == 0 {
+			p.pos = save
+			return current, nil
+		}
+		next := buildNominal(nodeKind, names)
+		current = next
+		p.pushSubstitution(current)
 	}
 }
 
@@ -383,15 +518,89 @@ func (p *parser) tryParseSubstitution() (*Node, bool, error) {
 	return node.Clone(), true, nil
 }
 
+func (p *parser) tryParseMultiSubstitution() (bool, error) {
+	if p.peek() != 'A' {
+		return false, nil
+	}
+	start := p.pos
+	p.consume()
+
+	repeat := -1
+	for {
+		if p.eof() {
+			p.pos = start
+			return false, fmt.Errorf("unterminated multi substitution")
+		}
+		c := p.peek()
+		switch {
+		case c >= 'a' && c <= 'z':
+			p.consume()
+			idx := int(c - 'a')
+			node, err := p.lookupSubstitution(idx)
+			if err != nil {
+				return false, err
+			}
+			count := 1
+			if repeat > 0 {
+				count = repeat
+			}
+			p.pushPendingNode(node, count)
+			repeat = -1
+			continue
+		case c >= 'A' && c <= 'Z':
+			p.consume()
+			idx := int(c - 'A')
+			node, err := p.lookupSubstitution(idx)
+			if err != nil {
+				return false, err
+			}
+			count := 1
+			if repeat > 0 {
+				count = repeat
+			}
+			p.pushPendingNode(node, count)
+			repeat = -1
+			return true, nil
+		case c == '_':
+			p.consume()
+			if repeat < 0 {
+				return false, fmt.Errorf("large multi substitution index without count")
+			}
+			idx := repeat + 27
+			node, err := p.lookupSubstitution(idx)
+			if err != nil {
+				return false, err
+			}
+			p.pushPendingNode(node, 1)
+			repeat = -1
+			return true, nil
+		case c >= '0' && c <= '9':
+			num, err := p.readNumber()
+			if err != nil {
+				return false, err
+			}
+			repeat = num
+			continue
+		default:
+			p.pos = start
+			return false, nil
+		}
+	}
+}
+
 func (p *parser) parseTypeSuffix(base *Node) (*Node, error) {
 	current := base
 	for !p.eof() {
 		switch p.peek() {
 		case 'y':
+			save := p.pos
 			p.consume()
 			bound, err := p.parseBoundGeneric(current)
 			if err != nil {
-				return nil, err
+				// Not actually a bound generic suffix; rewind and stop parsing suffixes so other
+				// grammar components (e.g. empty tuple markers) can consume the 'y'.
+				p.pos = save
+				return current, nil
 			}
 			current = bound
 		default:
@@ -506,6 +715,15 @@ func (p *parser) tryParseFunctionType(result *Node) (*Node, bool, error) {
 		return nil, false, nil
 	}
 
+	switch p.peek() {
+	case 'v', 'f', 'F', 'c', 't', 'W', 'M', 'T':
+		return nil, false, nil
+	}
+
+	if p.eof() {
+		return nil, false, nil
+	}
+
 	params, ok, err := p.parseFunctionInput()
 	if err != nil {
 		return nil, false, err
@@ -541,7 +759,6 @@ func (p *parser) tryParseFunctionType(result *Node) (*Node, bool, error) {
 	fn.Flags.Async = async
 	fn.Flags.Throws = throws
 	fn.Append(params, result)
-	p.pushSubstitution(fn)
 	return fn, true, nil
 }
 
@@ -551,63 +768,61 @@ func (p *parser) parseFunctionInput() (*Node, bool, error) {
 	if p.eof() {
 		return nil, false, nil
 	}
+	p.pushPendingScope()
+	defer p.popPendingScope()
 
-	// Empty tuple is encoded as 'y' 'y' ... handle simple 'yy' -> ()
+	if debugEnabled {
+		next := byte(0)
+		if !p.eof() {
+			next = p.data[p.pos]
+		}
+		next2 := byte(0)
+		if p.pos+1 < len(p.data) {
+			next2 = p.data[p.pos+1]
+		}
+		debugf("parseFunctionInput: start=%d remaining=%q pendingLen=%d floor=%d next=%q next2=%q\n", start, string(p.data[start:]), len(p.pending), p.pendingFloor, next, next2)
+	}
+	// fmt.Printf("parseFunctionInput start pos=%d char=%c\n", p.pos, p.peek())
+	// fmt.Printf("parseFunctionInput start pos=%d char=%c\n", p.pos, p.peek())
+
+	// Empty tuple is encoded as 'y' (optionally repeated). Accept single 'y'.
 	if p.peek() == 'y' {
 		p.consume()
 		if !p.eof() && p.peek() == 'y' {
 			p.consume()
-			tuple := NewNode(KindTuple, "")
-			p.pushSubstitution(tuple)
-			return tuple, true, nil
 		}
+		tuple := NewNode(KindTuple, "")
+		return tuple, true, nil
+	}
+
+	node, err := p.parseTypeWithOptions(true)
+	if err != nil {
 		p.pos = start
 		return nil, false, nil
 	}
-
-	params := []*Node{}
-	for {
-		param, err := p.parseType()
-		if err != nil {
-			p.pos = start
-			return nil, false, nil
-		}
-		params = append(params, param)
-
-		if p.eof() {
-			break
-		}
-
-		if p.peek() == '_' {
-			p.consume()
-			if !p.eof() && p.peek() == 't' {
-				p.consume()
-				break
+	if node != nil {
+		p.pushSubstitution(node)
+	}
+	if debugEnabled {
+		debugf("parseFunctionInput: parsed node=%s kind=%v pos=%d remaining=%q\n", func() string {
+			if node != nil {
+				return Format(node)
 			}
-			continue
-		}
-
-		if p.peek() == 't' {
-			p.consume()
-		} else {
-			// No more parameters; ensure we haven't inadvertently consumed async/throws markers.
-			// Leave position as-is for outer parser.
-		}
-		break
+			return "<nil>"
+		}(), func() interface{} {
+			if node != nil {
+				return node.Kind
+			}
+			return "<nil>"
+		}(), p.pos, string(p.data[p.pos:]))
 	}
 
-	if len(params) == 0 {
-		p.pos = start
-		return nil, false, nil
-	}
-
-	if len(params) == 1 && params[0].Kind == KindTuple {
-		return params[0], true, nil
+	if node.Kind == KindTuple {
+		return node, true, nil
 	}
 
 	tuple := NewNode(KindTuple, "")
-	tuple.Append(params...)
-	p.pushSubstitution(tuple)
+	tuple.Append(node)
 	return tuple, true, nil
 }
 
@@ -630,6 +845,85 @@ func (p *parser) applyOptionalSuffix(node *Node) (*Node, error) {
 		break
 	}
 	return node, nil
+}
+
+func (p *parser) tryParseTuple(node *Node) (*Node, bool, error) {
+	if p.eof() || p.peek() != '_' {
+		return node, false, nil
+	}
+
+	savePos := p.pos
+	elements := []*Node{node}
+
+	for !p.eof() && p.peek() == '_' {
+		p.consume()
+		if p.eof() {
+			p.pos = savePos
+			return node, false, nil
+		}
+		if p.peek() == 't' {
+			p.consume()
+			tuple := NewNode(KindTuple, "")
+			tuple.Append(elements...)
+			return tuple, true, nil
+		}
+
+		elem, err := p.parseTypeWithOptions(true)
+		if err != nil {
+			p.pos = savePos
+			return node, false, nil
+		}
+		elements = append(elements, elem)
+	}
+
+	if !p.eof() && p.peek() == 't' {
+		p.consume()
+		tuple := NewNode(KindTuple, "")
+		tuple.Append(elements...)
+		return tuple, true, nil
+	}
+
+	p.pos = savePos
+	return node, false, nil
+}
+
+func (p *parser) tryParseFunctionAfterTuple(tuple *Node) (*Node, bool, error) {
+	if tuple == nil {
+		return nil, false, nil
+	}
+
+	savePos := p.pos
+	async := false
+	throws := false
+
+	if !p.eof() && p.peek() == 'Y' {
+		async = true
+		p.consume()
+		if !p.eof() && p.peek() == 'a' {
+			p.consume()
+		}
+	}
+	if !p.eof() && p.peek() == 'K' {
+		throws = true
+		p.consume()
+	}
+
+	if p.eof() || p.peek() != 'c' {
+		p.pos = savePos
+		return tuple, false, nil
+	}
+
+	p.consume()
+	result, err := p.parseType()
+	if err != nil {
+		return nil, false, err
+	}
+
+	fn := NewNode(KindFunction, "")
+	fn.Flags.Async = async
+	fn.Flags.Throws = throws
+	fn.Append(tuple, result)
+	return fn, true, nil
 }
 
 func (p *parser) matchString(s string) bool {

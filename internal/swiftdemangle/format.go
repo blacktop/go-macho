@@ -1,6 +1,9 @@
 package swiftdemangle
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // Format renders the demangled representation of a node.
 func Format(node *Node) string {
@@ -46,6 +49,51 @@ func Format(node *Node) string {
 			return label
 		}
 		return label + ": " + typ
+	case KindVariable:
+		if node.Text != "" {
+			return node.Text
+		}
+		if len(node.Children) > 0 {
+			return Format(node.Children[0])
+		}
+		return ""
+	case KindAccessor:
+		if len(node.Children) == 0 {
+			return node.Text
+		}
+		variable := node.Children[0]
+		varName := variableName(variable)
+		varType := variableType(variable)
+		label := node.Text
+		if varType != "" {
+			return fmt.Sprintf("%s.%s : %s", varName, label, varType)
+		}
+		return fmt.Sprintf("%s.%s", varName, label)
+	case KindPropertyDescriptor:
+		if len(node.Children) == 0 {
+			return "property descriptor"
+		}
+		varName := variableName(node.Children[0])
+		varType := variableType(node.Children[0])
+		if varType != "" {
+			return fmt.Sprintf("property descriptor for %s : %s", varName, varType)
+		}
+		return fmt.Sprintf("property descriptor for %s", varName)
+	case KindProtocolDescriptor:
+		if len(node.Children) == 0 {
+			return "protocol descriptor"
+		}
+		return "protocol descriptor for " + Format(node.Children[0])
+	case KindNominalTypeDescriptor:
+		if len(node.Children) == 0 {
+			return "nominal type descriptor"
+		}
+		return "nominal type descriptor for " + Format(node.Children[0])
+	case KindMethodDescriptor:
+		if len(node.Children) == 0 {
+			return "method descriptor"
+		}
+		return "method descriptor for " + Format(node.Children[0])
 	case KindOptional:
 		if len(node.Children) > 0 {
 			return Format(node.Children[0]) + "?"
@@ -141,4 +189,21 @@ func Format(node *Node) string {
 // String implements fmt.Stringer for convenience.
 func (n *Node) String() string {
 	return Format(n)
+}
+
+func variableName(n *Node) string {
+	if n == nil {
+		return ""
+	}
+	if n.Text != "" {
+		return n.Text
+	}
+	return Format(n)
+}
+
+func variableType(n *Node) string {
+	if n == nil || len(n.Children) == 0 {
+		return ""
+	}
+	return Format(n.Children[0])
 }

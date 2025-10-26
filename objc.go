@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/blacktop/go-macho/swift/demangle"
+	swiftpkg "github.com/blacktop/go-macho/pkg/swift"
 	"github.com/blacktop/go-macho/types"
 	"github.com/blacktop/go-macho/types/objc"
 )
@@ -967,7 +967,7 @@ func (f *File) getObjcProtocol(vmaddr uint64) (proto *objc.Protocol, err error) 
 		if err != nil {
 			return nil, fmt.Errorf("failed to read cstring: %v", err)
 		}
-		proto.Name = demangle.NormalizeIdentifier(proto.Name)
+		proto.Name = swiftpkg.NormalizeIdentifier(proto.Name)
 	}
 	if protoPtr.IsaVMAddr > 0 {
 		protoPtr.IsaVMAddr = f.vma.Convert(protoPtr.IsaVMAddr)
@@ -1048,7 +1048,7 @@ func (f *File) getObjcProtocol(vmaddr uint64) (proto *objc.Protocol, err error) 
 		if err != nil {
 			return nil, fmt.Errorf("failed to read proto demangled name cstring: %v", err)
 		}
-		proto.DemangledName = demangle.NormalizeIdentifier(proto.DemangledName)
+		proto.DemangledName = swiftpkg.NormalizeIdentifier(proto.DemangledName)
 	}
 
 	proto.ProtocolT = protoPtr

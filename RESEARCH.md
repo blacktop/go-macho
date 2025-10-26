@@ -47,3 +47,38 @@ Conclusion
 In summary, Swift’s name mangling is a crucial mechanism that allows the language to support advanced features by encoding rich type information into symbol names. The flip side is that these symbol names are unreadable to humans, which is where Swift’s demangler comes into play. The Swift project provides a robust demangling implementation (also available via the swift-demangle tool) that can translate mangled names back to a human-friendly form. This is invaluable for debugging and tooling. While an official high-level API for demangling in code is still pending, developers have found ways to demangle programmatically using the underlying C function【34](https://stackoverflow.com/questions/24321773/how-can-i-demangle-a-swift-class-name-dynamically#L1-L4)】 or community libraries. The state-of-the-art as of 2025 is that we expect Swift to eventually offer a formal API (possibly once details around usage in no-allocation contexts and module placement are sorted out), but until then, the existing tools and methods fill the gap.
 
 All these details highlight the balance Swift’s design strikes between compiler/linker needs and developer experience: the compiler generates complex symbol names for correctness and performance, and complementary tooling like the demangler ensures developers can still work at the level of understandable Swift identifiers when diagnosing issues. Swift’s approach to name mangling continues to evolve, but it remains a fascinating aspect of the language’s runtime and binary interface, connecting the human-readable world of Swift source code with the lower-level world of binaries and memory addresses.
+
+## Swift Upstream References
+
+We rely on the upstream Swift sources at `OPC/swift-main/` to understand the full parser surface area, node definitions, and formatting rules before extending the pure-Go demangler. Review these before touching the parser:
+
+**Headers / Source**
+- `include/swift/AST/ASTDemangler.h`
+- `include/swift/Demangling/Demangle.h`
+- `include/swift/Demangling/DemangleNodes.def`
+- `include/swift/Demangling/Demangler.h`
+- `include/swift/SwiftDemangle/SwiftDemangle.h`
+- `lib/AST/ASTDemangler.cpp`
+- `lib/Demangling/Demangler.cpp`
+- `lib/Demangling/DemanglerAssert.h`
+- `lib/Demangling/OldDemangler.cpp`
+- `lib/SwiftDemangle/SwiftDemangle.cpp`
+- `stdlib/public/runtime/Demangle.cpp`
+
+**Tests / Fixtures**
+- `test/Demangle/`
+- `test/SourceKit/Demangle/`
+- `unittests/Basic/DemangleTest.cpp`
+- `unittests/SwiftDemangle/`
+- `unittests/SwiftDemangle/DemangleTest.cpp`
+
+**What to capture while reading**
+1. Node kinds and payloads from `DemangleNodes.def`, mapping directly to `internal/swiftdemangle/node.go`.
+2. Formatting helpers in `ASTDemangler.cpp`/`SwiftDemangle.cpp` (async/throws ordering, descriptor print logic, simplified output rules).
+3. Legacy `_T` handling paths (`OldDemangler.cpp`) and symbolic-reference resolution logic.
+4. High-value test symbols from `test/Demangle` to recreate in our parity/round-trip suites.
+
+**Gap snapshot (Oct 25 2025)**
+- Upstream declares ~370 node kinds in `DemangleNodes.def`; our Go AST models ~30. Plan: add a `.def`-driven generator (similar to `types/swift`) so `internal/swiftdemangle` stays in sync with upstream additions without manual edits.
+- Formatting parity currently diverges on method/property descriptors, async/throws suffixes, and ObjC bridge symbols. Relevant reference code: `ASTDemangler.cpp::printFunction`, `SwiftDemangle.cpp::DemanglerPrinter`, descriptor helpers.
+- Legacy `_T` manglings beyond basic tuples aren’t parsed yet—follow `OldDemangler.cpp` branches to cover them before we invest in new symbol kinds.

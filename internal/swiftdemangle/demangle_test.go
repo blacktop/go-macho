@@ -227,3 +227,34 @@ func TestDemangleOptionalTupleType(t *testing.T) {
 		t.Fatalf("unexpected optional tuple output: got %q want %q", got, want)
 	}
 }
+
+func TestDemangleAccessorsAndDescriptors(t *testing.T) {
+	d := New(nil)
+	cases := []struct {
+		mangled string
+		want    string
+	}{
+		{"_$s16DemangleFixtures7CounterC5valueSivg", "DemangleFixtures.Counter.value.getter : Swift.Int"},
+		{"_$s16DemangleFixtures7CounterC5valueSivs", "DemangleFixtures.Counter.value.setter : Swift.Int"},
+		{"_$s16DemangleFixtures7CounterC5valueSivpMV", "property descriptor for DemangleFixtures.Counter.value : Swift.Int"},
+		{"_$sScAMp", "protocol descriptor for Swift.Actor"},
+		{"_$sScA15unownedExecutorScevgTq", "method descriptor for Swift.Actor.unownedExecutor.getter : Swift.UnownedSerialExecutor"},
+		{"_$s16DemangleFixtures7CounterC5valueACSi_tcfC", "DemangleFixtures.Counter.__allocating_init(value: Swift.Int) -> DemangleFixtures.Counter"},
+		{"_$s16DemangleFixtures7CounterC5valueACSi_tcfc", "DemangleFixtures.Counter.init(value: Swift.Int) -> DemangleFixtures.Counter"},
+		{"_$s16DemangleFixtures15ObjCBridgeClassC7payloadAA5OuterV5InnerVvg", "DemangleFixtures.ObjCBridgeClass.payload.getter : DemangleFixtures.Outer.Inner"},
+		{"_$s16DemangleFixtures15ObjCBridgeClassC5label7payloadACSS_AA5OuterV5InnerVtcfC", "DemangleFixtures.ObjCBridgeClass.__allocating_init(label: Swift.String, payload: DemangleFixtures.Outer.Inner) -> DemangleFixtures.ObjCBridgeClass"},
+		{"_$s16DemangleFixtures15ObjCBridgeClassC12payloadValueSiyF", "DemangleFixtures.ObjCBridgeClass.payloadValue() -> Swift.Int"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.mangled, func(t *testing.T) {
+			out, _, err := d.DemangleString([]byte(tc.mangled))
+			if err != nil {
+				t.Fatalf("DemangleString failed: %v", err)
+			}
+			if out != tc.want {
+				t.Fatalf("unexpected demangle output: got %q want %q", out, tc.want)
+			}
+		})
+	}
+}
