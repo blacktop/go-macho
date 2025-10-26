@@ -31,6 +31,8 @@ func (d *Demangler) DemangleString(mangled []byte) (string, *Node, error) {
 	if len(clean) > 1 && clean[0] == '$' {
 		if node, err := d.DemangleSymbol(mangled); err == nil {
 			return Format(node), node, nil
+		} else if debugEnabled {
+			debugf("DemangleString: DemangleSymbol failed: %v, falling back to DemangleType\n", err)
 		}
 	}
 	node, err := d.DemangleType(mangled)
@@ -79,47 +81,75 @@ func (d *Demangler) DemangleType(mangled []byte) (*Node, error) {
 }
 
 func (p *parser) parseType() (*Node, error) {
+	if debugEnabled {
+		debugf("parseType: entry at pos=%d remaining=%q\n", p.pos, string(p.data[p.pos:]))
+	}
 	node, err := p.parseTypeWithOptions(false)
 	if err != nil {
+		if debugEnabled {
+			debugf("parseType: parseTypeWithOptions failed: %v\n", err)
+		}
 		return nil, err
 	}
 	if node != nil {
 		p.pushSubstitution(node)
 	}
+	if debugEnabled {
+		debugf("parseType: success, parsed %s, pos now %d\n", Format(node), p.pos)
+	}
 	return node, nil
 }
 
 func (p *parser) parseTypeWithOptions(allowTrailing bool) (*Node, error) {
+	if debugEnabled {
+		debugf("parseTypeWithOptions: entry at pos=%d allowTrailing=%v\n", p.pos, allowTrailing)
+	}
 	node, err := p.parsePrimaryType()
 	if err != nil {
 		return nil, err
+	}
+	if debugEnabled {
+		debugf("parseTypeWithOptions: after parsePrimaryType, node=%s pos=%d\n", Format(node), p.pos)
 	}
 
 	node, err = p.parseContextualSuffix(node)
 	if err != nil {
 		return nil, err
 	}
+	if debugEnabled {
+		debugf("parseTypeWithOptions: after parseContextualSuffix, pos=%d\n", p.pos)
+	}
 
 	node, err = p.parseTypeSuffix(node)
 	if err != nil {
 		return nil, err
+	}
+	if debugEnabled {
+		debugf("parseTypeWithOptions: after parseTypeSuffix, pos=%d\n", p.pos)
 	}
 
 	if tuple, ok, err := p.tryParseTuple(node); err != nil {
 		return nil, err
 	} else if ok {
 		node = tuple
+		if debugEnabled {
+			debugf("parseTypeWithOptions: parsed tuple, pos=%d\n", p.pos)
+		}
 		if !allowTrailing {
 			if fn, fnOK, err := p.tryParseFunctionAfterTuple(node); err != nil {
 				return nil, err
 			} else if fnOK {
 				node = fn
+				if debugEnabled {
+					debugf("parseTypeWithOptions: parsed function after tuple, pos=%d\n", p.pos)
+				}
 			}
 		}
 	}
 
 	if !allowTrailing {
 		for {
+			posBefore := p.pos
 			fn, ok, err := p.tryParseFunctionType(node)
 			if err != nil {
 				return nil, err
@@ -127,13 +157,25 @@ func (p *parser) parseTypeWithOptions(allowTrailing bool) (*Node, error) {
 			if !ok {
 				break
 			}
+			if posBefore == p.pos {
+				return nil, fmt.Errorf("function type parse made no progress at %d", p.pos)
+			}
 			node = fn
+			if debugEnabled {
+				debugf("parseTypeWithOptions: function type loop iteration, pos=%d\n", p.pos)
+			}
+		}
+		if debugEnabled {
+			debugf("parseTypeWithOptions: after function type loop, pos=%d\n", p.pos)
 		}
 	}
 
 	node, err = p.applyOptionalSuffix(node)
 	if err != nil {
 		return nil, err
+	}
+	if debugEnabled {
+		debugf("parseTypeWithOptions: after applyOptionalSuffix, pos=%d, returning\n", p.pos)
 	}
 
 	return node, nil
@@ -151,6 +193,27 @@ func (p *parser) parsePrimaryType() (*Node, error) {
 	}
 	if p.eof() {
 		return nil, fmt.Errorf("unexpected end while parsing type")
+	}
+
+	if node, ok, err := p.tryParseDependentGenericParam(); err != nil {
+		return nil, err
+	} else if ok {
+		p.pushSubstitution(node)
+		// Check for base-first dependent member type: <generic-param> <assoc-name> 'Q' <op>
+		if member, memberOk, memberErr := p.tryParseDependentMemberWithBase(node); memberErr != nil {
+			return nil, memberErr
+		} else if memberOk {
+			return member, nil
+		}
+		return node, nil
+	}
+
+	if isDigit(p.peek()) {
+		if node, ok, err := p.tryParseNumericSubstitution(); err != nil {
+			return nil, err
+		} else if ok {
+			return node, nil
+		}
 	}
 
 	// Handle symbolic references first
@@ -222,6 +285,21 @@ func (p *parser) parsePrimaryType() (*Node, error) {
 	if node, ok, err := p.tryParseSubstitution(); err != nil {
 		return nil, err
 	} else if ok {
+		return node, nil
+	}
+
+	// Handle 'y' as empty list/tuple marker before trying dependent member type
+	if p.peek() == 'y' {
+		p.consume()
+		node := NewNode(KindEmptyList, "")
+		if debugEnabled {
+			debugf("parsePrimaryType: parsed empty list at pos=%d\n", p.pos)
+		}
+		return node, nil
+	}
+
+	// Try dependent member types (associated types with Q operator)
+	if node, ok, _ := p.tryParseDependentMemberType(); ok {
 		return node, nil
 	}
 
@@ -348,6 +426,9 @@ func (p *parser) tryParseStdlibNominal() (*Node, bool, error) {
 		return nil, false, nil
 	}
 	savePos := p.pos
+	if debugEnabled {
+		debugf("tryParseStdlibNominal: entry at pos=%d\n", p.pos)
+	}
 	p.consume() // consume 's'
 
 	names := []string{"Swift"}
@@ -357,32 +438,59 @@ func (p *parser) tryParseStdlibNominal() (*Node, bool, error) {
 		return nil, false, nil
 	}
 	names = append(names, name)
+	if debugEnabled {
+		debugf("tryParseStdlibNominal: parsed first identifier %q, pos=%d\n", name, p.pos)
+	}
 
 	for !p.eof() {
 		if c := p.peek(); c < '0' || c > '9' {
+			if debugEnabled {
+				debugf("tryParseStdlibNominal: next char %q is not digit, breaking loop at pos=%d\n", c, p.pos)
+			}
 			break
+		}
+		if debugEnabled {
+			debugf("tryParseStdlibNominal: next char is digit, reading another identifier at pos=%d\n", p.pos)
 		}
 		next, err := p.readIdentifier()
 		if err != nil {
+			if debugEnabled {
+				debugf("tryParseStdlibNominal: readIdentifier failed: %v, restoring to %d\n", err, savePos)
+			}
 			p.pos = savePos
 			return nil, false, nil
 		}
 		names = append(names, next)
+		if debugEnabled {
+			debugf("tryParseStdlibNominal: parsed additional identifier %q, pos=%d, names=%v\n", next, p.pos, names)
+		}
 	}
 
 	if p.eof() {
+		if debugEnabled {
+			debugf("tryParseStdlibNominal: EOF, restoring to %d\n", savePos)
+		}
 		p.pos = savePos
 		return nil, false, nil
 	}
 	kindChar := p.peek()
 	nodeKind, ok := nominalTypeKinds[kindChar]
 	if !ok {
+		if debugEnabled {
+			debugf("tryParseStdlibNominal: kind char %q not recognized, restoring to %d\n", kindChar, savePos)
+		}
 		p.pos = savePos
 		return nil, false, nil
 	}
 	p.consume()
+	if debugEnabled {
+		debugf("tryParseStdlibNominal: consumed kind char %q, building nominal from names=%v at pos=%d\n", kindChar, names, p.pos)
+	}
 	node := buildNominal(nodeKind, names)
 	p.pushSubstitution(node)
+	if debugEnabled {
+		debugf("tryParseStdlibNominal: success, returning %s\n", Format(node))
+	}
 	return node, true, nil
 }
 
@@ -518,6 +626,263 @@ func (p *parser) tryParseSubstitution() (*Node, bool, error) {
 	return node.Clone(), true, nil
 }
 
+func (p *parser) tryParseDependentGenericParam() (*Node, bool, error) {
+	state := p.saveState()
+	depth := 0
+	index := 0
+	needUnderscore := false
+	switch {
+	case p.peek() == 'd':
+		p.consume()
+		dVal, err := p.readNumber()
+		if err != nil {
+			p.restoreState(state)
+			return nil, false, nil
+		}
+		idxVal, err := p.readNumber()
+		if err != nil {
+			p.restoreState(state)
+			return nil, false, nil
+		}
+		depth = dVal + 1
+		index = idxVal
+	case p.peek() == 'z':
+		p.consume()
+		depth = 0
+		index = 0
+	case p.peek() == 'x':
+		p.consume()
+		depth = 0
+		index = 0
+	case isDigit(p.peek()):
+		idxVal, err := p.readNumber()
+		if err != nil {
+			p.restoreState(state)
+			return nil, false, nil
+		}
+		depth = 0
+		index = idxVal + 1
+		needUnderscore = true
+	default:
+		return nil, false, nil
+	}
+
+	if needUnderscore {
+		if p.eof() || p.peek() != '_' {
+			p.restoreState(state)
+			return nil, false, nil
+		}
+		p.consume()
+	}
+
+	node := newDependentGenericParamNode(depth, index)
+	return node, true, nil
+}
+
+func newDependentGenericParamNode(depth, index int) *Node {
+	node := NewNode(KindDependentGenericParamType, "")
+	node.Append(newIndexNode(depth), newIndexNode(index))
+	return node
+}
+
+func newIndexNode(val int) *Node {
+	n := NewNode(KindIndex, fmt.Sprintf("%d", val))
+	return n
+}
+
+func (p *parser) tryParseDependentMemberType() (*Node, bool, error) {
+	// Quick check: if we're not at a position that could start an identifier, bail out
+	if p.eof() || (!isDigit(p.peek()) && p.peek() != '0') {
+		return nil, false, nil
+	}
+
+	state := p.saveState()
+	assoc, err := p.parseAssocTypeNameNode()
+	if err != nil {
+		p.restoreState(state)
+		return nil, false, nil
+	}
+	if p.eof() || p.peek() != 'Q' {
+		p.restoreState(state)
+		return nil, false, nil
+	}
+	p.consume()
+	if p.eof() {
+		p.restoreState(state)
+		return nil, false, nil
+	}
+	op := p.consume()
+	var base *Node
+	switch op {
+	case 'z':
+		base = newDependentGenericParamNode(0, 0)
+	case 'y':
+		gp, ok, err := p.tryParseDependentGenericParam()
+		if err != nil {
+			return nil, false, err
+		}
+		if !ok {
+			p.restoreState(state)
+			return nil, false, nil
+		}
+		base = gp
+	default:
+		p.restoreState(state)
+		return nil, false, nil
+	}
+	member := NewNode(KindDependentMemberType, "")
+	member.Append(base, assoc)
+	p.pushSubstitution(member)
+	return member, true, nil
+}
+
+// tryParseDependentMemberWithBase handles the "base-first" encoding: <generic-param> <assoc-name> 'Q' <op>
+// This is how Swift encodes dependent member types in parameter contexts.
+// The generic param has already been parsed (including any trailing underscore), so we just need
+// to parse the associated type name and Q operator.
+func (p *parser) tryParseDependentMemberWithBase(base *Node) (*Node, bool, error) {
+	state := p.saveState()
+	if debugEnabled {
+		endPos := state.pos + 20
+		if endPos > len(p.data) {
+			endPos = len(p.data)
+		}
+		debugf("tryParseDependentMemberWithBase: starting at pos=%d remaining=%q\n", state.pos, string(p.data[state.pos:endPos]))
+	}
+
+	// Parse the associated type name (with word substitutions)
+	assoc, err := p.parseAssocTypeNameNode()
+	if err != nil {
+		if debugEnabled {
+			debugf("tryParseDependentMemberWithBase: parseAssocTypeNameNode failed: %v\n", err)
+		}
+		p.restoreState(state)
+		return nil, false, nil
+	}
+
+	// Must be followed by 'Q'
+	if p.eof() || p.peek() != 'Q' {
+		if debugEnabled {
+			debugf("tryParseDependentMemberWithBase: not followed by Q at pos=%d, failing\n", p.pos)
+		}
+		p.restoreState(state)
+		return nil, false, nil
+	}
+	p.consume() // consume 'Q'
+
+	// Parse the operator ('z' or 'y')
+	if p.eof() {
+		p.restoreState(state)
+		return nil, false, nil
+	}
+	op := p.consume()
+
+	// 'z' means use the already-parsed base, 'y' would mean parse another one (not expected here)
+	if op != 'z' {
+		if debugEnabled {
+			debugf("tryParseDependentMemberWithBase: unexpected operator %q, failing\n", op)
+		}
+		p.restoreState(state)
+		return nil, false, nil
+	}
+
+	if debugEnabled {
+		debugf("tryParseDependentMemberWithBase: successfully parsed, creating DependentMemberType\n")
+	}
+	member := NewNode(KindDependentMemberType, "")
+	member.Append(base, assoc)
+	p.pushSubstitution(member)
+	return member, true, nil
+}
+
+func (p *parser) parseAssocTypeNameNode() (*Node, error) {
+	name, err := p.readAssocIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	assoc := NewNode(KindDependentAssociatedTypeRef, name)
+	if p.eof() {
+		return assoc, nil
+	}
+	if isDigit(p.peek()) {
+		protoName, err := p.readIdentifierNoSubst()
+		if err != nil {
+			return nil, err
+		}
+		if err := p.expect('P'); err != nil {
+			return nil, err
+		}
+		proto := NewNode(KindProtocol, protoName)
+		assoc.Append(proto)
+	}
+	return assoc, nil
+}
+
+func (p *parser) readAssocIdentifier() (string, error) {
+	state := p.saveState()
+	if debugEnabled {
+		debugf("readAssocIdentifier: saveState pos=%d remaining=%q\n", state.pos, string(p.data[state.pos:]))
+	}
+
+	// Associated type names can be encoded with word substitutions OR as literal identifiers.
+	// Try word substitutions first (more common for protocol-relative names).
+	name, err := p.readIdentifierWithWordSubstitutions()
+	if err == nil {
+		if !p.eof() && p.peek() == 'Q' {
+			if debugEnabled {
+				debugf("readAssocIdentifier: parsed identifier %q via word subst path\n", name)
+			}
+			return name, nil
+		}
+		// Parsed successfully but not followed by Q - restore and try literal path
+		p.restoreState(state)
+	} else {
+		// Word substitution parsing failed - restore and try literal path
+		p.restoreState(state)
+	}
+
+	// Try parsing as a literal identifier (length-prefixed)
+	if debugEnabled {
+		debugf("readAssocIdentifier: trying literal identifier at pos=%d\n", p.pos)
+	}
+	name, err = p.readIdentifier()
+	if err != nil {
+		if debugEnabled {
+			debugf("readAssocIdentifier: literal identifier parse failed: %v\n", err)
+		}
+		return "", err
+	}
+	if !p.eof() && p.peek() != 'Q' {
+		if debugEnabled {
+			debugf("readAssocIdentifier: literal identifier not followed by Q (have %q), failing\n", p.peek())
+		}
+		return "", fmt.Errorf("associated type identifier not followed by Q")
+	}
+	if debugEnabled {
+		debugf("readAssocIdentifier: parsed identifier %q via literal path\n", name)
+	}
+	return name, nil
+}
+
+func (p *parser) tryParseNumericSubstitution() (*Node, bool, error) {
+	state := p.saveState()
+	num, err := p.readNumber()
+	if err != nil {
+		return nil, false, nil
+	}
+	if p.eof() || p.peek() != '_' {
+		p.restoreState(state)
+		return nil, false, nil
+	}
+	p.consume()
+	node, err := p.lookupSubstitution(num)
+	if err != nil {
+		p.restoreState(state)
+		return nil, false, nil
+	}
+	return node, true, nil
+}
+
 func (p *parser) tryParseMultiSubstitution() (bool, error) {
 	if p.peek() != 'A' {
 		return false, nil
@@ -593,6 +958,9 @@ func (p *parser) parseTypeSuffix(base *Node) (*Node, error) {
 	for !p.eof() {
 		switch p.peek() {
 		case 'y':
+			if bytes.IndexByte(p.data[p.pos:], 'G') == -1 {
+				return current, nil
+			}
 			save := p.pos
 			p.consume()
 			bound, err := p.parseBoundGeneric(current)
@@ -709,8 +1077,6 @@ func isSwiftNominal(node *Node, fullyQualifiedName string) bool {
 }
 
 func (p *parser) tryParseFunctionType(result *Node) (*Node, bool, error) {
-	start := p.pos
-
 	if p.eof() {
 		return nil, false, nil
 	}
@@ -729,9 +1095,14 @@ func (p *parser) tryParseFunctionType(result *Node) (*Node, bool, error) {
 		return nil, false, err
 	}
 	if !ok {
-		p.pos = start
+		// No parameters found - this is fine, just not a function type
+		// No rewind needed because parseFunctionInput handles its own position
 		return nil, false, nil
 	}
+
+	// At this point, we've successfully parsed parameters onto the stack/tree
+	// We must NOT rewind even if subsequent checks fail, because the parameters
+	// are real and have consumed input.
 
 	async := false
 	throws := false
@@ -750,7 +1121,9 @@ func (p *parser) tryParseFunctionType(result *Node) (*Node, bool, error) {
 	}
 
 	if p.eof() || p.peek() != 'c' {
-		p.pos = start
+		// We parsed valid params but this isn't a complete function type
+		// Don't rewind - leave position where it is so we don't reparse
+		// Just return not-ok
 		return nil, false, nil
 	}
 	p.consume()
@@ -763,7 +1136,7 @@ func (p *parser) tryParseFunctionType(result *Node) (*Node, bool, error) {
 }
 
 func (p *parser) parseFunctionInput() (*Node, bool, error) {
-	start := p.pos
+	labelStart := p.pos
 
 	if p.eof() {
 		return nil, false, nil
@@ -780,10 +1153,8 @@ func (p *parser) parseFunctionInput() (*Node, bool, error) {
 		if p.pos+1 < len(p.data) {
 			next2 = p.data[p.pos+1]
 		}
-		debugf("parseFunctionInput: start=%d remaining=%q pendingLen=%d floor=%d next=%q next2=%q\n", start, string(p.data[start:]), len(p.pending), p.pendingFloor, next, next2)
+		debugf("parseFunctionInput: start=%d remaining=%q pendingLen=%d floor=%d next=%q next2=%q\n", labelStart, string(p.data[labelStart:]), len(p.pending), p.pendingFloor, next, next2)
 	}
-	// fmt.Printf("parseFunctionInput start pos=%d char=%c\n", p.pos, p.peek())
-	// fmt.Printf("parseFunctionInput start pos=%d char=%c\n", p.pos, p.peek())
 
 	// Empty tuple is encoded as 'y' (optionally repeated). Accept single 'y'.
 	if p.peek() == 'y' {
@@ -795,9 +1166,30 @@ func (p *parser) parseFunctionInput() (*Node, bool, error) {
 		return tuple, true, nil
 	}
 
+	// Try to skip parameter label if present
+	p.skipParameterLabel()
+
+	// If we have 'y' after the label, parse as tuple
+	if !p.eof() && p.peek() == 'y' {
+		p.pushPendingScope()
+		tuple, err := p.parseParameterTuple()
+		p.popPendingScope()
+		if err != nil {
+			// Tuple parsing failed - restore to before we tried to skip label
+			p.pos = labelStart
+			return nil, false, nil
+		}
+		if debugEnabled {
+			debugf("parseFunctionInput: parsed tuple node=%s pos=%d remaining=%q\n", Format(tuple), p.pos, string(p.data[p.pos:]))
+		}
+		return tuple, true, nil
+	}
+
+	// Try to parse as a single type
 	node, err := p.parseTypeWithOptions(true)
 	if err != nil {
-		p.pos = start
+		// Type parsing failed - restore to before we tried to skip label
+		p.pos = labelStart
 		return nil, false, nil
 	}
 	if node != nil {
@@ -824,6 +1216,164 @@ func (p *parser) parseFunctionInput() (*Node, bool, error) {
 	tuple := NewNode(KindTuple, "")
 	tuple.Append(node)
 	return tuple, true, nil
+}
+
+func (p *parser) skipParameterLabel() {
+	if p.eof() || p.peek() != '_' {
+		return
+	}
+	if p.pos+1 >= len(p.data) || !isDigit(p.data[p.pos+1]) {
+		return
+	}
+	save := p.pos
+	p.consume() // underscore
+	if debugEnabled {
+		debugf("skipParameterLabel: consumed '_' at %d\n", save)
+	}
+	if _, err := p.readIdentifierNoSubst(); err != nil {
+		p.pos = save
+		return
+	}
+	if debugEnabled {
+		nxt := byte(0)
+		if !p.eof() {
+			nxt = p.peek()
+		}
+		debugf("skipParameterLabel: new pos=%d next=%q\n", p.pos, nxt)
+	}
+}
+
+func (p *parser) parseParameterTuple() (*Node, error) {
+	start := p.pos
+	if p.eof() || p.peek() != 'y' {
+		return nil, fmt.Errorf("parameter tuple must start with 'y'")
+	}
+	p.consume()
+	tuple := NewNode(KindTuple, "")
+	frame := p.pushNodeFrame()
+	success := false
+	defer func() {
+		if !success {
+			p.discardNodeFrame(frame)
+		}
+	}()
+	for {
+		if p.eof() {
+			return nil, fmt.Errorf("unterminated parameter tuple starting at %d", start)
+		}
+		if debugEnabled {
+			debugf("parseParameterTuple: pos=%d char=%q remaining=%q\n", p.pos, p.peek(), string(p.data[p.pos:]))
+		}
+		if p.peek() == '_' {
+			p.consume()
+			continue
+		}
+		if p.peek() == 't' {
+			p.consume()
+			break
+		}
+		elem, err := p.parseParameterElement()
+		if err != nil {
+			return nil, err
+		}
+		if !p.eof() && p.peek() == 'z' {
+			p.consume()
+			wrapped := NewNode(KindInOut, "")
+			wrapped.Append(elem)
+			elem = wrapped
+		}
+		p.pushNode(elem)
+	}
+	elems := p.popNodesSince(frame)
+	for _, el := range elems {
+		tuple.Append(el)
+	}
+	success = true
+	return tuple, nil
+}
+
+func (p *parser) parseParameterElement() (*Node, error) {
+	// In parameter context, we need to handle sequences like "01_A5CTypeQz"
+	// where 01_ is a dependent generic param that gets combined with a dependent member type.
+	// The C++ demangler uses a stack; we simulate this with lookahead.
+
+	// Check if we're starting with a dependent generic param followed by identifier+Q
+	if isDigit(p.peek()) || p.peek() == 'x' || p.peek() == 'z' || p.peek() == 'd' {
+		state := p.saveState()
+
+		// Try to parse a dependent generic param
+		gpNode, gpOk, gpErr := p.tryParseDependentGenericParam()
+		if gpErr != nil {
+			p.restoreState(state)
+		} else if gpOk {
+			// Check if followed by an identifier + Q (dependent member type pattern)
+			checkPos := p.pos
+			if !p.eof() && (isAlpha(p.peek()) || isDigit(p.peek())) {
+				// Try to parse the dependent member type
+				if node, ok, err := p.tryParseDependentAssocElement(); err == nil && ok {
+					// Success! The generic param was context, and we got the member type
+					return node, nil
+				}
+			}
+			// Not a dependent member pattern, restore and return the generic param
+			p.pos = checkPos
+			return gpNode, nil
+		}
+		p.restoreState(state)
+	}
+
+	// Try standard dependent assoc element (A5CTypeQz without prefix)
+	if node, ok, err := p.tryParseDependentAssocElement(); err != nil {
+		return nil, err
+	} else if ok {
+		return node, nil
+	}
+
+	// Standard type parsing
+	return p.parseTypeWithOptions(true)
+}
+
+func isAlpha(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+func (p *parser) tryParseDependentAssocElement() (*Node, bool, error) {
+	state := p.saveState()
+	assoc, err := p.parseAssocTypeNameNode()
+	if err != nil {
+		p.restoreState(state)
+		return nil, false, nil
+	}
+	if err := p.expect('Q'); err != nil {
+		p.restoreState(state)
+		return nil, false, nil
+	}
+	if p.eof() {
+		p.restoreState(state)
+		return nil, false, nil
+	}
+	op := p.consume()
+	var base *Node
+	switch op {
+	case 'z':
+		base = newDependentGenericParamNode(0, 0)
+	case 'y':
+		gp, ok, err := p.tryParseDependentGenericParam()
+		if err != nil {
+			return nil, false, err
+		}
+		if !ok {
+			p.restoreState(state)
+			return nil, false, nil
+		}
+		base = gp
+	default:
+		p.restoreState(state)
+		return nil, false, nil
+	}
+	member := NewNode(KindDependentMemberType, "")
+	member.Append(base, assoc)
+	return member, true, nil
 }
 
 func (p *parser) applyOptionalSuffix(node *Node) (*Node, error) {
@@ -868,10 +1418,14 @@ func (p *parser) tryParseTuple(node *Node) (*Node, bool, error) {
 			return tuple, true, nil
 		}
 
+		posBefore := p.pos
 		elem, err := p.parseTypeWithOptions(true)
 		if err != nil {
 			p.pos = savePos
 			return node, false, nil
+		}
+		if p.pos == posBefore {
+			panic("infinite loop detected in recursive tuple parse")
 		}
 		elements = append(elements, elem)
 	}

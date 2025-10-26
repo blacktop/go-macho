@@ -222,7 +222,7 @@ func (f *File) readField(r io.ReadSeeker, addr uint64) (field *swift.Field, err 
 		if err != nil {
 			return nil, fmt.Errorf("failed to read swift field mangled type name: %w", err)
 		}
-		field.Type = swiftpkg.NormalizeIdentifier(field.Type)
+		field.Type = f.normalizeSwiftIdentifier(field.Type)
 	}
 
 	if field.SuperclassOffset.IsSet() {
@@ -230,7 +230,7 @@ func (f *File) readField(r io.ReadSeeker, addr uint64) (field *swift.Field, err 
 		if err != nil {
 			return nil, fmt.Errorf("failed to read swift field super class mangled name: %w", err)
 		}
-		field.SuperClass = swiftpkg.NormalizeIdentifier(field.SuperClass)
+		field.SuperClass = f.normalizeSwiftIdentifier(field.SuperClass)
 	}
 
 	for idx, rec := range field.Records {
@@ -244,7 +244,7 @@ func (f *File) readField(r io.ReadSeeker, addr uint64) (field *swift.Field, err 
 			if err != nil {
 				return nil, fmt.Errorf("failed to read swift field record mangled type name; %w", err)
 			}
-			field.Records[idx].MangledType = swiftpkg.NormalizeIdentifier(field.Records[idx].MangledType)
+			field.Records[idx].MangledType = f.normalizeSwiftIdentifier(field.Records[idx].MangledType)
 		}
 	}
 
@@ -2609,10 +2609,23 @@ func (f *File) demangleSwiftString(input string) string {
 	if trimmed == "" {
 		return input
 	}
+	if !f.swiftAutoDemangle {
+		return trimmed
+	}
 	if out, err := swiftpkg.Demangle(trimmed); err == nil && out != "" {
 		return out
 	}
-	return swiftpkg.NormalizeIdentifier(input)
+	return swiftpkg.NormalizeIdentifier(trimmed)
+}
+
+func (f *File) normalizeSwiftIdentifier(name string) string {
+	if name == "" {
+		return name
+	}
+	if !f.swiftAutoDemangle {
+		return name
+	}
+	return swiftpkg.NormalizeIdentifier(name)
 }
 
 func isPrintableASCII(s string) bool {
@@ -2962,7 +2975,7 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				continue
 			}
 			appendNormalized := func(val string) {
-				out = append(out, swiftpkg.NormalizeIdentifier(val))
+				out = append(out, f.normalizeSwiftIdentifier(val))
 			}
 			if regexp.MustCompile("So[0-9]+").MatchString(part) {
 				if strings.Contains(part, "OS_dispatch_queue") {
@@ -3015,7 +3028,7 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				// if symbolic {
 				// 	name += "()"
 				// }
-				out = append(out, swiftpkg.NormalizeIdentifier(name))
+			out = append(out, f.normalizeSwiftIdentifier(name))
 			case 0x02: // symbolic reference to a context descriptor
 				var name string
 				ptr, err := f.GetPointerAtAddress(part.Addr)
@@ -3048,7 +3061,7 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				// if symbolic {
 				// 	name += "()"
 				// }
-				out = append(out, swiftpkg.NormalizeIdentifier(name))
+			out = append(out, f.normalizeSwiftIdentifier(name))
 			case 0x09: // DIRECT symbolic reference to an accessor function, which can be executed in the process to get a pointer to the referenced entity.
 				// AccessorFunctionReference
 				out = append(out, fmt.Sprintf("(accessor function sub_%x)", part.Addr))
@@ -3072,7 +3085,7 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				// if symbolic {
 				// 	name += "()"
 				// }
-				out = append(out, swiftpkg.NormalizeIdentifier(name))
+			out = append(out, f.normalizeSwiftIdentifier(name))
 			case 0x0b: // DIRECT symbolic reference to a non-unique extended existential type shape.
 				// NonUniqueExtendedExistentialTypeShape
 				var name string
@@ -3093,14 +3106,14 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				// if symbolic {
 				// 	name += "()"
 				// }
-				out = append(out, swiftpkg.NormalizeIdentifier(name))
+			out = append(out, f.normalizeSwiftIdentifier(name))
 			case 0x0c: // DIRECT symbolic reference to a objective C protocol ref.
 				// ObjectiveCProtocol
 				name, err := f.readObjCProtocolName(part.Addr)
 				if err != nil {
 					return "", fmt.Errorf("failed to resolve objective-c protocol reference at %#x: %w", part.Addr, err)
 				}
-				out = append(out, swiftpkg.NormalizeIdentifier(name))
+			out = append(out, f.normalizeSwiftIdentifier(name))
 			/* These are all currently reserved but unused. */
 			case 0x03: // DIRECT to protocol conformance descriptor
 				fallthrough

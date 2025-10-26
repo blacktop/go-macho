@@ -44,6 +44,7 @@ type File struct {
 	ledata      *bytes.Buffer // tmp storage of linkedit data
 
 	sharedCacheRelativeSelectorBaseVMAddress uint64 // objc_opt version 16
+	swiftAutoDemangle                        bool
 
 	mu     sync.Mutex
 	sr     types.MachoReader
@@ -134,6 +135,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 	var loadExcluding []types.LoadCmd
 
 	f := new(File)
+	f.swiftAutoDemangle = true
 
 	f.objc = make(map[uint64]any)
 	f.swift = make(map[uint64]any)
@@ -3266,4 +3268,14 @@ func (f *File) FindAddressSymbols(addr uint64) ([]Symbol, error) {
 		return syms, nil
 	}
 	return nil, fmt.Errorf("symbol(s) not found in macho symtab for addr %#x", addr)
+}
+
+// SetSwiftAutoDemangle toggles automatic demangling of Swift metadata strings when parsing structures.
+func (f *File) SetSwiftAutoDemangle(enabled bool) {
+	f.swiftAutoDemangle = enabled
+}
+
+// SwiftAutoDemangle reports whether Swift metadata strings are automatically demangled.
+func (f *File) SwiftAutoDemangle() bool {
+	return f.swiftAutoDemangle
 }

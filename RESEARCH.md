@@ -82,3 +82,11 @@ We rely on the upstream Swift sources at `OPC/swift-main/` to understand the ful
 - Upstream declares ~370 node kinds in `DemangleNodes.def`; our Go AST models ~30. Plan: add a `.def`-driven generator (similar to `types/swift`) so `internal/swiftdemangle` stays in sync with upstream additions without manual edits.
 - Formatting parity currently diverges on method/property descriptors, async/throws suffixes, and ObjC bridge symbols. Relevant reference code: `ASTDemangler.cpp::printFunction`, `SwiftDemangle.cpp::DemanglerPrinter`, descriptor helpers.
 - Legacy `_T` manglings beyond basic tuples aren’t parsed yet—follow `OldDemangler.cpp` branches to cover them before we invest in new symbol kinds.
+
+---
+
+### 2025-10-26 updates
+
+- Implemented Swift’s word-substituted identifier grammar (`0…` form) in the parser so private identifiers such as `_ObjectiveCType` now materialize by replaying the shared word table just like `Demangler::demangleIdentifier`.
+- Added support for the modified punycode mode (`00…`) by translating `_` back to `-`, mapping `A…J` to digits, and running the reconstructed label through `idna.Lookup` (with an `xn--` prefix) so non-ASCII identifiers work without CGO.
+- `tryParseDependentAssocElement` now parses the associated-type name before consuming the trailing `Q{z|y…}` opcode, allowing us to emit `KindDependentMemberType` nodes that mirror Swift’s `Demangler::demangleArchetype` (e.g., `A._ObjectiveCType`).

@@ -92,3 +92,33 @@ public class ObjCBridgeClass: NSObject {
     payload.value
   }
 }
+
+public struct Restriction {
+  public typealias Getter = @Sendable () -> Any
+  public typealias Setter = @Sendable (Any) -> Void
+
+  public var getter: Getter
+  public var setter: Setter
+  public var defaultValue: Any?
+  public var innerStoredValue: Any?
+}
+
+public actor LockdownModeServer {
+  public func setEnabled(_ enabled: Bool, options: [AnyHashable: Any]?, completion: @escaping (Bool, Error?) -> Void) {
+    completion(enabled, nil)
+  }
+
+  public func getEnabledInAccount(synchronize: @Sendable (Bool) -> Void, completion: @escaping (Bool) -> Void) {
+    synchronize(true)
+    completion(true)
+  }
+
+  public func notifyRestrictionChanged(_ restriction: String, completion: @escaping (Error?) -> Void) {
+    completion(nil)
+  }
+
+  public func enableIfNeeded(reboot: @escaping (Bool) -> Void, completion: @escaping (Bool, Bool, Error?) -> Void) {
+    reboot(false)
+    completion(true, false, nil)
+  }
+}

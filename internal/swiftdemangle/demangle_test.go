@@ -2,8 +2,13 @@ package swiftdemangle
 
 import (
 	"fmt"
+	"os"
+	"runtime/pprof"
 	"testing"
+	"time"
 )
+
+const forceBridgeSymbol = "_$ss21_ObjectiveCBridgeableP016_forceBridgeFromA1C_6resulty01_A5CTypeQz_xSgztFZTq"
 
 type stubResolver struct {
 	nodes map[int32]*Node
@@ -161,6 +166,59 @@ func TestDemangleDictionary(t *testing.T) {
 	}
 }
 
+func TestDemangleObjectiveCBridgeableForceBridgeProfile(t *testing.T) {
+	if os.Getenv("GO_MACHO_SWIFT_PROFILE_FORCEBRIDGE") == "" {
+		t.Skip("set GO_MACHO_SWIFT_PROFILE_FORCEBRIDGE=1 to run profiling test")
+	}
+	prof, err := os.CreateTemp("", "forcebridge-*.pprof")
+	if err != nil {
+		t.Fatalf("failed to create profile file: %v", err)
+	}
+	t.Logf("CPU profile will be written to %s", prof.Name())
+	if err := pprof.StartCPUProfile(prof); err != nil {
+		prof.Close()
+		t.Fatalf("failed to start cpu profile: %v", err)
+	}
+	t.Cleanup(func() {
+		pprof.StopCPUProfile()
+		prof.Close()
+		t.Logf("CPU profile saved to %s", prof.Name())
+	})
+	done := make(chan struct{})
+	var (
+		out    string
+		node   *Node
+		demErr error
+	)
+	go func() {
+		out, node, demErr = Demangle(forceBridgeSymbol)
+		close(done)
+	}()
+	select {
+	case <-time.After(10 * time.Second):
+		t.Fatalf("demangle of %s timed out; inspect %s", forceBridgeSymbol, prof.Name())
+	case <-done:
+	}
+	if demErr != nil {
+		t.Fatalf("Demangle returned error: %v", demErr)
+	}
+	if node == nil {
+		t.Fatalf("Demangle returned nil node")
+	}
+	t.Logf("demangled symbol: %s", out)
+}
+
+func TestDemangleObjectiveCBridgeableForceBridge(t *testing.T) {
+	out, _, err := Demangle(forceBridgeSymbol)
+	if err != nil {
+		t.Fatalf("Demangle failed: %v", err)
+	}
+	const want = "method descriptor for static Swift._ObjectiveCBridgeable._forceBridgeFromObjectiveC(_: A._ObjectiveCType, result: inout A?) -> ()"
+	if out != want {
+		t.Fatalf("unexpected demangle result:\n got  %q\n want %q", out, want)
+	}
+}
+
 func TestDemangleFunctionTypes(t *testing.T) {
 	cases := []struct {
 		mangled string
@@ -244,6 +302,40 @@ func TestDemangleAccessorsAndDescriptors(t *testing.T) {
 		{"_$s16DemangleFixtures15ObjCBridgeClassC7payloadAA5OuterV5InnerVvg", "DemangleFixtures.ObjCBridgeClass.payload.getter : DemangleFixtures.Outer.Inner"},
 		{"_$s16DemangleFixtures15ObjCBridgeClassC5label7payloadACSS_AA5OuterV5InnerVtcfC", "DemangleFixtures.ObjCBridgeClass.__allocating_init(label: Swift.String, payload: DemangleFixtures.Outer.Inner) -> DemangleFixtures.ObjCBridgeClass"},
 		{"_$s16DemangleFixtures15ObjCBridgeClassC12payloadValueSiyF", "DemangleFixtures.ObjCBridgeClass.payloadValue() -> Swift.Int"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.mangled, func(t *testing.T) {
+			out, _, err := d.DemangleString([]byte(tc.mangled))
+			if err != nil {
+				t.Fatalf("DemangleString failed: %v", err)
+			}
+			if out != tc.want {
+				t.Fatalf("unexpected demangle output: got %q want %q", out, tc.want)
+			}
+		})
+	}
+}
+
+func TestDemangleMetadataSuffixes(t *testing.T) {
+	d := New(nil)
+	cases := []struct {
+		mangled string
+		want    string
+	}{
+		{"$sSiMa", "type metadata accessor for Swift.Int"},
+		{"$sSaMb", "canonical specialized generic type metadata accessor for Swift.Array"},
+		{"$sSiMf", "full type metadata for Swift.Int"},
+		{"$sSiMi", "type metadata instantiation function for Swift.Int"},
+		{"$sSiMI", "type metadata instantiation cache for Swift.Int"},
+		{"$sSiMl", "type metadata singleton initialization cache for Swift.Int"},
+		{"$sSiMr", "type metadata completion function for Swift.Int"},
+		{"$sSiMo", "class metadata base offset for Swift.Int"},
+		{"$sSiMs", "ObjC resilient class stub for Swift.Int"},
+		{"$sSiMt", "full ObjC resilient class stub for Swift.Int"},
+		{"$sSiMu", "method lookup function for Swift.Int"},
+		{"$sSiMU", "ObjC metadata update function for Swift.Int"},
+		{"$sSiMz", "flag for loading of canonical specialized generic type metadata for Swift.Int"},
 	}
 	for _, tc := range cases {
 		tc := tc

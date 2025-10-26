@@ -1,8 +1,15 @@
 package swift
 
-import "regexp"
+import (
+	"log"
+	"os"
+	"regexp"
+)
 
-var blobTokenPattern = regexp.MustCompile(`(?:_?\$[sS]|S[oO])[A-Za-z0-9_]+`)
+var (
+	blobTokenPattern = regexp.MustCompile(`(?:_?\$[sStT]|S[oO]|_T)[A-Za-z0-9_]+`)
+	logBlobTokens    = os.Getenv("GO_MACHO_SWIFT_TRACE_BLOB") != ""
+)
 
 // Demangle returns the fully formatted Swift symbol text.
 func Demangle(input string) (string, error) {
@@ -17,6 +24,9 @@ func DemangleSimple(input string) (string, error) {
 // DemangleBlob replaces every mangled token in blob with its demangled equivalent.
 func DemangleBlob(blob string) string {
 	return blobTokenPattern.ReplaceAllStringFunc(blob, func(token string) string {
+		if logBlobTokens {
+			log.Printf("DemangleBlob token: %s", token)
+		}
 		out, err := Demangle(token)
 		if err != nil {
 			return token
