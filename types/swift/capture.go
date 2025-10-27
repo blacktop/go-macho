@@ -67,7 +67,8 @@ type CaptureDescriptor struct {
 
 type CaptureType struct {
 	CaptureTypeRecord
-	TypeName string
+	TypeName    string // Formatted type name for display
+	RawMangling string // Original mangled form (for DynamicSelf context)
 }
 
 type CaptureTypeRecord struct {
@@ -110,7 +111,8 @@ func (msr *MetadataSourceRecord) Read(r io.Reader, addr uint64) error {
 
 type MetadataSource struct {
 	MetadataSourceRecord
-	MangledType           string
+	MangledType           string // Demangled/formatted type name for display
+	RawMangling           string // Original mangled form (for DynamicSelf context)
 	MangledMetadataSource string
 }
 

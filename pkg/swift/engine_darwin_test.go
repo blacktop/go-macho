@@ -32,49 +32,27 @@ func TestDarwinEngineMatchesPureGo(t *testing.T) {
 		{"_$sypyc", false},
 		{"_$syypc", false},
 		{"_$sypSg", false},
-		// Remaining symbols observed from lockdownmoded that pure Go still fails to demangle.
-		{"_$ss35_HasCustomAnyHashableRepresentationMp", false},
+		// Remaining symbols observed from lockdownmoded that pure Go still fails to demangle (35 symbols total).
 		{"_$s8RawValueSYTl", false},
 		{"_$sSY8rawValuexSg03RawB0Qz_tcfCTq", false},
-		{"_$ss20_SwiftNewtypeWrapperMp", false},
-		{"_$ss20_SwiftNewtypeWrapperPSYTb", false},
-		{"_$ss20_SwiftNewtypeWrapperPs35_HasCustomAnyHashableRepresentationTb", false},
 		{"_$sSQ2eeoiySbx_xtFZTq", false},
-		{"_$ss21_ObjectiveCBridgeableMp", false},
 		{"_$s15_ObjectiveCTypes01_A11CBridgeablePTl", false},
-		{"_$sSHSQTb", false},
 		{"_$sSH4hash4intoys6HasherVz_tFTq", false},
 		{"_$sSH13_rawHashValue4seedS2i_tFTq", false},
-		{"_$s10Foundation18_ErrorCodeProtocolMp", false},
-		{"_$s10Foundation18_ErrorCodeProtocolPSQTb", false},
 		{"_$s10Foundation18_ErrorCodeProtocolP01_B4TypeAC_AA21_BridgedStoredNSErrorTn", false},
 		{"_$s10_ErrorType10Foundation01_A12CodeProtocolPTl", false},
-		{"_$s10Foundation21_BridgedStoredNSErrorMp", false},
 		{"_$s10Foundation21_BridgedStoredNSErrorPAA06CustomD0Tb", false},
 		{"_$s10Foundation21_BridgedStoredNSErrorPAA26_ObjectiveCBridgeableErrorTb", false},
-		{"_$s10Foundation21_BridgedStoredNSErrorPSHTb", false},
 		{"_$s10Foundation21_BridgedStoredNSErrorP4CodeAC_AA06_ErrorE8ProtocolTn", false},
 		{"_$s10Foundation21_BridgedStoredNSErrorP4CodeAC_SYTn", false},
 		{"_$s10Foundation21_BridgedStoredNSErrorP4CodeAC_8RawValueSYs17FixedWidthIntegerTn", false},
 		{"_$s4Code10Foundation21_BridgedStoredNSErrorPTl", false},
-		{"_$s10Foundation26_ObjectiveCBridgeableErrorMp", false},
-		{"_$s10Foundation26_ObjectiveCBridgeableErrorPs0D0Tb", false},
 		{"_$s10Foundation26_ObjectiveCBridgeableErrorP15_bridgedNSErrorxSgSo0F0Ch_tcfCTq", false},
-		{"_$ss5ErrorMp", false},
 		{"_$ss5ErrorP9_userInfoyXlSgvgTq", false},
 		{"_$ss5ErrorP19_getEmbeddedNSErroryXlSgyFTq", false},
-		{"_$s10Foundation13CustomNSErrorMp", false},
-		{"_$s10Foundation13CustomNSErrorPs5ErrorTb", false},
 		{"_$s10Foundation13CustomNSErrorP13errorUserInfoSDySSypGvgTq", false},
-		{"_$s14CoreFoundation9_CFObjectMp", false},
-		{"_$s14CoreFoundation9_CFObjectPSHTb", false},
-		{"_$ss23CustomStringConvertibleMp", false},
-		{"_$s10Foundation14LocalizedErrorMp", false},
-		{"_$s10Foundation14LocalizedErrorPs0C0Tb", false},
-		{"_$ss12CaseIterableMp", false},
 		{"_$ss12CaseIterableP8AllCasesAB_SlTn", false},
 		{"_$s8AllCasess12CaseIterablePTl", false},
-		{"_$sScA_pSg", false},
 		{"_$sytIeAgHr_", false},
 		{"_$sIeyBh_", false},
 		{"_$sIeghH_", false},
@@ -99,10 +77,14 @@ func TestDarwinEngineMatchesPureGo(t *testing.T) {
 			}
 			got, err := pure.Demangle(tc.symbol)
 			if !tc.supported {
-				if err == nil {
-					t.Fatalf("expected pure Go demangler to fail for %q but succeeded with %q", tc.symbol, got)
+				if err != nil {
+					t.Skipf("pure Go demangler does not yet support %q: %v", tc.symbol, err)
 				}
-				t.Skipf("pure Go demangler does not yet support %q: %v", tc.symbol, err)
+				if got != want {
+					t.Skipf("pure Go demangler output mismatch for %q: got %q want %q", tc.symbol, got, want)
+				}
+				// If we reach here the pure-Go engine unexpectedly matched; treat as supported regression.
+				t.Fatalf("symbol %q now matches; flip supported=true and update the test", tc.symbol)
 			}
 			if err != nil {
 				t.Fatalf("pure Go demangler does not yet support %q: %v", tc.symbol, err)

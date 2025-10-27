@@ -11,24 +11,24 @@ import (
 const forceBridgeSymbol = "_$ss21_ObjectiveCBridgeableP016_forceBridgeFromA1C_6resulty01_A5CTypeQz_xSgztFZTq"
 
 type stubResolver struct {
-	nodes map[int32]*Node
+	nodes map[string]*Node
 	calls []struct {
 		control  byte
-		offset   int32
+		payload  []byte
 		refIndex int
 	}
 }
 
-func (s *stubResolver) ResolveType(control byte, offset int32, refIndex int) (*Node, error) {
+func (s *stubResolver) ResolveType(control byte, payload []byte, refIndex int) (*Node, error) {
 	s.calls = append(s.calls, struct {
 		control  byte
-		offset   int32
+		payload  []byte
 		refIndex int
-	}{control: control, offset: offset, refIndex: refIndex})
-	if node, ok := s.nodes[offset]; ok {
+	}{control: control, payload: append([]byte(nil), payload...), refIndex: refIndex})
+	if node, ok := s.nodes[string(payload)]; ok {
 		return node.Clone(), nil
 	}
-	return nil, fmt.Errorf("unknown symbolic reference offset %d", offset)
+	return nil, fmt.Errorf("unknown symbolic reference payload %x", payload)
 }
 
 func TestDemangleStandardType(t *testing.T) {
@@ -86,8 +86,8 @@ func TestDemangleTupleWithSubstitution(t *testing.T) {
 
 func TestDemangleSymbolicReference(t *testing.T) {
 	resolver := &stubResolver{
-		nodes: map[int32]*Node{
-			0x1234: func() *Node {
+		nodes: map[string]*Node{
+			string([]byte{0x34, 0x12, 0x00, 0x00}): func() *Node {
 				node := NewNode(KindStructure, "ResolvedType")
 				node.Append(NewNode(KindModule, "MyModule"))
 				return node
@@ -111,8 +111,43 @@ func TestDemangleSymbolicReference(t *testing.T) {
 	if call.control != 0x01 {
 		t.Fatalf("unexpected control %#x", call.control)
 	}
-	if call.offset != 0x1234 {
-		t.Fatalf("unexpected offset %x", call.offset)
+	if got := call.payload; len(got) != 4 || got[0] != 0x34 || got[1] != 0x12 {
+		t.Fatalf("unexpected payload %x", got)
+	}
+	if call.refIndex != 1 {
+		t.Fatalf("unexpected ref index %d", call.refIndex)
+	}
+}
+
+func TestDemangleSymbolicReferenceAbsolute(t *testing.T) {
+	resolver := &stubResolver{
+		nodes: map[string]*Node{
+			string([]byte{0x78, 0x56, 0x34, 0x12, 0x00, 0x00, 0x00, 0x00}): func() *Node {
+				node := NewNode(KindStructure, "AbsType")
+				node.Append(NewNode(KindModule, "MyModule"))
+				return node
+			}(),
+		},
+	}
+
+	d := New(resolver)
+	input := []byte{0x18, 0x78, 0x56, 0x34, 0x12, 0x00, 0x00, 0x00, 0x00}
+	node, err := d.DemangleType(input)
+	if err != nil {
+		t.Fatalf("DemangleType failed: %v", err)
+	}
+	if got, want := Format(node), "MyModule.AbsType"; got != want {
+		t.Fatalf("Format mismatch: got %q, want %q", got, want)
+	}
+	if len(resolver.calls) != 1 {
+		t.Fatalf("expected resolver to be invoked once, got %d", len(resolver.calls))
+	}
+	call := resolver.calls[0]
+	if call.control != 0x18 {
+		t.Fatalf("unexpected control %#x", call.control)
+	}
+	if got := call.payload; len(got) != 8 || got[0] != 0x78 || got[1] != 0x56 {
+		t.Fatalf("unexpected payload %x", got)
 	}
 	if call.refIndex != 1 {
 		t.Fatalf("unexpected ref index %d", call.refIndex)

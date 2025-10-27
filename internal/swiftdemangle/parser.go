@@ -34,7 +34,7 @@ var accessorDisplay = map[string]string{
 // the reference site and return a preconstructed node representing the target
 // context or type.
 type SymbolicReferenceResolver interface {
-	ResolveType(control byte, offset int32, refIndex int) (*Node, error)
+	ResolveType(control byte, payload []byte, refIndex int) (*Node, error)
 }
 
 type parser struct {
@@ -48,6 +48,7 @@ type parser struct {
 	pendingScopes []int
 	words         []string
 	nodeStack     []*Node // Lightweight stack for function params and dependent member types
+	typeStack     []*Node // Tracks previously parsed Type nodes for stack-based operators (impl function types, etc.)
 }
 
 func newParser(data []byte, resolver SymbolicReferenceResolver) *parser {
@@ -130,6 +131,23 @@ func (p *parser) popNodesSince(frame int) []*Node {
 	nodes := append([]*Node(nil), p.nodeStack[frame:]...)
 	p.nodeStack = p.nodeStack[:frame]
 	return nodes
+}
+
+func (p *parser) pushTypeForStack(node *Node) {
+	if node == nil {
+		return
+	}
+	var typeNode *Node
+	if node.Kind == KindType {
+		typeNode = node
+	} else {
+		typeNode = NewNode(KindType, "")
+		typeNode.Append(node)
+	}
+	p.typeStack = append(p.typeStack, typeNode)
+	if debugEnabled {
+		debugf("pushTypeForStack[%d]=%s\n", len(p.typeStack)-1, Format(typeNode))
+	}
 }
 
 func (p *parser) readNumber() (int, error) {
@@ -470,16 +488,18 @@ func adaptPunycodeBias(delta, numPoints int, firstTime bool) int {
 }
 
 type parserState struct {
-	pos        int
-	substLen   int
-	pendingLen int
+	pos          int
+	substLen     int
+	pendingLen   int
+	typeStackLen int
 }
 
 func (p *parser) saveState() parserState {
 	return parserState{
-		pos:        p.pos,
-		substLen:   len(p.subst),
-		pendingLen: len(p.pending),
+		pos:          p.pos,
+		substLen:     len(p.subst),
+		pendingLen:   len(p.pending),
+		typeStackLen: len(p.typeStack),
 	}
 }
 
@@ -493,6 +513,9 @@ func (p *parser) restoreState(state parserState) {
 	}
 	if len(p.pending) > state.pendingLen {
 		p.pending = p.pending[:state.pendingLen]
+	}
+	if len(p.typeStack) > state.typeStackLen {
+		p.typeStack = p.typeStack[:state.typeStackLen]
 	}
 }
 
@@ -540,6 +563,25 @@ func (p *parser) popPendingScope() {
 		prev = len(p.pending)
 	}
 	p.pendingFloor = prev
+}
+
+func (p *parser) popTypeNodes(count int) ([]*Node, error) {
+	if count < 0 {
+		count = 0
+	}
+	if count == 0 {
+		return nil, nil
+	}
+	if len(p.typeStack) < count {
+		return nil, fmt.Errorf("impl function expected %d prior types, have %d", count, len(p.typeStack))
+	}
+	popped := make([]*Node, count)
+	for i := 0; i < count; i++ {
+		idx := len(p.typeStack) - 1
+		popped[i] = p.typeStack[idx]
+		p.typeStack = p.typeStack[:idx]
+	}
+	return popped, nil
 }
 
 func (p *parser) lookupSubstitution(index int) (*Node, error) {
@@ -976,7 +1018,53 @@ func (p *parser) applySymbolSuffixes(node *Node) (*Node, error) {
 		if debugEnabled {
 			debugf("applySymbolSuffixes: checking char %q at pos=%d\n", p.peek(), p.pos)
 		}
-		switch p.peek() {
+
+		// Check if we're at a suffix (M or T) or need to parse more types
+		ch := p.peek()
+		if ch != 'M' && ch != 'T' && ch != 'Z' {
+			// Not a known suffix marker - could be another type to parse
+			// This handles cases like _$sSHSQTb where after SH we have SQ before Tb
+			if debugEnabled {
+				debugf("applySymbolSuffixes: not a suffix, checking if it's a type at pos=%d char=%q\n", p.pos, ch)
+			}
+			// Try to parse as type - if it works, this type will be consumed later by a suffix
+			additionalType, err := p.parseTypeAllowTrailing()
+			if err != nil {
+				// Not a type, not a suffix - we're done
+				if debugEnabled {
+					debugf("applySymbolSuffixes: failed to parse as type, done: %v\n", err)
+				}
+				return current, nil
+			}
+			if debugEnabled {
+				debugf("applySymbolSuffixes: parsed additional type, pos now %d\n", p.pos)
+			}
+			// The additional type is now available, will be used by next suffix
+			// For now, store it temporarily - we'll handle it when we see Tb/Tl/etc
+			// Actually, for Tb we need both types, so let's check if next is a suffix
+			if p.eof() {
+				// No suffix after this type - shouldn't happen, but handle it
+				return current, nil
+			}
+			// Now check for the suffix that should consume both current and additionalType
+			if p.peek() == 'T' && p.pos+1 < len(p.data) && p.data[p.pos+1] == 'b' {
+				// Base conformance descriptor: needs 2 types
+				p.pos += 2
+				descriptor := NewNode(KindBaseConformanceDescriptor, "")
+				descriptor.Append(current)        // conforming type (first type)
+				descriptor.Append(additionalType) // protocol requirement (second type)
+				current = descriptor
+				if debugEnabled {
+					debugf("applySymbolSuffixes: applied BaseConformanceDescriptor with 2 types, pos now %d\n", p.pos)
+				}
+				continue
+			}
+			// Not Tb - for now just continue, other suffixes might not need the second type
+			// This is a simplified approach - proper handling would track all parsed types
+			return current, nil
+		}
+
+		switch ch {
 		case 'Z':
 			p.consume()
 			current = wrapDescriptorNode(KindStatic, current)
@@ -1049,6 +1137,21 @@ func (p *parser) applySymbolSuffixes(node *Node) (*Node, error) {
 				debugf("applySymbolSuffixes: 'T' suffix=%q at pos=%d\n", suffix, p.pos+1)
 			}
 			switch suffix {
+			case 'b':
+				// This is handled in the pre-check above, shouldn't reach here
+				return nil, fmt.Errorf("unexpected Tb suffix without second type")
+			case 'l':
+				p.pos += 2
+				current = wrapDescriptorNode(KindAssociatedTypeDescriptor, current)
+				if debugEnabled {
+					debugf("applySymbolSuffixes: applied AssociatedTypeDescriptor, pos now %d\n", p.pos)
+				}
+			case 'n':
+				p.pos += 2
+				current = wrapDescriptorNode(KindNominalTypeDescriptor, current)
+				if debugEnabled {
+					debugf("applySymbolSuffixes: applied NominalTypeDescriptor, pos now %d\n", p.pos)
+				}
 			case 'q':
 				p.pos += 2
 				current = wrapDescriptorNode(KindMethodDescriptor, current)

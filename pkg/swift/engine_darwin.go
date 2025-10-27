@@ -95,6 +95,20 @@ func (e *darwinEngine) DemangleSimple(input string) (string, error) {
 	}, input)
 }
 
+func (e *darwinEngine) DemangleType(input string) (string, error) {
+	// NOTE: This method is NOT used by the public DemangleType() API,
+	// which always uses the pure-Go engine instead. Apple's libswiftDemangle.dylib
+	// doesn't support metadata-specific encodings (e.g., I* function type signatures
+	// found in __swift5_capture sections). This method is only here to satisfy the
+	// engine interface and may work for simple type codes like "Si" or "SS".
+	//
+	// Type demangling uses the same getDemangledName function
+	// The Swift runtime handles both symbols and types through the same entry point
+	return callSwiftDemangle(func(in, out *C.char, length C.size_t) C.int {
+		return C.SwiftDemangle(in, out, length)
+	}, input)
+}
+
 func callSwiftDemangle(fn cgoDemangleFunc, input string) (string, error) {
 	if input == "" {
 		return "", fmt.Errorf("empty input")

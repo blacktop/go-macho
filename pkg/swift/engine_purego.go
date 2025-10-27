@@ -47,6 +47,25 @@ func (e pureGoEngine) DemangleSimple(input string) (string, error) {
 	return e.Demangle(input)
 }
 
+func (pureGoEngine) DemangleType(input string) (string, error) {
+	if input == "" {
+		return "", fmt.Errorf("empty input")
+	}
+	if traceSymbols {
+		log.Printf("purego demangle type start: %s", input)
+	}
+	// Use DemangleTypeString for type-specific demangling
+	text, _, err := swiftdemangle.DemangleTypeString(input)
+	if traceSymbols {
+		if err != nil {
+			log.Printf("purego demangle type error: %v", err)
+		} else {
+			log.Printf("purego demangle type ok: %s", text)
+		}
+	}
+	return text, err
+}
+
 func looksLikeSwiftSymbol(s string) bool {
 	trimmed := strings.TrimSpace(s)
 	if trimmed == "" {

@@ -21,6 +21,19 @@ func DemangleSimple(input string) (string, error) {
 	return defaultEngine.DemangleSimple(input)
 }
 
+// DemangleType returns the demangled Swift type name from a mangled type string.
+// This is specifically for type manglings found in metadata, as opposed to full symbol manglings.
+// For example: "Si" -> "Swift.Int", "Sg" -> "Swift.Optional", etc.
+//
+// NOTE: This function ALWAYS uses the pure-Go demangling engine, even on darwin.
+// Apple's libswiftDemangle.dylib doesn't support metadata-specific encodings
+// (e.g., I* function type signatures found in __swift5_capture sections).
+// The CGO engine is only suitable for full symbol demangling, not type strings.
+func DemangleType(input string) (string, error) {
+	// Always use pure-Go engine for type demangling
+	return newPureGoEngine().DemangleType(input)
+}
+
 // DemangleBlob replaces every mangled token in blob with its demangled equivalent.
 func DemangleBlob(blob string) string {
 	return blobTokenPattern.ReplaceAllStringFunc(blob, func(token string) string {

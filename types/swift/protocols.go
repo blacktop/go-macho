@@ -381,6 +381,7 @@ func (f ProtocolRequirementFlags) Verbose() string {
 // The index of the requirement in the descriptor determines the offset of the witness in a witness table for this protocol.
 // ref: swift/ABI/Metadata.h - TargetProtocolRequirement
 type TargetProtocolRequirement struct {
+	Address               uint64
 	Flags                 ProtocolRequirementFlags
 	DefaultImplementation RelativeDirectPointer // The optional default implementation of the protocol.
 }
@@ -390,6 +391,7 @@ func (pr TargetProtocolRequirement) Size() int64 {
 }
 
 func (pr *TargetProtocolRequirement) Read(r io.Reader, addr uint64) error {
+	pr.Address = addr
 	pr.DefaultImplementation.Address = addr + uint64(binary.Size(pr.Flags))
 	if err := binary.Read(r, binary.LittleEndian, &pr.Flags); err != nil {
 		return err

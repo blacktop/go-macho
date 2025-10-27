@@ -100,6 +100,35 @@ func (ctx *formatContext) format(node *Node) string {
 			return "protocol descriptor"
 		}
 		return "protocol descriptor for " + ctx.format(node.Children[0])
+	case KindProtocolConformanceDescriptor:
+		switch len(node.Children) {
+		case 0:
+			return "protocol conformance descriptor"
+		case 1:
+			return "protocol conformance descriptor for " + ctx.format(node.Children[0])
+		default:
+			return fmt.Sprintf("protocol conformance descriptor for %s : %s",
+				ctx.format(node.Children[0]), ctx.format(node.Children[1]))
+		}
+	case KindBaseConformanceDescriptor:
+		if len(node.Children) < 2 {
+			return "base conformance descriptor"
+		}
+		return fmt.Sprintf("base conformance descriptor for %s: %s",
+			ctx.format(node.Children[0]), ctx.format(node.Children[1]))
+	case KindAssociatedConformanceDescriptor:
+		if node.Text != "" {
+			return node.Text
+		}
+		switch len(node.Children) {
+		case 0:
+			return "associated conformance descriptor"
+		case 1:
+			return "associated conformance descriptor for " + ctx.format(node.Children[0])
+		default:
+			return fmt.Sprintf("associated conformance descriptor for %s : %s",
+				ctx.format(node.Children[0]), ctx.format(node.Children[1]))
+		}
 	case KindNominalTypeDescriptor:
 		if len(node.Children) == 0 {
 			return "nominal type descriptor"
@@ -135,12 +164,22 @@ func (ctx *formatContext) format(node *Node) string {
 		return ctx.formatSingleChildDescription("ObjC resilient class stub for ", node)
 	case KindFullObjCResilientClassStub:
 		return ctx.formatSingleChildDescription("full ObjC resilient class stub for ", node)
+	case KindDefaultAssociatedConformanceAccessor:
+		if len(node.Children) == 0 {
+			return "associated conformance access function"
+		}
+		return "associated conformance access function " + ctx.format(node.Children[0])
 	case KindMethodLookupFunction:
 		return ctx.formatSingleChildDescription("method lookup function for ", node)
 	case KindObjCMetadataUpdateFunction:
 		return ctx.formatSingleChildDescription("ObjC metadata update function for ", node)
 	case KindCanonicalPrespecializedGenericTypeCachingOnceToken:
 		return ctx.formatSingleChildDescription("flag for loading of canonical specialized generic type metadata for ", node)
+	case KindAccessorFunctionReference:
+		if node.Text != "" {
+			return "accessor function @" + node.Text
+		}
+		return "accessor function"
 	case KindOptional:
 		if len(node.Children) > 0 {
 			return ctx.format(node.Children[0]) + "?"
@@ -166,6 +205,16 @@ func (ctx *formatContext) format(node *Node) string {
 			return "Set<>"
 		}
 		return "Set<" + ctx.format(node.Children[0]) + ">"
+	case KindUniqueExtendedExistentialTypeShapeSymbolicReference:
+		if node.Text != "" {
+			return "unique extended existential shape @" + node.Text
+		}
+		return "unique extended existential shape"
+	case KindNonUniqueExtendedExistentialTypeShapeSymbolicReference:
+		if node.Text != "" {
+			return "non-unique extended existential shape @" + node.Text
+		}
+		return "non-unique extended existential shape"
 	case KindDependentGenericParamType:
 		if name, ok := ctx.formatDependentGenericParam(node); ok {
 			return name
@@ -203,6 +252,11 @@ func (ctx *formatContext) format(node *Node) string {
 			return ctx.format(base) + "." + memberName
 		}
 		return "dependent"
+	case KindObjectiveCProtocolSymbolicReference:
+		if node.Text != "" {
+			return "Objective-C protocol " + node.Text
+		}
+		return "Objective-C protocol"
 	case KindInOut:
 		if len(node.Children) == 0 {
 			return "inout"
@@ -265,6 +319,98 @@ func (ctx *formatContext) format(node *Node) string {
 			return params + " -> " + result
 		}
 		return strings.Join(parts, " ") + " -> " + result
+	case KindImplFunctionType:
+		// Phase 3+: Full formatting with parameters and results
+		// Format: <@escaping @callee_guaranteed (params) -> results>
+		var attrs []string
+		var params []string
+		var results []string
+
+		for _, child := range node.Children {
+			switch child.Kind {
+			case KindImplEscaping:
+				attrs = append(attrs, "@escaping")
+			case KindImplConvention:
+				if child.Text != "" {
+					attrs = append(attrs, child.Text)
+				}
+			case KindImplFunctionAttribute:
+				if child.Text != "" {
+					attrs = append(attrs, child.Text)
+				}
+			case KindImplFunctionConvention:
+				// Format as @convention(...)
+				if len(child.Children) > 0 && child.Children[0].Kind == KindImplFunctionConventionName {
+					convName := child.Children[0].Text
+					attrs = append(attrs, fmt.Sprintf("@convention(%s)", convName))
+				}
+			case KindImplCoroutineKind:
+				// Format coroutine kind
+				if child.Text != "" {
+					attrs = append(attrs, child.Text)
+				}
+			case KindImplSendingResult:
+				attrs = append(attrs, "sending result")
+			case KindImplParameter:
+				// Format parameter: @convention Type
+				paramConv := ""
+				paramType := ""
+				for _, pchild := range child.Children {
+					if pchild.Kind == KindImplConvention {
+						paramConv = pchild.Text
+					} else if pchild.Kind == KindType {
+						paramType = ctx.format(pchild)
+					}
+				}
+				if paramConv != "" && paramType != "" {
+					params = append(params, paramConv + " " + paramType)
+				} else if paramType != "" {
+					params = append(params, paramType)
+				}
+			case KindImplResult:
+				// Format result: @convention Type
+				resultConv := ""
+				resultType := ""
+				for _, rchild := range child.Children {
+					if rchild.Kind == KindImplConvention {
+						resultConv = rchild.Text
+					} else if rchild.Kind == KindType {
+						resultType = ctx.format(rchild)
+					}
+				}
+				if resultConv != "" && resultType != "" {
+					results = append(results, resultConv + " " + resultType)
+				} else if resultType != "" {
+					results = append(results, resultType)
+				}
+			}
+		}
+
+		// Build the complete signature
+		var parts []string
+		if len(attrs) > 0 {
+			parts = append(parts, strings.Join(attrs, " "))
+		}
+
+		// Add parameters
+		if len(params) > 0 {
+			parts = append(parts, "("+strings.Join(params, ", ")+")")
+		} else {
+			parts = append(parts, "()")
+		}
+
+		// Add results
+		if len(results) > 0 {
+			if len(results) == 1 {
+				parts = append(parts, "-> "+results[0])
+			} else {
+				parts = append(parts, "-> ("+strings.Join(results, ", ")+")")
+			}
+		} else {
+			parts = append(parts, "-> ()")
+		}
+
+		return "<" + strings.Join(parts, " ") + ">"
 	default:
 		if len(node.Children) == 0 {
 			return node.Text

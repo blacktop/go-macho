@@ -47,6 +47,11 @@ func (f Field) dump(verbose bool) string {
 		recs = "\n"
 	}
 	for _, r := range f.Records {
+		// Skip fields with empty tuple types - these are placeholders with no meaningful data
+		if r.MangledType == "()" {
+			continue
+		}
+
 		var flags string
 		var hasType string
 		if f.Kind == FDKindEnum || f.Kind == FDKindMultiPayloadEnum {

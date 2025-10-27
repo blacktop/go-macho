@@ -2,6 +2,14 @@ Swift Name Mangling and Demangling: A Comprehensive Overview
 
 Swift Name Mangling is the process of encoding extra information (like module names, types, generics, etc.) into symbol names, to avoid collisions and convey function signatures in compiled binaries. Languages like C++ and Swift support function overloading and other features that require more than just the name to uniquely identify a symbol. Name mangling ensures that each symbol name in the binary is unique and unambiguous to the linker【23](https://www.mikeash.com/pyblog/friday-qa-2014-08-15-swift-name-mangling.html#L98-L106)】. For example, in C++, two functions named foo with different parameters would be mangled into distinct symbols (such as __Z3fooi vs __Z3food for foo(int) vs foo(double)), since _foo alone would collide【23](https://www.mikeash.com/pyblog/friday-qa-2014-08-15-swift-name-mangling.html#L98-L106)】. Swift, which also allows function overloading and has a rich type system, similarly requires name mangling for its symbols – the mechanism is broadly similar to C++’s but carries much more information about the types and context【22](https://www.mikeash.com/pyblog/friday-qa-2014-08-15-swift-name-mangling.html#L129-L132)】.
 
+## Demangler surfaces to keep straight
+
+- **Symbol demangler** – lives in `internal/swiftdemangle` (pure Go engine) and is exported through `pkg/swift`. Mirrors `libswiftDemangle`. This is what we use for functions, descriptors, witness tables, etc.
+- **Type demangler** – used when parsing metadata records (`types/swift`, `swift.go`) and currently still powered by the legacy `makeSymbolicMangledNameStringRef`. It needs to be brought in line with the Swift runtime’s `TypeRefBuilder` / `Demangle::makeSymbolicMangledNameStringRef` so closure captures and other metadata strings (e.g. `_ $sSgIegg_`, `_ $sSo7NSErrorCSgIeyBy_`) expand correctly.
+- When reviewing upstream, the relevant C++ sources are:
+  - `docs/ABI/Mangling.rst`, `docs/Runtime/TypeRef.rst`, `docs/ABI/TypeMetadata.rst`
+  - `lib/Demangling`, `lib/RemoteInspection/TypeRefBuilder.cpp`, `stdlib/public/runtime/Metadata.cpp`, `include/swift/RemoteInspection/Records.h`
+
 Demangling, conversely, is the act of decoding a mangled name back into a human-readable form (the original function or type name). Swift provides a demangler as part of its toolchain to translate those cryptic symbol names (e.g. _$s8MyModule4TestV5valueSivp) back into something developers can recognize (e.g. MyModule.Test.value : Int). This is crucial for debugging, logging, crash reports, and any scenario where you need to interpret raw symbol names.
 
 Swift’s Name Mangling Scheme
@@ -98,6 +106,77 @@ This is Matt Gallagher's pure Swift reimplementation of the C++ demangler, usefu
 
 ### 2025-10-26 updates
 
-- Implemented Swift’s word-substituted identifier grammar (`0…` form) in the parser so private identifiers such as `_ObjectiveCType` now materialize by replaying the shared word table just like `Demangler::demangleIdentifier`.
+- Implemented Swift's word-substituted identifier grammar (`0…` form) in the parser so private identifiers such as `_ObjectiveCType` now materialize by replaying the shared word table just like `Demangler::demangleIdentifier`.
 - Added support for the modified punycode mode (`00…`) by translating `_` back to `-`, mapping `A…J` to digits, and running the reconstructed label through `idna.Lookup` (with an `xn--` prefix) so non-ASCII identifiers work without CGO.
-- `tryParseDependentAssocElement` now parses the associated-type name before consuming the trailing `Q{z|y…}` opcode, allowing us to emit `KindDependentMemberType` nodes that mirror Swift’s `Demangler::demangleArchetype` (e.g., `A._ObjectiveCType`).
+- `tryParseDependentAssocElement` now parses the associated-type name before consuming the trailing `Q{z|y…}` opcode, allowing us to emit `KindDependentMemberType` nodes that mirror Swift's `Demangler::demangleArchetype` (e.g., `A._ObjectiveCType`).
+
+### 2025-10-27: Type Demangling Integration
+
+**Objective**: Replace ad-hoc `makeSymbolicMangledNameStringRef` with proper demangler integration, matching Swift's `TypeRefBuilder`.
+
+**Implementation Summary**:
+
+1. **machOResolver (swift.go:2492-2613)**
+   - Implements `SymbolicReferenceResolver` interface for symbolic reference resolution
+   - Handles control bytes 0x01 (direct) and 0x02 (indirect) symbolic references
+   - Converts context descriptors to demangler Nodes via `contextDescToNode()`
+   - Maps ContextDescriptorKind to NodeKind: Module→KindModule, Class→KindClass, Struct→KindStructure, Enum→KindEnum, Protocol→KindProtocol
+
+2. **readRawMangledBytes (swift.go:2983-3039)**
+   - Reads mangled type strings with symbolic references from binary
+   - Handles control bytes (0x01-0x1F) by reading 4-byte offsets
+   - Preserves control bytes in output for demangler processing
+   - Stops at null terminator (0x00)
+
+3. **makeSymbolicMangledNameWithDemangler (swift.go:3057-3084)**
+   - New implementation using `swiftdemangle.DemangleTypeString()`
+   - Always uses pure-Go engine (bypasses CGO even on darwin)
+   - Provides `machOResolver` for symbolic reference resolution
+   - Returns both demangled text and AST node
+
+4. **makeSymbolicMangledNameStringRef (swift.go:3043-3053)**
+   - Refactored as try-first dispatcher
+   - Attempts new demangler first
+   - Falls back to legacy implementation on error
+   - Logs demangle attempts when `GO_MACHO_SWIFT_DEBUG=1`
+
+5. **pkg/swift.DemangleType() (pkg/swift/api.go:24-35)**
+   - New public API for type demangling
+   - **Always uses pure-Go engine**, even on darwin
+   - Apple's `libswiftDemangle.dylib` doesn't support metadata-specific encodings:
+     - `I*` function type signatures (escaping, guaranteed, yields)
+     - Found in `__swift5_capture` sections
+     - Example: `_$sSgIegyg_` fails with `xcrun swift-demangle --type`
+   - CGO engine only suitable for full symbol demangling, not metadata types
+
+**Architecture Decision: Pure-Go for Metadata Types**
+
+Discovery: Apple's `swift-demangle` CLI and `libswiftDemangle.dylib` fail on metadata type strings:
+```bash
+$ xcrun swift-demangle --type '_$sSgIegyg_'
+# No output - fails to demangle
+```
+
+This validates using pure-Go for metadata types:
+- **Symbol demangling** (`Demangle()`, `DemangleSimple()`) → CGO on darwin (fast, works)
+- **Metadata types** (`DemangleType()`, `makeSymbolicMangledNameStringRef()`) → Pure-Go always
+
+**Testing (swift_regression_test.go)**:
+- `TestTypePayloadDemangling`: Tests simple types, generics, metadata-specific encodings
+- `TestSymbolicReferenceParsing`: Tests symbolic reference resolution with context descriptors
+- `TestEngineArchitecture`: Verifies pure-Go enforcement for types
+- `TestContextDescriptorConversion`: Documents ContextDescriptorKind→NodeKind mappings
+- All tests pass ✅
+
+**Status: Type Demangling IMPLEMENTED**
+- ✅ Symbolic reference resolution via `SymbolicReferenceResolver` interface
+- ✅ Integration with internal/swiftdemangle demangler
+- ✅ Fallback to legacy implementation
+- ✅ Public API in pkg/swift
+- ✅ Pure-Go enforcement for metadata types (CGO doesn't support I* sequences)
+- ✅ Comprehensive regression tests
+
+**Remaining Work**:
+- Full demangling of closure capture signatures (I* sequences) requires more parser work
+- Complex nested types may not demangle standalone without context
+- See DIAGNOSIS.md for specific demangling gaps

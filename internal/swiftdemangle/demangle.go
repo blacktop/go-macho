@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"unsafe"
 
 	"github.com/blacktop/go-macho/types/swift"
 )
+
+const pointerWidth = int(unsafe.Sizeof(uintptr(0)))
 
 var nominalTypeKinds = map[byte]NodeKind{
 	'V': KindStructure,
@@ -83,6 +86,12 @@ func (d *Demangler) DemangleType(mangled []byte) (*Node, error) {
 }
 
 func (p *parser) parseType() (*Node, error) {
+	baseStack := len(p.typeStack)
+	defer func() {
+		if len(p.typeStack) > baseStack {
+			p.typeStack = p.typeStack[:baseStack]
+		}
+	}()
 	if debugEnabled {
 		debugf("parseType: entry at pos=%d remaining=%q\n", p.pos, string(p.data[p.pos:]))
 	}
@@ -103,6 +112,12 @@ func (p *parser) parseType() (*Node, error) {
 }
 
 func (p *parser) parseTypeAllowTrailing() (*Node, error) {
+	baseStack := len(p.typeStack)
+	defer func() {
+		if len(p.typeStack) > baseStack {
+			p.typeStack = p.typeStack[:baseStack]
+		}
+	}()
 	if debugEnabled {
 		debugf("parseTypeAllowTrailing: entry at pos=%d remaining=%q\n", p.pos, string(p.data[p.pos:]))
 	}
@@ -169,6 +184,16 @@ func (p *parser) parseTypeWithOptions(allowTrailing bool) (*Node, error) {
 		}
 	}
 
+	if node.Kind == KindEmptyList && !p.eof() && p.peek() == 't' {
+		p.consume()
+		node.Kind = KindTuple
+		node.Text = ""
+		node.Children = nil
+		if debugEnabled {
+			debugf("parseTypeWithOptions: converted empty list to tuple, pos=%d\n", p.pos)
+		}
+	}
+
 	if !allowTrailing {
 		for {
 			if p.matchString("SgXw") || p.matchString("Sg") {
@@ -196,6 +221,33 @@ func (p *parser) parseTypeWithOptions(allowTrailing bool) (*Node, error) {
 		if debugEnabled {
 			debugf("parseTypeWithOptions: after function type loop, pos=%d\n", p.pos)
 		}
+
+		for {
+			for !p.eof() && p.peek() == '_' {
+				p.consume()
+			}
+			if p.eof() || p.peek() == 'I' || p.peek() == 't' || p.peek() == 'y' || p.matchString("SgXw") || p.matchString("Sg") {
+				break
+			}
+			if !canStartStandaloneType(p.peek()) {
+				break
+			}
+			start := p.pos
+			extra, err := p.parseTypeWithOptions(true)
+			if err != nil {
+				p.pos = start
+				break
+			}
+			if p.pos == start {
+				break
+			}
+			if extra != nil {
+				node = extra
+			}
+			if debugEnabled {
+				debugf("parseTypeWithOptions: consumed standalone type before impl function, pos=%d\n", p.pos)
+			}
+		}
 	}
 
 	node, err = p.applyOptionalSuffix(node)
@@ -206,10 +258,42 @@ func (p *parser) parseTypeWithOptions(allowTrailing bool) (*Node, error) {
 		debugf("parseTypeWithOptions: after applyOptionalSuffix, pos=%d, returning\n", p.pos)
 	}
 
+	if !allowTrailing {
+		for !p.eof() && p.peek() == 'I' {
+			start := p.pos
+			p.consume()
+			if debugEnabled {
+				debugf("parseTypeWithOptions: parsing impl function at pos=%d\n", start)
+			}
+			implType, implErr := p.parseImplFunctionType()
+			if implErr != nil {
+				p.pos = start
+				return nil, implErr
+			}
+			node = implType
+			p.pushTypeForStack(node)
+			if debugEnabled {
+				debugf("parseTypeWithOptions: parsed impl function, pos=%d\n", p.pos)
+			}
+		}
+	}
+
 	return node, nil
 }
 
-func (p *parser) parsePrimaryType() (*Node, error) {
+func (p *parser) parsePrimaryType() (result *Node, err error) {
+	baseStack := len(p.typeStack)
+	defer func() {
+		if err != nil {
+			if len(p.typeStack) > baseStack {
+				p.typeStack = p.typeStack[:baseStack]
+			}
+			return
+		}
+		if result != nil {
+			p.pushTypeForStack(result)
+		}
+	}()
 	if len(p.pending) > p.pendingFloor {
 		idx := len(p.pending) - 1
 		node := p.pending[idx]
@@ -245,21 +329,22 @@ func (p *parser) parsePrimaryType() (*Node, error) {
 	}
 
 	// Handle symbolic references first
-	if b := p.peek(); b >= 0x01 && b <= 0x17 {
+	if b := p.peek(); b >= 0x01 && b <= 0x1f {
 		control := p.consume()
 		if p.resolver == nil {
 			return nil, fmt.Errorf("symbolic reference encountered without resolver")
 		}
-		if p.pos+4 > len(p.data) {
+		payloadLen := 4
+		if control >= 0x18 && control <= 0x1f {
+			payloadLen = pointerWidth
+		}
+		if p.pos+payloadLen > len(p.data) {
 			return nil, fmt.Errorf("symbolic reference truncated")
 		}
 		refIndex := p.pos
-		offset := int32(p.data[p.pos]) |
-			int32(p.data[p.pos+1])<<8 |
-			int32(p.data[p.pos+2])<<16 |
-			int32(p.data[p.pos+3])<<24
-		p.pos += 4
-		node, err := p.resolver.ResolveType(control, offset, refIndex)
+		payload := p.data[p.pos : p.pos+payloadLen]
+		p.pos += payloadLen
+		node, err := p.resolver.ResolveType(control, payload, refIndex)
 		if err != nil {
 			return nil, fmt.Errorf("resolve symbolic reference (kind %02x): %w", control, err)
 		}
@@ -328,6 +413,16 @@ func (p *parser) parsePrimaryType() (*Node, error) {
 
 	// Try dependent member types (associated types with Q operator)
 	if node, ok, _ := p.tryParseDependentMemberType(); ok {
+		return node, nil
+	}
+
+	// impl-function-type (found in metadata/closure captures)
+	if p.peek() == 'I' {
+		p.consume() // consume 'I'
+		node, err := p.parseImplFunctionType()
+		if err != nil {
+			return nil, fmt.Errorf("parseImplFunctionType: %w", err)
+		}
 		return node, nil
 	}
 
@@ -495,20 +590,26 @@ func (p *parser) tryParseStdlibNominal() (*Node, bool, error) {
 	}
 
 	if p.eof() {
+		// No kind character - default to Protocol for stdlib types
+		// This handles bare references like `s5Error` (Swift.Error)
 		if debugEnabled {
-			debugf("tryParseStdlibNominal: EOF, restoring to %d\n", savePos)
+			debugf("tryParseStdlibNominal: EOF after identifiers, defaulting to Protocol kind\n")
 		}
-		p.pos = savePos
-		return nil, false, nil
+		node := buildNominal(KindProtocol, names)
+		p.pushSubstitution(node)
+		return node, true, nil
 	}
 	kindChar := p.peek()
 	nodeKind, ok := nominalTypeKinds[kindChar]
 	if !ok {
+		// Not a recognized kind character - default to Protocol for stdlib types
+		// This handles cases where the type reference doesn't include a kind marker
 		if debugEnabled {
-			debugf("tryParseStdlibNominal: kind char %q not recognized, restoring to %d\n", kindChar, savePos)
+			debugf("tryParseStdlibNominal: kind char %q not recognized, defaulting to Protocol\n", kindChar)
 		}
-		p.pos = savePos
-		return nil, false, nil
+		node := buildNominal(KindProtocol, names)
+		p.pushSubstitution(node)
+		return node, true, nil
 	}
 	p.consume()
 	if debugEnabled {
@@ -1116,6 +1217,10 @@ func (p *parser) tryParseFunctionType(result *Node) (*Node, bool, error) {
 		return nil, false, nil
 	}
 
+	if p.peek() == 'I' {
+		return nil, false, nil
+	}
+
 	switch p.peek() {
 	case 'v', 'f', 'F', 'c', 't', 'W', 'M', 'T':
 		return nil, false, nil
@@ -1130,8 +1235,6 @@ func (p *parser) tryParseFunctionType(result *Node) (*Node, bool, error) {
 		return nil, false, err
 	}
 	if !ok {
-		// No parameters found - this is fine, just not a function type
-		// No rewind needed because parseFunctionInput handles its own position
 		return nil, false, nil
 	}
 
@@ -1156,9 +1259,6 @@ func (p *parser) tryParseFunctionType(result *Node) (*Node, bool, error) {
 	}
 
 	if p.eof() || p.peek() != 'c' {
-		// We parsed valid params but this isn't a complete function type
-		// Don't rewind - leave position where it is so we don't reparse
-		// Just return not-ok
 		return nil, false, nil
 	}
 	p.consume()
@@ -1372,6 +1472,31 @@ func isAlpha(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
+func canStartStandaloneType(b byte) bool {
+	if b == 0 {
+		return false
+	}
+	if b >= 0x01 && b <= 0x1f {
+		return true
+	}
+	if b >= '0' && b <= '9' {
+		return true
+	}
+	if b >= 'a' && b <= 'z' {
+		if b == 't' || b == 'y' {
+			return false
+		}
+		return true
+	}
+	if b >= 'A' && b <= 'Z' {
+		return true
+	}
+	if b == '$' {
+		return true
+	}
+	return false
+}
+
 func (p *parser) tryParseDependentAssocElement() (*Node, bool, error) {
 	state := p.saveState()
 	assoc, err := p.parseAssocTypeNameNode()
@@ -1519,6 +1644,344 @@ func (p *parser) tryParseFunctionAfterTuple(tuple *Node) (*Node, bool, error) {
 	fn.Flags.Throws = throws
 	fn.Append(tuple, result)
 	return fn, true, nil
+}
+
+// parseImplFunctionType parses an implementation function type (metadata encoding).
+// Grammar: impl-function-type ::= type* 'I' FUNC-ATTRIBUTES '_'
+// Phase 1: Basic support for escaping, callee convention, and terminator.
+// Full implementation will add: generic signatures, substitutions, async, sendable,
+// parameters, results, etc.
+//
+// ref: https://github.com/apple/swift/blob/main/docs/ABI/Mangling.rst#function-signature
+// ref: OPC/swift-main/lib/Demangling/Demangler.cpp::demangleImplFunctionType
+func (p *parser) parseImplFunctionType() (*Node, error) {
+	// Note: 'I' already consumed by caller
+
+	// Create the ImplFunctionType node
+	implType := NewNode(KindImplFunctionType, "")
+
+	// Phase 1: Parse minimal attributes for closure captures
+	// Format: I + [e] + (y|g|x|t) + [other attributes] + _
+
+	// 1. Check for escaping ('e')
+	if p.peek() == 'e' {
+		p.consume()
+		escaping := NewNode(KindImplEscaping, "")
+		implType.Append(escaping)
+		if debugEnabled {
+			debugf("parseImplFunctionType: parsed @escaping at pos=%d\n", p.pos)
+		}
+	}
+
+	// Isolation attribute ('A')
+	if p.peek() == 'A' {
+		p.consume()
+		implType.Append(NewNode(KindImplFunctionAttribute, "@isolated(any)"))
+		if debugEnabled {
+			debugf("parseImplFunctionType: parsed @isolated(any) at pos=%d\n", p.pos)
+		}
+	}
+
+	// 2. Parse callee convention (REQUIRED)
+	// CALLEE-CONVENTION ::= 'y' | 'g' | 'x' | 't'
+	var convAttr string
+	switch p.peek() {
+	case 'y':
+		convAttr = "@callee_unowned"
+		p.consume()
+	case 'g':
+		convAttr = "@callee_guaranteed"
+		p.consume()
+	case 'x':
+		convAttr = "@callee_owned"
+		p.consume()
+	case 't':
+		convAttr = "@convention(thin)"
+		p.consume()
+	default:
+		return nil, fmt.Errorf("expected callee convention (y/g/x/t) at pos=%d, got %q", p.pos, p.peek())
+	}
+
+	convention := NewNode(KindImplConvention, convAttr)
+	implType.Append(convention)
+
+	if debugEnabled {
+		debugf("parseImplFunctionType: parsed convention %s at pos=%d\n", convAttr, p.pos)
+	}
+
+	// 3. Parse optional function convention (FUNC-REPRESENTATION)
+	// FUNC-REPRESENTATION ::= 'B' | 'C' | 'M' | 'J' | 'K' | 'W' | 'zB' C-TYPE | 'zC' C-TYPE
+	var funcConv string
+	var hasClangType bool
+	switch p.peek() {
+	case 'B':
+		funcConv = "block"
+		p.consume()
+	case 'C':
+		funcConv = "c"
+		p.consume()
+	case 'z':
+		p.consume()
+		switch p.peek() {
+		case 'B':
+			funcConv = "block"
+			hasClangType = true
+			p.consume()
+		case 'C':
+			funcConv = "c"
+			hasClangType = true
+			p.consume()
+		default:
+			// Not a function convention, backtrack
+			p.pos--
+		}
+	case 'M':
+		funcConv = "method"
+		p.consume()
+	case 'J':
+		funcConv = "objc_method"
+		p.consume()
+	case 'K':
+		funcConv = "closure"
+		p.consume()
+	case 'W':
+		funcConv = "witness_method"
+		p.consume()
+	}
+
+	if funcConv != "" {
+		funcAttrNode := NewNode(KindImplFunctionConvention, "")
+		funcAttrNode.Append(NewNode(KindImplFunctionConventionName, funcConv))
+		if hasClangType {
+			// Phase 2: Skip clang type for now
+			// Phase 3+ will implement demangleClangType()
+			// Just consume until we hit a known next character
+			if debugEnabled {
+				debugf("parseImplFunctionType: skipping clang type at pos=%d (Phase 2)\n", p.pos)
+			}
+		}
+		implType.Append(funcAttrNode)
+		if debugEnabled {
+			debugf("parseImplFunctionType: parsed function convention %s at pos=%d\n", funcConv, p.pos)
+		}
+	}
+
+	// 4. Parse optional coroutine kind
+	// COROUTINE-KIND ::= 'A' | 'I' | 'G'
+	var coroAttr string
+	switch p.peek() {
+	case 'A':
+		coroAttr = "yield_once"
+		p.consume()
+	case 'I':
+		coroAttr = "yield_once_2"
+		p.consume()
+	case 'G':
+		coroAttr = "yield_many"
+		p.consume()
+	}
+	if coroAttr != "" {
+		implType.Append(NewNode(KindImplCoroutineKind, coroAttr))
+		if debugEnabled {
+			debugf("parseImplFunctionType: parsed coroutine kind %s at pos=%d\n", coroAttr, p.pos)
+		}
+	}
+
+	// 5. Parse optional sendable attribute
+	if p.peek() == 'h' {
+		p.consume()
+		implType.Append(NewNode(KindImplFunctionAttribute, "@Sendable"))
+		if debugEnabled {
+			debugf("parseImplFunctionType: parsed @Sendable at pos=%d\n", p.pos)
+		}
+	}
+
+	// 6. Parse optional async attribute
+	if p.peek() == 'H' {
+		p.consume()
+		implType.Append(NewNode(KindImplFunctionAttribute, "@async"))
+		if debugEnabled {
+			debugf("parseImplFunctionType: parsed @async at pos=%d\n", p.pos)
+		}
+	}
+
+	// 7. Parse optional sending result attribute (Swift 6.0+)
+	if p.peek() == 'T' {
+		p.consume()
+		implType.Append(NewNode(KindImplSendingResult, ""))
+		if debugEnabled {
+			debugf("parseImplFunctionType: parsed sending result at pos=%d\n", p.pos)
+		}
+	}
+
+	// Phase 3: Parse parameters, results, yields, error result
+
+	// 8. Parse parameters (IMPL-PARAMETER*)
+	// Parameters are identified by convention characters: i,c,l,b,n,X,x,g,e,y,v,p,m
+	var paramsAndResults []*Node
+	for {
+		paramConv := p.parseImplParamConvention()
+		if paramConv == "" {
+			break // No more parameters
+		}
+		param := NewNode(KindImplParameter, "")
+		param.Append(NewNode(KindImplConvention, paramConv))
+
+		// TODO Phase 3.2: Parse optional parameter attributes (differentiability, sending, isolated, implicit_leading)
+
+		paramsAndResults = append(paramsAndResults, param)
+		implType.Append(param)
+
+		if debugEnabled {
+			debugf("parseImplFunctionType: parsed parameter %s at pos=%d\n", paramConv, p.pos)
+		}
+	}
+
+	// 9. Parse results (IMPL-RESULT*)
+	// Results are identified by convention characters: r,o,d,u,a,k (and l,g,m in result context)
+	for {
+		resultConv := p.parseImplResultConvention()
+		if resultConv == "" {
+			break // No more results
+		}
+		result := NewNode(KindImplResult, "")
+		result.Append(NewNode(KindImplConvention, resultConv))
+
+		// TODO Phase 3.2: Parse optional result attributes (differentiability)
+
+		paramsAndResults = append(paramsAndResults, result)
+		implType.Append(result)
+
+		if debugEnabled {
+			debugf("parseImplFunctionType: parsed result %s at pos=%d\n", resultConv, p.pos)
+		}
+	}
+
+	// 10. Parse yields (Y + IMPL-YIELD)
+	// TODO Phase 3.2: Implement yield parsing if needed
+
+	// 11. Parse error result (z + IMPL-ERROR-RESULT)
+	// TODO Phase 3.2: Implement error result parsing if needed
+
+	// 12. Expect terminator '_'
+	if p.eof() || p.peek() != '_' {
+		return nil, fmt.Errorf("expected '_' terminator at pos=%d, got %q", p.pos, p.peek())
+	}
+	p.consume() // consume '_'
+
+	if debugEnabled {
+		debugf("parseImplFunctionType: parsed terminator at pos=%d\n", p.pos)
+	}
+
+	// 13. Attach previously parsed types for each parameter/result.
+	if len(paramsAndResults) > 0 {
+		if debugEnabled {
+			debugf("parseImplFunctionType: attaching %d prior types\n", len(paramsAndResults))
+		}
+		popped, err := p.popTypeNodes(len(paramsAndResults))
+		if err != nil {
+			return nil, err
+		}
+		for idx := len(paramsAndResults) - 1; idx >= 0; idx-- {
+			popIdx := len(paramsAndResults) - 1 - idx
+			typ := popped[popIdx]
+			if typ == nil {
+				return nil, fmt.Errorf("impl function missing type for param/result %d", popIdx)
+			}
+			paramsAndResults[idx].Append(typ)
+			if debugEnabled {
+				debugf("parseImplFunctionType: attached prior type to param/result %d\n", idx)
+			}
+		}
+	}
+
+	// Wrap in Type node (matches upstream behavior)
+	typeNode := NewNode(KindType, "")
+	typeNode.Append(implType)
+
+	return typeNode, nil
+}
+
+// parseImplParamConvention parses a parameter convention character.
+// Returns the convention string or empty string if no parameter convention found.
+// ref: OPC/swift-main/lib/Demangling/Demangler.cpp::demangleImplParamConvention
+func (p *parser) parseImplParamConvention() string {
+	switch p.peek() {
+	case 'i':
+		p.consume()
+		return "@in"
+	case 'c':
+		p.consume()
+		return "@in_constant"
+	case 'l':
+		p.consume()
+		return "@inout"
+	case 'b':
+		p.consume()
+		return "@inout_aliasable"
+	case 'n':
+		p.consume()
+		return "@in_guaranteed"
+	case 'X':
+		p.consume()
+		return "@in_cxx"
+	case 'x':
+		p.consume()
+		return "@owned"
+	case 'g':
+		p.consume()
+		return "@guaranteed"
+	case 'e':
+		p.consume()
+		return "@deallocating"
+	case 'y':
+		p.consume()
+		return "@unowned"
+	case 'v':
+		p.consume()
+		return "@pack_owned"
+	case 'p':
+		p.consume()
+		return "@pack_guaranteed"
+	case 'm':
+		p.consume()
+		return "@pack_inout"
+	default:
+		return ""
+	}
+}
+
+// parseImplResultConvention parses a result convention character.
+// Returns the convention string or empty string if no result convention found.
+// ref: OPC/swift-main/lib/Demangling/Demangler.cpp::demangleImplResultConvention
+func (p *parser) parseImplResultConvention() string {
+	switch p.peek() {
+	case 'r':
+		p.consume()
+		return "@out"
+	case 'o':
+		p.consume()
+		return "@owned"
+	case 'd':
+		p.consume()
+		return "@unowned"
+	case 'u':
+		p.consume()
+		return "@unowned_inner_pointer"
+	case 'a':
+		p.consume()
+		return "@autoreleased"
+	case 'k':
+		p.consume()
+		return "@pack_out"
+	// Note: 'l', 'g', 'm' are shared with parameters but in result context they mean:
+	// 'l' = @guaranteed_address (not @inout)
+	// 'g' = @guaranteed (same as parameter)
+	// 'm' = @inout (same as parameter but valid in result context)
+	// We can't distinguish context here, so we only handle unambiguous result conventions
+	default:
+		return ""
+	}
 }
 
 func (p *parser) matchString(s string) bool {

@@ -29,6 +29,7 @@ func init() {
 type engine interface {
 	Demangle(string) (string, error)
 	DemangleSimple(string) (string, error)
+	DemangleType(string) (string, error)
 }
 
 // EngineMode reports which demangle engine (pure-Go or darwin-cgo) is active.

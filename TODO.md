@@ -16,5 +16,12 @@
 - [ ] Implement simplified demangle formatting in the pure-Go engine so `DemangleSimple` matches `swift-demangle -simplified` output and can be parity-tested.
 - [ ] Migrate downstream consumers (e.g. `ipsw`) to import `pkg/swift` and delete their local demangler copies once the API stabilizes.
 - [x] Auto-generate `internal/swiftdemangle` node kind enums/metadata from `OPC/swift-main/include/swift/Demangling/DemangleNodes.def` (similar to `types/swift` generators) to cover the full ~370-node surface.
+- [x] Port the Swift **type** demangler (metadata path). Replace `makeSymbolicMangledNameStringRef` with the new engine or a TypeRefBuilder mirror so captures like `_ $sSgIegg_` and `_ $sSo7NSErrorCSgIeyBy_` render cleanly.
+  - [x] Implemented `machOResolver` with `SymbolicReferenceResolver` interface for binary-integrated symbolic reference resolution
+  - [x] Refactored `makeSymbolicMangledNameStringRef` to use demangler with fallback to legacy
+  - [x] Added `pkg/swift.DemangleType()` public API that always uses pure-Go engine (CGO doesn't support metadata-specific I* sequences)
+  - [x] Comprehensive regression tests in `swift_regression_test.go`
+  - [ ] Add grammar for function types (`I*` sequences, block/thick conventions, optional Any, associated types) following `docs/ABI/Mangling.rst` and `lib/RemoteInspection/TypeRefBuilder.cpp` - **partial support, I* sequences require more parser work**
+  - [x] Reuse shared logic between symbol/type demanglers so we don't drift (ideally expose a type-only entry point in `internal/swiftdemangle`) - **DemangleTypeString() added**
 - [ ] Port upstream descriptor/async formatting helpers from `ASTDemangler.cpp` / `SwiftDemangle.cpp` so method/property descriptors and ObjC bridge symbols render identically to Apple’s tool.
 - [ ] Expand `_T` / legacy mangling coverage by following `OldDemangler.cpp` and adding regression symbols from `test/Demangle` to our parity suite.
