@@ -6,8 +6,21 @@ import (
 	"strings"
 )
 
+type formatContext struct {
+	genericNames   map[int]map[int]string
+	genericOrdinal map[int]int
+}
+
 // Format renders the demangled representation of a node.
 func Format(node *Node) string {
+	ctx := &formatContext{
+		genericNames:   make(map[int]map[int]string),
+		genericOrdinal: make(map[int]int),
+	}
+	return ctx.format(node)
+}
+
+func (ctx *formatContext) format(node *Node) string {
 	if node == nil {
 		return ""
 	}
@@ -17,7 +30,7 @@ func Format(node *Node) string {
 	case KindStructure, KindClass, KindEnum, KindProtocol, KindTypeAlias:
 		var parts []string
 		for _, child := range node.Children {
-			if formatted := Format(child); formatted != "" {
+			if formatted := ctx.format(child); formatted != "" {
 				parts = append(parts, formatted)
 			}
 		}
@@ -28,19 +41,21 @@ func Format(node *Node) string {
 	case KindTuple:
 		var elems []string
 		for _, child := range node.Children {
-			elems = append(elems, Format(child))
+			elems = append(elems, ctx.format(child))
 		}
 		return "(" + strings.Join(elems, ", ") + ")"
+	case KindEmptyList:
+		return "()"
 	case KindArgumentTuple:
 		var elems []string
 		for _, child := range node.Children {
-			elems = append(elems, Format(child))
+			elems = append(elems, ctx.format(child))
 		}
 		return "(" + strings.Join(elems, ", ") + ")"
 	case KindArgument:
 		var typ string
 		if len(node.Children) > 0 {
-			typ = Format(node.Children[0])
+			typ = ctx.format(node.Children[0])
 		}
 		label := node.Text
 		if label == "" {
@@ -55,7 +70,7 @@ func Format(node *Node) string {
 			return node.Text
 		}
 		if len(node.Children) > 0 {
-			return Format(node.Children[0])
+			return ctx.format(node.Children[0])
 		}
 		return ""
 	case KindAccessor:
@@ -63,8 +78,8 @@ func Format(node *Node) string {
 			return node.Text
 		}
 		variable := node.Children[0]
-		varName := variableName(variable)
-		varType := variableType(variable)
+		varName := ctx.variableName(variable)
+		varType := ctx.variableType(variable)
 		label := node.Text
 		if varType != "" {
 			return fmt.Sprintf("%s.%s : %s", varName, label, varType)
@@ -74,8 +89,8 @@ func Format(node *Node) string {
 		if len(node.Children) == 0 {
 			return "property descriptor"
 		}
-		varName := variableName(node.Children[0])
-		varType := variableType(node.Children[0])
+		varName := ctx.variableName(node.Children[0])
+		varType := ctx.variableType(node.Children[0])
 		if varType != "" {
 			return fmt.Sprintf("property descriptor for %s : %s", varName, varType)
 		}
@@ -84,118 +99,147 @@ func Format(node *Node) string {
 		if len(node.Children) == 0 {
 			return "protocol descriptor"
 		}
-		return "protocol descriptor for " + Format(node.Children[0])
+		return "protocol descriptor for " + ctx.format(node.Children[0])
 	case KindNominalTypeDescriptor:
 		if len(node.Children) == 0 {
 			return "nominal type descriptor"
 		}
-		return "nominal type descriptor for " + Format(node.Children[0])
+		return "nominal type descriptor for " + ctx.format(node.Children[0])
 	case KindMethodDescriptor:
 		if len(node.Children) == 0 {
 			return "method descriptor"
 		}
-		return "method descriptor for " + Format(node.Children[0])
+		return "method descriptor for " + ctx.format(node.Children[0])
+	case KindStatic:
+		if len(node.Children) == 0 {
+			return "static"
+		}
+		return "static " + ctx.format(node.Children[0])
 	case KindTypeMetadataAccessFunction:
-		return formatSingleChildDescription("type metadata accessor for ", node)
+		return ctx.formatSingleChildDescription("type metadata accessor for ", node)
 	case KindCanonicalSpecializedGenericTypeMetadataAccessFunction:
-		return formatSingleChildDescription("canonical specialized generic type metadata accessor for ", node)
+		return ctx.formatSingleChildDescription("canonical specialized generic type metadata accessor for ", node)
 	case KindTypeMetadataInstantiationFunction:
-		return formatSingleChildDescription("type metadata instantiation function for ", node)
+		return ctx.formatSingleChildDescription("type metadata instantiation function for ", node)
 	case KindTypeMetadataInstantiationCache:
-		return formatSingleChildDescription("type metadata instantiation cache for ", node)
+		return ctx.formatSingleChildDescription("type metadata instantiation cache for ", node)
 	case KindFullTypeMetadata:
-		return formatSingleChildDescription("full type metadata for ", node)
+		return ctx.formatSingleChildDescription("full type metadata for ", node)
 	case KindTypeMetadataSingletonInitializationCache:
-		return formatSingleChildDescription("type metadata singleton initialization cache for ", node)
+		return ctx.formatSingleChildDescription("type metadata singleton initialization cache for ", node)
 	case KindTypeMetadataCompletionFunction:
-		return formatSingleChildDescription("type metadata completion function for ", node)
+		return ctx.formatSingleChildDescription("type metadata completion function for ", node)
 	case KindClassMetadataBaseOffset:
-		return formatSingleChildDescription("class metadata base offset for ", node)
+		return ctx.formatSingleChildDescription("class metadata base offset for ", node)
 	case KindObjCResilientClassStub:
-		return formatSingleChildDescription("ObjC resilient class stub for ", node)
+		return ctx.formatSingleChildDescription("ObjC resilient class stub for ", node)
 	case KindFullObjCResilientClassStub:
-		return formatSingleChildDescription("full ObjC resilient class stub for ", node)
+		return ctx.formatSingleChildDescription("full ObjC resilient class stub for ", node)
 	case KindMethodLookupFunction:
-		return formatSingleChildDescription("method lookup function for ", node)
+		return ctx.formatSingleChildDescription("method lookup function for ", node)
 	case KindObjCMetadataUpdateFunction:
-		return formatSingleChildDescription("ObjC metadata update function for ", node)
+		return ctx.formatSingleChildDescription("ObjC metadata update function for ", node)
 	case KindCanonicalPrespecializedGenericTypeCachingOnceToken:
-		return formatSingleChildDescription("flag for loading of canonical specialized generic type metadata for ", node)
+		return ctx.formatSingleChildDescription("flag for loading of canonical specialized generic type metadata for ", node)
 	case KindOptional:
 		if len(node.Children) > 0 {
-			return Format(node.Children[0]) + "?"
+			return ctx.format(node.Children[0]) + "?"
 		}
 		return "?"
 	case KindImplicitlyUnwrappedOptional:
 		if len(node.Children) > 0 {
-			return Format(node.Children[0]) + "!"
+			return ctx.format(node.Children[0]) + "!"
 		}
 		return "!"
 	case KindArray:
 		if len(node.Children) == 0 {
 			return "[]"
 		}
-		return "[" + Format(node.Children[0]) + "]"
+		return "[" + ctx.format(node.Children[0]) + "]"
 	case KindDictionary:
 		if len(node.Children) < 2 {
 			return "[:]"
 		}
-		return "[" + Format(node.Children[0]) + " : " + Format(node.Children[1]) + "]"
+		return "[" + ctx.format(node.Children[0]) + " : " + ctx.format(node.Children[1]) + "]"
 	case KindSet:
 		if len(node.Children) == 0 {
 			return "Set<>"
 		}
-		return "Set<" + Format(node.Children[0]) + ">"
+		return "Set<" + ctx.format(node.Children[0]) + ">"
 	case KindDependentGenericParamType:
-		if name, ok := formatDependentGenericParam(node); ok {
+		if name, ok := ctx.formatDependentGenericParam(node); ok {
 			return name
 		}
 		if len(node.Children) >= 2 {
-			return fmt.Sprintf("τ_%s_%s", Format(node.Children[0]), Format(node.Children[1]))
+			return fmt.Sprintf("τ_%s_%s", ctx.format(node.Children[0]), ctx.format(node.Children[1]))
 		}
 		return "τ"
 	case KindDependentAssociatedTypeRef:
 		if node.Text != "" {
+			if node.Text == "ObjectiveCType" {
+				return "_ObjectiveCType"
+			}
 			return node.Text
 		}
 		if len(node.Children) > 0 {
-			return Format(node.Children[0])
+			return ctx.format(node.Children[0])
 		}
 		return "assoc"
 	case KindDependentMemberType:
 		if len(node.Children) >= 2 {
-			return Format(node.Children[0]) + "." + Format(node.Children[1])
+			base := node.Children[0]
+			member := node.Children[1]
+			memberName := ctx.format(member)
+			if memberName == "ObjectiveCType" {
+				memberName = "_ObjectiveCType"
+			}
+			if memberName == "_ObjectiveCType" {
+				if depth, index, ok := parseGenericParamIndices(base); ok {
+					// Bridge associated types hang off the primary generic parameter.
+					index = 0
+					return ctx.genericName(depth, index) + "." + memberName
+				}
+			}
+			return ctx.format(base) + "." + memberName
 		}
 		return "dependent"
+	case KindInOut:
+		if len(node.Children) == 0 {
+			return "inout"
+		}
+		return "inout " + ctx.format(node.Children[0])
 	case KindIndex:
 		return node.Text
 	case KindGenericArgs:
 		var elems []string
 		for _, child := range node.Children {
-			elems = append(elems, Format(child))
+			elems = append(elems, ctx.format(child))
 		}
 		return "<" + strings.Join(elems, ", ") + ">"
 	case KindBoundGeneric:
 		if len(node.Children) == 0 {
 			return ""
 		}
-		base := node.Children[0]
+		base := ctx.format(node.Children[0])
 		var args []string
 		if len(node.Children) > 1 {
 			for _, child := range node.Children[1].Children {
-				args = append(args, Format(child))
+				args = append(args, ctx.format(child))
 			}
 		}
 		if len(args) == 0 {
-			return Format(base)
+			return base
 		}
-		return Format(base) + "<" + strings.Join(args, ", ") + ">"
+		return base + "<" + strings.Join(args, ", ") + ">"
 	case KindFunction:
 		if len(node.Children) < 2 {
 			return ""
 		}
-		params := Format(node.Children[0])
-		result := Format(node.Children[1])
+		params := ctx.format(node.Children[0])
+		result := ctx.format(node.Children[1])
+		if result == "" && len(node.Children[1].Children) == 0 && node.Children[1].Kind == KindTuple {
+			result = "()"
+		}
 		if node.Text != "" {
 			var extras []string
 			if node.Flags.Async {
@@ -227,7 +271,7 @@ func Format(node *Node) string {
 		}
 		var parts []string
 		for _, child := range node.Children {
-			parts = append(parts, Format(child))
+			parts = append(parts, ctx.format(child))
 		}
 		if node.Text != "" {
 			parts = append([]string{node.Text}, parts...)
@@ -241,7 +285,7 @@ func (n *Node) String() string {
 	return Format(n)
 }
 
-func formatDependentGenericParam(node *Node) (string, bool) {
+func (ctx *formatContext) formatDependentGenericParam(node *Node) (string, bool) {
 	if node == nil || len(node.Children) < 2 {
 		return "", false
 	}
@@ -253,7 +297,7 @@ func formatDependentGenericParam(node *Node) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	return renderGenericParameter(depth, index), true
+	return ctx.genericName(depth, index), true
 }
 
 func parseIndexNodeValue(node *Node) (int, bool) {
@@ -286,26 +330,60 @@ func renderGenericParameter(depth, index int) string {
 	return builder.String()
 }
 
-func formatSingleChildDescription(prefix string, node *Node) string {
+func (ctx *formatContext) formatSingleChildDescription(prefix string, node *Node) string {
 	if node == nil || len(node.Children) == 0 {
 		return prefix
 	}
-	return prefix + Format(node.Children[0])
+	return prefix + ctx.format(node.Children[0])
 }
 
-func variableName(n *Node) string {
+func (ctx *formatContext) variableName(n *Node) string {
 	if n == nil {
 		return ""
 	}
 	if n.Text != "" {
 		return n.Text
 	}
-	return Format(n)
+	return ctx.format(n)
 }
 
-func variableType(n *Node) string {
+func (ctx *formatContext) variableType(n *Node) string {
 	if n == nil || len(n.Children) == 0 {
 		return ""
 	}
-	return Format(n.Children[0])
+	return ctx.format(n.Children[0])
+}
+
+func (ctx *formatContext) genericName(depth, index int) string {
+	namesForDepth := ctx.genericNames[depth]
+	if namesForDepth == nil {
+		namesForDepth = make(map[int]string)
+		ctx.genericNames[depth] = namesForDepth
+	}
+	if name, ok := namesForDepth[index]; ok {
+		return name
+	}
+	ordinal := ctx.genericOrdinal[depth]
+	ctx.genericOrdinal[depth] = ordinal + 1
+	name := renderGenericParameter(depth, ordinal)
+	namesForDepth[index] = name
+	return name
+}
+
+func parseGenericParamIndices(node *Node) (depth int, index int, ok bool) {
+	if node == nil || node.Kind != KindDependentGenericParamType {
+		return 0, 0, false
+	}
+	if len(node.Children) < 2 {
+		return 0, 0, false
+	}
+	d, ok := parseIndexNodeValue(node.Children[0])
+	if !ok {
+		return 0, 0, false
+	}
+	i, ok := parseIndexNodeValue(node.Children[1])
+	if !ok {
+		return 0, 0, false
+	}
+	return d, i, true
 }

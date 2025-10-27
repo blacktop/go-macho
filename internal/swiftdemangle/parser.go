@@ -193,11 +193,6 @@ func (p *parser) readIdentifierText() (string, error) {
 		return p.readIdentifierWithWordSubstitutions()
 	case isDigit(p.peek()):
 		return p.readLiteralIdentifierText()
-	case isUpperLetter(p.peek()):
-		if text, ok := p.readWordSubstitutionLiteral(); ok {
-			return text, nil
-		}
-		return "", fmt.Errorf("identifier starting with uppercase letter %q requires length prefix", p.peek())
 	default:
 		return "", fmt.Errorf("invalid identifier prefix %q at position %d", p.peek(), p.pos)
 	}
@@ -731,9 +726,16 @@ func (p *parser) parseSymbolWithModule() (*Node, error) {
 }
 
 func (p *parser) parseSpecialSymbol() (*Node, error) {
-	base, err := p.parseType()
+	base, err := p.parseTypeAllowTrailing()
 	if err != nil {
 		return nil, err
+	}
+
+	names := collectContextNames(base)
+	if len(names) > 0 && !p.eof() {
+		moduleName := names[0]
+		contextNames := append([]string{}, names[1:]...)
+		return p.parseSymbolEntity(moduleName, contextNames, base)
 	}
 	if !p.eof() && isDigit(p.peek()) {
 		prefix := Format(base)
@@ -746,7 +748,7 @@ func (p *parser) parseSymbolEntity(moduleName string, contextNames []string, bas
 	start := p.pos
 	state := p.saveState()
 	startPos := p.pos
-	if base != nil && (base.Kind == KindClass || base.Kind == KindStructure || base.Kind == KindEnum) {
+	if base != nil {
 		if node, ok, err := p.tryParseConstructorSpec(moduleName, contextNames, base); ok {
 			return node, err
 		}

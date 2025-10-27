@@ -1,38 +1,31 @@
 package swiftdemangle
 
-import (
-	"fmt"
-	"testing"
-)
+import "testing"
 
 func TestWordExtraction(t *testing.T) {
-	// Test word extraction from the CORRECT 16-char literal
-	p := newParser([]byte("dummy"), nil)
-	p.recordWordsFromLiteral("_forceBridgeFrom") // 16 chars, not 17!
-
-	fmt.Printf("Words extracted from '_forceBridgeFrom' (16 chars):\n")
-	for i, word := range p.words {
-		fmt.Printf("  [%d] = %q\n", i, word)
+	// Ensure literal chunk splits into expected sub-words
+	chunkParser := newParser([]byte("dummy"), nil)
+	chunkParser.recordWordsFromLiteral("_forceBridgeFrom")
+	wantWords := []string{"force", "Bridge", "From"}
+	if len(chunkParser.words) != len(wantWords) {
+		t.Fatalf("unexpected word count: got %d want %d", len(chunkParser.words), len(wantWords))
+	}
+	for i, want := range wantWords {
+		if chunkParser.words[i] != want {
+			t.Fatalf("word[%d] mismatch: got %q want %q", i, chunkParser.words[i], want)
+		}
 	}
 
-	// Now test the full identifier decoding
-	fmt.Printf("\nTesting full identifier: 016_forceBridgeFromA1C_6resulty\n")
-	p2 := newParser([]byte("016_forceBridgeFromA1C_6resulty"), nil)
-	p2.pos = 1 // Skip the '0' prefix
+	// Simulate actual parsing: words from _ObjectiveCBridgeable should persist
+	parser := newParser([]byte("016_forceBridgeFromA1C_6resulty"), nil)
+	parser.recordWordsFromLiteral("_ObjectiveCBridgeable")
+	parser.pos = 1 // skip leading '0'
 
-	name, err := p2.readIdentifierWithWordSubstitutions()
+	name, err := parser.readIdentifierWithWordSubstitutions()
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
 		t.Fatalf("readIdentifierWithWordSubstitutions failed: %v", err)
 	}
-
-	fmt.Printf("Decoded identifier: %q\n", name)
-	fmt.Printf("Final position: %d (remaining: %q)\n", p2.pos, string(p2.data[p2.pos:]))
-	fmt.Printf("Word list: %v\n", p2.words)
-
-	// Expected: "_forceBridgeFromObjectiveC"
-	expected := "_forceBridgeFromObjectiveC"
-	if name != expected {
-		t.Errorf("Expected %q, got %q", expected, name)
+	if got, want := name, "_forceBridgeFromObjectiveC"; got != want {
+		t.Fatalf("decoded identifier mismatch: got %q want %q", got, want)
 	}
 }

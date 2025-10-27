@@ -3,6 +3,7 @@ package swiftdemangle
 import (
 	"bytes"
 	"fmt"
+	"strings"
 
 	"github.com/blacktop/go-macho/types/swift"
 )
@@ -100,6 +101,26 @@ func (p *parser) parseType() (*Node, error) {
 	return node, nil
 }
 
+func (p *parser) parseTypeAllowTrailing() (*Node, error) {
+	if debugEnabled {
+		debugf("parseTypeAllowTrailing: entry at pos=%d remaining=%q\n", p.pos, string(p.data[p.pos:]))
+	}
+	node, err := p.parseTypeWithOptions(true)
+	if err != nil {
+		if debugEnabled {
+			debugf("parseTypeAllowTrailing: parseTypeWithOptions failed: %v\n", err)
+		}
+		return nil, err
+	}
+	if node != nil {
+		p.pushSubstitution(node)
+	}
+	if debugEnabled {
+		debugf("parseTypeAllowTrailing: success, parsed %s, pos now %d\n", Format(node), p.pos)
+	}
+	return node, nil
+}
+
 func (p *parser) parseTypeWithOptions(allowTrailing bool) (*Node, error) {
 	if debugEnabled {
 		debugf("parseTypeWithOptions: entry at pos=%d allowTrailing=%v\n", p.pos, allowTrailing)
@@ -149,6 +170,12 @@ func (p *parser) parseTypeWithOptions(allowTrailing bool) (*Node, error) {
 
 	if !allowTrailing {
 		for {
+			if p.matchString("SgXw") || p.matchString("Sg") {
+				if debugEnabled {
+					debugf("parseTypeWithOptions: optional suffix ahead at pos=%d, skipping function parse\n", p.pos)
+				}
+				break
+			}
 			posBefore := p.pos
 			fn, ok, err := p.tryParseFunctionType(node)
 			if err != nil {
@@ -519,6 +546,9 @@ func collectContextNames(node *Node) []string {
 	case KindModule:
 		return []string{node.Text}
 	case KindIdentifier:
+		if strings.Contains(node.Text, ".") {
+			return strings.Split(node.Text, ".")
+		}
 		return []string{node.Text}
 	case KindStructure, KindClass, KindEnum, KindProtocol, KindTypeAlias:
 		names := []string{}
@@ -993,7 +1023,7 @@ func (p *parser) parseBoundGeneric(base *Node) (*Node, error) {
 			break
 		}
 
-		arg, err := p.parseType()
+		arg, err := p.parseTypeAllowTrailing()
 		if err != nil {
 			return nil, err
 		}
@@ -1006,6 +1036,10 @@ func (p *parser) parseBoundGeneric(base *Node) (*Node, error) {
 			p.consume()
 			continue
 		}
+	}
+
+	if debugEnabled {
+		debugf("parseBoundGeneric: base=%s args=%d\n", Format(base), len(args))
 	}
 
 	genericArgs := NewNode(KindGenericArgs, "")

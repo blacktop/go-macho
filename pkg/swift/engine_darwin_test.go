@@ -21,7 +21,7 @@ func TestDarwinEngineMatchesPureGo(t *testing.T) {
 		{"_$s16DemangleFixtures15ObjCBridgeClassC5label7payloadACSS_AA5OuterV5InnerVtcfC", true},
 		{"_$s16DemangleFixtures15ObjCBridgeClassC12payloadValueSiyF", true},
 		{"_$s16DemangleFixtures12DemoProtocolP", true},
-		{"_$ss21_ObjectiveCBridgeableP016_forceBridgeFromA1C_6resulty01_A5CTypeQz_xSgztFZTq", false},
+		{"_$ss21_ObjectiveCBridgeableP016_forceBridgeFromA1C_6resulty01_A5CTypeQz_xSgztFZTq", true},
 		{"_$s13lockdownmoded18LockdownModeServerC10setEnabled7enabled7options10completionySb_SDys11AnyHashableVypGSgys5Error_pSgctF", false},
 		{"_$s13lockdownmoded18LockdownModeServerC19getEnabledInAccount11synchronize10completionySb_ySbctF", false},
 		{"_$s13lockdownmoded18LockdownModeServerC24notifyRestrictionChanged_10completionySS_ys5Error_pSgctF", false},
