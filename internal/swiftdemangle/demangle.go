@@ -36,7 +36,7 @@ func (d *Demangler) DemangleString(mangled []byte) (string, *Node, error) {
 			debugf("DemangleString: DemangleSymbol failed: %v, falling back to DemangleType\n", err)
 		}
 	}
-	node, err := d.DemangleType(mangled)
+	node, err := d.DemangleType(clean)
 	if err != nil {
 		return "", nil, err
 	}
@@ -70,7 +70,8 @@ func (d *Demangler) DemangleType(mangled []byte) (*Node, error) {
 		return nil, fmt.Errorf("empty mangled string")
 	}
 
-	p := newParser(mangled, d.resolver)
+	clean := bytes.TrimPrefix(mangled, []byte("_"))
+	p := newParser(clean, d.resolver)
 	node, err := p.parseType()
 	if err != nil {
 		return nil, err

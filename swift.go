@@ -2628,6 +2628,89 @@ func (f *File) normalizeSwiftIdentifier(name string) string {
 	return swiftpkg.NormalizeIdentifier(name)
 }
 
+var swiftSpecialTypeTokens = map[string]string{
+	"_$sXDXMT": "@thick Self.Type",
+	"$sXDXMT":  "@thick Self.Type",
+	"XDXMT":    "@thick Self.Type",
+}
+
+func (f *File) formatSwiftTypeToken(token string) string {
+	trimmed := strings.TrimSpace(token)
+	if trimmed == "" {
+		return ""
+	}
+	if mapped, ok := swiftSpecialTypeTokens[trimmed]; ok {
+		return mapped
+	}
+	if demangled, ok := swiftpkg.TryNormalizeIdentifier(trimmed); ok {
+		return demangled
+	}
+	if withoutLeading := strings.TrimPrefix(trimmed, "_"); withoutLeading != trimmed {
+		if demangled, ok := swiftpkg.TryNormalizeIdentifier(withoutLeading); ok {
+			return demangled
+		}
+	}
+	if shouldPrefixWithSwiftMangling(trimmed) {
+		if demangled, ok := swiftpkg.TryNormalizeIdentifier("_$s" + trimmed); ok {
+			return demangled
+		}
+	}
+	return trimmed
+}
+
+func shouldPrefixWithSwiftMangling(token string) bool {
+	if token == "" {
+		return false
+	}
+	if strings.HasPrefix(token, "_$s") || strings.HasPrefix(token, "$s") || strings.HasPrefix(token, "_T") {
+		return false
+	}
+	if strings.ContainsAny(token, ".@/ ") {
+		return false
+	}
+	for _, r := range token {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func cleanupSwiftSpacing(s string) string {
+	replacements := []struct {
+		old string
+		new string
+	}{
+		{" (", "("},
+		{" )", ")"},
+		{" ,", ","},
+		{" ?", "?"},
+		{" !", "!"},
+		{" >", ">"},
+		{" <", "<"},
+	}
+	for _, rep := range replacements {
+		s = strings.ReplaceAll(s, rep.old, rep.new)
+	}
+	return s
+}
+
+func (f *File) polishSwiftComponents(parts []string) string {
+	formatted := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		part = f.formatSwiftTypeToken(part)
+		formatted = append(formatted, part)
+	}
+	if len(formatted) == 0 {
+		return ""
+	}
+	return cleanupSwiftSpacing(strings.Join(formatted, " "))
+}
+
 func isPrintableASCII(s string) bool {
 	if len(s) == 0 {
 		return false
@@ -2943,6 +3026,16 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 	var isBoundGeneric bool
 	var out []string
 
+	appendNormalized := func(val string) {
+		val = normalizeSwiftMangling(val)
+		out = append(out, f.normalizeSwiftIdentifier(val))
+	}
+	appendRaw := func(val string) {
+		if val != "" {
+			out = append(out, val)
+		}
+	}
+
 	for idx, part := range parts {
 		switch part := part.(type) {
 		case string:
@@ -2974,14 +3067,15 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 			if part == "" {
 				continue
 			}
-			appendNormalized := func(val string) {
-				out = append(out, f.normalizeSwiftIdentifier(val))
-			}
 			if regexp.MustCompile("So[0-9]+").MatchString(part) {
 				if strings.Contains(part, "OS_dispatch_queue") {
 					appendNormalized("DispatchQueue")
 				} else {
-					appendNormalized("_$s" + part)
+					if strings.HasPrefix(part, "_$s") {
+						appendNormalized(part)
+					} else {
+						appendNormalized("_$s" + part)
+					}
 				}
 			} else if regexp.MustCompile("^[0-9]+").MatchString(part) {
 				// remove leading numbers
@@ -2993,17 +3087,19 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				}
 			} else if strings.HasPrefix(part, "$s") {
 				appendNormalized("_" + part)
+			} else if strings.HasPrefix(part, "_$s") || strings.HasPrefix(part, "_T") {
+				appendNormalized(part)
 			} else {
 				if demangled, ok := swift.MangledType[part]; ok {
-					appendNormalized(demangled)
+					appendRaw(demangled)
 				} else if strings.HasPrefix(part, "s") {
 					if demangled, ok := swift.MangledKnownTypeKind[part[1:]]; ok {
-						appendNormalized(demangled)
+						appendRaw(demangled)
 					}
 				} else {
 					if isBoundGeneric {
 						appendNormalized("_$s" + part)
-						out = append(out, "->")
+						appendRaw("->")
 						isBoundGeneric = false
 					} else {
 						appendNormalized("_$s" + part)
@@ -3028,7 +3124,7 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				// if symbolic {
 				// 	name += "()"
 				// }
-			out = append(out, f.normalizeSwiftIdentifier(name))
+				appendNormalized(name)
 			case 0x02: // symbolic reference to a context descriptor
 				var name string
 				ptr, err := f.GetPointerAtAddress(part.Addr)
@@ -3061,10 +3157,10 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				// if symbolic {
 				// 	name += "()"
 				// }
-			out = append(out, f.normalizeSwiftIdentifier(name))
+				appendNormalized(name)
 			case 0x09: // DIRECT symbolic reference to an accessor function, which can be executed in the process to get a pointer to the referenced entity.
 				// AccessorFunctionReference
-				out = append(out, fmt.Sprintf("(accessor function sub_%x)", part.Addr))
+				appendRaw(fmt.Sprintf("(accessor function sub_%x)", part.Addr))
 			case 0x0a: // DIRECT symbolic reference to a unique extended existential type shape.
 				// UniqueExtendedExistentialTypeShape
 				var name string
@@ -3085,7 +3181,7 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				// if symbolic {
 				// 	name += "()"
 				// }
-			out = append(out, f.normalizeSwiftIdentifier(name))
+				appendNormalized(name)
 			case 0x0b: // DIRECT symbolic reference to a non-unique extended existential type shape.
 				// NonUniqueExtendedExistentialTypeShape
 				var name string
@@ -3106,14 +3202,14 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				// if symbolic {
 				// 	name += "()"
 				// }
-			out = append(out, f.normalizeSwiftIdentifier(name))
+				appendNormalized(name)
 			case 0x0c: // DIRECT symbolic reference to a objective C protocol ref.
 				// ObjectiveCProtocol
 				name, err := f.readObjCProtocolName(part.Addr)
 				if err != nil {
 					return "", fmt.Errorf("failed to resolve objective-c protocol reference at %#x: %w", part.Addr, err)
 				}
-			out = append(out, f.normalizeSwiftIdentifier(name))
+				appendNormalized(name)
 			/* These are all currently reserved but unused. */
 			case 0x03: // DIRECT to protocol conformance descriptor
 				fallthrough
@@ -3135,5 +3231,5 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 		}
 	}
 
-	return strings.Join(out, " "), nil
+	return f.polishSwiftComponents(out), nil
 }

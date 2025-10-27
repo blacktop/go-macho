@@ -10,6 +10,7 @@ import (
 )
 
 var traceSymbols = os.Getenv("GO_MACHO_SWIFT_TRACE") != ""
+var logInputs = os.Getenv(debugEnvVar) != ""
 
 type pureGoEngine struct{}
 
@@ -18,7 +19,9 @@ func newPureGoEngine() engine {
 }
 
 func (pureGoEngine) Demangle(input string) (string, error) {
-	fmt.Fprintf(os.Stderr, "DEMANGLING: %s\n", input)
+	if logInputs {
+		log.Printf("purego demangle input: %s", input)
+	}
 	if input == "" {
 		return "", fmt.Errorf("empty input")
 	}

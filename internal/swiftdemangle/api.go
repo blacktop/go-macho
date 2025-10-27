@@ -1,6 +1,9 @@
 package swiftdemangle
 
-import "regexp"
+import (
+	"bytes"
+	"regexp"
+)
 
 var mangledTokenPattern = regexp.MustCompile(`(?:_?\$[sS]|S[oO])[A-Za-z0-9_]+`)
 
@@ -39,7 +42,8 @@ func DemangleSymbolString(mangled string, opts ...Option) (string, *Node, error)
 func DemangleTypeString(mangled string, opts ...Option) (string, *Node, error) {
 	cfg := buildOptions(opts...)
 	dem := New(cfg.resolver)
-	node, err := dem.DemangleType([]byte(mangled))
+	clean := bytes.TrimPrefix([]byte(mangled), []byte("_"))
+	node, err := dem.DemangleType(clean)
 	if err != nil {
 		return "", nil, err
 	}
