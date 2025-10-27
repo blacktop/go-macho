@@ -50,9 +50,11 @@ All these details highlight the balance Swift’s design strikes between compile
 
 ## Swift Upstream References
 
-We rely on the upstream Swift sources at `OPC/swift-main/` to understand the full parser surface area, node definitions, and formatting rules before extending the pure-Go demangler. Review these before touching the parser:
+We rely on the upstream Swift sources at `OPC/swift-main/` (C++) and `OPC/CwlDemangle/` (pure Swift) to understand the full parser surface area, node definitions, and formatting rules before extending the pure-Go demangler. Review these before touching the parser:
 
-**Headers / Source**
+**C++ Implementation (OPC/swift-main/)**
+
+Headers / Source
 - `include/swift/AST/ASTDemangler.h`
 - `include/swift/Demangling/Demangle.h`
 - `include/swift/Demangling/DemangleNodes.def`
@@ -71,6 +73,15 @@ We rely on the upstream Swift sources at `OPC/swift-main/` to understand the ful
 - `unittests/Basic/DemangleTest.cpp`
 - `unittests/SwiftDemangle/`
 - `unittests/SwiftDemangle/DemangleTest.cpp`
+
+**Pure Swift Implementation (OPC/CwlDemangle/)**
+
+This is Matt Gallagher's pure Swift reimplementation of the C++ demangler, useful as an alternative reference:
+
+- `Sources/CwlDemangle/CwlDemangle.swift` - Main demangler implementation in Swift
+- `Tests/CwlDemangleTests/CwlDemangleTests.swift` - Test cases
+- Written in a more readable style than the C++ version, may provide clearer insights for our Go port
+- Implements the same recursive descent parsing approach but in a higher-level language
 
 **What to capture while reading**
 1. Node kinds and payloads from `DemangleNodes.def`, mapping directly to `internal/swiftdemangle/node.go`.

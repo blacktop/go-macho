@@ -746,12 +746,14 @@ func (p *parser) parseSymbolEntity(moduleName string, contextNames []string, bas
 	start := p.pos
 	state := p.saveState()
 	startPos := p.pos
-	if node, ok, err := p.tryParseConstructorSpec(moduleName, contextNames, base); ok {
-		return node, err
-	}
-	// Only restore if position hasn't advanced (no input consumed)
-	if p.pos == startPos {
-		p.restoreState(state)
+	if base != nil && (base.Kind == KindClass || base.Kind == KindStructure || base.Kind == KindEnum) {
+		if node, ok, err := p.tryParseConstructorSpec(moduleName, contextNames, base); ok {
+			return node, err
+		}
+		// Only restore if position hasn't advanced (no input consumed)
+		if p.pos == startPos {
+			p.restoreState(state)
+		}
 	}
 
 	state = p.saveState()
@@ -803,12 +805,24 @@ func (p *parser) tryParseFunctionSpec(moduleName string, contextNames []string) 
 		p.restoreState(startState)
 		return nil, false, err
 	}
+	if debugEnabled {
+		debugf("tryParseFunctionSpec: signature parsed params=%d result=%s pos=%d remaining=%q\n", len(params), func() string {
+			if resultType != nil {
+				return Format(resultType)
+			}
+			return "<nil>"
+		}(), p.pos, string(p.data[p.pos:]))
+	}
 
-	// IMPORTANT: Once parseFunctionSignature succeeds, we must NOT restore state even if
-	// the 'F' check fails. The signature parsing consumed input and may have pushed nodes/substitutions.
 	if err := p.expect('F'); err != nil {
-		// Not a function entity - return ok=false but DON'T restore state
+		if debugEnabled {
+			debugf("tryParseFunctionSpec: expect('F') failed at pos=%d: %v\n", p.pos, err)
+		}
+		p.restoreState(startState)
 		return nil, false, nil
+	}
+	if debugEnabled {
+		debugf("tryParseFunctionSpec: consumed 'F', pos now %d remaining=%q\n", p.pos, string(p.data[p.pos:]))
 	}
 	node := buildFunctionNode(moduleName, contextNames, name, labels, params, resultType, async, throws)
 	return node, true, nil
@@ -872,9 +886,8 @@ func (p *parser) tryParseConstructorSpec(moduleName string, contextNames []strin
 	if !p.eof() && p.peek() == 'c' {
 		p.consume()
 	}
-	// Don't restore state here - signature already parsed and consumed input
 	if err := p.expect('f'); err != nil {
-		// Not a constructor - return ok=false but DON'T restore state
+		p.restoreState(state)
 		return nil, false, nil
 	}
 	if p.eof() {
@@ -953,9 +966,21 @@ func (p *parser) tryParseVariableSpec(moduleName string, contextNames []string) 
 }
 
 func (p *parser) applySymbolSuffixes(node *Node) (*Node, error) {
+	if debugEnabled {
+		debugf("applySymbolSuffixes: entry at pos=%d remaining=%q\n", p.pos, string(p.data[p.pos:]))
+	}
 	current := node
 	for !p.eof() {
+		if debugEnabled {
+			debugf("applySymbolSuffixes: checking char %q at pos=%d\n", p.peek(), p.pos)
+		}
 		switch p.peek() {
+		case 'Z':
+			p.consume()
+			current = wrapDescriptorNode(KindStatic, current)
+			if debugEnabled {
+				debugf("applySymbolSuffixes: applied Static, pos now %d\n", p.pos)
+			}
 		case 'M':
 			if p.pos+1 >= len(p.data) {
 				return nil, fmt.Errorf("truncated metatype suffix")
@@ -1018,11 +1043,20 @@ func (p *parser) applySymbolSuffixes(node *Node) (*Node, error) {
 				return nil, fmt.Errorf("truncated thunk suffix")
 			}
 			suffix := p.data[p.pos+1]
+			if debugEnabled {
+				debugf("applySymbolSuffixes: 'T' suffix=%q at pos=%d\n", suffix, p.pos+1)
+			}
 			switch suffix {
 			case 'q':
 				p.pos += 2
 				current = wrapDescriptorNode(KindMethodDescriptor, current)
+				if debugEnabled {
+					debugf("applySymbolSuffixes: applied MethodDescriptor, pos now %d\n", p.pos)
+				}
 			default:
+				if debugEnabled {
+					debugf("applySymbolSuffixes: unknown 'T' suffix %q, returning\n", suffix)
+				}
 				return current, nil
 			}
 		default:
@@ -1162,6 +1196,7 @@ loop:
 }
 
 func (p *parser) parseFunctionSignature() ([]*Node, *Node, bool, bool, error) {
+	startPos := p.pos
 	if debugEnabled {
 		debugf("parseFunctionSignature: start pos=%d remaining=%q\n", p.pos, string(p.data[p.pos:]))
 	}
@@ -1172,13 +1207,13 @@ func (p *parser) parseFunctionSignature() ([]*Node, *Node, bool, bool, error) {
 		}
 		return nil, nil, false, false, err
 	}
+	posAfterResultParse := p.pos
 	if debugEnabled {
 		debugf("parseFunctionSignature: parsed result kind=%v text=%s pos=%d\n", resultType.Kind, resultType.Text, p.pos)
 	}
 	if len(p.pending) > 0 {
 		p.pending = p.pending[:0]
 	}
-	state := p.saveState()
 	paramsTuple := NewNode(KindTuple, "")
 	async := false
 	throws := false
@@ -1199,18 +1234,47 @@ func (p *parser) parseFunctionSignature() ([]*Node, *Node, bool, bool, error) {
 		async = fn.Flags.Async
 		throws = fn.Flags.Throws
 	} else {
-		if tuple, ok, err := p.parseFunctionInput(); err != nil {
-			return nil, nil, false, false, err
-		} else if ok {
-			if debugEnabled {
-				debugf("parseFunctionSignature: got params tuple kind=%v with %d elems\n", tuple.Kind, len(tuple.Children))
+		// Only try to parse function input if parseType didn't already consume parameters
+		// parseType can consume parameters via tryParseFunctionType in its function type loop
+		shouldParseInput := true
+		if posAfterResultParse > startPos+1 {
+			// Position advanced significantly - parseType may have consumed parameters
+			// Check if we're at a position that looks like parameter start
+			if p.eof() || (!isDigit(p.peek()) && p.peek() != 'y' && p.peek() != '_') {
+				// Not at parameter markers - don't try to parse input again
+				shouldParseInput = false
+				if debugEnabled {
+					debugf("parseFunctionSignature: skipping parseFunctionInput, position advanced from %d to %d, subst len=%d\n", startPos, posAfterResultParse, len(p.subst))
+				}
+				// Check if a recent substitution is a tuple - that's likely the parameters
+				// Search backwards through substitutions to find the most recent tuple
+				for i := len(p.subst) - 1; i >= 0; i-- {
+					subst := p.subst[i]
+					if debugEnabled && i >= len(p.subst)-3 {
+						debugf("parseFunctionSignature: checking subst[%d] kind=%v children=%d\n", i, subst.Kind, len(subst.Children))
+					}
+					if subst != nil && subst.Kind == KindTuple && len(subst.Children) > 0 {
+						paramsTuple = subst
+						if debugEnabled {
+							debugf("parseFunctionSignature: retrieved params tuple from subst[%d] with %d elems\n", i, len(paramsTuple.Children))
+						}
+						break
+					}
+				}
 			}
-			paramsTuple = tuple
-		} else {
-			if debugEnabled {
-				debugf("parseFunctionSignature: parseFunctionInput failed, restoring to %d\n", state.pos)
+		}
+
+		if shouldParseInput {
+			if tuple, ok, err := p.parseFunctionInput(); err != nil {
+				return nil, nil, false, false, err
+			} else if ok {
+				if debugEnabled {
+					debugf("parseFunctionSignature: got params tuple kind=%v with %d elems\n", tuple.Kind, len(tuple.Children))
+				}
+				paramsTuple = tuple
+			} else if debugEnabled {
+				debugf("parseFunctionSignature: no parameter tuple at pos=%d\n", p.pos)
 			}
-			p.restoreState(state)
 		}
 
 		if !p.eof() && p.peek() == 'Y' {

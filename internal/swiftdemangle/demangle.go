@@ -1427,6 +1427,12 @@ func (p *parser) tryParseTuple(node *Node) (*Node, bool, error) {
 		if p.pos == posBefore {
 			panic("infinite loop detected in recursive tuple parse")
 		}
+		if !p.eof() && p.peek() == 'z' {
+			p.consume()
+			wrapped := NewNode(KindInOut, "")
+			wrapped.Append(elem)
+			elem = wrapped
+		}
 		elements = append(elements, elem)
 	}
 
