@@ -1,3 +1,0 @@
-# Performance hints (PerformanceHints)
-
-## Overview

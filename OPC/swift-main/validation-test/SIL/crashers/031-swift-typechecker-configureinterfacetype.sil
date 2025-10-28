@@ -1,3 +1,0 @@
-// RUN: not %target-sil-opt %s
-// REQUIRES: asserts
-func y:@opened(Any

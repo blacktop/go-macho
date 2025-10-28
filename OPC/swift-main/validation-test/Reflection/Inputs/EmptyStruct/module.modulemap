@@ -1,3 +1,0 @@
-module EmptyStruct {
-  header "EmptyStruct.h"
-}

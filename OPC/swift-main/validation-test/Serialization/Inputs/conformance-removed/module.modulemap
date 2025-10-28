@@ -1,4 +1,0 @@
-module ObjCLib {
-  header "ObjCLib.h"
-  export *
-}

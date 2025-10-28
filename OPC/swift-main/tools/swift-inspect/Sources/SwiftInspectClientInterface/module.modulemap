@@ -1,4 +1,0 @@
-module SwiftInspectClientInterface {
-  header "SwiftInspectClientInterface.h"
-  export *
-}

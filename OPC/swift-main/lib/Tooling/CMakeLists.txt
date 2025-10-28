@@ -1,1 +1,0 @@
-add_swift_tool_subdirectory(libSwiftScan)

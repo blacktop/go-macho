@@ -1,9 +1,0 @@
-add_swift_unittest(SwiftIDETests
-  CodeCompletionToken.cpp
-  FuzzyStringMatcherTest.cpp
-  Placeholders.cpp
-  )
-target_link_libraries(SwiftIDETests
-  PRIVATE
-  swiftIDE
-)

@@ -1,4 +1,0 @@
-framework module TestUser {
-  umbrella header "TestUser.h"
-  export *
-}

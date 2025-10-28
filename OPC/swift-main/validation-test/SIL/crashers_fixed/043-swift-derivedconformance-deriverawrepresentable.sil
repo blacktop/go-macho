@@ -1,3 +1,0 @@
-// RUN: not %target-sil-opt %s
-import Swift
-func d<T{enum a:T

@@ -1,2 +1,0 @@
-// RUN: not %target-sil-opt %s
-{struct R{func o:inout p<

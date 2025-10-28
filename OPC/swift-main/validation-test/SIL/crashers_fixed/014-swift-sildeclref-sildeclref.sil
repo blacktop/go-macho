@@ -1,2 +1,0 @@
-// RUN: not %target-sil-opt %s
-class C}sil_vtable C{#C

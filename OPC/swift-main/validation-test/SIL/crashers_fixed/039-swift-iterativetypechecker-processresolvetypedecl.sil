@@ -1,3 +1,0 @@
-// RUN: not %target-sil-opt %s
-struct I:b:typealias b:a
-typealias a=f

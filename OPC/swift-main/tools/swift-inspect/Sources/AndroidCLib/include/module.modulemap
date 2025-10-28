@@ -1,4 +1,0 @@
-module AndroidCLib {
-  header "heap.h"
-  export *
-}

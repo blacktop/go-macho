@@ -1,4 +1,0 @@
-XPC
-XCTest
-SceneKit.ModelIO
-CoreImage.CIFilterBuiltins

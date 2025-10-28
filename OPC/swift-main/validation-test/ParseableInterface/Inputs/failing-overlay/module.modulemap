@@ -1,8 +1,0 @@
-module HasOverlay {
-  header "HasOverlay.h"
-}
-
-module ImportsOverlay {
-  header "ImportsOverlay.h"
-  export *
-}

@@ -1,7 +1,0 @@
-// RUN: not %target-sil-opt %s
-{
-()AnyObject
-.n
-}
-import Swift
-class b{@objc func a(c)

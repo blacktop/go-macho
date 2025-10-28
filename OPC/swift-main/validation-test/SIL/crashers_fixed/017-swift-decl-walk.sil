@@ -1,3 +1,0 @@
-// RUN: not %target-sil-opt -enable-ast-verifier %s
-
-import Swift func g(@opened(Any

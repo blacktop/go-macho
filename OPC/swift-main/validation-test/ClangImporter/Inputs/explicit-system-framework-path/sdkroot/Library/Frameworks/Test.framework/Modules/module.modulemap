@@ -1,3 +1,0 @@
-framework module Test {
-  umbrella header "Test.h"
-}
