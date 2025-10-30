@@ -53,6 +53,11 @@ func (f *File) getCStringWithFallback(addr uint64, label string) (string, error)
 	return "", err
 }
 
+// isSwiftClass checks if the fast flags indicate this is a Swift class
+func isSwiftClass(fastFlags uint64) bool {
+	return (fastFlags&objc.FAST_IS_SWIFT_LEGACY != 0) || (fastFlags&objc.FAST_IS_SWIFT_STABLE != 0)
+}
+
 // HasObjC returns true if MachO contains a __objc_imageinfo section
 func (f *File) HasObjC() bool {
 	for _, s := range f.Segments() {
@@ -407,6 +412,12 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 		return nil, fmt.Errorf("failed to read cstring: %v", err)
 	}
 
+	// Normalize Swift class names if this is a Swift class and auto-demangling is enabled
+	isSwift := isSwiftClass(classPtr.DataVMAddrAndFastFlags)
+	if f.swiftAutoDemangle && isSwift {
+		name = swiftpkg.NormalizeIdentifier(name)
+	}
+
 	var methods []objc.Method
 	if info.BaseMethodsVMAddr > 0 {
 		info.BaseMethodsVMAddr, err = f.disablePreattachedCategories(info.BaseMethodsVMAddr)
@@ -421,7 +432,7 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 
 	var prots []objc.Protocol
 	if info.BaseProtocolsVMAddr > 0 {
-		info.BaseProtocolsVMAddr, err = f.disablePreattachedCategories(info.BaseProtocolsVMAddr)
+		info.BasePropertiesVMAddr, err = f.disablePreattachedCategories(info.BaseProtocolsVMAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to disable preattached categories: %v", err)
 		}
@@ -433,7 +444,7 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 
 	var ivars []objc.Ivar
 	if info.IvarsVMAddr > 0 {
-		ivars, err = f.GetObjCIvars(info.IvarsVMAddr)
+		ivars, err = f.getObjCIvars(info.IvarsVMAddr, isSwift)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get ivars at vmaddr: %#x; %v", info.IvarsVMAddr, err)
 		}
@@ -445,7 +456,7 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to disable preattached categories: %v", err)
 		}
-		props, err = f.GetObjCProperties(info.BasePropertiesVMAddr)
+		props, err = f.getObjCProperties(info.BasePropertiesVMAddr, isSwift)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get props at vmaddr: %#x; %v", info.BasePropertiesVMAddr, err)
 		}
@@ -588,6 +599,12 @@ func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 		return nil, fmt.Errorf("failed to read cstring: %v", err)
 	}
 
+	// Normalize Swift class names if this is a Swift class and auto-demangling is enabled
+	isSwift := isSwiftClass(classPtr.DataVMAddrAndFastFlags)
+	if f.swiftAutoDemangle && isSwift {
+		name = swiftpkg.NormalizeIdentifier(name)
+	}
+
 	var methods []objc.Method
 	if info.BaseMethodsVMAddr > 0 {
 		info.BaseMethodsVMAddr, err = f.disablePreattachedCategories(info.BaseMethodsVMAddr)
@@ -614,7 +631,7 @@ func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 
 	var ivars []objc.Ivar
 	if info.IvarsVMAddr > 0 {
-		ivars, err = f.GetObjCIvars(info.IvarsVMAddr)
+		ivars, err = f.getObjCIvars(info.IvarsVMAddr, isSwift)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get ivars at vmaddr: %#x; %v", info.IvarsVMAddr, err)
 		}
@@ -626,7 +643,7 @@ func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to disable preattached categories: %v", err)
 		}
-		props, err = f.GetObjCProperties(info.BasePropertiesVMAddr)
+		props, err = f.getObjCProperties(info.BasePropertiesVMAddr, isSwift)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get props at vmaddr: %#x; %v", info.BasePropertiesVMAddr, err)
 		}
@@ -1264,6 +1281,11 @@ func (f *File) forEachObjCMethod(methodListVMAddr uint64, handler func(uint64, o
 
 // GetObjCIvars returns the Objective-C instance variables
 func (f *File) GetObjCIvars(vmaddr uint64) ([]objc.Ivar, error) {
+	return f.getObjCIvars(vmaddr, false)
+}
+
+// getObjCIvars returns the Objective-C instance variables with optional Swift demangling
+func (f *File) getObjCIvars(vmaddr uint64, isSwift bool) ([]objc.Ivar, error) {
 
 	var ivarsList objc.IvarList
 	var ivars []objc.Ivar
@@ -1326,6 +1348,13 @@ func (f *File) GetObjCIvars(vmaddr uint64) ([]objc.Ivar, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to read ivar types cstring: %v", err)
 		}
+
+		// Demangle Swift ivar names and types if this is a Swift class
+		if f.swiftAutoDemangle && isSwift {
+			n = swiftpkg.NormalizeIdentifier(n)
+			t = swiftpkg.NormalizeIdentifier(t)
+		}
+
 		ivars = append(ivars, objc.Ivar{
 			Name:   n,
 			Type:   t,
@@ -1339,6 +1368,11 @@ func (f *File) GetObjCIvars(vmaddr uint64) ([]objc.Ivar, error) {
 
 // GetObjCProperties returns the Objective-C properties
 func (f *File) GetObjCProperties(vmaddr uint64) ([]objc.Property, error) {
+	return f.getObjCProperties(vmaddr, false)
+}
+
+// getObjCProperties returns the Objective-C properties with optional Swift demangling
+func (f *File) getObjCProperties(vmaddr uint64, isSwift bool) ([]objc.Property, error) {
 
 	var propList objc.PropertyList
 	var objcProperties []objc.Property
@@ -1368,6 +1402,13 @@ func (f *File) GetObjCProperties(vmaddr uint64) ([]objc.Property, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to read prop attributes cstring: %v", err)
 		}
+
+		// Demangle Swift property names and attributes if this is a Swift class
+		if f.swiftAutoDemangle && isSwift {
+			name = swiftpkg.NormalizeIdentifier(name)
+			attrib = swiftpkg.NormalizeIdentifier(attrib)
+		}
+
 		objcProperties = append(objcProperties, objc.Property{
 			PropertyT:         prop,
 			Name:              name,

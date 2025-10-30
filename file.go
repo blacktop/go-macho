@@ -61,8 +61,8 @@ var ErrMachOSectionNotFound = errors.New("MachO missing required section")
 var ErrMachODyldInfoNotFound = errors.New("LC_DYLD_INFO(_ONLY) not found")
 var ErrMachONoBindInfo = errors.New("MachO does not contain bind information (fixups)")
 
-var ErrCStringNoTerminator = errors.New("c-string has no terminator")
-var ErrCStringNotFound = errors.New("c-string not found")
+var ErrCStringNoTerminator = errors.New("cstring has no terminator")
+var ErrCStringNotFound = errors.New("cstring not found")
 
 // FormatError is returned by some operations if the data does
 // not have the correct format for an object file.
@@ -1773,7 +1773,7 @@ func (f *File) GetCString(addr uint64) (string, error) {
 			if nullIdx >= 0 {
 				out = append(out, buf[:nullIdx]...)
 				if len(out) == 0 {
-					return "", fmt.Errorf("%w at address %#x", ErrCStringNotFound, addr)
+					return "", nil
 				}
 				return string(out), nil
 			}
@@ -1874,7 +1874,7 @@ func (f *File) GetCStringAtOffset(strOffset int64) (string, error) {
 			if nullIdx >= 0 {
 				out = append(out, buf[:nullIdx]...)
 				if len(out) == 0 {
-					return "", fmt.Errorf("%w at offset %#x", ErrCStringNotFound, strOffset)
+					return "", nil
 				}
 				return string(out), nil
 			}

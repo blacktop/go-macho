@@ -338,26 +338,51 @@ func decodeType(encType string) string {
 	if len(encType) > 2 {
 		switch encType[0] {
 		case '!': // VECTOR
-			inner := encType[strings.IndexByte(encType, '[')+1 : strings.LastIndexByte(encType, ']')]
+			start := strings.IndexByte(encType, '[')
+			end := strings.LastIndexByte(encType, ']')
+			if start == -1 || end == -1 || start+1 > end {
+				return encType
+			}
+			inner := encType[start+1 : end]
 			s += decodeVector(inner)
 
 		case '(': // UNION
-			inner := encType[strings.IndexByte(encType, '(')+1 : strings.LastIndexByte(encType, ')')]
+			start := strings.IndexByte(encType, '(')
+			end := strings.LastIndexByte(encType, ')')
+			if start == -1 || end == -1 || start+1 > end {
+				return encType
+			}
+			inner := encType[start+1 : end]
 			s += decodeUnion(inner)
 
 		case '[': // ARRAY
-			inner := encType[strings.IndexByte(encType, '[')+1 : strings.LastIndexByte(encType, ']')]
+			start := strings.IndexByte(encType, '[')
+			end := strings.LastIndexByte(encType, ']')
+			if start == -1 || end == -1 || start+1 > end {
+				return encType
+			}
+			inner := encType[start+1 : end]
 			s += decodeArray(inner)
 
 		case '{': // STRUCT
-			if !(strings.Contains(encType, "{") && strings.Contains(encType, "}")) {
+			if !strings.Contains(encType, "{") || !strings.Contains(encType, "}") {
 				return "?"
 			}
-			inner := encType[strings.IndexByte(encType, '{')+1 : strings.LastIndexByte(encType, '}')]
+			start := strings.IndexByte(encType, '{')
+			end := strings.LastIndexByte(encType, '}')
+			if start == -1 || end == -1 || start+1 > end {
+				return encType
+			}
+			inner := encType[start+1 : end]
 			s += decodeStructure(inner)
 
 		case '<': // block func prototype
-			inner := encType[strings.IndexByte(encType, '<')+1 : strings.LastIndexByte(encType, '>')]
+			start := strings.IndexByte(encType, '<')
+			end := strings.LastIndexByte(encType, '>')
+			if start == -1 || end == -1 || start+1 > end {
+				return encType
+			}
+			inner := encType[start+1 : end]
 			ret, args := decodeMethodTypes(inner)
 			s += fmt.Sprintf("(%s (^)(%s))", ret, strings.Join(args, " "))
 		}
