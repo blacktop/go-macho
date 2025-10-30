@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	swiftpkg "github.com/blacktop/go-macho/pkg/swift"
 	"github.com/blacktop/go-macho/types"
 	"github.com/blacktop/go-macho/types/swift"
 )
@@ -555,7 +556,7 @@ func (f *File) GetSwiftDynamicReplacementInfoForOpaqueTypes() (*swift.AutomaticD
 }
 
 // GetSwiftAccessibleFunctions parses the __TEXT.__swift5_acfuncs section
-func (f *File) GetSwiftAccessibleFunctions() (funcs []swift.TargetAccessibleFunctionRecord, err error) {
+func (f *File) GetSwiftAccessibleFunctions() (funcs []swift.AccessibleFunction, err error) {
 	if sec := f.Section("__TEXT", "__swift5_acfuncs"); sec != nil {
 		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
 		if err != nil {
@@ -579,7 +580,41 @@ func (f *File) GetSwiftAccessibleFunctions() (funcs []swift.TargetAccessibleFunc
 				}
 				return nil, fmt.Errorf("failed to read swift %T: %w", afr, err)
 			}
-			funcs = append(funcs, afr)
+
+			name := ""
+			if afr.Name.IsSet() {
+				if s, err := f.GetCString(afr.Name.GetAddress()); err == nil {
+					name = f.demangleSwiftString(s)
+				} else {
+					name = fmt.Sprintf("(name %#x)", afr.Name.GetAddress())
+				}
+			}
+
+			functionType := ""
+			if afr.FunctionType.IsSet() {
+				if s, err := f.makeSymbolicMangledNameStringRef(afr.FunctionType.GetAddress()); err == nil {
+					functionType = f.demangleSwiftString(s)
+				} else if raw, err := f.GetCString(afr.FunctionType.GetAddress()); err == nil {
+					functionType = f.demangleSwiftString(raw)
+				} else {
+					functionType = fmt.Sprintf("(type %#x)", afr.FunctionType.GetAddress())
+				}
+			}
+
+			fnAddr := afr.Function.GetAddress()
+			if f.vma != nil {
+				if converted := f.vma.Convert(fnAddr); converted != 0 {
+					fnAddr = converted
+				}
+			}
+
+			funcs = append(funcs, swift.AccessibleFunction{
+				Name:               name,
+				FunctionType:       functionType,
+				FunctionAddress:    fnAddr,
+				GenericEnvironment: afr.GenericEnvironment.GetAddress(),
+				Flags:              afr.Flags,
+			})
 		}
 
 		return funcs, nil
@@ -3050,4 +3085,37 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 	}
 
 	return strings.Join(out, " "), nil
+}
+
+func (f *File) demangleSwiftString(input string) string {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return input
+	}
+	if mapped, ok := swiftSpecialTypeTokens[trimmed]; ok {
+		return mapped
+	}
+	if !f.swiftAutoDemangle {
+		return trimmed
+	}
+	if out, err := swiftpkg.Demangle(trimmed); err == nil && out != "" {
+		return out
+	}
+	return swiftpkg.NormalizeIdentifier(trimmed)
+}
+
+func (f *File) normalizeSwiftIdentifier(name string) string {
+	if name == "" {
+		return name
+	}
+	if !f.swiftAutoDemangle {
+		return name
+	}
+	return swiftpkg.NormalizeIdentifier(name)
+}
+
+var swiftSpecialTypeTokens = map[string]string{
+	"_$sXDXMT": "@thick Self.Type",
+	"$sXDXMT":  "@thick Self.Type",
+	"XDXMT":    "@thick Self.Type",
 }
