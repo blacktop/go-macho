@@ -1,11 +1,11 @@
 package objc
 
-	import (
-		"fmt"
-		"log/slog"
-		"strings"
-		"unsafe"
-	)
+import (
+	"fmt"
+	"log/slog"
+	"strings"
+	"unsafe"
+)
 
 const (
 	// Values for protocol_t->flags
@@ -38,11 +38,11 @@ type ProtocolT struct {
 	ClassPropertiesVMAddr     uint64
 }
 
-	type Protocol struct {
-		Name                    string
-		Ptr                     uint64
-		Isa                     *Class
-		Prots                   []Protocol
+type Protocol struct {
+	Name                    string
+	Ptr                     uint64
+	Isa                     *Class
+	Prots                   []Protocol
 	InstanceMethods         []Method
 	InstanceProperties      []Property
 	ClassMethods            []Method
@@ -150,51 +150,51 @@ func (p *Protocol) dump(verbose, addrs bool) string {
 			optMethods = "/* optional instance methods */\n" + optMethods + "\n"
 		}
 	}
-		return fmt.Sprintf(
-			"%s\n\n"+
-				"@required\n\n"+
-				"%s"+
-				"%s"+
-				"%s"+
-				"@optional\n\n"+
-				"%s"+
-				"%s"+
-				"@end\n",
-			protocol,
-			props,
-			cMethods,
-			iMethods,
-			optProps,
-			optMethods,
-		)
-	}
-
-	func (p *Protocol) String() string {
-		return p.dump(false, false)
-	}
-	func (p *Protocol) Verbose() string {
-		return p.dump(true, false)
-	}
-	func (p *Protocol) WithAddrs() string {
-		return p.dump(true, true)
-	}
-
-	// Computed offsets for optional tail fields to avoid magic numbers in parsers.
-	var (
-		// Start offset where fields may not be present on disk.
-		ProtocolExtendedMethodTypesOffset = uint32(unsafe.Offsetof(ProtocolT{}.ExtendedMethodTypesVMAddr))
-		ProtocolDemangledNameOffset       = uint32(unsafe.Offsetof(ProtocolT{}.DemangledNameVMAddr))
-		ProtocolClassPropertiesOffset     = uint32(unsafe.Offsetof(ProtocolT{}.ClassPropertiesVMAddr))
-		protocolPointerSize               = uint32(unsafe.Sizeof(ProtocolT{}.ExtendedMethodTypesVMAddr))
+	return fmt.Sprintf(
+		"%s\n\n"+
+			"@required\n\n"+
+			"%s"+
+			"%s"+
+			"%s"+
+			"@optional\n\n"+
+			"%s"+
+			"%s"+
+			"@end\n",
+		protocol,
+		props,
+		cMethods,
+		iMethods,
+		optProps,
+		optMethods,
 	)
+}
 
-	// Helpers to check if optional fields are present based on on-disk size.
-	func (p ProtocolT) HasExtendedMethodTypes() bool {
-		return p.Size >= ProtocolExtendedMethodTypesOffset+protocolPointerSize
-	}
-	func (p ProtocolT) HasDemangledName() bool {
-		return p.Size >= ProtocolDemangledNameOffset+protocolPointerSize
-	}
-	func (p ProtocolT) HasClassProperties() bool {
-		return p.Size >= ProtocolClassPropertiesOffset+protocolPointerSize
-	}
+func (p *Protocol) String() string {
+	return p.dump(false, false)
+}
+func (p *Protocol) Verbose() string {
+	return p.dump(true, false)
+}
+func (p *Protocol) WithAddrs() string {
+	return p.dump(true, true)
+}
+
+// Computed offsets for optional tail fields to avoid magic numbers in parsers.
+var (
+	// Start offset where fields may not be present on disk.
+	ProtocolExtendedMethodTypesOffset = uint32(unsafe.Offsetof(ProtocolT{}.ExtendedMethodTypesVMAddr))
+	ProtocolDemangledNameOffset       = uint32(unsafe.Offsetof(ProtocolT{}.DemangledNameVMAddr))
+	ProtocolClassPropertiesOffset     = uint32(unsafe.Offsetof(ProtocolT{}.ClassPropertiesVMAddr))
+	protocolPointerSize               = uint32(unsafe.Sizeof(ProtocolT{}.ExtendedMethodTypesVMAddr))
+)
+
+// Helpers to check if optional fields are present based on on-disk size.
+func (p ProtocolT) HasExtendedMethodTypes() bool {
+	return p.Size >= ProtocolExtendedMethodTypesOffset+protocolPointerSize
+}
+func (p ProtocolT) HasDemangledName() bool {
+	return p.Size >= ProtocolDemangledNameOffset+protocolPointerSize
+}
+func (p ProtocolT) HasClassProperties() bool {
+	return p.Size >= ProtocolClassPropertiesOffset+protocolPointerSize
+}
