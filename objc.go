@@ -1450,13 +1450,12 @@ func (f *File) GetObjCClassReferences() (map[uint64]*objc.Class, error) {
 					} else {
 						if cls, err := f.GetObjCClass(ptr); err != nil {
 							if f.HasFixups() {
-								if bindName, err := f.GetBindName(ptr); err == nil {
+								if bindName, bindErr := f.GetBindName(ptr); bindErr == nil {
 									clsRefs[sec.Addr+uint64(idx*sizeOfInt64)] = &objc.Class{Name: strings.TrimPrefix(bindName, "_OBJC_CLASS_$_")}
 								} else {
-									return nil, fmt.Errorf("failed to read objc_class_t at classref ptr: %#x; %v", ptr, err)
+									return nil, fmt.Errorf("failed to read objc_class_t at classref ptr: %#x; %v", ptr, errors.Join(bindErr, err))
 								}
 							}
-							// TODO: don't swallow error here
 						} else {
 							clsRefs[sec.Addr+uint64(idx*sizeOfInt64)] = cls
 							f.PutObjC(ptr, cls)
@@ -1498,13 +1497,12 @@ func (f *File) GetObjCSuperReferences() (map[uint64]*objc.Class, error) {
 					} else {
 						if cls, err := f.GetObjCClass(ptr); err != nil {
 							if f.HasFixups() {
-								if bindName, err := f.GetBindName(ptr); err == nil {
+								if bindName, bindErr := f.GetBindName(ptr); bindErr == nil {
 									clsRefs[sec.Addr+uint64(idx*sizeOfInt64)] = &objc.Class{Name: strings.TrimPrefix(bindName, "_OBJC_CLASS_$_")}
 								} else {
-									return nil, fmt.Errorf("failed to read objc_class_t at superref ptr: %#x; %v", ptr, err)
+									return nil, fmt.Errorf("failed to read objc_class_t at superref ptr: %#x; %v", ptr, errors.Join(bindErr, err))
 								}
 							}
-							// TODO: don't swallow error here
 						} else {
 							clsRefs[sec.Addr+uint64(idx*sizeOfInt64)] = cls
 							f.PutObjC(ptr, cls)
