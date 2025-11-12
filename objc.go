@@ -1051,9 +1051,10 @@ func (f *File) getObjcProtocol(vmaddr uint64) (proto *objc.Protocol, err error) 
 			return nil, fmt.Errorf("failed to read instance property vmaddr: %v", err)
 		}
 	}
-	if protoPtr.ExtendedMethodTypesVMAddr > 0 {
-		protoPtr.ExtendedMethodTypesVMAddr = f.vma.Convert(protoPtr.ExtendedMethodTypesVMAddr)
-		off, err := f.vma.GetOffset(protoPtr.ExtendedMethodTypesVMAddr)
+	if protoPtr.Size > 72 {
+		if protoPtr.ExtendedMethodTypesVMAddr > 0 {
+			protoPtr.ExtendedMethodTypesVMAddr = f.vma.Convert(protoPtr.ExtendedMethodTypesVMAddr)
+			off, err := f.vma.GetOffset(protoPtr.ExtendedMethodTypesVMAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
 		}
@@ -1066,14 +1067,17 @@ func (f *File) getObjcProtocol(vmaddr uint64) (proto *objc.Protocol, err error) 
 
 		proto.ExtendedMethodTypes, err = f.GetCString(f.vma.Convert(extMPtr))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read proto extended method types cstring: %v", err)
+				return nil, fmt.Errorf("failed to read proto extended method types cstring: %v", err)
+			}
 		}
 	}
-	if protoPtr.DemangledNameVMAddr > 0 {
-		protoPtr.DemangledNameVMAddr = f.vma.Convert(protoPtr.DemangledNameVMAddr)
-		proto.DemangledName, err = f.GetCString(protoPtr.DemangledNameVMAddr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read proto demangled name cstring: %v", err)
+	if protoPtr.Size > 80 {
+		if protoPtr.DemangledNameVMAddr > 0 {
+			protoPtr.DemangledNameVMAddr = f.vma.Convert(protoPtr.DemangledNameVMAddr)
+			proto.DemangledName, err = f.GetCString(protoPtr.DemangledNameVMAddr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read proto demangled name cstring: %v", err)
+			}
 		}
 	}
 
