@@ -1051,27 +1051,27 @@ func (f *File) getObjcProtocol(vmaddr uint64) (proto *objc.Protocol, err error) 
 			return nil, fmt.Errorf("failed to read instance property vmaddr: %v", err)
 		}
 	}
-	if protoPtr.Size > 72 {
+	if protoPtr.HasExtendedMethodTypes() {
 		if protoPtr.ExtendedMethodTypesVMAddr > 0 {
 			protoPtr.ExtendedMethodTypesVMAddr = f.vma.Convert(protoPtr.ExtendedMethodTypesVMAddr)
 			off, err := f.vma.GetOffset(protoPtr.ExtendedMethodTypesVMAddr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
-		}
-		f.cr.Seek(int64(off), io.SeekStart)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
+			}
+			f.cr.Seek(int64(off), io.SeekStart)
 
-		var extMPtr uint64
-		if err := binary.Read(f.cr, f.ByteOrder, &extMPtr); err != nil {
-			return nil, fmt.Errorf("failed to read ExtendedMethodTypesVMAddr: %v", err)
-		}
+			var extMPtr uint64
+			if err := binary.Read(f.cr, f.ByteOrder, &extMPtr); err != nil {
+				return nil, fmt.Errorf("failed to read ExtendedMethodTypesVMAddr: %v", err)
+			}
 
-		proto.ExtendedMethodTypes, err = f.GetCString(f.vma.Convert(extMPtr))
-		if err != nil {
+			proto.ExtendedMethodTypes, err = f.GetCString(f.vma.Convert(extMPtr))
+			if err != nil {
 				return nil, fmt.Errorf("failed to read proto extended method types cstring: %v", err)
 			}
 		}
 	}
-	if protoPtr.Size > 80 {
+	if protoPtr.HasDemangledName() {
 		if protoPtr.DemangledNameVMAddr > 0 {
 			protoPtr.DemangledNameVMAddr = f.vma.Convert(protoPtr.DemangledNameVMAddr)
 			proto.DemangledName, err = f.GetCString(protoPtr.DemangledNameVMAddr)
