@@ -15,6 +15,33 @@ import (
 
 var ErrObjcSectionNotFound = errors.New("missing required ObjC section")
 var ErrObjcSectionNEmpty = errors.New("required ObjC section is empty")
+var ErrObjcFragileRuntimeUnsupported = errors.New("objective-c fragile runtime metadata is unsupported")
+
+var legacyObjCSectionNames = map[string]struct{}{
+	"__image_info":     {},
+	"__module_info":    {},
+	"__class":          {},
+	"__meta_class":     {},
+	"__protocol":       {},
+	"__protocol_ext":   {},
+	"__category":       {},
+	"__class_vars":     {},
+	"__instance_vars":  {},
+	"__cls_refs":       {},
+	"__message_refs":   {},
+	"__symbols":        {},
+	"__sel_refs":       {},
+	"__string_object":  {},
+	"__class_names":    {},
+	"__meth_var_names": {},
+	"__meth_var_types": {},
+	"__selector_strs":  {},
+}
+
+func isLegacyObjCSectionName(name string) bool {
+	_, ok := legacyObjCSectionNames[strings.ToLower(name)]
+	return ok
+}
 
 // TODO refactor into a pkg
 
@@ -58,21 +85,43 @@ func (f *File) getCStringWithFallback(addr uint64, label string, allowSwift bool
 	return "", err
 }
 
-// HasObjC returns true if MachO contains a __objc_imageinfo section
-func (f *File) HasObjC() bool {
-	for _, s := range f.Segments() {
-		if strings.HasPrefix(s.Name, "__DATA") {
-			if sec := f.Section(s.Name, "__objc_imageinfo"); sec != nil {
-				return true
+func (f *File) hasObjCNonFragileRuntime() bool {
+	f.detectObjCRuntimeKinds()
+	return f.objcHasNonFragileRuntime
+}
+
+func (f *File) hasObjCFragileRuntime() bool {
+	f.detectObjCRuntimeKinds()
+	return f.objcHasFragileRuntime
+}
+
+func (f *File) detectObjCRuntimeKinds() {
+	f.objcRuntimeOnce.Do(func() {
+		for _, sec := range f.Sections {
+			if strings.HasPrefix(sec.Seg, "__DATA") && strings.HasPrefix(sec.Name, "__objc_") {
+				f.objcHasNonFragileRuntime = true
+			}
+			if strings.EqualFold(sec.Seg, "__OBJC") && isLegacyObjCSectionName(sec.Name) {
+				f.objcHasFragileRuntime = true
+			}
+			if f.objcHasNonFragileRuntime && f.objcHasFragileRuntime {
+				return
 			}
 		}
+	})
+}
+
+func (f *File) ensureObjCNonFragileRuntime(api string) error {
+	f.detectObjCRuntimeKinds()
+	if f.objcHasFragileRuntime && !f.objcHasNonFragileRuntime {
+		return fmt.Errorf("%s requires the Objective-C non-fragile runtime: %w", api, ErrObjcFragileRuntimeUnsupported)
 	}
-	if f.CPU == types.CPUI386 {
-		if sec := f.Section("__OBJC", "__image_info"); sec != nil {
-			return true
-		}
-	}
-	return false
+	return nil
+}
+
+// HasObjC returns true if MachO contains Objective-C metadata.
+func (f *File) HasObjC() bool {
+	return f.hasObjCNonFragileRuntime() || f.hasObjCFragileRuntime()
 }
 
 // HasPlusLoadMethod returns true if MachO contains a __objc_nlclslist or __objc_nlcatlist section
@@ -100,6 +149,9 @@ func (f *File) HasObjCMessageReferences() bool {
 			}
 		}
 	}
+	if sec := f.Section("__OBJC", "__message_refs"); sec != nil {
+		return true
+	}
 	return false
 }
 
@@ -126,7 +178,7 @@ func (f *File) GetObjCToc() objc.Toc {
 			case "__objc_selrefs":
 				oInfo.SelRefs = sec.Size / f.pointerSize()
 			}
-		} else if (f.CPU == types.CPUI386) && strings.EqualFold(sec.Name, "__OBJC") {
+		} else if strings.EqualFold(sec.Seg, "__OBJC") {
 			if strings.EqualFold(sec.Name, "__message_refs") {
 				oInfo.SelRefs += sec.SectionHeader.Size / 4
 			} else if strings.EqualFold(sec.Name, "__class") {
@@ -144,6 +196,10 @@ func (f *File) GetObjCToc() objc.Toc {
 
 // GetObjCImageInfo returns the parsed __objc_imageinfo data
 func (f *File) GetObjCImageInfo() (*objc.ImageInfo, error) {
+	if err := f.ensureObjCNonFragileRuntime("GetObjCImageInfo"); err != nil {
+		return nil, err
+	}
+
 	var imgInfo objc.ImageInfo
 	for _, s := range f.Segments() {
 		if strings.HasPrefix(s.Name, "__DATA") {
@@ -196,6 +252,10 @@ func (f *File) GetObjCClassInfo(vmaddr uint64) (*objc.ClassRO64, error) {
 
 // GetObjCClassNames returns a map of section data virtual memory address to their class names
 func (f *File) GetObjCClassNames() (map[uint64]string, error) {
+	if err := f.ensureObjCNonFragileRuntime("GetObjCClassNames"); err != nil {
+		return nil, err
+	}
+
 	class2vmaddr := make(map[uint64]string)
 
 	if sec := f.Section("__TEXT", "__objc_classname"); sec != nil { // Names for locally implemented classes
@@ -230,6 +290,10 @@ func (f *File) GetObjCClassNames() (map[uint64]string, error) {
 
 // GetObjCMethodNames returns a map of section data virtual memory addresses to their method names
 func (f *File) GetObjCMethodNames() (map[uint64]string, error) {
+	if err := f.ensureObjCNonFragileRuntime("GetObjCMethodNames"); err != nil {
+		return nil, err
+	}
+
 	meth2vmaddr := make(map[uint64]string)
 
 	if sec := f.Section("__TEXT", "__objc_methname"); sec != nil { // Method names for locally implemented methods
@@ -264,6 +328,10 @@ func (f *File) GetObjCMethodNames() (map[uint64]string, error) {
 
 // GetObjCClasses returns an array of Objective-C classes
 func (f *File) GetObjCClasses() ([]objc.Class, error) {
+	if err := f.ensureObjCNonFragileRuntime("GetObjCClasses"); err != nil {
+		return nil, err
+	}
+
 	var classes []objc.Class
 
 	for _, s := range f.Segments() {
@@ -313,6 +381,10 @@ func (f *File) GetObjCClasses() ([]objc.Class, error) {
 
 // GetObjCNonLazyClasses returns an array of Objective-C classes that implement +load
 func (f *File) GetObjCNonLazyClasses() ([]objc.Class, error) {
+	if err := f.ensureObjCNonFragileRuntime("GetObjCNonLazyClasses"); err != nil {
+		return nil, err
+	}
+
 	var classes []objc.Class
 
 	for _, s := range f.Segments() {
@@ -381,6 +453,9 @@ func (f *File) disablePreattachedCategories(vmaddr uint64) (uint64, error) {
 
 // GetObjCClass parses an Objective-C class at a given virtual memory address
 func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
+	if err := f.ensureObjCNonFragileRuntime("GetObjCClass"); err != nil {
+		return nil, err
+	}
 
 	if c, ok := f.GetObjC(vmaddr); ok {
 		return c.(*objc.Class), nil
@@ -572,6 +647,9 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 // TODO: get rid of old GetObjCClass
 // GetObjCClass parses an Objective-C class at a given virtual memory address
 func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
+	if err := f.ensureObjCNonFragileRuntime("GetObjCClass2"); err != nil {
+		return nil, err
+	}
 
 	if c, ok := f.GetObjC(vmaddr); ok {
 		return c.(*objc.Class), nil
@@ -763,6 +841,10 @@ func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 
 // GetObjCCategories returns an array of Objective-C categories by parsing the __objc_catlist data
 func (f *File) GetObjCCategories() ([]objc.Category, error) {
+	if err := f.ensureObjCNonFragileRuntime("GetObjCCategories"); err != nil {
+		return nil, err
+	}
+
 	var categoryPtr objc.CategoryT
 	var categories []objc.Category
 
@@ -880,6 +962,10 @@ func (f *File) GetObjCCategories() ([]objc.Category, error) {
 
 // GetObjCNonLazyCategories returns an array of Objective-C classes that implement +load
 func (f *File) GetObjCNonLazyCategories() ([]objc.Category, error) {
+	if err := f.ensureObjCNonFragileRuntime("GetObjCNonLazyCategories"); err != nil {
+		return nil, err
+	}
+
 	var cats []objc.Category
 
 	for _, s := range f.Segments() {
@@ -1099,6 +1185,9 @@ func (f *File) getObjcProtocol(vmaddr uint64) (proto *objc.Protocol, err error) 
 
 // GetObjCProtocols returns the Objective-C protocols
 func (f *File) GetObjCProtocols() ([]objc.Protocol, error) {
+	if err := f.ensureObjCNonFragileRuntime("GetObjCProtocols"); err != nil {
+		return nil, err
+	}
 
 	var protocols []objc.Protocol
 
@@ -1133,6 +1222,10 @@ func (f *File) GetObjCProtocols() ([]objc.Protocol, error) {
 }
 
 func (f *File) GetObjCMethods(vmaddr uint64) ([]objc.Method, error) {
+	if err := f.ensureObjCNonFragileRuntime("GetObjCMethods"); err != nil {
+		return nil, err
+	}
+
 	if c, ok := f.GetObjC(vmaddr); ok {
 		return c.([]objc.Method), nil
 	}
@@ -1152,6 +1245,10 @@ func (f *File) GetObjCMethods(vmaddr uint64) ([]objc.Method, error) {
 
 // GetObjCMethodLists parses the method lists in the __objc_methlist section
 func (f *File) GetObjCMethodLists() ([]objc.Method, error) {
+	if err := f.ensureObjCNonFragileRuntime("GetObjCMethodLists"); err != nil {
+		return nil, err
+	}
+
 	var methods []objc.Method
 	var methodList objc.MethodList
 	var nextMethodListOffset uint64
@@ -1310,6 +1407,10 @@ func (f *File) forEachObjCMethod(methodListVMAddr uint64, handler func(uint64, o
 
 // GetObjCIvars returns the Objective-C instance variables
 func (f *File) GetObjCIvars(vmaddr uint64) ([]objc.Ivar, error) {
+	if err := f.ensureObjCNonFragileRuntime("GetObjCIvars"); err != nil {
+		return nil, err
+	}
+
 	return f.getObjCIvarsWithSwift(vmaddr, false)
 }
 
@@ -1394,6 +1495,10 @@ func (f *File) getObjCIvarsWithSwift(vmaddr uint64, allowSwift bool) ([]objc.Iva
 
 // GetObjCProperties returns the Objective-C properties
 func (f *File) GetObjCProperties(vmaddr uint64) ([]objc.Property, error) {
+	if err := f.ensureObjCNonFragileRuntime("GetObjCProperties"); err != nil {
+		return nil, err
+	}
+
 	return f.getObjCPropertiesWithSwift(vmaddr, false)
 }
 
@@ -1439,6 +1544,10 @@ func (f *File) getObjCPropertiesWithSwift(vmaddr uint64, allowSwift bool) ([]obj
 
 // GetObjCClassReferences returns a map of classes to their section data virtual memory address
 func (f *File) GetObjCClassReferences() (map[uint64]*objc.Class, error) {
+	if err := f.ensureObjCNonFragileRuntime("GetObjCClassReferences"); err != nil {
+		return nil, err
+	}
+
 	clsRefs := make(map[uint64]*objc.Class)
 
 	for _, s := range f.Segments() {
@@ -1486,6 +1595,10 @@ func (f *File) GetObjCClassReferences() (map[uint64]*objc.Class, error) {
 
 // GetObjCSuperReferences returns a map of super classes to their section data virtual memory address
 func (f *File) GetObjCSuperReferences() (map[uint64]*objc.Class, error) {
+	if err := f.ensureObjCNonFragileRuntime("GetObjCSuperReferences"); err != nil {
+		return nil, err
+	}
+
 	clsRefs := make(map[uint64]*objc.Class)
 
 	for _, s := range f.Segments() {
@@ -1532,6 +1645,10 @@ func (f *File) GetObjCSuperReferences() (map[uint64]*objc.Class, error) {
 
 // GetObjCProtoReferences returns a map of protocol names to their section data virtual memory address
 func (f *File) GetObjCProtoReferences() (map[uint64]*objc.Protocol, error) {
+	if err := f.ensureObjCNonFragileRuntime("GetObjCProtoReferences"); err != nil {
+		return nil, err
+	}
+
 	protRefs := make(map[uint64]*objc.Protocol)
 
 	for _, s := range f.Segments() {
@@ -1569,6 +1686,10 @@ func (f *File) GetObjCProtoReferences() (map[uint64]*objc.Protocol, error) {
 
 // GetObjCSelectorReferences returns a map of selector names to their section data virtual memory address
 func (f *File) GetObjCSelectorReferences() (map[uint64]*objc.Selector, error) {
+	if err := f.ensureObjCNonFragileRuntime("GetObjCSelectorReferences"); err != nil {
+		return nil, err
+	}
+
 	selRefs := make(map[uint64]*objc.Selector)
 
 	for _, s := range f.Segments() {

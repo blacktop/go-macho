@@ -13,7 +13,7 @@ This package goes beyond the Go's `debug/macho` to:
 - Cover ALL load commands and architectures
 - Provide nice summary string output
 - Allow for creating custom MachO files
-- Parse Objective-C runtime information
+- Parse Objective-C runtime information (non-fragile runtime ABI; legacy `__OBJC` metadata is detected and reported unsupported)
 - Parse Swift runtime information
 - Read/Write code signature information
 - Parse fixup chain information

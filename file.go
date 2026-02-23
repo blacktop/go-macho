@@ -52,6 +52,10 @@ type File struct {
 	swift  map[uint64]any
 	ledata *bytes.Buffer // tmp storage of linkedit data
 
+	objcRuntimeOnce          sync.Once
+	objcHasNonFragileRuntime bool
+	objcHasFragileRuntime    bool
+
 	sharedCacheRelativeSelectorBaseVMAddress uint64 // objc_opt version 16
 	swiftAutoDemangle                        bool
 
