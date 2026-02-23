@@ -62,4 +62,4 @@ This allows you to control go-macho's logging output in your application without
 
 ## License
 
-MIT Copyright (c) 2020-2025 **blacktop**
+MIT Copyright (c) 2020-2026 **blacktop**
