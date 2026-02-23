@@ -129,11 +129,11 @@ func (s SegFlag) List() []string {
 }
 
 func (s SegFlag) String() string {
-	var fStr string
+	var fStr strings.Builder
 	for _, attr := range s.List() {
-		fStr += fmt.Sprintf("%s|", attr)
+		fStr.WriteString(fmt.Sprintf("%s|", attr))
 	}
-	return strings.TrimSuffix(fStr, "|")
+	return strings.TrimSuffix(fStr.String(), "|")
 }
 
 /*

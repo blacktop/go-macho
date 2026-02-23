@@ -173,7 +173,7 @@ func getMethodWithArgs(method, returnType string, args []string) string {
 
 	parts := strings.Split(method, ":")
 
-	var methodStr string
+	var methodStr strings.Builder
 	if len(parts) > 1 { // method has arguments based on SEL having ':'
 		for idx, part := range parts {
 			argName := getLastCapitalizedPart(part)
@@ -183,9 +183,9 @@ func getMethodWithArgs(method, returnType string, args []string) string {
 			if len(part) == 0 || idx >= len(args) {
 				break
 			}
-			methodStr += fmt.Sprintf("%s:%s ", part, args[idx]+argName)
+			methodStr.WriteString(fmt.Sprintf("%s:%s ", part, args[idx]+argName))
 		}
-		return fmt.Sprintf("(%s)%s;", returnType, strings.TrimSpace(methodStr))
+		return fmt.Sprintf("(%s)%s;", returnType, strings.TrimSpace(methodStr.String()))
 	}
 	// method has no arguments based on SEL not having ':'
 	return fmt.Sprintf("(%s)%s;", returnType, method)
@@ -464,8 +464,8 @@ func decodeBitfield(bitfield string) string {
 }
 
 func getFieldName(field string) (string, string) {
-	if strings.HasPrefix(field, "\"") {
-		name, rest, ok := strings.Cut(strings.TrimPrefix(field, "\""), "\"")
+	if after, ok := strings.CutPrefix(field, "\""); ok {
+		name, rest, ok := strings.Cut(after, "\"")
 		if !ok {
 			return "", field
 		}

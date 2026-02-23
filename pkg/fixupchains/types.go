@@ -135,34 +135,25 @@ func (s *DyldChainedStarts) Binds() []Bind {
 	return binds
 }
 
-func stride(pointerFormat DCPtrKind) uint64 {
+func stride(pointerFormat DCPtrKind) (uint64, bool) {
 	switch pointerFormat {
-	case DYLD_CHAINED_PTR_ARM64E:
-		fallthrough
-	case DYLD_CHAINED_PTR_ARM64E_USERLAND:
-		fallthrough
-	case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
-		return uint64(8)
-	case DYLD_CHAINED_PTR_ARM64E_KERNEL:
-		fallthrough
-	case DYLD_CHAINED_PTR_ARM64E_FIRMWARE:
-		fallthrough
-	case DYLD_CHAINED_PTR_32_FIRMWARE:
-		fallthrough
-	case DYLD_CHAINED_PTR_64:
-		fallthrough
-	case DYLD_CHAINED_PTR_64_OFFSET:
-		fallthrough
-	case DYLD_CHAINED_PTR_32:
-		fallthrough
-	case DYLD_CHAINED_PTR_32_CACHE:
-		fallthrough
-	case DYLD_CHAINED_PTR_64_KERNEL_CACHE:
-		return uint64(4)
+	case DYLD_CHAINED_PTR_ARM64E,
+		DYLD_CHAINED_PTR_ARM64E_USERLAND,
+		DYLD_CHAINED_PTR_ARM64E_USERLAND24:
+		return 8, true
+	case DYLD_CHAINED_PTR_ARM64E_KERNEL,
+		DYLD_CHAINED_PTR_ARM64E_FIRMWARE,
+		DYLD_CHAINED_PTR_32_FIRMWARE,
+		DYLD_CHAINED_PTR_64,
+		DYLD_CHAINED_PTR_64_OFFSET,
+		DYLD_CHAINED_PTR_32,
+		DYLD_CHAINED_PTR_32_CACHE,
+		DYLD_CHAINED_PTR_64_KERNEL_CACHE:
+		return 4, true
 	case DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE:
-		return uint64(1)
+		return 1, true
 	default:
-		panic(fmt.Sprintf("unsupported pointer chain format: %d", pointerFormat))
+		return 0, false
 	}
 }
 

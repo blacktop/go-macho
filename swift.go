@@ -2405,11 +2405,11 @@ func (f *File) getTypeImportInfo(addr uint64) (string, error) {
 		}
 	}
 
-	var out string
+	var out strings.Builder
 	for _, s := range parts {
 		switch {
 		case strings.HasPrefix(s, ABIName):
-			out += strings.TrimPrefix(s, string(ABIName))
+			out.WriteString(strings.TrimPrefix(s, string(ABIName)))
 		case strings.HasPrefix(s, SymbolNamespace):
 			namespace := strings.TrimPrefix(s, string(SymbolNamespace))
 			if namespace != CTypedef {
@@ -2423,7 +2423,7 @@ func (f *File) getTypeImportInfo(addr uint64) (string, error) {
 		}
 	}
 
-	return out, nil
+	return out.String(), nil
 }
 
 func (f *File) getAssociatedTypes(addr uint64) ([]string, error) {
@@ -2746,7 +2746,7 @@ func selectSwiftStringFromJoined(parts []string) (string, bool) {
 		normalized := normalizeSwiftMangling(joined[idx:end])
 		update(normalized, swiftStringScore(normalized))
 	}
-	if idx := strings.Index(joined, "."); idx >= 0 {
+	if found := strings.Contains(joined, "."); found {
 		// handle ASCII forms like Module.Type
 		parts := strings.Split(joined, "\x00")
 		for _, part := range parts {

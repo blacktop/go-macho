@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"strings"
 )
 
 //go:generate stringer -type NecessaryBindingsKind -output capture_string.go
@@ -21,25 +22,25 @@ type Capture struct {
 }
 
 func (c Capture) String() string {
-	var captureTypes string
+	var captureTypes strings.Builder
 	if len(c.CaptureTypes) > 0 {
-		captureTypes += "  /* capture types */\n"
+		captureTypes.WriteString("  /* capture types */\n")
 		for _, t := range c.CaptureTypes {
-			captureTypes += fmt.Sprintf("    %s\n", t.TypeName)
+			captureTypes.WriteString(fmt.Sprintf("    %s\n", t.TypeName))
 		}
 	}
-	var metadataSources string
+	var metadataSources strings.Builder
 	if len(c.MetadataSources) > 0 {
-		metadataSources += "  /* metadata sources */\n"
+		metadataSources.WriteString("  /* metadata sources */\n")
 		for _, m := range c.MetadataSources {
-			metadataSources += fmt.Sprintf("    %s: %s\n", m.MangledType, m.MangledMetadataSource)
+			metadataSources.WriteString(fmt.Sprintf("    %s: %s\n", m.MangledType, m.MangledMetadataSource))
 		}
 	}
-	var bindings string
+	var bindings strings.Builder
 	if len(c.Bindings) > 0 {
-		bindings += "  /* necessary bindings */\n"
+		bindings.WriteString("  /* necessary bindings */\n")
 		for _, b := range c.Bindings {
-			bindings += fmt.Sprintf("    // Kind: %d, RequirementsSet: %d, RequirementsVector: %d, Conformances: %d\n", b.Kind, b.RequirementsSet, b.RequirementsVector, b.Conformances)
+			bindings.WriteString(fmt.Sprintf("    // Kind: %d, RequirementsSet: %d, RequirementsVector: %d, Conformances: %d\n", b.Kind, b.RequirementsSet, b.RequirementsVector, b.Conformances))
 		}
 	}
 	return fmt.Sprintf(
@@ -49,9 +50,9 @@ func (c Capture) String() string {
 			"%s"+
 			"}",
 		c.Address,
-		captureTypes,
-		metadataSources,
-		bindings,
+		captureTypes.String(),
+		metadataSources.String(),
+		bindings.String(),
 	)
 }
 

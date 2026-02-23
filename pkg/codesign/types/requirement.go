@@ -309,7 +309,7 @@ func getOid(r *bytes.Reader) (uint32, error) {
 // ref https://opensource.apple.com/source/Security/Security-59306.80.4/
 // ref http://oid-info.com/get/1.2.840.113635.100.6.2.6
 func toOID(data []byte) string {
-	var oidStr string
+	var oidStr strings.Builder
 
 	r := bytes.NewReader(data)
 
@@ -319,7 +319,7 @@ func toOID(data []byte) string {
 	}
 
 	q1 := uint32(math.Min(float64(oid1)/40, 2))
-	oidStr += fmt.Sprintf("%d.%d", q1, oid1-q1*40)
+	oidStr.WriteString(fmt.Sprintf("%d.%d", q1, oid1-q1*40))
 
 	for {
 		oid, err := getOid(r)
@@ -330,10 +330,10 @@ func toOID(data []byte) string {
 			return ""
 		}
 
-		oidStr += fmt.Sprintf(".%d", uint32(oid))
+		oidStr.WriteString(fmt.Sprintf(".%d", uint32(oid)))
 	}
 
-	return oidStr
+	return oidStr.String()
 }
 
 func evalExpression(r *bytes.Reader, syntaxLevel int) (string, error) {

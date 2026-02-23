@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"unsafe"
 
 	"github.com/blacktop/go-macho/types"
@@ -159,18 +160,18 @@ type loads []Load
 
 // LoadsString returns a string representation of all the MachO's load commands
 func (ls loads) String() string {
-	var loadsStr string
+	var loadsStr strings.Builder
 	for i, l := range ls {
 		if sg, ok := l.(*Segment); ok {
-			loadsStr += fmt.Sprintf("%03d: %s\n", i, sg)
+			loadsStr.WriteString(fmt.Sprintf("%03d: %s\n", i, sg))
 			for _, sc := range sg.sections {
-				loadsStr += fmt.Sprintf("%s\n", sc)
+				loadsStr.WriteString(fmt.Sprintf("%s\n", sc))
 			}
 		} else {
 			if l != nil {
-				loadsStr += fmt.Sprintf("%03d: %-28s%s\n", i, l.Command(), l.String())
+				loadsStr.WriteString(fmt.Sprintf("%03d: %-28s%s\n", i, l.Command(), l.String()))
 			}
 		}
 	}
-	return loadsStr
+	return loadsStr.String()
 }

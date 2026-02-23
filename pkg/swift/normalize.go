@@ -41,8 +41,8 @@ func tryDemangleCandidate(candidate string) (string, bool) {
 	}
 
 	attempts := []string{candidate}
-	if strings.HasPrefix(candidate, "_") {
-		attempts = append(attempts, strings.TrimPrefix(candidate, "_"))
+	if after, ok := strings.CutPrefix(candidate, "_"); ok {
+		attempts = append(attempts, after)
 	}
 
 	for _, attempt := range attempts {
@@ -68,8 +68,8 @@ func tryDemangleCandidate(candidate string) (string, bool) {
 }
 
 func tryTupleFromMangledParts(candidate string) (string, bool) {
-	if strings.HasSuffix(candidate, "Sg") {
-		if parts, ok := parseTupleParts(strings.TrimSuffix(candidate, "Sg")); ok {
+	if before, ok := strings.CutSuffix(candidate, "Sg"); ok {
+		if parts, ok := parseTupleParts(before); ok {
 			return formatTuple(parts, true), true
 		}
 	}
@@ -126,8 +126,8 @@ func decodeStandardLibraryToken(part string) (string, bool) {
 		optional = true
 		core = strings.TrimSuffix(core, "Sg")
 	}
-	if strings.HasSuffix(core, "t") {
-		core = strings.TrimSuffix(core, "t")
+	if before, ok := strings.CutSuffix(core, "t"); ok {
+		core = before
 	}
 	if core == "" {
 		return "", false

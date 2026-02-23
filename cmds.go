@@ -45,19 +45,20 @@ func (s LoadCmdBytes) Copy() LoadCmdBytes {
 type LoadBytes []byte
 
 func (b LoadBytes) String() string {
-	s := "["
+	var s strings.Builder
+	s.WriteString("[")
 	for i, a := range b {
 		if i > 0 {
-			s += " "
+			s.WriteString(" ")
 			if len(b) > 48 && i >= 16 {
-				s += fmt.Sprintf("... (%d bytes)", len(b))
+				s.WriteString(fmt.Sprintf("... (%d bytes)", len(b)))
 				break
 			}
 		}
-		s += fmt.Sprintf("%x", a)
+		s.WriteString(fmt.Sprintf("%x", a))
 	}
-	s += "]"
-	return s
+	s.WriteString("]")
+	return s.String()
 }
 func (b LoadBytes) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
