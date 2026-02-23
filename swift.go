@@ -2684,10 +2684,10 @@ func (f *File) getContextDesc(addr uint64) (ctx *swift.TargetModuleContext, err 
 }
 
 func (f *File) swiftSymbolicName(addr uint64) (string, error) {
-	reader, ok := f.cr.(types.MachoReader)
-	if !ok {
+	if f.cr == nil {
 		return "", fmt.Errorf("reader does not support ReadAtAddr for swift symbolic references")
 	}
+	reader := f.cr
 
 	header := make([]byte, 8)
 	n, err := reader.ReadAtAddr(header, addr)
