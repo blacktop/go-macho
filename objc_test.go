@@ -170,3 +170,106 @@ func TestObjCAPIsAllowMixedRuntimeMetadata(t *testing.T) {
 		"expected mixed-runtime metadata to bypass fragile-runtime rejection",
 	)
 }
+
+func TestLegacySwiftObjCClassName(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+		ok    bool
+	}{
+		{
+			name:  "simple class",
+			input: "_TtC4apsd28ClientIdentityMetricReporter",
+			want:  "apsd.ClientIdentityMetricReporter",
+			ok:    true,
+		},
+		{
+			name:  "nested class",
+			input: "_TtCC4apsd20ClientIdentityMetric13FailureMetric",
+			want:  "apsd.ClientIdentityMetric.FailureMetric",
+			ok:    true,
+		},
+		{
+			name:  "not a legacy swift objc class name",
+			input: "NSObject",
+			want:  "",
+			ok:    false,
+		},
+		{
+			name:  "reject trailing garbage suffix",
+			input: "_TtC4apsd28ClientIdentityMetricReporterXX",
+			want:  "",
+			ok:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := legacySwiftObjCClassName(tt.input)
+			if ok != tt.ok {
+				t.Fatalf("legacySwiftObjCClassName(%q) ok=%v, want %v", tt.input, ok, tt.ok)
+			}
+			if got != tt.want {
+				t.Fatalf("legacySwiftObjCClassName(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSwiftClassLookupNames(t *testing.T) {
+	lookup := swiftClassLookupNames("_OBJC_CLASS_$_TtCC4apsd20ClientIdentityMetric13FailureMetric", nil)
+
+	if _, ok := lookup["_OBJC_CLASS_$_TtCC4apsd20ClientIdentityMetric13FailureMetric"]; !ok {
+		t.Fatalf("expected lookup to contain original objc class symbol")
+	}
+	if _, ok := lookup["_TtCC4apsd20ClientIdentityMetric13FailureMetric"]; !ok {
+		t.Fatalf("expected lookup to contain objc class symbol without _OBJC_CLASS_$_ prefix")
+	}
+	if _, ok := lookup["apsd.ClientIdentityMetric.FailureMetric"]; !ok {
+		t.Fatalf("expected lookup to contain demangled legacy swift class name")
+	}
+}
+
+func TestNormalizeSwiftIvarTypeEncoding(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "method signature returns object",
+			input: "@40@0:8Q16Q24B32B36",
+			want:  "@",
+		},
+		{
+			name:  "method signature returns class object",
+			input: "@\"NSString\"24@0:8q16",
+			want:  "@\"NSString\"",
+		},
+		{
+			name:  "already ivar encoding",
+			input: "Q",
+			want:  "Q",
+		},
+		{
+			name:  "swift mangled type token",
+			input: "Sb",
+			want:  "Sb",
+		},
+		{
+			name:  "non method encoding with colon absent",
+			input: "{CGRect={CGPoint=dd}{CGSize=dd}}",
+			want:  "{CGRect={CGPoint=dd}{CGSize=dd}}",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeSwiftIvarTypeEncoding(tt.input)
+			if got != tt.want {
+				t.Fatalf("normalizeSwiftIvarTypeEncoding(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}

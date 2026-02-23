@@ -638,8 +638,8 @@ func (f *File) GetObjCClass(vmaddr uint64) (*objc.Class, error) {
 		MethodCacheBuckets:    classPtr.MethodCacheBuckets,
 		MethodCacheProperties: classPtr.MethodCacheProperties,
 		DataVMAddr:            classPtr.DataVMAddrAndFastFlags & objc.FAST_DATA_MASK64,
-		IsSwiftLegacy:         (classPtr.DataVMAddrAndFastFlags&objc.FAST_IS_SWIFT_LEGACY == 1),
-		IsSwiftStable:         (classPtr.DataVMAddrAndFastFlags&objc.FAST_IS_SWIFT_STABLE == 1),
+		IsSwiftLegacy:         (classPtr.DataVMAddrAndFastFlags&objc.FAST_IS_SWIFT_LEGACY != 0),
+		IsSwiftStable:         (classPtr.DataVMAddrAndFastFlags&objc.FAST_IS_SWIFT_STABLE != 0),
 		ReadOnlyData:          *info,
 	}, nil
 }
@@ -1477,6 +1477,9 @@ func (f *File) getObjCIvarsWithSwift(vmaddr uint64, allowSwift bool) ([]objc.Iva
 		if err != nil {
 			return nil, fmt.Errorf("failed to read ivar types cstring: %v", err)
 		}
+		if allowSwift {
+			t = normalizeSwiftIvarTypeEncoding(t)
+		}
 		if allowSwift && t == "" {
 			if guess, ok := f.swiftASCIITypeGuess(ivar.TypesVMAddr); ok {
 				t = guess
@@ -1491,6 +1494,37 @@ func (f *File) getObjCIvarsWithSwift(vmaddr uint64, allowSwift bool) ([]objc.Iva
 	}
 
 	return ivars, nil
+}
+
+func normalizeSwiftIvarTypeEncoding(enc string) string {
+	enc = strings.TrimSpace(enc)
+	if enc == "" || !strings.Contains(enc, ":") {
+		return enc
+	}
+
+	typ, rest, ok := objc.CutType(enc)
+	if !ok || rest == "" {
+		return enc
+	}
+
+	stackSizePrefixLen := leadingDecimalLen(rest)
+	if stackSizePrefixLen == 0 {
+		return enc
+	}
+
+	if strings.Contains(rest[stackSizePrefixLen:], ":") {
+		return typ
+	}
+
+	return enc
+}
+
+func leadingDecimalLen(input string) int {
+	length := 0
+	for length < len(input) && input[length] >= '0' && input[length] <= '9' {
+		length++
+	}
+	return length
 }
 
 // GetObjCProperties returns the Objective-C properties
