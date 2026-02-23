@@ -40,6 +40,20 @@ func Test_decodeType(t *testing.T) {
 			want: "unsigned int x:13",
 		},
 		{
+			name: "Test bitfield 128",
+			args: args{
+				encType: "b128",
+			},
+			want: "unsigned __int128 x:128",
+		},
+		{
+			name: "Test bitfield 200",
+			args: args{
+				encType: "b200",
+			},
+			want: "unsigned __int128 x:128 /* unsupported bitfield width 200 */",
+		},
+		{
 			name: "Test struct 0",
 			args: args{
 				encType: "{test=@*i}",
@@ -52,6 +66,20 @@ func Test_decodeType(t *testing.T) {
 				encType: "{?=i[3f]b3b2c}",
 			},
 			want: "struct { int x0; float x1[3]; unsigned int x2:3; unsigned int x3:2; signed char x4; }",
+		},
+		{
+			name: "Test struct bitfield widths",
+			args: args{
+				encType: "{?=ib33b64b128}",
+			},
+			want: "struct { int x0; unsigned long long x1:33; unsigned long long x2:64; unsigned __int128 x3:128; }",
+		},
+		{
+			name: "Test struct bitfield width overflow",
+			args: args{
+				encType: "{?=b200}",
+			},
+			want: "struct { unsigned __int128 x0:128 /* unsupported bitfield width 200 */; }",
 		},
 		{
 			name: "Test struct 3",

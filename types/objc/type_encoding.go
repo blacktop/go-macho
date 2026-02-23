@@ -460,7 +460,35 @@ func decodeVector(vectorType string) string {
 
 func decodeBitfield(bitfield string) string {
 	span := encodingGetSizeOfArguments(bitfield)
-	return fmt.Sprintf("unsigned int x:%d", span)
+	return formatBitfieldDecl("x", span)
+}
+
+const (
+	bitfieldWidthUnsignedInt      uint = 32
+	bitfieldWidthUnsignedLongLong uint = 64
+	bitfieldWidthUnsignedInt128   uint = 128
+)
+
+func bitfieldTypeForSpan(span uint) (string, uint) {
+	switch {
+	case span <= bitfieldWidthUnsignedInt:
+		return "unsigned int", span
+	case span <= bitfieldWidthUnsignedLongLong:
+		return "unsigned long long", span
+	case span <= bitfieldWidthUnsignedInt128:
+		return "unsigned __int128", span
+	default:
+		return "unsigned __int128", bitfieldWidthUnsignedInt128
+	}
+}
+
+func formatBitfieldDecl(name string, span uint) string {
+	typ, effectiveSpan := bitfieldTypeForSpan(span)
+	decl := fmt.Sprintf("%s %s:%d", typ, name, effectiveSpan)
+	if effectiveSpan != span {
+		decl += fmt.Sprintf(" /* unsupported bitfield width %d */", span)
+	}
+	return decl
 }
 
 func getFieldName(field string) (string, string) {
@@ -516,7 +544,7 @@ func decodeStructOrUnion(typ, kind string) string {
 
 		if strings.HasPrefix(field, "b") {
 			span := encodingGetSizeOfArguments(field)
-			fields = append(fields, fmt.Sprintf("unsigned int %s:%d;", fieldName, span))
+			fields = append(fields, formatBitfieldDecl(fieldName, span)+";")
 		} else if strings.HasPrefix(field, "[") {
 			array := decodeType(field)
 			array = strings.TrimSpace(strings.Replace(array, "x", fieldName, 1)) + ";"
