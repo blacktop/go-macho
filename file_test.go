@@ -6,6 +6,7 @@ package macho
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -263,6 +264,165 @@ func openFatObscured(name string) (*FatFile, error) {
 		return nil, err
 	}
 	return ff, nil
+}
+
+func newSyntheticDyldInfoOnlyFile(rawPointer uint64, pointerAddr uint64, resolvedPointer uint64) *File {
+	data := make([]byte, 0x40)
+	binary.LittleEndian.PutUint64(data[0x10:0x18], rawPointer)
+
+	f := &File{
+		FileTOC: FileTOC{
+			FileHeader: types.FileHeader{
+				Magic: types.Magic64,
+				Type:  types.MH_EXECUTE,
+			},
+			Loads: loads{
+				&Segment{
+					SegmentHeader: SegmentHeader{
+						LoadCmd: types.LC_SEGMENT_64,
+						Name:    "__TEXT",
+						Addr:    0x100000000,
+						Memsz:   0x2000,
+						Offset:  0,
+						Filesz:  uint64(len(data)),
+					},
+				},
+				&DyldInfoOnly{},
+			},
+		},
+	}
+	f.ByteOrder = binary.LittleEndian
+
+	f.vma = &types.VMAddrConverter{
+		Converter:    f.convertToVMAddr,
+		VMAddr2Offet: f.getOffset,
+		Offet2VMAddr: f.getVMAddress,
+	}
+	reader := types.NewCustomSectionReader(bytes.NewReader(data), f.vma, 0, int64(len(data)))
+	f.sr = reader
+	f.cr = reader
+
+	f.dyldInfoCacheBuilt = true
+	f.dyldInfoRebaseValues = map[uint64]struct{}{
+		rawPointer: {},
+	}
+	f.dyldInfoRebaseTargets = map[uint64]uint64{
+		pointerAddr: resolvedPointer,
+	}
+
+	return f
+}
+
+func TestConvertToVMAddrDyldInfoOnlyRebaseValue(t *testing.T) {
+	const (
+		raw      = uint64(0xfa0)
+		expected = uint64(0x100000fa0)
+	)
+
+	mf := newSyntheticDyldInfoOnlyFile(raw, 0x100000010, expected)
+
+	if !mf.HasDyldInfoOnly() || mf.HasDyldChainedFixups() {
+		t.Fatalf("expected dyld-info-only binary without chained fixups")
+	}
+
+	if got := mf.convertToVMAddr(raw); got != expected {
+		t.Fatalf("convertToVMAddr(%#x) = %#x, want %#x", raw, got, expected)
+	}
+	if got := mf.SlidePointer(raw); got != expected {
+		t.Fatalf("SlidePointer(%#x) = %#x, want %#x", raw, got, expected)
+	}
+}
+
+func TestGetSlidPointerAtAddressDyldInfoOnlyRebase(t *testing.T) {
+	const (
+		addr     = uint64(0x100000010)
+		raw      = uint64(0xfa0)
+		expected = uint64(0x100000fa0)
+	)
+
+	mf := newSyntheticDyldInfoOnlyFile(raw, addr, expected)
+
+	got, err := mf.GetSlidPointerAtAddress(addr)
+	if err != nil {
+		t.Fatalf("GetSlidPointerAtAddress(%#x) error = %v", addr, err)
+	}
+	if got != expected {
+		t.Fatalf("GetSlidPointerAtAddress(%#x) = %#x, want %#x", addr, got, expected)
+	}
+}
+
+func TestBuildDyldInfoFixupsCacheKeepsFirstBindForAddress(t *testing.T) {
+	const addr = uint64(0x100000010)
+
+	mf := newSyntheticDyldInfoOnlyFile(0, addr, 0)
+	mf.dyldInfoCacheBuilt = false
+	mf.rebasesDone = true
+	mf.rebases = nil
+	mf.binds = types.Binds{
+		{
+			Name:      "_first_symbol",
+			Dylib:     "libSystem.B.dylib",
+			Start:     addr,
+			SegOffset: 0,
+		},
+		{
+			Name:      "_second_symbol",
+			Dylib:     "libSystem.B.dylib",
+			Start:     addr,
+			SegOffset: 0,
+		},
+	}
+
+	if err := mf.buildDyldInfoFixupsCache(); err != nil {
+		t.Fatalf("buildDyldInfoFixupsCache() error = %v", err)
+	}
+
+	got, ok := mf.dyldInfoBindsByAddr[addr]
+	if !ok {
+		t.Fatalf("expected bind cache entry for %#x", addr)
+	}
+	if got.Name != "_first_symbol" {
+		t.Fatalf("bind cache chose %q, want %q", got.Name, "_first_symbol")
+	}
+}
+
+func TestConvertToVMAddrDyldInfoOnlyDoesNotNormalizeUnknownValue(t *testing.T) {
+	const (
+		rebaseRaw = uint64(0xfa0)
+		addr      = uint64(0x100000010)
+		unknown   = uint64(0xfa1)
+	)
+
+	mf := newSyntheticDyldInfoOnlyFile(rebaseRaw, addr, 0x100000fa0)
+
+	if got := mf.convertToVMAddr(unknown); got != unknown {
+		t.Fatalf("convertToVMAddr(%#x) = %#x, want %#x", unknown, got, unknown)
+	}
+}
+
+func TestGetSlidPointerAtAddressDyldInfoOnlyUnresolvedSelfBind(t *testing.T) {
+	const (
+		addr = uint64(0x100000010)
+		raw  = uint64(0xfeedface)
+	)
+
+	mf := newSyntheticDyldInfoOnlyFile(raw, addr, raw)
+	mf.dyldInfoRebaseTargets = map[uint64]uint64{}
+	mf.dyldInfoRebaseValues = map[uint64]struct{}{}
+	mf.dyldInfoBindsByAddr = map[uint64]types.Bind{
+		addr: {
+			Name:  "_missing_local_symbol",
+			Dylib: mf.LibraryOrdinalName(types.BIND_SPECIAL_DYLIB_SELF),
+		},
+	}
+
+	got, err := mf.GetSlidPointerAtAddress(addr)
+	if err != nil {
+		t.Fatalf("GetSlidPointerAtAddress(%#x) error = %v", addr, err)
+	}
+	if got != 0 {
+		t.Fatalf("GetSlidPointerAtAddress(%#x) = %#x, want %#x", addr, got, uint64(0))
+	}
 }
 
 func TestOpen(t *testing.T) {
@@ -718,13 +878,14 @@ func TestNewFileWithSwift(t *testing.T) {
 		}
 	}
 
-	// if refStrs, err := got.GetSwiftTypeRefs(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
-	// 	t.Fatalf("GetSwiftTypeRefs() error = %v", err)
-	// } else {
-	// 	for addr, refstr := range refStrs {
-	// 		fmt.Printf("%#x: %s\n", addr, refstr)
-	// 	}
-	// }
+	if refStrs, err := got.GetSwiftTypeRefs(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
+		t.Fatalf("GetSwiftTypeRefs() error = %v", err)
+	} else {
+		fmt.Println("GetSwiftTypeRefs" + strings.Repeat("-", 80))
+		for addr, refstr := range refStrs {
+			fmt.Printf("%#x: %s\n", addr, refstr)
+		}
+	}
 
 	if typs, err := got.GetSwiftTypes(); err != nil && !errors.Is(err, ErrSwiftSectionError) {
 		t.Fatalf("GetSwiftTypes() error = %v", err)
