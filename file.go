@@ -40,9 +40,17 @@ type File struct {
 	exp         []trie.TrieExport
 	exptrieData []byte
 	binds       types.Binds
-	objc        map[uint64]any
-	swift       map[uint64]any
-	ledata      *bytes.Buffer // tmp storage of linkedit data
+	rebases     []types.Rebase
+	rebasesDone bool
+
+	dyldInfoCacheBuilt    bool
+	dyldInfoRebaseTargets map[uint64]uint64
+	dyldInfoRebaseValues  map[uint64]struct{}
+	dyldInfoBindsByAddr   map[uint64]types.Bind
+
+	objc   map[uint64]any
+	swift  map[uint64]any
+	ledata *bytes.Buffer // tmp storage of linkedit data
 
 	sharedCacheRelativeSelectorBaseVMAddress uint64 // objc_opt version 16
 	swiftAutoDemangle                        bool
@@ -1618,6 +1626,13 @@ func (f *File) GetPointerAtAddress(address uint64) (uint64, error) {
 // lookups will reparse the load command payload.
 func (f *File) ResetFixupsCache() {
 	f.dcf = nil
+	f.binds = nil
+	f.rebases = nil
+	f.rebasesDone = false
+	f.dyldInfoCacheBuilt = false
+	f.dyldInfoRebaseTargets = nil
+	f.dyldInfoRebaseValues = nil
+	f.dyldInfoBindsByAddr = nil
 	if f.vma != nil {
 		f.vma.ChainedPointerFormat = 0
 	}
@@ -1632,7 +1647,7 @@ func (f *File) GetSlidPointerAtAddress(address uint64) (uint64, error) {
 	var raw uint64
 	var rawRead bool
 
-	if offErr == nil && f.HasFixups() {
+	if offErr == nil && f.HasDyldChainedFixups() {
 		dcf, err := f.DyldChainedFixups()
 		if err == nil && dcf != nil {
 			if format, fmtErr := dcf.PointerFormatForOffset(offset); fmtErr == nil {
@@ -1664,11 +1679,15 @@ func (f *File) GetSlidPointerAtAddress(address uint64) (uint64, error) {
 		}
 	}
 
+	if resolved, ok := f.decodeDyldInfoPointerAtAddress(address, raw); ok {
+		return resolved, nil
+	}
+
 	return f.SlidePointer(raw), nil
 }
 
 func (f *File) decodeChainedPointer(value uint64) (uint64, bool) {
-	if value == 0 || !f.HasFixups() {
+	if value == 0 || !f.HasDyldChainedFixups() {
 		return 0, false
 	}
 
@@ -1697,9 +1716,113 @@ func (f *File) decodeChainedPointer(value uint64) (uint64, bool) {
 	return value, true
 }
 
+func (f *File) buildDyldInfoFixupsCache() error {
+	if f.dyldInfoCacheBuilt {
+		return nil
+	}
+
+	f.dyldInfoRebaseTargets = make(map[uint64]uint64)
+	f.dyldInfoRebaseValues = make(map[uint64]struct{})
+	f.dyldInfoBindsByAddr = make(map[uint64]types.Bind)
+
+	rebases, err := f.GetRebaseInfo()
+	if err != nil && !errors.Is(err, ErrMachODyldInfoNotFound) {
+		return err
+	}
+	for _, rebase := range rebases {
+		addr := rebase.Start + rebase.Offset
+		f.dyldInfoRebaseTargets[addr] = f.normalizeDyldInfoPointer(rebase.Value)
+		f.dyldInfoRebaseValues[rebase.Value] = struct{}{}
+	}
+
+	binds, err := f.GetBindInfo()
+	if err != nil && !errors.Is(err, ErrMachODyldInfoNotFound) {
+		return err
+	}
+	for _, bind := range binds {
+		addr := bind.Start + bind.SegOffset
+		if _, exists := f.dyldInfoBindsByAddr[addr]; exists {
+			continue
+		}
+		f.dyldInfoBindsByAddr[addr] = bind
+	}
+
+	f.dyldInfoCacheBuilt = true
+	return nil
+}
+
+func (f *File) normalizeDyldInfoPointer(value uint64) uint64 {
+	if value == 0 {
+		return 0
+	}
+	if f.FindSegmentForVMAddr(value) != nil {
+		return value
+	}
+
+	base := f.GetBaseAddress()
+	if value >= base {
+		return value
+	}
+
+	candidate := value + base
+	if f.FindSegmentForVMAddr(candidate) != nil {
+		return candidate
+	}
+
+	return value
+}
+
+func (f *File) usesDyldInfoOnlyFixups() bool {
+	return f.HasDyldInfoOnly() && !f.HasDyldChainedFixups()
+}
+
+func (f *File) decodeDyldInfoPointer(value uint64) (uint64, bool) {
+	if value == 0 || !f.usesDyldInfoOnlyFixups() {
+		return 0, false
+	}
+
+	if err := f.buildDyldInfoFixupsCache(); err != nil {
+		return 0, false
+	}
+	if _, ok := f.dyldInfoRebaseValues[value]; !ok {
+		return 0, false
+	}
+	return f.normalizeDyldInfoPointer(value), true
+}
+
+func (f *File) decodeDyldInfoPointerAtAddress(address, raw uint64) (uint64, bool) {
+	if !f.usesDyldInfoOnlyFixups() {
+		return 0, false
+	}
+
+	if err := f.buildDyldInfoFixupsCache(); err != nil {
+		return 0, false
+	}
+
+	if resolved, ok := f.dyldInfoRebaseTargets[address]; ok {
+		return resolved, true
+	}
+
+	if bind, ok := f.dyldInfoBindsByAddr[address]; ok {
+		if bind.Dylib == f.LibraryOrdinalName(types.BIND_SPECIAL_DYLIB_SELF) {
+			symAddr, err := f.FindSymbolAddress(bind.Name)
+			if err != nil {
+				return 0, true
+			}
+			return uint64(int64(symAddr) + bind.Addend), true
+		}
+		return raw, true
+	}
+
+	return 0, false
+}
+
 // SlidePointer returns slid or un-chained pointer
 func (f *File) SlidePointer(ptr uint64) uint64 {
 	if resolved, ok := f.decodeChainedPointer(ptr); ok {
+		return resolved
+	}
+	if resolved, ok := f.decodeDyldInfoPointer(ptr); ok {
 		return resolved
 	}
 	return f.vma.Convert(ptr)
@@ -1710,6 +1833,9 @@ func (f *File) convertToVMAddr(value uint64) uint64 {
 		return 0
 	}
 	if resolved, ok := f.decodeChainedPointer(value); ok {
+		return resolved
+	}
+	if resolved, ok := f.decodeDyldInfoPointer(value); ok {
 		return resolved
 	} else if f.isArm64e() {
 		// TODO: fix this dumb hack for SUPPORT_OLD_ARM64E_FORMAT
@@ -2984,26 +3110,45 @@ func (f *File) GetBindInfo() (types.Binds, error) {
 }
 
 func (f *File) GetRebaseInfo() ([]types.Rebase, error) {
-	if dinfo := f.DyldInfo(); dinfo != nil {
-		if dinfo.RebaseSize > 0 {
-			dat := make([]byte, dinfo.RebaseSize)
-			if _, err := f.cr.ReadAt(dat, int64(dinfo.RebaseOff)); err != nil {
-				return nil, fmt.Errorf("failed to read rebase info: %v", err)
-			}
-			return f.parseRebase(bytes.NewReader(dat))
-		}
-	} else if dinfo := f.DyldInfoOnly(); dinfo != nil {
-		if dinfo.RebaseSize > 0 {
-			dat := make([]byte, dinfo.RebaseSize)
-			if _, err := f.cr.ReadAt(dat, int64(dinfo.RebaseOff)); err != nil {
-				return nil, fmt.Errorf("failed to read rebase info: %v", err)
-			}
-			return f.parseRebase(bytes.NewReader(dat))
-		}
-	} else {
+	if f.rebasesDone {
+		return f.rebases, nil
+	}
+	var (
+		rebaseOff  uint32
+		rebaseSize uint32
+	)
+
+	switch {
+	case f.DyldInfo() != nil:
+		dinfo := f.DyldInfo()
+		rebaseOff = dinfo.RebaseOff
+		rebaseSize = dinfo.RebaseSize
+	case f.DyldInfoOnly() != nil:
+		dinfo := f.DyldInfoOnly()
+		rebaseOff = dinfo.RebaseOff
+		rebaseSize = dinfo.RebaseSize
+	default:
 		return nil, ErrMachODyldInfoNotFound
 	}
-	return nil, nil
+
+	if rebaseSize == 0 {
+		f.rebasesDone = true
+		return nil, nil
+	}
+
+	dat := make([]byte, rebaseSize)
+	if _, err := f.cr.ReadAt(dat, int64(rebaseOff)); err != nil {
+		return nil, fmt.Errorf("failed to read rebase info: %v", err)
+	}
+
+	rebases, err := f.parseRebase(bytes.NewReader(dat))
+	if err != nil {
+		return nil, err
+	}
+
+	f.rebases = rebases
+	f.rebasesDone = true
+	return f.rebases, nil
 }
 
 func (f *File) GetExports() ([]trie.TrieExport, error) {
