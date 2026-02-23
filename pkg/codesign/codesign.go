@@ -95,6 +95,15 @@ func (cs *CodeSignature) MarshalJSON() ([]byte, error) {
 func ParseCodeSignature(cmddat []byte) (*CodeSignature, error) {
 	r := bytes.NewReader(cmddat)
 	cs := &CodeSignature{}
+	payloadLen := func(total uint32, headerSize int, baseOffset uint32) (int, error) {
+		if total < uint32(headerSize) {
+			return 0, fmt.Errorf("invalid blob length %d (header %d)", total, headerSize)
+		}
+		if uint64(baseOffset)+uint64(total) > uint64(len(cmddat)) {
+			return 0, fmt.Errorf("blob length %d exceeds code signature data", total)
+		}
+		return int(total) - headerSize, nil
+	}
 
 	csBlob := types.SuperBlob{}
 	if err := binary.Read(r, binary.BigEndian, &csBlob.SbHeader); err != nil {
@@ -114,7 +123,7 @@ func ParseCodeSignature(cmddat []byte) (*CodeSignature, error) {
 		case types.CSSLOT_CODEDIRECTORY:
 			fallthrough
 		case types.CSSLOT_ALTERNATE_CODEDIRECTORIES:
-			cd, err := parseCodeDirectory(r, index.Offset)
+			cd, err := parseCodeDirectory(r, index.Offset, uint32(len(cmddat)))
 			if err != nil {
 				return nil, err
 			}
@@ -127,7 +136,10 @@ func ParseCodeSignature(cmddat []byte) (*CodeSignature, error) {
 			if req.RequirementsBlob.Magic != types.MAGIC_REQUIREMENT && req.RequirementsBlob.Magic != types.MAGIC_REQUIREMENTS {
 				return nil, fmt.Errorf("invalid CSSLOT_REQUIREMENTS blob magic: %s", req.RequirementsBlob.Magic)
 			}
-			datLen := int(req.RequirementsBlob.Length) - binary.Size(types.RequirementsBlob{})
+			datLen, err := payloadLen(req.RequirementsBlob.Length, binary.Size(types.RequirementsBlob{}), index.Offset)
+			if err != nil {
+				return nil, err
+			}
 			if datLen > 0 {
 				reqData := make([]byte, datLen)
 				if err := binary.Read(r, binary.BigEndian, &reqData); err != nil {
@@ -154,7 +166,11 @@ func ParseCodeSignature(cmddat []byte) (*CodeSignature, error) {
 			if entBlob.Magic != types.MAGIC_EMBEDDED_ENTITLEMENTS {
 				return nil, fmt.Errorf("invalid CSSLOT_ENTITLEMENTS blob magic: %s", entBlob.Magic)
 			}
-			plistData := make([]byte, int(entBlob.Length)-binary.Size(entBlob))
+			plistLen, err := payloadLen(entBlob.Length, binary.Size(entBlob), index.Offset)
+			if err != nil {
+				return nil, err
+			}
+			plistData := make([]byte, plistLen)
 			if err := binary.Read(r, binary.BigEndian, &plistData); err != nil {
 				return nil, err
 			}
@@ -167,7 +183,11 @@ func ParseCodeSignature(cmddat []byte) (*CodeSignature, error) {
 			if cmsBlob.Magic != types.MAGIC_BLOBWRAPPER {
 				return nil, fmt.Errorf("invalid CSSLOT_CMS_SIGNATURE blob magic: %s", cmsBlob.Magic)
 			}
-			cmsData := make([]byte, int(cmsBlob.Length)-binary.Size(cmsBlob))
+			cmsLen, err := payloadLen(cmsBlob.Length, binary.Size(cmsBlob), index.Offset)
+			if err != nil {
+				return nil, err
+			}
+			cmsData := make([]byte, cmsLen)
 			if err := binary.Read(r, binary.BigEndian, &cmsData); err != nil {
 				return nil, err
 			}
@@ -181,7 +201,11 @@ func ParseCodeSignature(cmddat []byte) (*CodeSignature, error) {
 			if entDerBlob.Magic != types.MAGIC_EMBEDDED_ENTITLEMENTS_DER {
 				return nil, fmt.Errorf("invalid CSSLOT_ENTITLEMENTS_DER blob magic: %s", entDerBlob.Magic)
 			}
-			entDerData := make([]byte, int(entDerBlob.Length)-binary.Size(entDerBlob))
+			entDerLen, err := payloadLen(entDerBlob.Length, binary.Size(entDerBlob), index.Offset)
+			if err != nil {
+				return nil, err
+			}
+			entDerData := make([]byte, entDerLen)
 			if err := binary.Read(r, binary.BigEndian, &entDerData); err != nil {
 				return nil, err
 			}
@@ -206,7 +230,11 @@ func ParseCodeSignature(cmddat []byte) (*CodeSignature, error) {
 			if lcBlob.Magic != types.MAGIC_EMBEDDED_LAUNCH_CONSTRAINT {
 				return nil, fmt.Errorf("invalid CSSLOT_LAUNCH_CONSTRAINT_SELF blob magic: %s", lcBlob.Magic)
 			}
-			lcData := make([]byte, int(lcBlob.Length)-binary.Size(lcBlob))
+			lcLen, err := payloadLen(lcBlob.Length, binary.Size(lcBlob), index.Offset)
+			if err != nil {
+				return nil, err
+			}
+			lcData := make([]byte, lcLen)
 			if err := binary.Read(r, binary.BigEndian, &lcData); err != nil {
 				return nil, err
 			}
@@ -227,13 +255,19 @@ func ParseCodeSignature(cmddat []byte) (*CodeSignature, error) {
 	return cs, nil
 }
 
-func parseCodeDirectory(r *bytes.Reader, offset uint32) (*types.CodeDirectory, error) {
+func parseCodeDirectory(r *bytes.Reader, offset uint32, maxSize uint32) (*types.CodeDirectory, error) {
 	var cd types.CodeDirectory
 	if err := binary.Read(r, binary.BigEndian, &cd.BlobHeader); err != nil {
 		return nil, err
 	}
 	if cd.BlobHeader.Magic != types.MAGIC_CODEDIRECTORY {
 		return nil, fmt.Errorf("invalid CSSLOT_(ALTERNATE_)CODEDIRECTORY blob magic: %#x", cd.BlobHeader.Magic)
+	}
+	if cd.BlobHeader.Length < uint32(binary.Size(cd.BlobHeader)) {
+		return nil, fmt.Errorf("invalid CodeDirectory length %d", cd.BlobHeader.Length)
+	}
+	if uint64(offset)+uint64(cd.BlobHeader.Length) > uint64(maxSize) {
+		return nil, fmt.Errorf("CodeDirectory length %d exceeds code signature data", cd.BlobHeader.Length)
 	}
 	if err := binary.Read(r, binary.BigEndian, &cd.Header.CdEarliest); err != nil {
 		return nil, err
