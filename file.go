@@ -1960,6 +1960,10 @@ func (f *File) getUTF16String(addr, charCount uint64) (string, error) {
 	if charCount == 0 {
 		return "", nil
 	}
+	const maxCharCount = 1 << 20 // 1M code units safety cap
+	if charCount > maxCharCount {
+		return "", fmt.Errorf("implausible UTF-16 char count %d at address %#x", charCount, addr)
+	}
 	buf := make([]byte, charCount*2)
 	if _, err := f.cr.ReadAtAddr(buf, addr); err != nil {
 		return "", fmt.Errorf("failed to read UTF-16 string at address %#x: %w", addr, err)
