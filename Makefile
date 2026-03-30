@@ -4,8 +4,7 @@ NEXT_VERSION:=$(shell svu patch)
 
 .PHONY: dev-deps
 dev-deps: ## Install the dev dependencies
-	@brew install gh
-	@go install github.com/caarlos0/svu@v1.4.1
+	@go install github.com/caarlos0/svu@latest
 
 OBJC_SRC := internal/testdata/test.m
 OBJC_BIN := internal/testdata/objc_fixture
@@ -31,7 +30,8 @@ fmt: ## Format code
 	@gofmt -w -r 'interface{} -> any' .
 	@goimports -w .
 	@gofmt -w -s .
-	@go mod tidy	
+	@go mod tidy
+	@go fix ./...
 
 # Absolutely awesome: http://marmelab.com/blog/2016/02/29/auto-documented-makefile.html
 help:
