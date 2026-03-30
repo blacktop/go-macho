@@ -1313,6 +1313,10 @@ func (f *File) readProtocolConformance(r io.ReadSeeker, addr uint64) (pcd *swift
 		if err := binary.Read(r, f.ByteOrder, &rwit); err != nil {
 			return nil, fmt.Errorf("failed to read resilient witnesses offset: %v", err)
 		}
+		const maxResilientWitnesses = 65536
+		if rwit.NumWitnesses > maxResilientWitnesses {
+			return nil, fmt.Errorf("implausible witness count %d", rwit.NumWitnesses)
+		}
 		pcd.ResilientWitnesses = make([]swift.ResilientWitnesses, rwit.NumWitnesses)
 		for i := 0; i < int(rwit.NumWitnesses); i++ {
 			curr, _ := r.Seek(0, io.SeekCurrent) // save offset

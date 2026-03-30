@@ -77,6 +77,15 @@ var ErrMachONoBindInfo = errors.New("MachO does not contain bind information (fi
 var ErrCStringNoTerminator = errors.New("cstring has no terminator")
 var ErrCStringNotFound = errors.New("cstring not found")
 
+// cstringBufPool reuses 4 KiB read buffers in GetCString to avoid hammering
+// the allocator's mcentral lock when many goroutines read C strings concurrently.
+var cstringBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 0x1000)
+		return &b
+	},
+}
+
 // FormatError is returned by some operations if the data does
 // not have the correct format for an object file.
 type FormatError struct {
@@ -1897,12 +1906,12 @@ func (f *File) GetBindName(pointer uint64) (string, error) {
 
 // GetCString returns a c-string at a given virtual address in the MachO
 func (f *File) GetCString(addr uint64) (string, error) {
-	const (
-		chunkSize = 0x1000  // 4 KiB per read attempt
-		maxLength = 1 << 20 // 1 MiB safety cap
-	)
+	const maxLength = 1 << 20 // 1 MiB safety cap
 
-	buf := make([]byte, chunkSize)
+	bp := cstringBufPool.Get().(*[]byte)
+	buf := *bp
+	defer cstringBufPool.Put(bp)
+
 	var out []byte
 	current := addr
 
