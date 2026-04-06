@@ -2670,7 +2670,13 @@ func (f *File) getContextDesc(addr uint64) (ctx *swift.TargetModuleContext, err 
 
 	ctx = &swift.TargetModuleContext{}
 	if err := ctx.TargetModuleContextDescriptor.Read(f.cr, ptr); err != nil {
-		return nil, fmt.Errorf("failed to read swift context descriptor: %w", err)
+		// The address is in-range but doesn't contain a valid descriptor
+		// (e.g., indirect pointer resolved to a non-descriptor location).
+		// Try symbol resolution before giving up.
+		if bind, err := f.GetBindName(ptr); err == nil {
+			return &swift.TargetModuleContext{Name: bind}, nil
+		}
+		return &swift.TargetModuleContext{}, nil
 	}
 
 	if ctx.ParentOffset.IsSet() {
