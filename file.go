@@ -1541,6 +1541,14 @@ func (f *File) pointerSize() uint64 {
 	return 4
 }
 
+// pageSize returns the VM page size for the binary's CPU architecture.
+func (f *File) pageSize() uint64 {
+	if f.has16KPages() {
+		return 0x4000
+	}
+	return 0x1000
+}
+
 func (f *File) symbolSize() int {
 	if f.is64bit() {
 		return binary.Size(types.Nlist64{})

@@ -96,6 +96,7 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 	var segMap exportSegMap
 
 	inCache := f.FileHeader.Flags.DylibInCache()
+	pgSz := f.pageSize()
 
 	// create segment offset map
 	var newSegOffset uint64
@@ -108,12 +109,12 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 			},
 			New: segInfo{
 				Start: newSegOffset,
-				End:   newSegOffset + pageAlign(seg.Filesz, 0x4000),
+				End:   newSegOffset + pageAlign(seg.Filesz, pgSz),
 			},
 			OrigMemsz:  seg.Memsz,
 			OrigFilesz: seg.Filesz,
 		})
-		newSegOffset += pageAlign(seg.Filesz, 0x4000)
+		newSegOffset += pageAlign(seg.Filesz, pgSz)
 	}
 
 	sort.Sort(segMap)
@@ -167,6 +168,18 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 
 	if inCache {
 		f.FileHeader.Flags &= 0x7FFFFFFF // remove in-cache bit
+		// Strip LC_DYLD_CHAINED_FIXUPS: the fixup chain data in the
+		// shared cache is not reconstructed during export, so the
+		// remapped offset would point to invalid data. Callers that
+		// need rebasing (e.g. slide info) handle it post-export.
+		for _, l := range f.Loads {
+			if _, ok := l.(*DyldChainedFixups); ok {
+				if err := f.FileTOC.RemoveLoad(l); err != nil {
+					return fmt.Errorf("failed to remove LC_DYLD_CHAINED_FIXUPS: %v", err)
+				}
+				break
+			}
+		}
 	}
 
 	if err := f.FileHeader.Write(&buf, f.ByteOrder); err != nil {
@@ -250,61 +263,6 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 	if err := os.WriteFile(path, buf.Bytes(), 0755); err != nil {
 		return fmt.Errorf("failed to write exported MachO to file %s: %w", path, err)
 	}
-
-	// FIXME: fixup chains are not yet supported (this should be done in the linkedit optimization step and create a REAL LC_DYLD_CHAINED_FIXUPS load command)
-	// if dcf != nil {
-	// 	newFile, err := os.OpenFile(path, os.O_WRONLY, 0755)
-	// 	if err != nil {
-	// 		return fmt.Errorf("failed to open exported MachO %s: %v", path, err)
-	// 	}
-	// 	defer newFile.Close()
-
-	// 	fi, err := newFile.Stat()
-	// 	if err != nil {
-	// 		return fmt.Errorf("failed to stat file %s: %v", path, err)
-	// 	}
-	// 	fileSize := fi.Size()
-
-	// 	for _, start := range dcf.Starts {
-	// 		if start.PageStarts != nil {
-	// 			for _, fixup := range start.Fixups {
-	// 				off, err := segMap.Remap(fixup.Offset())
-	// 				if err != nil {
-	// 					continue
-	// 				}
-
-	// 				if off == 0 || off >= uint64(fileSize) {
-	// 					continue
-	// 				}
-
-	// 				if _, err := newFile.Seek(int64(off), io.SeekStart); err != nil {
-	// 					return fmt.Errorf("failed to seek in exported file to offset %#x from the start: %v", off, err)
-	// 				}
-
-	// 				switch fx := fixup.(type) {
-	// 				case fixupchains.Bind:
-	// 					// var addend string
-	// 					// addr := uint64(f.Offset()) + m.GetBaseAddress()
-	// 					// if fullAddend := dcf.Imports[f.Ordinal()].Addend() + f.Addend(); fullAddend > 0 {
-	// 					// 	addend = fmt.Sprintf(" + %#x", fullAddend)
-	// 					// 	addr += fullAddend
-	// 					// }
-	// 					// sec = m.FindSectionForVMAddr(addr)
-	// 					// lib := m.LibraryOrdinalName(dcf.Imports[f.Ordinal()].LibOrdinal())
-	// 					// if sec != nil && sec != lastSec {
-	// 					// 	fmt.Printf("%s.%s\n", sec.Seg, sec.Name)
-	// 					// }
-	// 					// fmt.Printf("%s\t%s/%s%s\n", fixupchains.Bind(f).String(m.GetBaseAddress()), lib, f.Name(), addend)
-	// 				case fixupchains.Rebase:
-	// 					addr := uint64(fx.Target()) + baseAddress
-	// 					if err := binary.Write(newFile, f.ByteOrder, addr); err != nil {
-	// 						return fmt.Errorf("failed to write fixup address %#x: %v", addr, err)
-	// 					}
-	// 				}
-	// 			}
-	// 		}
-	// 	}
-	// }
 
 	return nil
 }
@@ -412,8 +370,8 @@ func (f *File) CodeSign(config *codesign.Config) error {
 	f.ledata = bytes.NewBuffer(ledata)
 
 	// update __LINKEDIT segment sizes
-	linkedit.Filesz = pageAlign(uint64(len(ledata))+codesign.EstimateCodeSignatureSize(config), 0x4000)
-	linkedit.Memsz = pageAlign(linkedit.Filesz, 0x8000)
+	linkedit.Filesz = pageAlign(uint64(len(ledata))+codesign.EstimateCodeSignatureSize(config), f.pageSize())
+	linkedit.Memsz = pageAlign(linkedit.Filesz, f.pageSize())
 	// update LC_CODE_SIGNATURE size
 	cs.Size = uint32((linkedit.Offset + linkedit.Filesz) - uint64(cs.Offset))
 
@@ -763,11 +721,13 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap, inCache bool) error {
 				l.(*DyldExportsTrie).Offset = uint32(off)
 			}
 		case types.LC_DYLD_CHAINED_FIXUPS:
-			off, err := segMap.Remap(uint64(l.(*DyldChainedFixups).Offset))
-			if err != nil {
-				return fmt.Errorf("failed to remap offset in %s: %v", l.Command(), err)
+			if !inCache {
+				off, err := segMap.Remap(uint64(l.(*DyldChainedFixups).Offset))
+				if err != nil {
+					return fmt.Errorf("failed to remap offset in %s: %v", l.Command(), err)
+				}
+				l.(*DyldChainedFixups).Offset = uint32(off)
 			}
-			l.(*DyldChainedFixups).Offset = uint32(off)
 		case types.LC_FILESET_ENTRY:
 			off, err := segMap.Remap(l.(*FilesetEntry).FileOffset)
 			if err != nil {
@@ -870,7 +830,8 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		return nil, fmt.Errorf("binary has no LC_DYSYMTAB")
 	}
 
-	// TODO: LC_DYLD_CHAINED_FIXUPS
+	// LC_DYLD_CHAINED_FIXUPS is stripped from in-cache exports in Export();
+	// no reconstruction needed here.
 
 	// optimize LC_DYLD_EXPORTS_TRIE
 	if dexpTrie := f.DyldExportsTrie(); dexpTrie != nil {
@@ -1172,6 +1133,10 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		f.Symtab.Stroff = uint32(linkedit.Offset + newStringPoolOffset)
 		f.Symtab.Strsize = uint32(newSymNames.Len())
 	}
+	// Apple convention: when LC_DATA_IN_CODE has no data, set dataoff = symoff
+	if dataNCode := f.DataInCode(); dataNCode != nil && dataNCode.Size == 0 && f.Symtab != nil {
+		dataNCode.Offset = f.Symtab.Symoff
+	}
 	f.Dysymtab.Ilocalsym = 0
 	f.Dysymtab.Nlocalsym = nLocalSyms
 	f.Dysymtab.Iextdefsym = nLocalSyms
@@ -1186,7 +1151,7 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	f.Dysymtab.Indirectsymoff = uint32(linkedit.Offset + newIndSymTabOffset)
 
 	linkedit.Filesz = uint64(lebuf.Len())
-	linkedit.Memsz = pageAlign(linkedit.Filesz, 0x4000)
+	linkedit.Memsz = pageAlign(linkedit.Filesz, f.pageSize())
 
 	return &lebuf, nil
 }
