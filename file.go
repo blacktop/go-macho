@@ -290,7 +290,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				sh.Flags = sh32.Flags
 				sh.Reserved1 = sh32.Reserve1
 				sh.Reserved2 = sh32.Reserve2
-				sh.SetReaders(f.cr, io.NewSectionReader(f.cr, int64(sh32.Offset), int64(sh32.Size)))
+				sh.SetReaders(f.cr, io.NewSectionReader(&addrReaderAt{f.cr, sh.Addr}, 0, int64(sh.Size)))
 				if err := f.pushSection(sh, f.cr); err != nil {
 					return nil, fmt.Errorf("failed to pushSection32: %v", err)
 				}
@@ -336,7 +336,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				sh.Reserved1 = sh64.Reserve1
 				sh.Reserved2 = sh64.Reserve2
 				sh.Reserved3 = sh64.Reserve3
-				sh.SetReaders(f.cr, io.NewSectionReader(f.cr, int64(sh64.Offset), int64(sh64.Size)))
+				sh.SetReaders(f.cr, io.NewSectionReader(&addrReaderAt{f.cr, sh.Addr}, 0, int64(sh.Size)))
 				if err := f.pushSection(sh, f.cr); err != nil {
 					return nil, fmt.Errorf("failed to pushSection64: %v", err)
 				}
@@ -1575,6 +1575,19 @@ func (f *File) preferredLoadAddress() uint64 {
 		return text.Addr
 	}
 	return 0
+}
+
+// addrReaderAt adapts a MachoReader's ReadAtAddr into io.ReaderAt,
+// translating offset-based reads into virtual-address-based reads.
+// This ensures Section.Data() resolves the correct DSC subcache for
+// each read rather than always hitting the LINKEDIT subcache.
+type addrReaderAt struct {
+	r    types.MachoReader
+	addr uint64
+}
+
+func (a *addrReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	return a.r.ReadAtAddr(p, a.addr+uint64(off))
 }
 
 // ReadAt reads data at offset within MachO
