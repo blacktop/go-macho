@@ -817,7 +817,6 @@ func (f *File) optimizeObjC(segMap exportSegMap) error {
 
 func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	var err error
-	var newSymCount uint32
 	var lebuf bytes.Buffer
 	var newSymNames bytes.Buffer
 	var exports []trie.TrieExport
@@ -1013,80 +1012,98 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	// symbol category counters for DYSYMTAB
 	var nLocalSyms, nExtdefSyms, nUndefSyms uint32
 
-	// first pool entry is always empty string
-	newSymNames.WriteString("\x00")
-	// local symbols are first in dylibs, if this cache has unmapped locals, insert them all first
-	for _, lsym := range locals {
-		if err := binary.Write(&lebuf, binary.LittleEndian, types.Nlist64{
-			Nlist: types.Nlist{
-				Name: uint32(newSymNames.Len()),
-				Type: lsym.Type,
-				Sect: lsym.Sect,
-				Desc: lsym.Desc,
-			},
-			Value: lsym.Value,
-		}); err != nil {
-			return nil, fmt.Errorf("failed to write local nlist entry to NEW linkedit data: %v", err)
-		}
-		if _, err := newSymNames.WriteString(lsym.Name + "\x00"); err != nil {
-			return nil, fmt.Errorf("failed to write local symbol name string to NEW linkedit data: %v", err)
-		}
-		newSymCount++
-		nLocalSyms++
+	// Collect all symbols into three categories for correct DYSYMTAB ordering:
+	// locals first, then external defined, then undefined.
+	type symEntry struct {
+		sym  Symbol
+		name string // includes re-export name if applicable
 	}
-	// now start copying symbol table from start of externs instead of start of locals
+	var localSyms, extdefSyms, undefSyms []symEntry
+
+	// extra symbols (unmapped locals from DSC, or resolved imports from fileset KC)
+	for _, lsym := range locals {
+		e := symEntry{sym: lsym, name: lsym.Name}
+		switch {
+		case !lsym.Type.IsExternalSym():
+			localSyms = append(localSyms, e)
+		case lsym.Type.IsUndefinedSym():
+			undefSyms = append(undefSyms, e)
+		default:
+			extdefSyms = append(extdefSyms, e)
+		}
+	}
+	// original symbol table entries
 	if f.Symtab != nil {
 		for _, sym := range f.Symtab.Syms {
 			if sym.Name == "<redacted>" {
 				continue
 			}
-			if err := binary.Write(&lebuf, binary.LittleEndian, types.Nlist64{
-				Nlist: types.Nlist{
-					Name: uint32(newSymNames.Len()),
-					Type: sym.Type,
-					Sect: sym.Sect,
-					Desc: sym.Desc,
-				},
-				Value: sym.Value,
-			}); err != nil {
-				return nil, fmt.Errorf("failed to write symtab nlist entry to NEW linkedit data: %v", err)
-			}
-			if _, err := newSymNames.WriteString(sym.Name + "\x00"); err != nil {
-				return nil, fmt.Errorf("failed to write symbol name string to NEW linkedit data: %v", err)
-			}
-			newSymCount++
+			e := symEntry{sym: sym, name: sym.Name}
 			switch {
 			case !sym.Type.IsExternalSym():
-				nLocalSyms++
+				localSyms = append(localSyms, e)
 			case sym.Type.IsUndefinedSym():
-				nUndefSyms++
+				undefSyms = append(undefSyms, e)
 			default:
-				nExtdefSyms++
+				extdefSyms = append(extdefSyms, e)
 			}
 		}
 	}
-	// get all re-exports from LC_DYLD_EXPORTS_TRIE (these are external defined)
+	// re-exports from LC_DYLD_EXPORTS_TRIE (external defined)
 	for _, exp := range exports {
 		if !exp.Flags.Regular() || exp.Flags.ReExport() {
-			if err := binary.Write(&lebuf, binary.LittleEndian, types.Nlist64{
-				Nlist: types.Nlist{
-					Name: uint32(newSymNames.Len()),
-					Type: (types.N_INDR | types.N_EXT),
-					Sect: 0,
-					Desc: 0,
+			extdefSyms = append(extdefSyms, symEntry{
+				sym: Symbol{
+					Name:  exp.Name,
+					Type:  (types.N_INDR | types.N_EXT),
+					Sect:  0,
+					Desc:  0,
+					Value: exp.Address,
 				},
-				Value: exp.Address,
-			}); err != nil {
-				return nil, fmt.Errorf("failed to write export nlist entry to NEW linkedit data: %v", err)
-			}
-			if _, err := newSymNames.WriteString(exp.Name + "\x00"); err != nil {
-				return nil, fmt.Errorf("failed to write export symbol name string to NEW linkedit data: %v", err)
-			}
-			if _, err := newSymNames.WriteString(exp.ReExport + "\x00"); err != nil {
-				return nil, fmt.Errorf("failed to write symbol reexport name string to NEW linkedit data: %v", err)
-			}
-			newSymCount++
-			nExtdefSyms++
+				name: exp.Name + "\x00" + exp.ReExport,
+			})
+		}
+	}
+
+	nLocalSyms = uint32(len(localSyms))
+	nExtdefSyms = uint32(len(extdefSyms))
+	nUndefSyms = uint32(len(undefSyms))
+
+	// first pool entry is always empty string
+	newSymNames.WriteString("\x00")
+	// write symbols in DYSYMTAB order: locals, external defined, undefined
+	// re-export entries encode both names as "name\x00reexport"; the trailing
+	// \x00 from the write call terminates the second name.
+	writeSym := func(e symEntry) error {
+		if err := binary.Write(&lebuf, binary.LittleEndian, types.Nlist64{
+			Nlist: types.Nlist{
+				Name: uint32(newSymNames.Len()),
+				Type: e.sym.Type,
+				Sect: e.sym.Sect,
+				Desc: e.sym.Desc,
+			},
+			Value: e.sym.Value,
+		}); err != nil {
+			return err
+		}
+		if _, err := newSymNames.WriteString(e.name + "\x00"); err != nil {
+			return err
+		}
+		return nil
+	}
+	for _, e := range localSyms {
+		if err := writeSym(e); err != nil {
+			return nil, fmt.Errorf("failed to write local symbol to NEW linkedit data: %v", err)
+		}
+	}
+	for _, e := range extdefSyms {
+		if err := writeSym(e); err != nil {
+			return nil, fmt.Errorf("failed to write extdef symbol to NEW linkedit data: %v", err)
+		}
+	}
+	for _, e := range undefSyms {
+		if err := writeSym(e); err != nil {
+			return nil, fmt.Errorf("failed to write undef symbol to NEW linkedit data: %v", err)
 		}
 	}
 
@@ -1101,8 +1118,12 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	// Copy (and adjust) indirect symbol table.
 	// The new symtab prepends len(locals) entries before all of f.Symtab.Syms,
 	// so every original index shifts forward by len(locals).
+	// Skip sentinel values (INDIRECT_SYMBOL_LOCAL, INDIRECT_SYMBOL_ABS).
 	if len(locals) > 0 {
 		for idx, indSym := range f.Dysymtab.IndirectSyms {
+			if indSym&types.INDIRECT_SYMBOL_LOCAL != 0 {
+				continue
+			}
 			f.Dysymtab.IndirectSyms[idx] = indSym + uint32(len(locals))
 		}
 	}
@@ -1128,7 +1149,7 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	}
 
 	if f.Symtab != nil {
-		f.Symtab.Nsyms = newSymCount
+		f.Symtab.Nsyms = nLocalSyms + nExtdefSyms + nUndefSyms
 		f.Symtab.Symoff = uint32(linkedit.Offset + newSymTabOffset)
 		f.Symtab.Stroff = uint32(linkedit.Offset + newStringPoolOffset)
 		f.Symtab.Strsize = uint32(newSymNames.Len())
