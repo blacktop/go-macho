@@ -517,6 +517,94 @@ func TestOpen(t *testing.T) {
 	}
 }
 
+func TestSectionData(t *testing.T) {
+	for _, tt := range fileTests {
+		f, err := openObscured(tt.file)
+		if err != nil {
+			t.Errorf("open %s: %v", tt.file, err)
+			continue
+		}
+		for i, sec := range f.Sections {
+			if sec.Size == 0 {
+				continue
+			}
+			data, err := sec.Data()
+			if err != nil {
+				t.Errorf("%s section %d (%s.%s): Data() error = %v", tt.file, i, sec.Seg, sec.Name, err)
+				continue
+			}
+			if uint64(len(data)) != sec.Size {
+				t.Errorf("%s section %d (%s.%s): Data() len = %d, want %d", tt.file, i, sec.Seg, sec.Name, len(data), sec.Size)
+			}
+		}
+	}
+}
+
+
+// dscMachoReader simulates a DSC CacheImage where virtual addresses and file
+// offsets diverge. ReadAtAddr resolves correctly; ReadAt uses raw file offsets
+// which would hit wrong data without VA-based section reads.
+type dscMachoReader struct {
+	fileData []byte            // raw file data (file-offset space)
+	vaMap    map[uint64][]byte // VA → backing data
+}
+
+func (r *dscMachoReader) Read(p []byte) (int, error)                 { return 0, io.EOF }
+func (r *dscMachoReader) Seek(int64, int) (int64, error)             { return 0, nil }
+func (r *dscMachoReader) SeekToAddr(uint64) error                    { return nil }
+func (r *dscMachoReader) ReadAt(p []byte, off int64) (int, error)    { return copy(p, r.fileData[off:]), nil }
+func (r *dscMachoReader) ReadAtAddr(p []byte, addr uint64) (int, error) {
+	for base, data := range r.vaMap {
+		if addr >= base && addr < base+uint64(len(data)) {
+			return copy(p, data[addr-base:]), nil
+		}
+	}
+	return 0, fmt.Errorf("address %#x not mapped", addr)
+}
+
+func TestSectionDataDSCViaVirtualAddress(t *testing.T) {
+	// File offset 0x100 contains stale data (e.g. from the wrong subcache).
+	// VA 0x1000 maps to the correct bytes via ReadAtAddr.
+	fileData := make([]byte, 0x400)
+	copy(fileData[0x100:], []byte("STALE!"))
+
+	mr := &dscMachoReader{
+		fileData: fileData,
+		vaMap:    map[uint64][]byte{0x1000: []byte("ACTUAL")},
+	}
+
+	sec := &types.Section{
+		SectionHeader: types.SectionHeader{
+			Name: "__text",
+			Seg:  "__TEXT",
+			Addr: 0x1000,
+			Size: 6,
+		},
+	}
+	sec.SetReaders(mr, io.NewSectionReader(mr, 0x100, 6))
+
+	t.Run("Data", func(t *testing.T) {
+		data, err := sec.Data()
+		if err != nil {
+			t.Fatalf("Data() error = %v", err)
+		}
+		if string(data) != "ACTUAL" {
+			t.Fatalf("Data() = %q, want %q", data, "ACTUAL")
+		}
+	})
+
+	t.Run("Open", func(t *testing.T) {
+		r := sec.Open()
+		buf := make([]byte, 6)
+		if _, err := io.ReadFull(r, buf); err != nil {
+			t.Fatalf("Open().Read error = %v", err)
+		}
+		if string(buf) != "ACTUAL" {
+			t.Fatalf("Open().Read = %q, want %q", buf, "ACTUAL")
+		}
+	})
+}
+
 func TestOpenFailure(t *testing.T) {
 	filename := "file.go"    // not a Mach-O file
 	_, err := Open(filename) // don't crash
