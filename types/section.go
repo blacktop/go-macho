@@ -483,13 +483,32 @@ func (s *Section) SetReaders(r io.ReaderAt, sr *io.SectionReader) {
 	s.sr = sr
 }
 
+type addrReaderAt struct {
+	mr   MachoReader
+	addr uint64
+}
+
+func (r addrReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	return r.mr.ReadAtAddr(p, r.addr+uint64(off))
+}
+
 // Data reads and returns the contents of the Mach-O section.
 func (s *Section) Data() ([]byte, error) {
+	// Read virtual address space rather than file offset space if using a MachoReader.
+	if mr, ok := s.ReaderAt.(MachoReader); ok {
+		return saferio.ReadDataAt(addrReaderAt{mr, s.Addr}, s.Size, 0)
+	}
 	return saferio.ReadDataAt(s.sr, s.Size, 0)
 }
 
 // Open returns a new ReadSeeker reading the Mach-O section.
-func (s *Section) Open() io.ReadSeeker { return io.NewSectionReader(s.sr, 0, 1<<63-1) }
+func (s *Section) Open() io.ReadSeeker {
+	// Read virtual address space rather than file offset space if using a MachoReader.
+	if mr, ok := s.ReaderAt.(MachoReader); ok {
+		return io.NewSectionReader(addrReaderAt{mr, s.Addr}, 0, int64(s.Size))
+	}
+	return io.NewSectionReader(s.sr, 0, 1<<63-1)
+}
 
 func (s *Section) Put32(b []byte, o binary.ByteOrder) int {
 	PutAtMost16Bytes(b[0:], s.Name)
