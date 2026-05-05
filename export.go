@@ -89,6 +89,45 @@ func pointerAlignPad(currentLen int, ptrSize uint64) int {
 	return int(ptrSize - rem)
 }
 
+func (f *File) textSegmentFirstSectionRelOff(inCache bool) (uint64, error) {
+	textSeg := f.Segment("__TEXT")
+	if textSeg == nil {
+		return 0, nil
+	}
+	for i := uint32(0); i < textSeg.Nsect; i++ {
+		idx := uint64(textSeg.Firstsect) + uint64(i)
+		if idx >= uint64(len(f.Sections)) {
+			return 0, fmt.Errorf("__TEXT section index %d out of range", idx)
+		}
+		sec := f.Sections[int(idx)]
+		if sec.Offset == 0 {
+			continue
+		}
+		if inCache {
+			if sec.Addr < textSeg.Addr {
+				return 0, fmt.Errorf("__TEXT section %s address %#x precedes segment address %#x", sec.Name, sec.Addr, textSeg.Addr)
+			}
+			return sec.Addr - textSeg.Addr, nil
+		}
+		if uint64(sec.Offset) < textSeg.Offset {
+			return 0, fmt.Errorf("__TEXT section %s offset %#x precedes segment offset %#x", sec.Name, sec.Offset, textSeg.Offset)
+		}
+		return uint64(sec.Offset) - textSeg.Offset, nil
+	}
+	return 0, nil
+}
+
+func textSegmentWriteStart(firstSectionRelOff, endOfLoadsOffset, dataLen uint64) (uint64, error) {
+	dataStart := firstSectionRelOff
+	if endOfLoadsOffset > dataStart {
+		dataStart = endOfLoadsOffset
+	}
+	if dataStart > dataLen {
+		return 0, fmt.Errorf("__TEXT data start %#x exceeds segment data length %#x", dataStart, dataLen)
+	}
+	return dataStart, nil
+}
+
 // Export exports an in-memory or cached dylib|kext MachO to a file
 func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddress uint64, locals []Symbol) (err error) {
 	var buf bytes.Buffer
@@ -125,15 +164,9 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 	}
 
 	// save original __TEXT layout before load commands rewrite changes offsets
-	var origTextFirstSectRelOff uint64
-	if textSeg := f.Segment("__TEXT"); textSeg != nil {
-		for i := uint32(0); i < textSeg.Nsect; i++ {
-			sec := f.Sections[i+textSeg.Firstsect]
-			if sec.Offset > 0 {
-				origTextFirstSectRelOff = uint64(sec.Offset) - textSeg.Offset
-				break
-			}
-		}
+	origTextFirstSectRelOff, err := f.textSegmentFirstSectionRelOff(inCache)
+	if err != nil {
+		return err
 	}
 
 	if err := f.optimizeLoadCommands(segMap, inCache); err != nil {
@@ -210,12 +243,11 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 					return fmt.Errorf("failed to read segment %s data: %v", seg.Name, err)
 				}
 				// write __TEXT data after the header+load commands we already wrote
-				dataStart := origTextFirstSectRelOff
-				if endOfLoadsOffset > dataStart {
-					// load commands grew past original first section offset;
-					// start from endOfLoadsOffset to avoid re-writing LC bytes
-					dataStart = endOfLoadsOffset
-				} else if dataStart > endOfLoadsOffset {
+				dataStart, err := textSegmentWriteStart(origTextFirstSectRelOff, endOfLoadsOffset, uint64(len(dat)))
+				if err != nil {
+					return err
+				}
+				if dataStart > endOfLoadsOffset {
 					// pad gap between end of load commands and first section
 					if _, err := buf.Write(make([]byte, dataStart-endOfLoadsOffset)); err != nil {
 						return fmt.Errorf("failed to write __TEXT LC-to-section padding: %v", err)

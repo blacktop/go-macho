@@ -1,7 +1,10 @@
 package macho
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/blacktop/go-macho/types"
 )
 
 func TestPointerAlignPad(t *testing.T) {
@@ -56,6 +59,137 @@ func TestPageAlign(t *testing.T) {
 				t.Errorf("pageAlign(%#x, %#x) = %#x, want %#x", tt.off, tt.align, got, tt.want)
 			}
 		})
+	}
+}
+
+func newTextSegmentFile(seg SegmentHeader, sections ...*types.Section) *File {
+	seg.LoadCmd = types.LC_SEGMENT_64
+	seg.Name = "__TEXT"
+	text := &Segment{
+		SegmentHeader: seg,
+	}
+	return &File{
+		FileTOC: FileTOC{
+			Loads:    loads{text},
+			Sections: sections,
+		},
+	}
+}
+
+func newTextSection(addr uint64, offset uint32) *types.Section {
+	return &types.Section{
+		SectionHeader: types.SectionHeader{
+			Name:   "__text",
+			Seg:    "__TEXT",
+			Addr:   addr,
+			Offset: offset,
+		},
+	}
+}
+
+func requireErrorContains(t *testing.T, err error, want string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected error containing %q", want)
+	}
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("expected error containing %q, got %v", want, err)
+	}
+}
+
+func TestTextSegmentFirstSectionRelOffUsesVMAddrForCachedImages(t *testing.T) {
+	f := newTextSegmentFile(
+		SegmentHeader{
+			Addr:   0x180000000,
+			Offset: 0x3f000000,
+			Nsect:  1,
+		},
+		newTextSection(0x180004000, 0x4000),
+	)
+
+	got, err := f.textSegmentFirstSectionRelOff(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 0x4000 {
+		t.Errorf("textSegmentFirstSectionRelOff(true) = %#x, want 0x4000", got)
+	}
+}
+
+func TestTextSegmentFirstSectionRelOffRejectsInvalidCachedAddress(t *testing.T) {
+	f := newTextSegmentFile(
+		SegmentHeader{
+			Addr:   0x180004000,
+			Offset: 0x3f000000,
+			Nsect:  1,
+		},
+		newTextSection(0x180000000, 0x4000),
+	)
+
+	_, err := f.textSegmentFirstSectionRelOff(true)
+	requireErrorContains(t, err, "precedes segment address")
+}
+
+func TestTextSegmentFirstSectionRelOffRejectsInvalidFileOffset(t *testing.T) {
+	f := newTextSegmentFile(
+		SegmentHeader{
+			Addr:   0x100000000,
+			Offset: 0x8000,
+			Nsect:  1,
+		},
+		newTextSection(0x100001000, 0x1000),
+	)
+
+	_, err := f.textSegmentFirstSectionRelOff(false)
+	requireErrorContains(t, err, "precedes segment offset")
+}
+
+func TestTextSegmentFirstSectionRelOffRejectsInvalidSectionIndex(t *testing.T) {
+	f := newTextSegmentFile(SegmentHeader{
+		Addr:      0x100000000,
+		Nsect:     1,
+		Firstsect: 1,
+	})
+
+	_, err := f.textSegmentFirstSectionRelOff(false)
+	requireErrorContains(t, err, "out of range")
+}
+
+func TestTextSegmentFirstSectionRelOffRejectsHugeSectionIndex(t *testing.T) {
+	f := newTextSegmentFile(SegmentHeader{
+		Addr:      0x100000000,
+		Nsect:     1,
+		Firstsect: ^uint32(0),
+	})
+
+	_, err := f.textSegmentFirstSectionRelOff(false)
+	requireErrorContains(t, err, "out of range")
+}
+
+func TestTextSegmentFirstSectionRelOffNoTextSegment(t *testing.T) {
+	f := &File{}
+
+	got, err := f.textSegmentFirstSectionRelOff(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 0 {
+		t.Errorf("textSegmentFirstSectionRelOff without __TEXT = %#x, want 0", got)
+	}
+}
+
+func TestTextSegmentWriteStartRejectsOutOfRangeStart(t *testing.T) {
+	_, err := textSegmentWriteStart(0x400000000, 0x2000, 0x10000)
+	requireErrorContains(t, err, "exceeds segment data length")
+}
+
+func TestTextSegmentWriteStartUsesEndOfLoadsWhenLarger(t *testing.T) {
+	got, err := textSegmentWriteStart(0x1000, 0x2000, 0x4000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 0x2000 {
+		t.Errorf("textSegmentWriteStart = %#x, want 0x2000", got)
 	}
 }
 
