@@ -13,21 +13,22 @@ func _() {
 	_ = x[GRKindBaseClass-2]
 	_ = x[GRKindSameConformance-3]
 	_ = x[GRKSameShape-4]
+	_ = x[GRKindInvertedProtocols-5]
 	_ = x[GRKindLayout-31]
 }
 
 const (
-	_GenericRequirementKind_name_0 = "protocolsame-typebase-classsame-conformancesame-shape"
+	_GenericRequirementKind_name_0 = "protocolsame-typebase-classsame-conformancesame-shapeinverted-protocols"
 	_GenericRequirementKind_name_1 = "layout"
 )
 
 var (
-	_GenericRequirementKind_index_0 = [...]uint8{0, 8, 17, 27, 43, 53}
+	_GenericRequirementKind_index_0 = [...]uint8{0, 8, 17, 27, 43, 53, 71}
 )
 
 func (i GenericRequirementKind) String() string {
 	switch {
-	case i <= 4:
+	case i <= 5:
 		return _GenericRequirementKind_name_0[_GenericRequirementKind_index_0[i]:_GenericRequirementKind_index_0[i+1]]
 	case i == 31:
 		return _GenericRequirementKind_name_1
