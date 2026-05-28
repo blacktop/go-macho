@@ -98,7 +98,7 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 
 	sort.Sort(segMap)
 
-	if err := f.optimizeLoadCommands(segMap); err != nil {
+	if err := f.optimizeLoadCommands(segMap, inCache); err != nil {
 		return fmt.Errorf("failed to optimize load commands: %v", err)
 	}
 
@@ -413,7 +413,21 @@ func (f *File) Save(outpath string) error {
 	return nil
 }
 
-func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
+// pointerAlignPad returns the number of zero bytes needed to align currentLen
+// up to the next multiple of ptrSize. Patched in by kxapp: upstream v1.1.162
+// shipped `pad := linkedit.Offset + (lebuf.Len() % ptrSize)` which writes
+// millions of zero bytes between every linkedit blob, inflating each
+// extracted Mach-O by 4-5x. See https://github.com/blacktop/go-macho commit
+// history for the upstream fix.
+func pointerAlignPad(currentLen int, ptrSize uint64) int {
+	rem := uint64(currentLen) % ptrSize
+	if rem == 0 {
+		return 0
+	}
+	return int(ptrSize - rem)
+}
+
+func (f *File) optimizeLoadCommands(segMap exportSegMap, inCache bool) error {
 	var depIndex uint64
 	for _, l := range f.Loads {
 		switch l.Command() {
@@ -431,11 +445,24 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap) error {
 			seg.Memsz = sz
 
 			for i := uint32(0); i < seg.Nsect; i++ {
-				if f.Sections[i+seg.Firstsect].Offset != 0 {
-					off, err := segMap.Remap(uint64(f.Sections[i+seg.Firstsect].Offset))
+				sect := f.Sections[i+seg.Firstsect]
+				if sect.Offset == 0 {
+					continue
+				}
+				// Patched in by kxapp: ipsw's dyld extractor leaves each
+				// section.offset pointing at the cache-relative location
+				// rather than the new per-segment file extent, so the
+				// segMap.Remap call below would fail (or, worse, succeed
+				// against an unrelated mapping). For in-cache dylibs the
+				// correct value is segment.fileoff + (section.addr −
+				// segment.vmaddr); fall back to the same formula when a
+				// non-in-cache remap fails (matches upstream's later fix).
+				if inCache {
+					f.Sections[i+seg.Firstsect].Offset = uint32(seg.Offset + (sect.Addr - seg.Addr))
+				} else {
+					off, err := segMap.Remap(uint64(sect.Offset))
 					if err != nil {
-						// return fmt.Errorf("failed to remap offset in section %s.%s: %v", seg.Name, f.Sections[i+seg.Firstsect].Name, err)
-						continue // FIXME: this is so that libcorecrypto.dylib will work as it has normal offsets for some reason
+						off = seg.Offset + (sect.Addr - seg.Addr)
 					}
 					f.Sections[i+seg.Firstsect].Offset = uint32(off)
 				}
@@ -768,9 +795,10 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		if _, err := lebuf.Write(dat); err != nil {
 			return nil, fmt.Errorf("failed to write LC_DYLD_EXPORTS_TRIE data: %v", err)
 		}
-		pad := linkedit.Offset + (uint64(lebuf.Len()) % f.pointerSize())
-		if _, err := lebuf.Write(make([]byte, pad)); err != nil {
-			return nil, fmt.Errorf("failed to write LC_DYLD_EXPORTS_TRIE padding: %v", err)
+		if pad := pointerAlignPad(lebuf.Len(), f.pointerSize()); pad > 0 {
+			if _, err := lebuf.Write(make([]byte, pad)); err != nil {
+				return nil, fmt.Errorf("failed to write LC_DYLD_EXPORTS_TRIE padding: %v", err)
+			}
 		}
 	}
 	// optimize LC_DATA_IN_CODE
@@ -783,9 +811,10 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		if _, err := lebuf.Write(dat); err != nil {
 			return nil, fmt.Errorf("failed to write LC_DATA_IN_CODE data: %v", err)
 		}
-		pad := linkedit.Offset + (uint64(lebuf.Len()) % f.pointerSize())
-		if _, err := lebuf.Write(make([]byte, pad)); err != nil {
-			return nil, fmt.Errorf("failed to write LC_DATA_IN_CODE padding: %v", err)
+		if pad := pointerAlignPad(lebuf.Len(), f.pointerSize()); pad > 0 {
+			if _, err := lebuf.Write(make([]byte, pad)); err != nil {
+				return nil, fmt.Errorf("failed to write LC_DATA_IN_CODE padding: %v", err)
+			}
 		}
 	}
 
@@ -803,9 +832,10 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		if _, err := lebuf.Write(dat); err != nil {
 			return nil, fmt.Errorf("failed to write LC_FUNCTION_STARTS data: %v", err)
 		}
-		pad := linkedit.Offset + (uint64(lebuf.Len()) % f.pointerSize())
-		if _, err := lebuf.Write(make([]byte, pad)); err != nil {
-			return nil, fmt.Errorf("failed to write LC_FUNCTION_STARTS padding: %v", err)
+		if pad := pointerAlignPad(lebuf.Len(), f.pointerSize()); pad > 0 {
+			if _, err := lebuf.Write(make([]byte, pad)); err != nil {
+				return nil, fmt.Errorf("failed to write LC_FUNCTION_STARTS padding: %v", err)
+			}
 		}
 	}
 
@@ -912,9 +942,10 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 				return nil, fmt.Errorf("failed to write %s export data: %v", dionly.LoadCmd, err)
 			}
 		}
-		pad := linkedit.Offset + (uint64(lebuf.Len()) % f.pointerSize())
-		if _, err := lebuf.Write(make([]byte, pad)); err != nil {
-			return nil, fmt.Errorf("failed to write LC_DYLD_INFO|LC_DYLD_INFO_ONLY padding: %v", err)
+		if pad := pointerAlignPad(lebuf.Len(), f.pointerSize()); pad > 0 {
+			if _, err := lebuf.Write(make([]byte, pad)); err != nil {
+				return nil, fmt.Errorf("failed to write LC_DYLD_INFO|LC_DYLD_INFO_ONLY padding: %v", err)
+			}
 		}
 	}
 
@@ -994,9 +1025,10 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		}
 	}
 
-	pad := linkedit.Offset + (uint64(lebuf.Len()) % f.pointerSize())
-	if _, err := lebuf.Write(make([]byte, pad)); err != nil {
-		return nil, fmt.Errorf("failed to write symtab padding: %v", err)
+	if pad := pointerAlignPad(lebuf.Len(), f.pointerSize()); pad > 0 {
+		if _, err := lebuf.Write(make([]byte, pad)); err != nil {
+			return nil, fmt.Errorf("failed to write symtab padding: %v", err)
+		}
 	}
 
 	newIndSymTabOffset := uint64(lebuf.Len())
@@ -1015,9 +1047,10 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		return nil, fmt.Errorf("failed to write indirect symbol table to NEW linkedit data: %v", err)
 	}
 
-	pad = linkedit.Offset + (uint64(lebuf.Len()) % f.pointerSize())
-	if _, err := lebuf.Write(make([]byte, pad)); err != nil {
-		return nil, fmt.Errorf("failed to write indirect symtab padding: %v", err)
+	if pad := pointerAlignPad(lebuf.Len(), f.pointerSize()); pad > 0 {
+		if _, err := lebuf.Write(make([]byte, pad)); err != nil {
+			return nil, fmt.Errorf("failed to write indirect symtab padding: %v", err)
+		}
 	}
 
 	newStringPoolOffset := uint64(lebuf.Len())
@@ -1050,7 +1083,7 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	linkedit.Filesz = pageAlign(uint64(f.Symtab.Stroff+f.Symtab.Strsize), 0x4000)
 	linkedit.Memsz = pageAlign(linkedit.Filesz, 0x8000)
 	if linkedit.Filesz > uint64(lebuf.Len()) {
-		pad = linkedit.Filesz - uint64(lebuf.Len())
+		pad := linkedit.Filesz - uint64(lebuf.Len())
 		if _, err := lebuf.Write(make([]byte, pad)); err != nil {
 			return nil, fmt.Errorf("failed to write linkedit segment padding: %v", err)
 		}
