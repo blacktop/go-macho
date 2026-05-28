@@ -1255,6 +1255,8 @@ func (f *File) parseProtocol(r io.ReadSeeker, typ *swift.Type) (prot *swift.Prot
 				}
 			case swift.GRKindLayout:
 				prot.SignatureRequirements[idx].Kind = swift.GenericRequirementLayoutKind(req.TypeOrProtocolOrConformanceOrLayoutOff.RelOff).String()
+			case swift.GRKindInvertedProtocols:
+				prot.SignatureRequirements[idx].Kind = swift.InvertibleProtocolSet(uint32(req.TypeOrProtocolOrConformanceOrLayoutOff.RelOff) >> 16).String()
 			default:
 				return nil, fmt.Errorf("unknown signature requirement kind: %v", req.Flags.Kind())
 			}
@@ -1508,6 +1510,8 @@ func (f *File) readProtocolConformance(r io.ReadSeeker, addr uint64) (pcd *swift
 			}
 		case swift.GRKindLayout:
 			pcd.ConditionalRequirements[idx].Kind = swift.GenericRequirementLayoutKind(req.TypeOrProtocolOrConformanceOrLayoutOff.RelOff).String()
+		case swift.GRKindInvertedProtocols:
+			pcd.ConditionalRequirements[idx].Kind = swift.InvertibleProtocolSet(uint32(req.TypeOrProtocolOrConformanceOrLayoutOff.RelOff) >> 16).String()
 		default:
 			return nil, fmt.Errorf("unknown conditional requirement kind: %v", req.Flags.Kind())
 		}
@@ -2389,6 +2393,8 @@ func (f *File) parseGenericContext(ctx *swift.TypeGenericContext) (err error) {
 				if err != nil {
 					return fmt.Errorf("failed to read protocol conformance descriptor: %v", err)
 				}
+			case swift.GRKindInvertedProtocols:
+				ctx.Requirements[idx].Kind = swift.InvertibleProtocolSet(uint32(req.TypeOrProtocolOrConformanceOrLayoutOff.RelOff) >> 16).String()
 			case swift.GRKindLayout:
 				ctx.Requirements[idx].Kind = swift.GenericRequirementLayoutKind(req.TypeOrProtocolOrConformanceOrLayoutOff.RelOff).String()
 			default:

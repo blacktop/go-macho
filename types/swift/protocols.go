@@ -208,9 +208,36 @@ const (
 	GRKindSameConformance GenericRequirementKind = 3 // same-conformance
 	// A same-shape requirement between generic parameter packs.
 	GRKSameShape GenericRequirementKind = 4 // same-shape
+	// A requirement that a generic parameter suppresses conformance to one or
+	// more invertible protocols (e.g. ~Copyable, ~Escapable). Added in Swift 6.
+	GRKindInvertedProtocols GenericRequirementKind = 5 // inverted-protocols
 	// A layout requirement.
 	GRKindLayout GenericRequirementKind = 0x1F // layout
 )
+
+// InvertibleProtocolSet is a bitset of the invertible protocols (Copyable,
+// Escapable) named by a GRKindInvertedProtocols generic requirement. The
+// requirement's payload word stores this set in its high 16 bits.
+type InvertibleProtocolSet uint16
+
+const (
+	InvertibleProtocolCopyable  InvertibleProtocolSet = 1 << 0 // Copyable
+	InvertibleProtocolEscapable InvertibleProtocolSet = 1 << 1 // Escapable
+)
+
+func (s InvertibleProtocolSet) String() string {
+	var parts []string
+	if s&InvertibleProtocolCopyable != 0 {
+		parts = append(parts, "~Copyable")
+	}
+	if s&InvertibleProtocolEscapable != 0 {
+		parts = append(parts, "~Escapable")
+	}
+	if len(parts) == 0 {
+		return fmt.Sprintf("InvertibleProtocolSet(0x%x)", uint16(s))
+	}
+	return strings.Join(parts, " & ")
+}
 
 type GenericRequirementFlags uint32
 
