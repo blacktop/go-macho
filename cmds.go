@@ -2607,11 +2607,30 @@ type SepUnknown3 struct {
 type Dylib struct {
 	LoadBytes
 	types.DylibCmd
-	Name string
+	Name  string
+	Flags types.DylibUseFlags // set when encoded as a dylib_use_command
+}
+
+// IsDylibUseCmd reports whether the command uses the alternate dylib_use_command
+// encoding (name offset 28 + marker in the timestamp field), mirroring dyld's
+// UnsafeHeader::loadCommandToDylibKind detection.
+func (d *Dylib) IsDylibUseCmd() bool {
+	return d.NameOffset == uint32(binary.Size(types.DylibUseCmd{})) && d.Timestamp == types.DYLIB_USE_MARKER
+}
+
+func (d *Dylib) setDylibUseFlags(b []byte, o binary.ByteOrder) {
+	if !d.IsDylibUseCmd() {
+		return
+	}
+	d.Flags = types.DylibUseFlags(o.Uint32(b[binary.Size(types.DylibCmd{}):]))
 }
 
 func (d *Dylib) LoadSize() uint32 {
-	return pointerAlign(uint32(binary.Size(d.DylibCmd)) + uint32(len(d.Name)) + 1)
+	headerSize := uint32(binary.Size(d.DylibCmd))
+	if d.IsDylibUseCmd() {
+		headerSize = uint32(binary.Size(types.DylibUseCmd{}))
+	}
+	return pointerAlign(headerSize + uint32(len(d.Name)) + 1)
 }
 func (d *Dylib) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
@@ -2620,17 +2639,30 @@ func (d *Dylib) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[3*4:], d.Timestamp)
 	o.PutUint32(b[4*4:], uint32(d.CurrentVersion))
 	o.PutUint32(b[5*4:], uint32(d.CompatVersion))
+	if d.IsDylibUseCmd() {
+		o.PutUint32(b[6*4:], uint32(d.Flags))
+		return 7 * binary.Size(uint32(0))
+	}
 	return 6 * binary.Size(uint32(0))
 }
 func (d *Dylib) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	start := buf.Len()
 	if err := binary.Write(buf, o, d.DylibCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", d.Command(), err)
+	}
+	if d.IsDylibUseCmd() {
+		if err := binary.Write(buf, o, d.Flags); err != nil {
+			return fmt.Errorf("failed to write %s flags to buffer: %v", d.Command(), err)
+		}
 	}
 	if _, err := buf.WriteString(d.Name + "\x00"); err != nil {
 		return fmt.Errorf("failed to write %s to %s buffer: %v", d.Name, d.Command(), err)
 	}
-	if (buf.Len() % 8) != 0 {
-		pad := 8 - (buf.Len() % 8)
+	written := buf.Len() - start
+	if int(d.Len) < written {
+		return fmt.Errorf("%s cmdsize %d is smaller than the %d bytes written; Len must be recalculated (e.g. via LoadSize) after changing Name", d.Command(), d.Len, written)
+	}
+	if pad := int(d.Len) - written; pad > 0 {
 		if _, err := buf.Write(make([]byte, pad)); err != nil {
 			return fmt.Errorf("failed to write %s padding: %v", d.Command(), err)
 		}
@@ -2638,16 +2670,20 @@ func (d *Dylib) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	return nil
 }
 func (d *Dylib) String() string {
+	if flags := d.Flags.List(); len(flags) > 0 {
+		return fmt.Sprintf("%s (%s) [%s]", d.Name, d.CurrentVersion, strings.Join(flags, " "))
+	}
 	return fmt.Sprintf("%s (%s)", d.Name, d.CurrentVersion)
 }
 func (d *Dylib) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		LoadCmd   string `json:"load_cmd"`
-		Len       uint32 `json:"length"`
-		Name      string `json:"name"`
-		Timestamp uint32 `json:"timestamp"`
-		Current   string `json:"current_version"`
-		Compat    string `json:"compatibility_version"`
+		LoadCmd   string   `json:"load_cmd"`
+		Len       uint32   `json:"length"`
+		Name      string   `json:"name"`
+		Timestamp uint32   `json:"timestamp"`
+		Current   string   `json:"current_version"`
+		Compat    string   `json:"compatibility_version"`
+		Flags     []string `json:"flags,omitempty"`
 	}{
 		LoadCmd:   d.Command().String(),
 		Len:       d.Len,
@@ -2655,6 +2691,7 @@ func (d *Dylib) MarshalJSON() ([]byte, error) {
 		Timestamp: d.Timestamp,
 		Current:   d.CurrentVersion.String(),
 		Compat:    d.CompatVersion.String(),
+		Flags:     d.Flags.List(),
 	})
 }
 

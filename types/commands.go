@@ -240,10 +240,31 @@ const (
 	DYLIB_USE_DELAYED_INIT DylibUseFlags = 0x08
 )
 
+func (f DylibUseFlags) List() []string {
+	var flags []string
+	if (f & DYLIB_USE_WEAK_LINK) != 0 {
+		flags = append(flags, "weak-link")
+	}
+	if (f & DYLIB_USE_REEXPORT) != 0 {
+		flags = append(flags, "re-export")
+	}
+	if (f & DYLIB_USE_UPWARD) != 0 {
+		flags = append(flags, "upward")
+	}
+	if (f & DYLIB_USE_DELAYED_INIT) != 0 {
+		flags = append(flags, "delay-init")
+	}
+	return flags
+}
+
+func (f DylibUseFlags) String() string {
+	return strings.Join(f.List(), "|")
+}
+
 const DYLIB_USE_MARKER = 0x1a741800
 
 /*
- * DylibUseCmd is an alternate encoding for: LC_LOAD_DYLIB.
+ * DylibUseCmd is an alternate encoding for dylib load commands.
  * The flags field contains independent flags DYLIB_USE_*
  * First supported in macOS 15, iOS 18.
  */

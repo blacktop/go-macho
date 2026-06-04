@@ -593,6 +593,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Timestamp = hdr.Timestamp
 			l.CurrentVersion = hdr.CurrentVersion
 			l.CompatVersion = hdr.CompatVersion
+			l.setDylibUseFlags(cmddat, bo)
 			f.Loads = append(f.Loads, l)
 		case types.LC_ID_DYLIB:
 			var hdr types.DylibCmd
@@ -790,6 +791,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Timestamp = hdr.Timestamp
 			l.CurrentVersion = hdr.CurrentVersion
 			l.CompatVersion = hdr.CompatVersion
+			l.setDylibUseFlags(cmddat, bo)
 			f.Loads = append(f.Loads, l)
 		case types.LC_ROUTINES_64:
 			var r64 types.Routines64Cmd
@@ -899,6 +901,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Timestamp = hdr.Timestamp
 			l.CurrentVersion = hdr.CurrentVersion
 			l.CompatVersion = hdr.CompatVersion
+			l.setDylibUseFlags(cmddat, bo)
 			f.Loads = append(f.Loads, l)
 		case types.LC_LAZY_LOAD_DYLIB:
 			var hdr types.LazyLoadDylibCmd
@@ -988,12 +991,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Len = siz
 			l.NameOffset = hdr.NameOffset
 			if hdr.NameOffset >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid name in load upwardl dylib command", hdr.NameOffset}
+				return nil, &FormatError{offset, "invalid name in load upward dylib command", hdr.NameOffset}
 			}
 			l.Name = cstring(cmddat[hdr.NameOffset:])
 			l.Timestamp = hdr.Timestamp
 			l.CurrentVersion = hdr.CurrentVersion
 			l.CompatVersion = hdr.CompatVersion
+			l.setDylibUseFlags(cmddat, bo)
 			f.Loads = append(f.Loads, l)
 		case types.LC_VERSION_MIN_MACOSX:
 			var verMin types.VersionMinMacOSCmd
