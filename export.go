@@ -726,6 +726,22 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap, inCache bool) error {
 				}
 				l.(*DataInCode).Offset = uint32(off)
 			}
+		case types.LC_FUNCTION_VARIANTS:
+			if !inCache {
+				off, err := segMap.Remap(uint64(l.(*FunctionVariants).Offset))
+				if err != nil {
+					return fmt.Errorf("failed to remap offset in %s: %v", l.Command(), err)
+				}
+				l.(*FunctionVariants).Offset = uint32(off)
+			}
+		case types.LC_FUNCTION_VARIANT_FIXUPS:
+			if !inCache {
+				off, err := segMap.Remap(uint64(l.(*FunctionVariantFixups).Offset))
+				if err != nil {
+					return fmt.Errorf("failed to remap offset in %s: %v", l.Command(), err)
+				}
+				l.(*FunctionVariantFixups).Offset = uint32(off)
+			}
 		case types.LC_DYLIB_CODE_SIGN_DRS:
 			off, err := segMap.Remap(uint64(l.(*DylibCodeSignDrs).Offset))
 			if err != nil {
@@ -919,6 +935,37 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 			if _, err := lebuf.Write(make([]byte, pad)); err != nil {
 				return nil, fmt.Errorf("failed to write LC_FUNCTION_STARTS padding: %v", err)
 			}
+		}
+	}
+
+	copyLinkEditData := func(l *LinkEditData) error {
+		dat := make([]byte, l.Size)
+		if _, err := f.cr.ReadAt(dat, int64(l.Offset)); err != nil {
+			return fmt.Errorf("failed to read %s data: %v", l.Command(), err)
+		}
+		l.Offset = uint32(linkedit.Offset) + uint32(lebuf.Len())
+		if _, err := lebuf.Write(dat); err != nil {
+			return fmt.Errorf("failed to write %s data: %v", l.Command(), err)
+		}
+		if pad := pointerAlignPad(lebuf.Len(), f.pointerSize()); pad > 0 {
+			if _, err := lebuf.Write(make([]byte, pad)); err != nil {
+				return fmt.Errorf("failed to write %s padding: %v", l.Command(), err)
+			}
+		}
+		return nil
+	}
+
+	// optimize LC_FUNCTION_VARIANTS
+	if fvars := f.FunctionVariants(); fvars != nil {
+		if err := copyLinkEditData(&fvars.LinkEditData); err != nil {
+			return nil, err
+		}
+	}
+
+	// optimize LC_FUNCTION_VARIANT_FIXUPS
+	if fvfix := f.FunctionVariantFixups(); fvfix != nil {
+		if err := copyLinkEditData(&fvfix.LinkEditData); err != nil {
+			return nil, err
 		}
 	}
 
