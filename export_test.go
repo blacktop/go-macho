@@ -287,3 +287,64 @@ func TestSegMapRemap(t *testing.T) {
 		}
 	})
 }
+
+func newFunctionVariantLoads(fvOff, ffOff uint32) (*FunctionVariants, *FunctionVariantFixups) {
+	fv := &FunctionVariants{
+		LinkEditData: LinkEditData{
+			LinkEditDataCmd: types.LinkEditDataCmd{LoadCmd: types.LC_FUNCTION_VARIANTS, Offset: fvOff, Size: 0x20},
+		},
+	}
+	ff := &FunctionVariantFixups{
+		LinkEditData: LinkEditData{
+			LinkEditDataCmd: types.LinkEditDataCmd{LoadCmd: types.LC_FUNCTION_VARIANT_FIXUPS, Offset: ffOff, Size: 0x8},
+		},
+	}
+	return fv, ff
+}
+
+func functionVariantSegMap() exportSegMap {
+	return exportSegMap{
+		{
+			Name:       "__LINKEDIT",
+			Old:        segInfo{Start: 0x30000, End: 0x40000},
+			New:        segInfo{Start: 0x5000, End: 0x15000},
+			OrigMemsz:  0x10000,
+			OrigFilesz: 0x10000,
+		},
+	}
+}
+
+// On the non-cache path the function-variants linkedit offsets shift with the
+// segment, so optimizeLoadCommands must remap them through segMap.
+func TestOptimizeLoadCommandsRemapsFunctionVariants(t *testing.T) {
+	fv, ff := newFunctionVariantLoads(0x31000, 0x31100)
+	f := &File{FileTOC: FileTOC{Loads: loads{fv, ff}}}
+
+	if err := f.optimizeLoadCommands(functionVariantSegMap(), false); err != nil {
+		t.Fatal(err)
+	}
+	// new = New.Start + (off - Old.Start)
+	if fv.Offset != 0x6000 {
+		t.Errorf("FunctionVariants.Offset = %#x, want 0x6000", fv.Offset)
+	}
+	if ff.Offset != 0x6100 {
+		t.Errorf("FunctionVariantFixups.Offset = %#x, want 0x6100", ff.Offset)
+	}
+}
+
+// On the in-cache path optimizeLinkedit rewrites the offsets after copying the
+// blobs into the rebuilt __LINKEDIT, so optimizeLoadCommands must leave them be.
+func TestOptimizeLoadCommandsLeavesFunctionVariantsInCache(t *testing.T) {
+	fv, ff := newFunctionVariantLoads(0x31000, 0x31100)
+	f := &File{FileTOC: FileTOC{Loads: loads{fv, ff}}}
+
+	if err := f.optimizeLoadCommands(functionVariantSegMap(), true); err != nil {
+		t.Fatal(err)
+	}
+	if fv.Offset != 0x31000 {
+		t.Errorf("FunctionVariants.Offset = %#x, want it unchanged (0x31000)", fv.Offset)
+	}
+	if ff.Offset != 0x31100 {
+		t.Errorf("FunctionVariantFixups.Offset = %#x, want it unchanged (0x31100)", ff.Offset)
+	}
+}
