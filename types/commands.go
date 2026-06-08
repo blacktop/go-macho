@@ -79,6 +79,7 @@ const (
 	LC_FUNCTION_VARIANTS        LoadCmd = 0x37                 /* used with linkedit_data_command */
 	LC_FUNCTION_VARIANT_FIXUPS  LoadCmd = 0x38                 /* used with linkedit_data_command */
 	LC_TARGET_TRIPLE            LoadCmd = 0x39                 /* target triple used to compile */
+	LC_LAZY_LOAD_DYLIB_INFO     LoadCmd = 0x3a                 /* used with linkedit_data_command */
 	/*
 	 * sep load commands
 	 */
@@ -882,8 +883,9 @@ type LinkEditDataCmd struct {
 	   LC_DYLIB_CODE_SIGN_DRS,
 	   LC_ATOM_INFO,
 	   LC_LINKER_OPTIMIZATION_HINT,
-	   LC_DYLD_EXPORTS_TRIE, or
-	   LC_DYLD_CHAINED_FIXUPS. */
+	   LC_DYLD_EXPORTS_TRIE,
+	   LC_DYLD_CHAINED_FIXUPS, or
+	   LC_LAZY_LOAD_DYLIB_INFO. */
 	Len    uint32 // sizeof(struct linkedit_data_command)
 	Offset uint32 // file offset of data in __LINKEDIT segment
 	Size   uint32 // file size of data in __LINKEDIT segment
@@ -909,6 +911,8 @@ type DyldChainedFixupsCmd LinkEditDataCmd // LC_DYLD_CHAINED_FIXUPS
 type FunctionVariantsCmd LinkEditDataCmd // LC_FUNCTION_VARIANTS
 // A FunctionVariantFixupsCmd is used with linkedit_data_command command.
 type FunctionVariantFixupsCmd LinkEditDataCmd // LC_FUNCTION_VARIANT_FIXUPS
+// A LazyLoadDylibInfoCmd is used with linkedit_data_command command.
+type LazyLoadDylibInfoCmd LinkEditDataCmd // LC_LAZY_LOAD_DYLIB_INFO
 
 /*
  * FunctionVariants payload structures

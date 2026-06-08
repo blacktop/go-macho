@@ -2600,6 +2600,17 @@ type SepUnknown3 struct {
 }
 
 /*******************************************************************************
+ * LC_LAZY_LOAD_DYLIB_INFO
+ *******************************************************************************/
+
+// LazyLoadDylibInfo is a Mach-O LC_LAZY_LOAD_DYLIB_INFO load command (0x3a / 58).
+// It is a linkedit_data_command pointing at a blob in the __LINKEDIT segment;
+// the payload format is not yet decoded, so only the offset and size are exposed.
+type LazyLoadDylibInfo struct {
+	LinkEditData
+}
+
+/*******************************************************************************
  * COMMON COMMANDS
  *******************************************************************************/
 

@@ -742,6 +742,14 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap, inCache bool) error {
 				}
 				l.(*FunctionVariantFixups).Offset = uint32(off)
 			}
+		case types.LC_LAZY_LOAD_DYLIB_INFO:
+			if !inCache {
+				off, err := segMap.Remap(uint64(l.(*LazyLoadDylibInfo).Offset))
+				if err != nil {
+					return fmt.Errorf("failed to remap offset in %s: %v", l.Command(), err)
+				}
+				l.(*LazyLoadDylibInfo).Offset = uint32(off)
+			}
 		case types.LC_DYLIB_CODE_SIGN_DRS:
 			off, err := segMap.Remap(uint64(l.(*DylibCodeSignDrs).Offset))
 			if err != nil {

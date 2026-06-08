@@ -1335,6 +1335,19 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			}
 			l.Target = cstring(cmddat[hdr.TargetOffset:])
 			f.Loads = append(f.Loads, l)
+		case types.LC_LAZY_LOAD_DYLIB_INFO:
+			var led types.LinkEditDataCmd
+			b := bytes.NewReader(cmddat)
+			if err := binary.Read(b, bo, &led); err != nil {
+				return nil, fmt.Errorf("failed to read LC_LAZY_LOAD_DYLIB_INFO: %v", err)
+			}
+			l := new(LazyLoadDylibInfo)
+			l.LoadBytes = cmddat
+			l.LoadCmd = cmd
+			l.Len = siz
+			l.Offset = led.Offset
+			l.Size = led.Size
+			f.Loads = append(f.Loads, l)
 		case types.LC_SEP_CACHE_SLIDE:
 			var led types.LinkEditDataCmd
 			b := bytes.NewReader(cmddat)
