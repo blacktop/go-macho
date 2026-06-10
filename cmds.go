@@ -12,6 +12,7 @@ import (
 
 	"github.com/blacktop/go-macho/internal/saferio"
 	"github.com/blacktop/go-macho/pkg/codesign"
+	"github.com/blacktop/go-macho/pkg/fixupchains"
 	"github.com/blacktop/go-macho/types"
 )
 
@@ -2604,10 +2605,106 @@ type SepUnknown3 struct {
  *******************************************************************************/
 
 // LazyLoadDylibInfo is a Mach-O LC_LAZY_LOAD_DYLIB_INFO load command (0x3a / 58).
-// It is a linkedit_data_command pointing at a blob in the __LINKEDIT segment;
-// the payload format is not yet decoded, so only the offset and size are exposed.
+// It is a linkedit_data_command pointing at a blob in the __LINKEDIT segment.
+// Data holds the decoded payload once File.GetLazyLoadedDylibs (or Enrich) is called.
 type LazyLoadDylibInfo struct {
 	LinkEditData
+	Data *LazyLoadedDylib
+}
+
+func (l *LazyLoadDylibInfo) String() string {
+	if l.Data == nil {
+		return fmt.Sprintf("offset=0x%09x size=0x%x", l.Offset, l.Size)
+	}
+	var out strings.Builder
+	fmt.Fprintf(&out, "offset=0x%09x size=0x%x %s", l.Offset, l.Size, l.Data.LoadPath)
+	if l.Data.Weak {
+		out.WriteString(" (weak)")
+	}
+	fmt.Fprintf(&out, " (%s)", l.Data.PointerFormat)
+	for _, sym := range l.Data.Symbols {
+		fmt.Fprintf(&out, "\n\t\t%s", sym)
+	}
+	return out.String()
+}
+func (l *LazyLoadDylibInfo) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		LoadCmd string           `json:"load_cmd"`
+		Len     uint32           `json:"length"`
+		Offset  uint32           `json:"offset"`
+		Size    uint32           `json:"size"`
+		Data    *LazyLoadedDylib `json:"data,omitempty"`
+	}{
+		LoadCmd: l.Command().String(),
+		Len:     l.Len,
+		Offset:  l.Offset,
+		Size:    l.Size,
+		Data:    l.Data,
+	})
+}
+
+// LazyLoadedDylib is the decoded LC_LAZY_LOAD_DYLIB_INFO payload, mirroring
+// dyld's LazyLoadDylibLinkEdit structure.
+type LazyLoadedDylib struct {
+	LoadPath      string                `json:"load_path"`         // dylib path to lazily load
+	Weak          bool                  `json:"weak"`              // may be missing at runtime (flag bit 0)
+	PointerFormat fixupchains.DCPtrKind `json:"pointer_format"`    // DYLD_CHAINED_PTR_* format of the fixup chain
+	Symbols       []string              `json:"symbols,omitempty"` // bound symbol names
+}
+
+const (
+	lazyLoadDylibHeaderSize = 24
+	lazyLoadDylibFlagWeak   = 0x0001 // flags bit 0: weak-linked ("may be missing")
+)
+
+// ParseLazyLoadDylibInfo decodes an LC_LAZY_LOAD_DYLIB_INFO __LINKEDIT payload.
+// All offsets are validated against the blob length so that malformed or
+// truncated input returns an error rather than panicking.
+func ParseLazyLoadDylibInfo(data []byte, bo binary.ByteOrder) (*LazyLoadedDylib, error) {
+	if len(data) < lazyLoadDylibHeaderSize {
+		return nil, fmt.Errorf("lazy load dylib info payload too small: %d bytes (need >= %d)", len(data), lazyLoadDylibHeaderSize)
+	}
+
+	blobLen := uint32(len(data))
+
+	// Header layout: loadPathOffset@0, flagImageOffset@4, flags@8, pointerFormat@10,
+	// chainStartImageOffset@12, symbolsCount@16, symbolStringArrayOffset@20. The two
+	// image offsets are runtime-only and not needed for static parsing.
+	loadPathOffset := bo.Uint32(data[0:4])
+	flags := bo.Uint16(data[8:10])
+	pointerFormat := bo.Uint16(data[10:12])
+	symbolsCount := bo.Uint32(data[16:20])
+	symbolStringArrayOffset := bo.Uint32(data[20:24])
+
+	if loadPathOffset >= blobLen {
+		return nil, fmt.Errorf("lazy load dylib info loadPathOffset 0x%x exceeds payload size 0x%x", loadPathOffset, blobLen)
+	}
+
+	// symbol offset array must fit: symbolStringArrayOffset + 4*symbolsCount <= len
+	arrayEnd := uint64(symbolStringArrayOffset) + 4*uint64(symbolsCount)
+	if arrayEnd > uint64(blobLen) {
+		return nil, fmt.Errorf("lazy load dylib info symbol offset array end 0x%x exceeds payload size 0x%x", arrayEnd, blobLen)
+	}
+
+	lld := &LazyLoadedDylib{
+		LoadPath:      cstring(data[loadPathOffset:]),
+		Weak:          flags&lazyLoadDylibFlagWeak != 0,
+		PointerFormat: fixupchains.DCPtrKind(pointerFormat),
+	}
+
+	if symbolsCount > 0 {
+		lld.Symbols = make([]string, symbolsCount)
+		for i := uint32(0); i < symbolsCount; i++ {
+			off := symbolStringArrayOffset + i*4
+			strOff := bo.Uint32(data[off : off+4])
+			if strOff >= blobLen {
+				return nil, fmt.Errorf("lazy load dylib info symbol %d string offset 0x%x exceeds payload size 0x%x", i, strOff, blobLen)
+			}
+			lld.Symbols[i] = cstring(data[strOff:])
+		}
+	}
+
+	return lld, nil
 }
 
 /*******************************************************************************

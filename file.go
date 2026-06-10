@@ -2441,6 +2441,63 @@ func (f *File) GetFunctionVariantFixups() (*types.FuncVarFixupsData, error) {
 	return parsed, nil
 }
 
+// LazyLoadDylibInfos returns all LC_LAZY_LOAD_DYLIB_INFO load commands.
+// A single binary may carry many of these, so this returns a slice (nil if none).
+func (f *File) LazyLoadDylibInfos() []*LazyLoadDylibInfo {
+	var lazies []*LazyLoadDylibInfo
+	for _, l := range f.Loads {
+		if ll, ok := l.(*LazyLoadDylibInfo); ok {
+			lazies = append(lazies, ll)
+		}
+	}
+	return lazies
+}
+
+// GetLazyLoadedDylibs decodes the payloads of all LC_LAZY_LOAD_DYLIB_INFO load
+// commands, caching the result on each command's Data field. It returns the
+// successfully decoded payloads in load-command order; a malformed payload is
+// skipped and its error joined into the returned error so valid siblings still
+// decode. It returns (nil, nil) when the binary has no such commands.
+func (f *File) GetLazyLoadedDylibs() ([]*LazyLoadedDylib, error) {
+	infos := f.LazyLoadDylibInfos()
+	if len(infos) == 0 {
+		return nil, nil
+	}
+
+	dylibs := make([]*LazyLoadedDylib, 0, len(infos))
+	var errs []error
+	for _, ll := range infos {
+		// Return cached data if already parsed
+		if ll.Data != nil {
+			dylibs = append(dylibs, ll.Data)
+			continue
+		}
+
+		// Read the payload data
+		data, err := saferio.ReadDataAt(f.cr, uint64(ll.Size), int64(ll.Offset))
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to read lazy load dylib info data at offset %#x: %v", ll.Offset, err))
+			continue
+		}
+
+		// Parse the data
+		parsed, err := ParseLazyLoadDylibInfo(data, f.ByteOrder)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+
+		// Cache the parsed data
+		ll.Data = parsed
+		dylibs = append(dylibs, parsed)
+	}
+
+	if len(errs) > 0 {
+		return dylibs, errors.Join(errs...)
+	}
+	return dylibs, nil
+}
+
 // Enrich pre-parses optional data to add detail to load command stringers/JSON.
 // It is best-effort; any encountered errors are returned as a joined error.
 func (f *File) Enrich() error {
@@ -2462,6 +2519,10 @@ func (f *File) Enrich() error {
 		if _, err := f.GetFunctionVariantFixups(); err != nil {
 			errs = append(errs, err)
 		}
+	}
+
+	if _, err := f.GetLazyLoadedDylibs(); err != nil {
+		errs = append(errs, err)
 	}
 
 	if len(errs) == 0 {
