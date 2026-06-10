@@ -2487,6 +2487,12 @@ func (f *File) GetLazyLoadedDylibs() ([]*LazyLoadedDylib, error) {
 			continue
 		}
 
+		// Walk the fixup chain to map each bound slot to its symbol. This is
+		// best-effort: the path/symbols stay valid even if the chain walk fails.
+		if err := f.walkLazyLoadChain(parsed); err != nil {
+			errs = append(errs, err)
+		}
+
 		// Cache the parsed data
 		ll.Data = parsed
 		dylibs = append(dylibs, parsed)
@@ -2496,6 +2502,101 @@ func (f *File) GetLazyLoadedDylibs() ([]*LazyLoadedDylib, error) {
 		return dylibs, errors.Join(errs...)
 	}
 	return dylibs, nil
+}
+
+// walkLazyLoadChain follows the chained-pointer fixup chain at
+// lld.ChainStartImageOffset, appending each bound slot to lld.Fixups and
+// resolving its ordinal to lld.Symbols. The chain lives in the image (not the
+// __LINKEDIT blob) and is encoded per lld.PointerFormat.
+func (f *File) walkLazyLoadChain(lld *LazyLoadedDylib) error {
+	if lld.ChainStartImageOffset == 0 {
+		return nil
+	}
+	step, ok := fixupchains.Stride(lld.PointerFormat)
+	if !ok {
+		return fmt.Errorf("lazy load dylib %q: unsupported pointer format %s", lld.LoadPath, lld.PointerFormat)
+	}
+
+	base := f.GetBaseAddress()
+	imgOff := uint64(lld.ChainStartImageOffset)
+	buf := make([]byte, 8)
+	const maxChain = 1 << 20 // guard against a malformed/cyclic chain
+	for i := 0; i < maxChain; i++ {
+		vmaddr := base + imgOff
+		fileOff, err := f.GetOffset(vmaddr)
+		if err != nil {
+			return fmt.Errorf("lazy load dylib %q: map chain offset %#x: %v", lld.LoadPath, imgOff, err)
+		}
+		if _, err := f.cr.ReadAt(buf, int64(fileOff)); err != nil {
+			return fmt.Errorf("lazy load dylib %q: read chain at %#x: %v", lld.LoadPath, fileOff, err)
+		}
+		raw := f.ByteOrder.Uint64(buf)
+
+		fixup, next, err := decodeLazyLoadFixup(lld.PointerFormat, raw, vmaddr, fileOff, lld.Symbols)
+		if err != nil {
+			return fmt.Errorf("lazy load dylib %q: %v", lld.LoadPath, err)
+		}
+		if fixup != nil {
+			lld.Fixups = append(lld.Fixups, *fixup)
+		}
+		if next == 0 {
+			return nil
+		}
+		imgOff += next * step
+	}
+	return fmt.Errorf("lazy load dylib %q: fixup chain exceeded %d entries (malformed?)", lld.LoadPath, maxChain)
+}
+
+// decodeLazyLoadFixup decodes a single chained-pointer slot. It returns the
+// decoded bind (nil for a rebase slot, which carries no symbol), the chain's
+// raw next delta, and an error for unsupported formats.
+func decodeLazyLoadFixup(format fixupchains.DCPtrKind, raw, vmaddr, fileOff uint64, symbols []string) (*LazyLoadFixup, uint64, error) {
+	resolve := func(ordinal uint64) string {
+		if ordinal < uint64(len(symbols)) {
+			return symbols[ordinal]
+		}
+		return ""
+	}
+
+	switch format {
+	case fixupchains.DYLD_CHAINED_PTR_ARM64E,
+		fixupchains.DYLD_CHAINED_PTR_ARM64E_USERLAND,
+		fixupchains.DYLD_CHAINED_PTR_ARM64E_KERNEL,
+		fixupchains.DYLD_CHAINED_PTR_ARM64E_FIRMWARE,
+		fixupchains.DYLD_CHAINED_PTR_ARM64E_USERLAND24:
+		next := fixupchains.DcpArm64eNext(raw)
+		if !fixupchains.DcpArm64eIsBind(raw) {
+			return nil, next, nil // rebase slot, not a symbol bind
+		}
+		is24 := format == fixupchains.DYLD_CHAINED_PTR_ARM64E_USERLAND24
+		fixup := &LazyLoadFixup{Address: vmaddr, Offset: fileOff}
+		switch {
+		case fixupchains.DcpArm64eIsAuth(raw) && is24:
+			b := fixupchains.DyldChainedPtrArm64eAuthBind24{Pointer: raw}
+			fixup.Ordinal = uint32(b.Ordinal())
+			fixup.Auth, fixup.Key, fixup.AddrDiv, fixup.Diversity = true, uint8(b.Key()), b.AddrDiv() != 0, uint16(b.Diversity())
+		case fixupchains.DcpArm64eIsAuth(raw):
+			b := fixupchains.DyldChainedPtrArm64eAuthBind{Pointer: raw}
+			fixup.Ordinal = uint32(b.Ordinal())
+			fixup.Auth, fixup.Key, fixup.AddrDiv, fixup.Diversity = true, uint8(b.Key()), b.AddrDiv() != 0, uint16(b.Diversity())
+		case is24:
+			fixup.Ordinal = uint32(fixupchains.DyldChainedPtrArm64eBind24{Pointer: raw}.Ordinal())
+		default:
+			fixup.Ordinal = uint32(fixupchains.DyldChainedPtrArm64eBind{Pointer: raw}.Ordinal())
+		}
+		fixup.Symbol = resolve(uint64(fixup.Ordinal))
+		return fixup, next, nil
+	case fixupchains.DYLD_CHAINED_PTR_64,
+		fixupchains.DYLD_CHAINED_PTR_64_OFFSET:
+		next := fixupchains.Generic64Next(raw)
+		if !fixupchains.Generic64IsBind(raw) {
+			return nil, next, nil
+		}
+		b := fixupchains.DyldChainedPtr64Bind{Pointer: raw}
+		return &LazyLoadFixup{Address: vmaddr, Offset: fileOff, Ordinal: uint32(b.Ordinal()), Symbol: resolve(b.Ordinal())}, next, nil
+	default:
+		return nil, 0, fmt.Errorf("unsupported pointer format %s for lazy load fixup chain", format)
+	}
 }
 
 // Enrich pre-parses optional data to add detail to load command stringers/JSON.

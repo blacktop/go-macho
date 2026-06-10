@@ -212,6 +212,12 @@ func PointerSize(pointerFormat DCPtrKind) int {
 	return pointerSize(pointerFormat)
 }
 
+// Stride returns the chain step (in bytes) that the pointer format's "next"
+// field is multiplied by, and whether the format is recognized.
+func Stride(pointerFormat DCPtrKind) (uint64, bool) {
+	return stride(pointerFormat)
+}
+
 // DyldChainedStartsInSegment object is embedded in dyld_chain_starts_in_image
 // and passed down to the kernel for page-in linking
 type DyldChainedStartsInSegment struct {

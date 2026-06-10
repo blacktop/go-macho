@@ -2622,8 +2622,18 @@ func (l *LazyLoadDylibInfo) String() string {
 		out.WriteString(" (weak)")
 	}
 	fmt.Fprintf(&out, " (%s)", l.Data.PointerFormat)
-	for _, sym := range l.Data.Symbols {
-		fmt.Fprintf(&out, "\n\t\t%s", sym)
+	if len(l.Data.Fixups) > 0 {
+		for _, fx := range l.Data.Fixups {
+			fmt.Fprintf(&out, "\n\t\t%#011x", fx.Address)
+			if fx.Auth {
+				fmt.Fprintf(&out, " (auth: key=%s addrDiv=%t div=%#x)", fixupchains.KeyName(uint64(fx.Key)), fx.AddrDiv, fx.Diversity)
+			}
+			fmt.Fprintf(&out, "  %s", fx.Symbol)
+		}
+	} else {
+		for _, sym := range l.Data.Symbols {
+			fmt.Fprintf(&out, "\n\t\t%s", sym)
+		}
 	}
 	return out.String()
 }
@@ -2646,10 +2656,25 @@ func (l *LazyLoadDylibInfo) MarshalJSON() ([]byte, error) {
 // LazyLoadedDylib is the decoded LC_LAZY_LOAD_DYLIB_INFO payload, mirroring
 // dyld's LazyLoadDylibLinkEdit structure.
 type LazyLoadedDylib struct {
-	LoadPath      string                `json:"load_path"`         // dylib path to lazily load
-	Weak          bool                  `json:"weak"`              // may be missing at runtime (flag bit 0)
-	PointerFormat fixupchains.DCPtrKind `json:"pointer_format"`    // DYLD_CHAINED_PTR_* format of the fixup chain
-	Symbols       []string              `json:"symbols,omitempty"` // bound symbol names
+	LoadPath              string                `json:"load_path"`                // dylib path to lazily load
+	Weak                  bool                  `json:"weak"`                     // may be missing at runtime (flag bit 0)
+	PointerFormat         fixupchains.DCPtrKind `json:"pointer_format"`           // DYLD_CHAINED_PTR_* format of the fixup chain
+	Symbols               []string              `json:"symbols,omitempty"`        // bound symbol names
+	Fixups                []LazyLoadFixup       `json:"fixups,omitempty"`         // GOT slots bound by the fixup chain (populated by File.GetLazyLoadedDylibs)
+	ChainStartImageOffset uint32                `json:"chain_start_image_offset"` // image offset of the fixup chain start
+}
+
+// LazyLoadFixup is one entry of an LC_LAZY_LOAD_DYLIB_INFO fixup chain: a slot
+// that is bound to a lazily-loaded symbol when the dylib is loaded.
+type LazyLoadFixup struct {
+	Address   uint64 `json:"address"`             // VM address of the bound slot
+	Offset    uint64 `json:"offset"`              // file offset of the bound slot
+	Ordinal   uint32 `json:"ordinal"`             // index into Symbols
+	Symbol    string `json:"symbol,omitempty"`    // Symbols[Ordinal], when resolvable
+	Auth      bool   `json:"auth"`                // PAC-signed slot
+	Key       uint8  `json:"key,omitempty"`       // PAC key (0=IA 1=IB 2=DA 3=DB) when Auth
+	AddrDiv   bool   `json:"addr_div,omitempty"`  // PAC address diversity when Auth
+	Diversity uint16 `json:"diversity,omitempty"` // PAC diversity constant when Auth
 }
 
 const (
@@ -2668,11 +2693,12 @@ func ParseLazyLoadDylibInfo(data []byte, bo binary.ByteOrder) (*LazyLoadedDylib,
 	blobLen := uint32(len(data))
 
 	// Header layout: loadPathOffset@0, flagImageOffset@4, flags@8, pointerFormat@10,
-	// chainStartImageOffset@12, symbolsCount@16, symbolStringArrayOffset@20. The two
-	// image offsets are runtime-only and not needed for static parsing.
+	// chainStartImageOffset@12, symbolsCount@16, symbolStringArrayOffset@20.
+	// flagImageOffset (the runtime "loaded" flag global) is not used here.
 	loadPathOffset := bo.Uint32(data[0:4])
 	flags := bo.Uint16(data[8:10])
 	pointerFormat := bo.Uint16(data[10:12])
+	chainStartImageOffset := bo.Uint32(data[12:16])
 	symbolsCount := bo.Uint32(data[16:20])
 	symbolStringArrayOffset := bo.Uint32(data[20:24])
 
@@ -2687,9 +2713,10 @@ func ParseLazyLoadDylibInfo(data []byte, bo binary.ByteOrder) (*LazyLoadedDylib,
 	}
 
 	lld := &LazyLoadedDylib{
-		LoadPath:      cstring(data[loadPathOffset:]),
-		Weak:          flags&lazyLoadDylibFlagWeak != 0,
-		PointerFormat: fixupchains.DCPtrKind(pointerFormat),
+		LoadPath:              cstring(data[loadPathOffset:]),
+		Weak:                  flags&lazyLoadDylibFlagWeak != 0,
+		PointerFormat:         fixupchains.DCPtrKind(pointerFormat),
+		ChainStartImageOffset: chainStartImageOffset,
 	}
 
 	if symbolsCount > 0 {
