@@ -752,44 +752,58 @@ func CutType(typStr string) (string, string, bool) {
 				i++ /* Blocks */
 			} else if i+1 < len(typ) && typ[i+1] == '"' {
 				i++
-				for typ[i+1] != '"' {
+				for i+1 < len(typ) && typ[i+1] != '"' {
 					i++ /* Class */
 				}
 				i++
 			}
-			return string(typ[:i+1]), string(typ[i+1:]), true
+			return cutAt(typ, i+1)
 		case 'b': /* bitfields */
 			i++
 			for i < len(typ) && typ[i] >= '0' && typ[i] <= '9' {
 				i++
 			}
-			return string(typ[:i]), string(typ[i:]), true
+			return cutAt(typ, i)
 		case '!': /* vectors */
 			i += 2
-			for typ[i] == ',' || typ[i] >= '0' && typ[i] <= '9' {
+			if i > len(typ) {
+				i = len(typ)
+			}
+			for i < len(typ) && (typ[i] == ',' || typ[i] >= '0' && typ[i] <= '9') {
 				i++
 			}
-			return string(typ[:i+subtypeUntil(string(typ[i:]), ']')+1]), string(typ[i+subtypeUntil(string(typ[i:]), ']')+1:]), true
+			return cutAt(typ, i+subtypeUntil(string(typ[i:]), ']')+1)
 		case '[': /* arrays */
 			i++
-			for typ[i] >= '0' && typ[i] <= '9' {
+			for i < len(typ) && typ[i] >= '0' && typ[i] <= '9' {
 				i++
 			}
-			return string(typ[:i+subtypeUntil(string(typ[i:]), ']')+1]), string(typ[i+subtypeUntil(string(typ[i:]), ']')+1:]), true
+			return cutAt(typ, i+subtypeUntil(string(typ[i:]), ']')+1)
 		case '{': /* structures */
 			i++
-			return string(typ[:i+subtypeUntil(string(typ[i:]), '}')+1]), string(typ[i+subtypeUntil(string(typ[i:]), '}')+1:]), true
+			return cutAt(typ, i+subtypeUntil(string(typ[i:]), '}')+1)
 		case '(': /* unions */
 			i++
-			return string(typ[:i+subtypeUntil(string(typ[i:]), ')')+1]), string(typ[i+subtypeUntil(string(typ[i:]), ')')+1:]), true
+			return cutAt(typ, i+subtypeUntil(string(typ[i:]), ')')+1)
 		case '<': /* block func prototype */
 			i++
-			return string(typ[:i+subtypeUntil(string(typ[i:]), '>')+1]), string(typ[i+subtypeUntil(string(typ[i:]), '>')+1:]), true
+			return cutAt(typ, i+subtypeUntil(string(typ[i:]), '>')+1)
 		default: /* basic types */
 			i++
-			return string(typ[:i]), string(typ[i:]), true
+			return cutAt(typ, i)
 		}
 	}
+}
+
+// cutAt splits typ into the head token typ[:end] and the remainder typ[end:],
+// clamping end to len(typ) so a malformed or truncated type encoding (e.g. an
+// unterminated "{", "(", "<", or "@\"" with no closing delimiter) can never
+// drive an out-of-range slice. It always reports ok=true.
+func cutAt(typ []byte, end int) (string, string, bool) {
+	if end > len(typ) {
+		end = len(typ)
+	}
+	return string(typ[:end]), string(typ[end:]), true
 }
 
 func getNumberOfArguments(types string) int {

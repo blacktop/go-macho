@@ -181,3 +181,92 @@ func Test_decodeType(t *testing.T) {
 		})
 	}
 }
+
+// TestCutType_Truncated verifies CutType does not panic on malformed or
+// truncated type encodings (e.g. garbage read from a method's typesOffset).
+// Previously these inputs caused "index out of range" panics.
+func TestCutType_Truncated(t *testing.T) {
+	cases := []string{
+		"",            // empty
+		"!",           // vector marker only
+		"!,",          // vector, no dimensions/subtype
+		"![16,8",      // vector, unterminated
+		"[",           // array marker only
+		"[12",         // array, digits but no subtype/close
+		"[12^v",       // array, unterminated
+		"@\"",         // object class name, no closing quote
+		"@\"NSString", // object class name, unterminated
+		"{",           // struct marker only
+		"{Foo=",       // struct, unterminated
+		"(",           // union marker only
+		"<",           // block prototype marker only
+		"b",           // bitfield marker only
+		"^",           // pointer marker only
+		// Prefix specifier(s) followed by an unterminated aggregate at the end
+		// of the string: the prefix advances the cursor so the aggregate's close
+		// delimiter is missing AND the computed slice end runs one past the
+		// buffer. These cases panicked until every bracket case was clamped.
+		"^{",   // pointer + unterminated struct
+		"r(",   // const + unterminated union
+		"n<",   // in + unterminated block prototype
+		"^^(",  // pointer + pointer + unterminated union
+		"NO<",  // inout + bycopy + unterminated block prototype
+		"r[",   // const + unterminated array
+		"^!",   // pointer + unterminated vector
+		"A@\"", // _Atomic + unterminated class name
+	}
+	for _, in := range cases {
+		t.Run(in, func(t *testing.T) {
+			// Must not panic; just exercise the parser.
+			head, rest, ok := CutType(in)
+			_ = head
+			_ = rest
+			_ = ok
+		})
+	}
+}
+
+// TestArgumentTypeIndexing locks in the index contract that callers rely on:
+// ArgumentType indexes the full method type encoding, so index 0 is the return
+// type, 1 is self, 2 is _cmd/SEL, and the real arguments run from index 3
+// through NumberOfArguments() inclusive (one past that is out of range).
+func TestArgumentTypeIndexing(t *testing.T) {
+	// void method with two object arguments.
+	m := &Method{Types: "v32@0:8@16@24"}
+	if got := m.NumberOfArguments(); got != 4 {
+		t.Fatalf("NumberOfArguments() = %d, want 4", got)
+	}
+	want := map[int]string{0: "void", 1: "id", 2: "SEL", 3: "id", 4: "id"}
+	for idx, exp := range want {
+		if got := m.ArgumentType(idx); got != exp {
+			t.Errorf("ArgumentType(%d) = %q, want %q", idx, got, exp)
+		}
+	}
+	// The last real argument (index == NumberOfArguments()) must be reachable;
+	// regression guard for the off-by-one that dropped it.
+	if got := m.ArgumentType(m.NumberOfArguments()); got != "id" {
+		t.Errorf("ArgumentType(NumberOfArguments()) = %q, want %q", got, "id")
+	}
+	// Out-of-range indices return the sentinel rather than panicking.
+	if got := m.ArgumentType(5); got != "<error>" {
+		t.Errorf("ArgumentType(5) = %q, want %q", got, "<error>")
+	}
+	if got := m.ArgumentType(-1); got != "<error>" {
+		t.Errorf("ArgumentType(-1) = %q, want %q", got, "<error>")
+	}
+}
+
+// TestArgumentTypeMalformedNoPanic verifies the parser-disagreement boundary:
+// for "v16@0:8^^" getNumberOfArguments counts the trailing "^^" as an argument
+// (NumberOfArguments()==3) but the argument decoder drops that dangling prefix
+// (getArguments yields only 3 entries: return type, self, _cmd). Indexing
+// ArgumentType at NumberOfArguments() therefore lands one past the decoded args
+// and must return the "<error>" sentinel instead of panicking — the boundary
+// fillImportsForMethod stops at.
+func TestArgumentTypeMalformedNoPanic(t *testing.T) {
+	m := &Method{Types: "v16@0:8^^"} // trailing pointer-prefix with no pointee
+	n := m.NumberOfArguments()
+	if got := m.ArgumentType(n); got != "<error>" {
+		t.Errorf("ArgumentType(%d) = %q, want %q", n, got, "<error>")
+	}
+}

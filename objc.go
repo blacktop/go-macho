@@ -1332,7 +1332,10 @@ func (f *File) forEachObjCMethod(methodListVMAddr uint64, handler func(uint64, o
 
 			if methodList.UsesDirectOffsetsToSelectors() {
 				if f.sharedCacheRelativeSelectorBaseVMAddress != 0 {
-					method.NameVMAddr = uint64(int64(f.sharedCacheRelativeSelectorBaseVMAddress) + int64(m.NameOffset))
+					// nameOffset is an unsigned offset into the shared cache's
+					// selector strings buffer (dyld reads it as uint32), matching
+					// the relative method types buffer handling below.
+					method.NameVMAddr = f.sharedCacheRelativeSelectorBaseVMAddress + uint64(uint32(m.NameOffset))
 				} else {
 					method.NameVMAddr = uint64(methodVMAddr + int64(m.NameOffset))
 				}
@@ -1352,7 +1355,14 @@ func (f *File) forEachObjCMethod(methodListVMAddr uint64, handler func(uint64, o
 			// This matches Apple's objc4 RelativePointer implementation: actual_address = &offset_field + offset
 			typesFieldAddr := methodVMAddr + int64(unsafe.Offsetof(m.TypesOffset))
 			impFieldAddr := methodVMAddr + int64(unsafe.Offsetof(m.ImpOffset))
-			method.TypesVMAddr = uint64(typesFieldAddr + int64(m.TypesOffset))
+			if methodList.UsesDirectOffsetsToTypes() && f.sharedCacheRelativeSelectorBaseVMAddress != 0 {
+				// iOS 27+: typesOffset is an unsigned offset into the shared cache's
+				// relative method types buffer (which follows the selector strings
+				// buffer), measured from the same selector base address.
+				method.TypesVMAddr = f.sharedCacheRelativeSelectorBaseVMAddress + uint64(uint32(m.TypesOffset))
+			} else {
+				method.TypesVMAddr = uint64(typesFieldAddr + int64(m.TypesOffset))
+			}
 			method.ImpVMAddr = uint64(impFieldAddr + int64(m.ImpOffset))
 
 			method.Name, err = f.getCStringWithFallback(method.NameVMAddr, "selector", false)
