@@ -33,21 +33,27 @@ func _() {
 	_ = x[Platform_watchOsExclaveKit-22]
 	_ = x[Platform_visionOsExclaveCore-23]
 	_ = x[Platform_visionOsExclaveKit-24]
+	_ = x[Platform_macOSKernelKit-25]
+	_ = x[Platform_iOSKernelKit-26]
+	_ = x[Platform_tvOsKernelKit-27]
+	_ = x[Platform_watchOsKernelKit-28]
+	_ = x[Platform_visionOsKernelKit-29]
+	_ = x[Platform_bridgeOsKernelKit-30]
 	_ = x[ANY-4294967295]
 }
 
 const (
-	_Platform_name_0 = "UnknownmacOSiOStvOSwatchOSbridgeOSmacCatalystiOsSimulatortvOsSimulatorwatchOsSimulatorDriverkitvisionOSvisionOsSimulatorFirmwaresepOSmacOSExclaveCoremacOSExclaveKitiOSExclaveCoreiOSExclaveKittvOsExclaveCoretvOsExclaveKitwatchOsExclaveCorewatchOsExclaveKitvisionOsExclaveCorevisionOsExclaveKit"
+	_Platform_name_0 = "UnknownmacOSiOStvOSwatchOSbridgeOSmacCatalystiOsSimulatortvOsSimulatorwatchOsSimulatorDriverkitvisionOSvisionOsSimulatorFirmwaresepOSmacOSExclaveCoremacOSExclaveKitiOSExclaveCoreiOSExclaveKittvOsExclaveCoretvOsExclaveKitwatchOsExclaveCorewatchOsExclaveKitvisionOsExclaveCorevisionOsExclaveKitmacOSKernelKitiOSKernelKittvOsKernelKitwatchOsKernelKitvisionOsKernelKitbridgeOsKernelKit"
 	_Platform_name_1 = "ANY"
 )
 
 var (
-	_Platform_index_0 = [...]uint16{0, 7, 12, 15, 19, 26, 34, 45, 57, 70, 86, 95, 103, 120, 128, 133, 149, 164, 178, 191, 206, 220, 238, 255, 274, 292}
+	_Platform_index_0 = [...]uint16{0, 7, 12, 15, 19, 26, 34, 45, 57, 70, 86, 95, 103, 120, 128, 133, 149, 164, 178, 191, 206, 220, 238, 255, 274, 292, 306, 318, 331, 347, 364, 381}
 )
 
 func (i Platform) String() string {
 	switch {
-	case i <= 24:
+	case i <= 30:
 		return _Platform_name_0[_Platform_index_0[i]:_Platform_index_0[i+1]]
 	case i == 4294967295:
 		return _Platform_name_1
@@ -115,9 +121,9 @@ const _DiceKind_name = "KindDataKindJumpTable8KindJumpTable16KindJumpTable32Kind
 var _DiceKind_index = [...]uint8{0, 8, 22, 37, 52, 70}
 
 func (i DiceKind) String() string {
-	i -= 1
-	if i >= DiceKind(len(_DiceKind_index)-1) {
-		return "DiceKind(" + strconv.FormatInt(int64(i+1), 10) + ")"
+	idx := int(i) - 1
+	if i < 1 || idx >= len(_DiceKind_index)-1 {
+		return "DiceKind(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
-	return _DiceKind_name[_DiceKind_index[i]:_DiceKind_index[i+1]]
+	return _DiceKind_name[_DiceKind_index[idx]:_DiceKind_index[idx+1]]
 }

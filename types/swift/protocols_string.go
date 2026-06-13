@@ -56,10 +56,11 @@ const _ProtocolRequirementKind_name = "base protocolmethodinitializergettersette
 var _ProtocolRequirementKind_index = [...]uint8{0, 13, 19, 30, 36, 42, 56, 72, 103, 141}
 
 func (i ProtocolRequirementKind) String() string {
-	if i >= ProtocolRequirementKind(len(_ProtocolRequirementKind_index)-1) {
+	idx := int(i) - 0
+	if i < 0 || idx >= len(_ProtocolRequirementKind_index)-1 {
 		return "ProtocolRequirementKind(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
-	return _ProtocolRequirementKind_name[_ProtocolRequirementKind_index[i]:_ProtocolRequirementKind_index[i+1]]
+	return _ProtocolRequirementKind_name[_ProtocolRequirementKind_index[idx]:_ProtocolRequirementKind_index[idx+1]]
 }
 func _() {
 	// An "invalid array index" compiler error signifies that the constant values have changed.
@@ -74,10 +75,11 @@ const _GenericPackKind_name = "metadatawitness-table"
 var _GenericPackKind_index = [...]uint8{0, 8, 21}
 
 func (i GenericPackKind) String() string {
-	if i >= GenericPackKind(len(_GenericPackKind_index)-1) {
+	idx := int(i) - 0
+	if i < 0 || idx >= len(_GenericPackKind_index)-1 {
 		return "GenericPackKind(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
-	return _GenericPackKind_name[_GenericPackKind_index[i]:_GenericPackKind_index[i+1]]
+	return _GenericPackKind_name[_GenericPackKind_index[idx]:_GenericPackKind_index[idx+1]]
 }
 func _() {
 	// An "invalid array index" compiler error signifies that the constant values have changed.
@@ -92,8 +94,9 @@ const _SpecialProtocol_name = "noneerror"
 var _SpecialProtocol_index = [...]uint8{0, 4, 9}
 
 func (i SpecialProtocol) String() string {
-	if i >= SpecialProtocol(len(_SpecialProtocol_index)-1) {
+	idx := int(i) - 0
+	if i < 0 || idx >= len(_SpecialProtocol_index)-1 {
 		return "SpecialProtocol(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
-	return _SpecialProtocol_name[_SpecialProtocol_index[i]:_SpecialProtocol_index[i+1]]
+	return _SpecialProtocol_name[_SpecialProtocol_index[idx]:_SpecialProtocol_index[idx+1]]
 }

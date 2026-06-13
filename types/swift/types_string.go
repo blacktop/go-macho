@@ -54,10 +54,11 @@ const _TypeReferenceKind_name = "directindirectdirect_objc_classindirect_objc_cl
 var _TypeReferenceKind_index = [...]uint8{0, 6, 14, 31, 50}
 
 func (i TypeReferenceKind) String() string {
-	if i >= TypeReferenceKind(len(_TypeReferenceKind_index)-1) {
+	idx := int(i) - 0
+	if i < 0 || idx >= len(_TypeReferenceKind_index)-1 {
 		return "TypeReferenceKind(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
-	return _TypeReferenceKind_name[_TypeReferenceKind_index[i]:_TypeReferenceKind_index[i+1]]
+	return _TypeReferenceKind_name[_TypeReferenceKind_index[idx]:_TypeReferenceKind_index[idx+1]]
 }
 func _() {
 	// An "invalid array index" compiler error signifies that the constant values have changed.
@@ -73,10 +74,11 @@ const _MetadataInitializationKind_name = "nonesingletonforeign"
 var _MetadataInitializationKind_index = [...]uint8{0, 4, 13, 20}
 
 func (i MetadataInitializationKind) String() string {
-	if i >= MetadataInitializationKind(len(_MetadataInitializationKind_index)-1) {
+	idx := int(i) - 0
+	if i < 0 || idx >= len(_MetadataInitializationKind_index)-1 {
 		return "MetadataInitializationKind(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
-	return _MetadataInitializationKind_name[_MetadataInitializationKind_index[i]:_MetadataInitializationKind_index[i+1]]
+	return _MetadataInitializationKind_name[_MetadataInitializationKind_index[idx]:_MetadataInitializationKind_index[idx+1]]
 }
 func _() {
 	// An "invalid array index" compiler error signifies that the constant values have changed.
@@ -93,10 +95,11 @@ const _SpecialKind_name = "noneclassmetatypeexplicit layout"
 var _SpecialKind_index = [...]uint8{0, 4, 9, 17, 32}
 
 func (i SpecialKind) String() string {
-	if i >= SpecialKind(len(_SpecialKind_index)-1) {
+	idx := int(i) - 0
+	if i < 0 || idx >= len(_SpecialKind_index)-1 {
 		return "SpecialKind(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
-	return _SpecialKind_name[_SpecialKind_index[i]:_SpecialKind_index[i+1]]
+	return _SpecialKind_name[_SpecialKind_index[idx]:_SpecialKind_index[idx+1]]
 }
 func _() {
 	// An "invalid array index" compiler error signifies that the constant values have changed.
@@ -138,8 +141,9 @@ const _GenericRequirementLayoutKind_name = "class"
 var _GenericRequirementLayoutKind_index = [...]uint8{0, 5}
 
 func (i GenericRequirementLayoutKind) String() string {
-	if i >= GenericRequirementLayoutKind(len(_GenericRequirementLayoutKind_index)-1) {
+	idx := int(i) - 0
+	if i < 0 || idx >= len(_GenericRequirementLayoutKind_index)-1 {
 		return "GenericRequirementLayoutKind(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
-	return _GenericRequirementLayoutKind_name[_GenericRequirementLayoutKind_index[i]:_GenericRequirementLayoutKind_index[i+1]]
+	return _GenericRequirementLayoutKind_name[_GenericRequirementLayoutKind_index[idx]:_GenericRequirementLayoutKind_index[idx+1]]
 }

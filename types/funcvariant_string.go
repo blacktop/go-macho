@@ -105,10 +105,11 @@ const _X86_64Flag_name = "defaultsse41fmaavxavx2avx512favx512bwbmi1rosettahaswel
 var _X86_64Flag_index = [...]uint8{0, 7, 12, 15, 18, 22, 29, 37, 41, 48, 55, 64, 71}
 
 func (i X86_64Flag) String() string {
-	if i >= X86_64Flag(len(_X86_64Flag_index)-1) {
+	idx := int(i) - 0
+	if i < 0 || idx >= len(_X86_64Flag_index)-1 {
 		return "X86_64Flag(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
-	return _X86_64Flag_name[_X86_64Flag_index[i]:_X86_64Flag_index[i+1]]
+	return _X86_64Flag_name[_X86_64Flag_index[idx]:_X86_64Flag_index[idx+1]]
 }
 func _() {
 	// An "invalid array index" compiler error signifies that the constant values have changed.
@@ -125,10 +126,11 @@ const _PerProcessFlag_name = "defaulttranslatedmteno_overread"
 var _PerProcessFlag_index = [...]uint8{0, 7, 17, 20, 31}
 
 func (i PerProcessFlag) String() string {
-	if i >= PerProcessFlag(len(_PerProcessFlag_index)-1) {
+	idx := int(i) - 0
+	if i < 0 || idx >= len(_PerProcessFlag_index)-1 {
 		return "PerProcessFlag(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
-	return _PerProcessFlag_name[_PerProcessFlag_index[i]:_PerProcessFlag_index[i+1]]
+	return _PerProcessFlag_name[_PerProcessFlag_index[idx]:_PerProcessFlag_index[idx+1]]
 }
 func _() {
 	// An "invalid array index" compiler error signifies that the constant values have changed.
@@ -145,8 +147,9 @@ const _SystemWideFlag_name = "defaultinternalInstallcustomerInstalllockdown"
 var _SystemWideFlag_index = [...]uint8{0, 7, 22, 37, 45}
 
 func (i SystemWideFlag) String() string {
-	if i >= SystemWideFlag(len(_SystemWideFlag_index)-1) {
+	idx := int(i) - 0
+	if i < 0 || idx >= len(_SystemWideFlag_index)-1 {
 		return "SystemWideFlag(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
-	return _SystemWideFlag_name[_SystemWideFlag_index[i]:_SystemWideFlag_index[i+1]]
+	return _SystemWideFlag_name[_SystemWideFlag_index[idx]:_SystemWideFlag_index[idx+1]]
 }

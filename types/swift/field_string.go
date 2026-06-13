@@ -23,8 +23,9 @@ const _FieldDescriptorKind_name = "structclassenummulti-payload enumprotocolclas
 var _FieldDescriptorKind_index = [...]uint8{0, 6, 11, 15, 33, 41, 55, 68, 78}
 
 func (i FieldDescriptorKind) String() string {
-	if i >= FieldDescriptorKind(len(_FieldDescriptorKind_index)-1) {
+	idx := int(i) - 0
+	if i < 0 || idx >= len(_FieldDescriptorKind_index)-1 {
 		return "FieldDescriptorKind(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
-	return _FieldDescriptorKind_name[_FieldDescriptorKind_index[i]:_FieldDescriptorKind_index[i+1]]
+	return _FieldDescriptorKind_name[_FieldDescriptorKind_index[idx]:_FieldDescriptorKind_index[idx+1]]
 }
