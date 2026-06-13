@@ -88,8 +88,14 @@ const (
 	Platform_tvOsExclaveKit      Platform = 20 // PLATFORM_TVOS_EXCLAVEKIT
 	Platform_watchOsExclaveCore  Platform = 21 // PLATFORM_WATCHOS_EXCLAVECORE
 	Platform_watchOsExclaveKit   Platform = 22 // PLATFORM_WATCHOS_EXCLAVEKIT
-	Platform_visionOsExclaveCore Platform = 23 // PLATFORM_WATCHOS_EXCLAVEKIT
-	Platform_visionOsExclaveKit  Platform = 24 // PLATFORM_WATCHOS_EXCLAVEKIT
+	Platform_visionOsExclaveCore Platform = 23 // PLATFORM_VISIONOS_EXCLAVECORE
+	Platform_visionOsExclaveKit  Platform = 24 // PLATFORM_VISIONOS_EXCLAVEKIT
+	Platform_macOSKernelKit      Platform = 25 // PLATFORM_MACOS_KERNELKIT
+	Platform_iOSKernelKit        Platform = 26 // PLATFORM_IOS_KERNELKIT
+	Platform_tvOsKernelKit       Platform = 27 // PLATFORM_TVOS_KERNELKIT
+	Platform_watchOsKernelKit    Platform = 28 // PLATFORM_WATCHOS_KERNELKIT
+	Platform_visionOsKernelKit   Platform = 29 // PLATFORM_VISIONOS_KERNELKIT
+	Platform_bridgeOsKernelKit   Platform = 30 // PLATFORM_BRIDGEOS_KERNELKIT
 
 	ANY Platform = 0xFFFFFFFF // PLATFORM_ANY
 )
@@ -144,6 +150,18 @@ func GetPlatformByName(name string) (Platform, error) {
 		return Platform_visionOsExclaveCore, nil
 	case "visionosexclavekit", "visionos_exclavekit":
 		return Platform_visionOsExclaveKit, nil
+	case "macoskernelkit", "macos_kernelkit":
+		return Platform_macOSKernelKit, nil
+	case "ioskernelkit", "ios_kernelkit":
+		return Platform_iOSKernelKit, nil
+	case "tvoskernelkit", "tvos_kernelkit":
+		return Platform_tvOsKernelKit, nil
+	case "watchoskernelkit", "watchos_kernelkit":
+		return Platform_watchOsKernelKit, nil
+	case "visionoskernelkit", "visionos_kernelkit":
+		return Platform_visionOsKernelKit, nil
+	case "bridgeoskernelkit", "bridgeos_kernelkit":
+		return Platform_bridgeOsKernelKit, nil
 	default:
 		return Platform_Unknown, fmt.Errorf("unknown platform")
 	}
