@@ -36,13 +36,13 @@ func looksLikeSwiftSymbol(s string) bool {
 	if trimmed == "" {
 		return false
 	}
-	symbolPrefixes := []string{"$s", "$S", "_$s", "_$S", "_T", "__T"}
+	symbolPrefixes := []string{"$s", "$S", "$e", "_$s", "_$S", "_$e", "_T", "__T"}
 	for _, prefix := range symbolPrefixes {
 		if strings.HasPrefix(trimmed, prefix) {
 			return true
 		}
 	}
-	if strings.Contains(trimmed, "_$s") || strings.Contains(trimmed, "$s.") {
+	if strings.Contains(trimmed, "_$s") || strings.Contains(trimmed, "_$e") || strings.Contains(trimmed, "$s.") {
 		return true
 	}
 	if strings.HasPrefix(trimmed, "So") && strings.HasSuffix(trimmed, "C") {

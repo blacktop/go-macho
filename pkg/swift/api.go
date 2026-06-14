@@ -4,12 +4,27 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"strings"
 )
 
 var (
-	blobTokenPattern = regexp.MustCompile(`(?:_?\$[sStT]|S[oO]|_T)[A-Za-z0-9_]+`)
+	blobTokenPattern = regexp.MustCompile(`(?:_?\$[sStTe]|S[oO]|_T)[A-Za-z0-9_]+`)
 	logBlobTokens    = os.Getenv("GO_MACHO_SWIFT_TRACE_BLOB") != ""
+	// manglingPrefixes are the known Swift symbol-mangling prefixes per docs/ABI/Mangling.rst:
+	// $s = stable, $S = Swift 4.2, $e = Embedded Swift, _T0 / _T = pre-stable.
+	manglingPrefixes = []string{"_$s", "$s", "_$S", "$S", "_$e", "$e", "_T0", "_T"}
 )
+
+// IsMangled reports whether name begins with a known Swift mangling prefix and
+// is therefore a candidate for Demangle.
+func IsMangled(name string) bool {
+	for _, p := range manglingPrefixes {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
 
 // Demangle returns the fully formatted Swift symbol text.
 func Demangle(input string) (string, error) {
