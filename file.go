@@ -1638,16 +1638,14 @@ func (f *File) getOffset(address uint64) (uint64, error) {
 // extracted dylib) only contain their own segments, so a cross-image reference
 // is unresolvable and callers skip it rather than failing.
 func (f *File) addrResolvable(vmaddr uint64) bool {
-	if vmaddr == 0 {
+	if vmaddr == 0 || f.cr == nil {
 		return false
 	}
-	if f.cr != nil {
-		var buf [1]byte
-		n, _ := f.cr.ReadAtAddr(buf[:], vmaddr)
-		return n == len(buf)
-	}
-	_, err := f.vma.GetOffset(vmaddr)
-	return err == nil
+	// Probe with a real read so segments whose Memsz exceeds Filesz (bss tails)
+	// report unresolvable, which a segment-table lookup alone would not catch.
+	var buf [1]byte
+	n, _ := f.cr.ReadAtAddr(buf[:], vmaddr)
+	return n == len(buf)
 }
 
 // GetVMAddress returns the virtal address for a given file offset
