@@ -57,6 +57,7 @@ type File struct {
 	objcHasFragileRuntime    bool
 
 	sharedCacheRelativeSelectorBaseVMAddress uint64 // objc_opt version 16
+	objcSelectorBaseUnavailable              bool   // relative method selectors needed the shared cache's selector base
 	swiftAutoDemangle                        bool
 
 	mu     sync.Mutex
@@ -1628,6 +1629,25 @@ func (f *File) getOffset(address uint64) (uint64, error) {
 		}
 	}
 	return 0, fmt.Errorf("address %#x not within any segment's adress range", address)
+}
+
+// addrResolvable reports whether vmaddr can be read from this file's reader.
+//
+// In-cache files resolve addresses against the entire shared cache, so
+// cross-image references succeed. Standalone files (e.g. a dyld_shared_cache
+// extracted dylib) only contain their own segments, so a cross-image reference
+// is unresolvable and callers skip it rather than failing.
+func (f *File) addrResolvable(vmaddr uint64) bool {
+	if vmaddr == 0 {
+		return false
+	}
+	if f.cr != nil {
+		var buf [1]byte
+		n, _ := f.cr.ReadAtAddr(buf[:], vmaddr)
+		return n == len(buf)
+	}
+	_, err := f.vma.GetOffset(vmaddr)
+	return err == nil
 }
 
 // GetVMAddress returns the virtal address for a given file offset

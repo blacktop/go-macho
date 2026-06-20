@@ -1,10 +1,13 @@
 package macho
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
 	"testing"
 
 	"github.com/blacktop/go-macho/types"
+	"github.com/blacktop/go-macho/types/objc"
 )
 
 type objcTestSection struct {
@@ -92,6 +95,67 @@ func newObjCTestFile(defs ...objcTestSection) *File {
 func callGetObjCMethodsAtZero(f *File) error {
 	_, err := f.GetObjCMethods(0)
 	return err
+}
+
+func TestForEachObjCMethodDirectSelectorsWithoutBase(t *testing.T) {
+	const (
+		methodListVMAddr                  = uint64(0x1000)
+		relativeMethodSelectorsDirectFlag = uint32(0x40000000)
+		smallMethodListFlag               = uint32(0x80000000)
+		relativeMethodEntrySize           = uint32(12)
+		nameStringOffset                  = uint64(0x20)
+		typesStringOffset                 = uint64(0x30)
+	)
+
+	data := make([]byte, 0x80)
+	order := binary.LittleEndian
+	order.PutUint32(data[0:], smallMethodListFlag|relativeMethodSelectorsDirectFlag|relativeMethodEntrySize)
+	order.PutUint32(data[4:], 1)
+
+	methodVMAddr := methodListVMAddr + 8
+	nameVMAddr := methodListVMAddr + nameStringOffset
+	typesVMAddr := methodListVMAddr + typesStringOffset
+	order.PutUint32(data[8:], uint32(nameVMAddr-methodVMAddr))
+	order.PutUint32(data[12:], uint32(typesVMAddr-(methodVMAddr+4)))
+	copy(data[nameStringOffset:], "wrongSelector\x00")
+	copy(data[typesStringOffset:], "v16@0:8\x00")
+
+	f := &File{
+		FileTOC: FileTOC{
+			FileHeader: types.FileHeader{Magic: types.Magic64, Type: types.MH_EXECUTE},
+			Loads: loads{
+				&Segment{SegmentHeader: SegmentHeader{
+					LoadCmd: types.LC_SEGMENT_64,
+					Name:    "__TEXT",
+					Addr:    methodListVMAddr,
+					Memsz:   uint64(len(data)),
+					Offset:  0,
+					Filesz:  uint64(len(data)),
+				}},
+			},
+		},
+	}
+	f.ByteOrder = order
+	f.vma = &types.VMAddrConverter{
+		Converter:    f.convertToVMAddr,
+		VMAddr2Offet: f.getOffset,
+		Offet2VMAddr: f.getVMAddress,
+	}
+	f.cr = types.NewCustomSectionReader(bytes.NewReader(data), f.vma, 0, int64(len(data)))
+
+	called := false
+	err := f.forEachObjCMethod(methodListVMAddr, func(uint64, objc.Method, *bool) {
+		called = true
+	})
+	if !errors.Is(err, ErrObjCSelectorBaseUnavailable) {
+		t.Fatalf("forEachObjCMethod() error = %v, want %v", err, ErrObjCSelectorBaseUnavailable)
+	}
+	if !f.ObjCSelectorBaseUnavailable() {
+		t.Fatal("ObjCSelectorBaseUnavailable() = false, want true")
+	}
+	if called {
+		t.Fatal("method handler was called after selector-base failure")
+	}
 }
 
 func callGetObjCIvarsAtZero(f *File) error {

@@ -313,6 +313,64 @@ func newSyntheticDyldInfoOnlyFile(rawPointer uint64, pointerAddr uint64, resolve
 	return f
 }
 
+func TestAddrResolvable(t *testing.T) {
+	f := &File{
+		FileTOC: FileTOC{
+			FileHeader: types.FileHeader{Magic: types.Magic64, Type: types.MH_EXECUTE},
+			Loads: loads{
+				&Segment{SegmentHeader: SegmentHeader{
+					LoadCmd: types.LC_SEGMENT_64,
+					Name:    "__TEXT",
+					Addr:    0x100000000,
+					Memsz:   0x4000,
+					Offset:  0,
+					Filesz:  0x4000,
+				}},
+			},
+		},
+	}
+	f.ByteOrder = binary.LittleEndian
+	f.vma = &types.VMAddrConverter{
+		Converter:    f.convertToVMAddr,
+		VMAddr2Offet: f.getOffset,
+		Offet2VMAddr: f.getVMAddress,
+	}
+	f.cr = types.NewCustomSectionReader(bytes.NewReader(make([]byte, 0x4000)), f.vma, 0, 0x4000)
+
+	tests := []struct {
+		name string
+		addr uint64
+		want bool
+	}{
+		{"zero", 0, false},
+		{"segment start", 0x100000000, true},
+		{"inside segment", 0x100002000, true},
+		{"last byte", 0x100003fff, true},
+		{"one past end", 0x100004000, false},
+		{"cross-image address", 0x1ec4d3d08, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := f.addrResolvable(tt.addr); got != tt.want {
+				t.Fatalf("addrResolvable(%#x) = %v, want %v", tt.addr, got, tt.want)
+			}
+		})
+	}
+
+	const cacheOnlyAddr = 0x1ec4d3d08
+	if _, err := f.vma.GetOffset(cacheOnlyAddr); err == nil {
+		t.Fatalf("test setup: cache-only address %#x unexpectedly resolves through image VM converter", cacheOnlyAddr)
+	}
+
+	f.cr = &recordingCacheReader{
+		addrBase: cacheOnlyAddr,
+		addrData: []byte{0xaa},
+	}
+	if got := f.addrResolvable(cacheOnlyAddr); !got {
+		t.Fatalf("addrResolvable(%#x) = false, want true through active cache reader", cacheOnlyAddr)
+	}
+}
+
 func TestConvertToVMAddrDyldInfoOnlyRebaseValue(t *testing.T) {
 	const (
 		raw      = uint64(0xfa0)
