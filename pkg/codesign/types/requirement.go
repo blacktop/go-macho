@@ -523,38 +523,43 @@ func evalExpression(r *bytes.Reader, syntaxLevel int) (string, error) {
 	}
 }
 
+// evalRequirementSet reads and evaluates all expressions of a single requirement
+func evalRequirementSet(r *bytes.Reader) (string, error) {
+	var reqSet []string
+	for {
+		rsPart, err := evalExpression(r, slTop)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		reqSet = append(reqSet, rsPart)
+	}
+	return strings.Join(reqSet, " "), nil
+}
+
 // ParseRequirements parses the requirements set bytes
 func ParseRequirements(r *bytes.Reader, reqs Requirements) (string, error) {
 	// NOTE: codesign -d -r- MACHO (to display requirement sets)
 	r.Seek(int64(reqs.Offset), io.SeekStart)
 
+	reqSet, err := evalRequirementSet(r)
+	if err != nil {
+		return "", err
+	}
+
 	switch reqs.Type {
-	case HostRequirementType:
-		var reqSet []string
-		for {
-			rsPart, err := evalExpression(r, slTop)
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				return "", err
-			}
-			reqSet = append(reqSet, rsPart)
-		}
-		return "host => " + strings.Join(reqSet, " "), nil
 	case DesignatedRequirementType:
-		var reqSet []string
-		for {
-			rsPart, err := evalExpression(r, slTop)
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				return "", err
-			}
-			reqSet = append(reqSet, rsPart)
-		}
-		return strings.Join(reqSet, " "), nil
+		return reqSet, nil
+	case HostRequirementType:
+		return "host => " + reqSet, nil
+	case GuestRequirementType:
+		return "guest => " + reqSet, nil
+	case LibraryRequirementType:
+		return "library => " + reqSet, nil
+	case PluginRequirementType:
+		return "plugin => " + reqSet, nil
 	default:
 		return "", fmt.Errorf("failed to dump requirements set; found unsupported codesign requirement type '%s', please notify author", reqs.Type)
 	}
