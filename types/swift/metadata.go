@@ -8,7 +8,7 @@ import (
 	"github.com/blacktop/go-macho/types"
 )
 
-//go:generate stringer -type MetadataKind -linecomment -output metadata_string.go
+//go:generate go run golang.org/x/tools/cmd/stringer@v0.50.0 -type MetadataKind -linecomment -output metadata_string.go
 
 const (
 	// Non-type metadata kinds have this bit set.

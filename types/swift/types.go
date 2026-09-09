@@ -10,7 +10,7 @@ import (
 	"github.com/blacktop/go-macho/types"
 )
 
-//go:generate stringer -type ContextDescriptorKind,TypeReferenceKind,MetadataInitializationKind,SpecialKind,GenericParamKind,GenericRequirementLayoutKind -linecomment -output types_string.go
+//go:generate go run golang.org/x/tools/cmd/stringer@v0.50.0 -type ContextDescriptorKind,TypeReferenceKind,MetadataInitializationKind,SpecialKind,GenericParamKind,GenericRequirementLayoutKind -linecomment -output types_string.go
 
 // __TEXT.__swift5_types
 // This section contains an array of 32-bit signed integers.

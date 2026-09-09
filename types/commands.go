@@ -1,7 +1,7 @@
 package types
 
-//go:generate stringer -type=LoadCmd,X86ThreadFlavor,ArmThreadFlavor -output commands_string.go
-//go:generate stringer -type=ARM64Flag,X86_64Flag,PerProcessFlag,SystemWideFlag -linecomment -output funcvariant_string.go
+//go:generate go run golang.org/x/tools/cmd/stringer@v0.50.0 -type=LoadCmd,X86ThreadFlavor,ArmThreadFlavor -output commands_string.go
+//go:generate go run golang.org/x/tools/cmd/stringer@v0.50.0 -type=ARM64Flag,X86_64Flag,PerProcessFlag,SystemWideFlag -linecomment -output funcvariant_string.go
 
 import (
 	"encoding/json"

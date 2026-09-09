@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-//go:generate stringer -type NecessaryBindingsKind -output capture_string.go
+//go:generate go run golang.org/x/tools/cmd/stringer@v0.50.0 -type NecessaryBindingsKind -output capture_string.go
 
 // __TEXT.__swift5_capture
 // Capture descriptors describe the layout of a closure context object.

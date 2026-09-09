@@ -4,7 +4,7 @@
 
 package types
 
-//go:generate stringer -type=RelocTypeGeneric,RelocTypeX86_64,RelocTypeARM,RelocTypeARM64 -output reloc_string.go
+//go:generate go run golang.org/x/tools/cmd/stringer@v0.50.0 -type=RelocTypeGeneric,RelocTypeX86_64,RelocTypeARM,RelocTypeARM64 -output reloc_string.go
 
 type RelocTypeGeneric int
 

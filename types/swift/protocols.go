@@ -9,7 +9,7 @@ import (
 	"github.com/blacktop/go-macho/types"
 )
 
-//go:generate stringer -type GenericRequirementKind,ProtocolRequirementKind,GenericPackKind,SpecialProtocol -linecomment -output protocols_string.go
+//go:generate go run golang.org/x/tools/cmd/stringer@v0.50.0 -type GenericRequirementKind,ProtocolRequirementKind,GenericPackKind,SpecialProtocol -linecomment -output protocols_string.go
 
 // ConformanceDescriptor in __TEXT.__swift5_proto
 // This section contains an array of 32-bit signed integers.

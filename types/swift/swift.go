@@ -2,7 +2,7 @@ package swift
 
 import "fmt"
 
-//go:generate stringer -type SpecialPointerAuthDiscriminators -trimprefix=Disc -output swift_string.go
+//go:generate go run golang.org/x/tools/cmd/stringer@v0.50.0 -type SpecialPointerAuthDiscriminators -trimprefix=Disc -output swift_string.go
 
 const (
 	/// The name of the standard library, which is a reserved module name.

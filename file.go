@@ -1549,7 +1549,7 @@ func (f *File) is64bit() bool { return f.FileHeader.Magic == types.Magic64 }
 func (f *File) isArm() bool   { return f.CPU == types.CPUArm }
 func (f *File) isArm64() bool { return f.CPU == types.CPUArm64 || f.CPU == types.CPUArm6432 }
 func (f *File) isArm64e() bool {
-	return f.isArm64() && (f.SubCPU&types.CpuSubtypeMask) == types.CPUSubtypeArm64E
+	return f.CPU == types.CPUArm64 && f.SubCPU.HasArm64E()
 }
 
 func (f *File) pointerSize() uint64 {

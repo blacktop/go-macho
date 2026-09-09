@@ -6,7 +6,7 @@ import (
 	"io"
 )
 
-//go:generate stringer -type=FieldDescriptorKind -linecomment -output field_string.go
+//go:generate go run golang.org/x/tools/cmd/stringer@v0.50.0 -type=FieldDescriptorKind -linecomment -output field_string.go
 
 // __TEXT.__swift5_fieldmd
 // This section contains an array of field descriptors.

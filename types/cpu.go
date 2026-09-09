@@ -194,6 +194,10 @@ const (
 	CPUSubtypeArm64All CPUSubtype = 0
 	CPUSubtypeArm64V8  CPUSubtype = 1
 	CPUSubtypeArm64E   CPUSubtype = 2
+	CPUSubtypeArm64X1  CPUSubtype = 3 // Defined by other tooling, otherwise unused.
+	CPUSubtypeArm64EX1 CPUSubtype = 12
+	// CPUSubtypeArm64Max bounds the reserved subtype range; it is not a slice.
+	CPUSubtypeArm64Max CPUSubtype = 20
 )
 
 // ARM64_32 subtypes
@@ -247,8 +251,27 @@ var cpuSubtypeArm64Strings = []IntName{
 	{uint32(CPUSubtypeArm64All), "ARM64"},
 	{uint32(CPUSubtypeArm64V8), "v8"},
 	{uint32(CPUSubtypeArm64E), "ARM64e"},
+	{uint32(CPUSubtypeArm64X1), "ARM64_X1"},
+	{uint32(CPUSubtypeArm64EX1), "ARM64e_X1"},
+}
+
+var cpuSubtypeArm6432Strings = []IntName{
 	{uint32(CPUSubtypeArm6432All), "ARM64_32"},
 	{uint32(CPUSubtypeArm6432V8), "v8"},
+}
+
+// HasArm64E reports whether an ARM64 subtype belongs to the PAC taxonomy.
+// Callers must establish that the CPU is ARM64; subtype values overlap across CPUs.
+func (st CPUSubtype) HasArm64E() bool {
+	base := st & CpuSubtypeMask
+	return base == CPUSubtypeArm64E || base == CPUSubtypeArm64EX1
+}
+
+// HasArm64X1 reports whether an ARM64 subtype belongs to the X1 taxonomy.
+// Callers must establish that the CPU is ARM64; subtype values overlap across CPUs.
+func (st CPUSubtype) HasArm64X1() bool {
+	base := st & CpuSubtypeMask
+	return base == CPUSubtypeArm64X1 || base == CPUSubtypeArm64EX1
 }
 
 func (st CPUSubtype) Capabilities(cpu CPU) string {
@@ -258,7 +281,7 @@ func (st CPUSubtype) Capabilities(cpu CPU) string {
 		if caps > 0 {
 			if (st & CpuSubtypeMask) == CpuSubtypeLib64 { // lib64
 				return "LIB64"
-			} else if (st & CpuSubtypeMask) == CPUSubtypeArm64E { // arm64e
+			} else if st.HasArm64E() { // arm64e
 				if (caps & CpuSubtypeArm64eKernelAbiMask) == 0 {
 					return fmt.Sprintf("USR%02d", ((caps & CpuSubtypeArm64ePtrAuthMask) >> 24))
 				}
@@ -285,7 +308,7 @@ func (st CPUSubtype) String(cpu CPU) string {
 	case CPUArm64:
 		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm64Strings, false)
 	case CPUArm6432:
-		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm64Strings, false)
+		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm6432Strings, false)
 	}
 	return "UNKNOWN"
 }
@@ -301,7 +324,7 @@ func (st CPUSubtype) GoString(cpu CPU) string {
 	case CPUArm64:
 		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm64Strings, true)
 	case CPUArm6432:
-		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm64Strings, true)
+		return StringName(uint32(st&CpuSubtypeMask), cpuSubtypeArm6432Strings, true)
 	}
 	return "UNKNOWN"
 }

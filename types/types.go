@@ -1,6 +1,6 @@
 package types
 
-//go:generate stringer -type=Platform,Tool,DiceKind -trimprefix=Platform_ -output types_string.go
+//go:generate go run golang.org/x/tools/cmd/stringer@v0.50.0 -type=Platform,Tool,DiceKind -trimprefix=Platform_ -output types_string.go
 
 import (
 	"encoding/binary"

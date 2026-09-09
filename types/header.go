@@ -1,6 +1,6 @@
 package types
 
-//go:generate stringer -type=HeaderFileType -trimprefix=MH_ -output header_string.go
+//go:generate go run golang.org/x/tools/cmd/stringer@v0.50.0 -type=HeaderFileType -trimprefix=MH_ -output header_string.go
 
 import (
 	"bytes"
