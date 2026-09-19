@@ -59,8 +59,11 @@ func (h *FileHeader) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[28:], 0)
 	return 32
 }
+
+// Write serializes the header at its magic's size: 32-bit headers have no reserved field.
 func (h *FileHeader) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, h); err != nil {
+	b := make([]byte, FileHeaderSize64)
+	if _, err := buf.Write(b[:h.Put(b, o)]); err != nil {
 		return fmt.Errorf("failed to write file header: %v", err)
 	}
 	return nil
