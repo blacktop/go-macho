@@ -1162,15 +1162,18 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	// re-export entries encode both names as "name\x00reexport"; the trailing
 	// \x00 from the write call terminates the second name.
 	writeSym := func(e symEntry) error {
-		if err := binary.Write(&lebuf, binary.LittleEndian, types.Nlist64{
-			Nlist: types.Nlist{
-				Name: uint32(newSymNames.Len()),
-				Type: e.sym.Type,
-				Sect: e.sym.Sect,
-				Desc: e.sym.Desc,
-			},
-			Value: e.sym.Value,
-		}); err != nil {
+		nlist := types.Nlist{
+			Name: uint32(newSymNames.Len()),
+			Type: e.sym.Type,
+			Sect: e.sym.Sect,
+			Desc: e.sym.Desc,
+		}
+		// 32-bit files carry 12-byte nlist entries
+		var entry any = types.Nlist64{Nlist: nlist, Value: e.sym.Value}
+		if !f.is64bit() {
+			entry = types.Nlist32{Nlist: nlist, Value: uint32(e.sym.Value)}
+		}
+		if err := binary.Write(&lebuf, binary.LittleEndian, entry); err != nil {
 			return err
 		}
 		if _, err := newSymNames.WriteString(e.name + "\x00"); err != nil {
