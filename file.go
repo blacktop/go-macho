@@ -122,6 +122,13 @@ type FileConfig struct {
 	SectionReader        types.MachoReader
 	CacheReader          types.MachoReader
 	RelativeSelectorBase uint64
+	// StringTableLookup, if set, is called with the LC_SYMTAB string table's
+	// (offset, size) and returns a function yielding the NUL-terminated name at
+	// an offset below size, in place of NewFile reading its own copy of the
+	// table. Offsets are bounds-checked by NewFile, and it retains nothing the
+	// function returns. Returning (nil, nil) declines the table, and NewFile
+	// reads its own copy as if no lookup were set.
+	StringTableLookup func(offset int64, size uint64) (func(off uint64) string, error)
 }
 
 // Open opens the named file using os.Open and prepares it for use as a Mach-O binary.
@@ -156,6 +163,7 @@ func (f *File) Close() error {
 func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 	var loadIncluding []types.LoadCmd
 	var loadExcluding []types.LoadCmd
+	var stringTableLookup func(int64, uint64) (func(uint64) string, error)
 
 	f := new(File)
 
@@ -186,6 +194,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 		loadIncluding = config[0].LoadIncluding
 		loadExcluding = config[0].LoadExcluding
 		f.sharedCacheRelativeSelectorBaseVMAddress = config[0].RelativeSelectorBase
+		stringTableLookup = config[0].StringTableLookup
 	}
 
 	// Read and decode Mach magic to determine byte order, size.
@@ -350,9 +359,19 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err := binary.Read(b, bo, &hdr); err != nil {
 				return nil, fmt.Errorf("failed to read LC_SYMTAB: %v", err)
 			}
-			strtab, err := saferio.ReadDataAt(f.cr, uint64(hdr.Strsize), int64(hdr.Stroff))
-			if err != nil {
-				return nil, fmt.Errorf("failed to read data at Stroff=%#x; %v", int64(hdr.Stroff), err)
+			var nameAt func(uint64) string
+			if stringTableLookup != nil {
+				nameAt, err = stringTableLookup(int64(hdr.Stroff), uint64(hdr.Strsize))
+				if err != nil {
+					return nil, fmt.Errorf("failed to look up string table at Stroff=%#x; %v", int64(hdr.Stroff), err)
+				}
+			}
+			if nameAt == nil { // no lookup configured, or it declined this table
+				strtab, err := saferio.ReadDataAt(f.cr, uint64(hdr.Strsize), int64(hdr.Stroff))
+				if err != nil {
+					return nil, fmt.Errorf("failed to read data at Stroff=%#x; %v", int64(hdr.Stroff), err)
+				}
+				nameAt = func(off uint64) string { return cstring(strtab[off:]) }
 			}
 			var symsz int
 			if f.Magic == types.Magic64 {
@@ -364,7 +383,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if err != nil {
 				return nil, fmt.Errorf("failed to read data at Symoff=%#x; %v", int64(hdr.Symoff), err)
 			}
-			st, err := f.parseSymtab(symdat, strtab, cmddat, &hdr, offset)
+			st, err := f.parseSymtab(symdat, nameAt, cmddat, &hdr, offset)
 			if err != nil {
 				return nil, fmt.Errorf("failed to read parseSymtab: %v", err)
 			}
@@ -1404,11 +1423,28 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 	return f, nil
 }
 
-func (f *File) parseSymtab(symdat, strtab, cmddat []byte, hdr *types.SymtabCmd, offset int64) (*Symtab, error) {
+// parseSymtab decodes the nlist entries in symdat. nameAt returns the
+// NUL-terminated name at an offset into the string table; it is only ever
+// called with offsets below hdr.Strsize, and any name it returns that would
+// extend past the table is rejected here.
+func (f *File) parseSymtab(symdat []byte, nameAt func(uint64) string, cmddat []byte, hdr *types.SymtabCmd, offset int64) (*Symtab, error) {
 	bo := f.ByteOrder
 	c := saferio.SliceCap[Symbol](uint64(hdr.Nsyms))
 	if c < 0 {
 		return nil, &FormatError{offset, "too many symbols", nil}
+	}
+	strsize := uint64(hdr.Strsize)
+	// boundedName is the one place names come from: it applies the LC_SYMTAB
+	// bounds regardless of who supplied nameAt.
+	boundedName := func(off uint64) (string, error) {
+		if off >= strsize {
+			return "", nil
+		}
+		s := nameAt(off)
+		if uint64(len(s)) > strsize-off {
+			return "", &FormatError{offset, fmt.Sprintf("symbol name at string table offset %#x extends past Strsize=%#x", off, strsize), nil}
+		}
+		return s, nil
 	}
 	symtab := make([]Symbol, 0, c)
 	b := bytes.NewReader(symdat)
@@ -1429,17 +1465,19 @@ func (f *File) parseSymtab(symdat, strtab, cmddat []byte, hdr *types.SymtabCmd, 
 			n.Desc = n32.Desc
 			n.Value = uint64(n32.Value)
 		}
-		var name string
-		var indirectName string
-		if n.Name < uint32(len(strtab)) {
-			// We add "_" to Go symbols. Strip it here. See issue 33808.
-			name = cstring(strtab[n.Name:])
-			if strings.Contains(name, ".") && name[0] == '_' {
-				name = name[1:]
-			}
+		name, err := boundedName(uint64(n.Name))
+		if err != nil {
+			return nil, err
 		}
-		if n.Type.IsIndirectSym() && n.Value < uint64(len(strtab)) {
-			indirectName = cstring(strtab[n.Value:])
+		// We add "_" to Go symbols. Strip it here. See issue 33808.
+		if strings.Contains(name, ".") && name[0] == '_' {
+			name = name[1:]
+		}
+		var indirectName string
+		if n.Type.IsIndirectSym() {
+			if indirectName, err = boundedName(n.Value); err != nil {
+				return nil, err
+			}
 			if strings.Contains(indirectName, ".") && indirectName[0] == '_' {
 				indirectName = indirectName[1:]
 			}
