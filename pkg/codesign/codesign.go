@@ -515,6 +515,10 @@ func Sign(r io.Reader, config *Config) ([]byte, error) {
 	if len(config.SpecialSlots) > 0 {
 		config.NSpecialSlots = uint32(len(config.SpecialSlots))
 	}
+	if config.NSpecialSlots > uint32(types.CSSLOT_ENTITLEMENTS_DER) {
+		return nil, fmt.Errorf("cannot re-sign a code directory with %d special slots: "+
+			"launch/library constraint slots (8-11) are not supported", config.NSpecialSlots)
+	}
 
 	// Entitlements /////////////////////////////////////////////
 	if len(config.Entitlements) > 0 {

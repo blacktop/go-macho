@@ -1,6 +1,7 @@
 package codesign
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"strings"
@@ -91,5 +92,16 @@ func TestParseCodeSignatureRequirementTypes(t *testing.T) {
 				t.Errorf("Requirements[0].Detail = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSignRejectsConstraintSlots(t *testing.T) {
+	config := &Config{
+		ID:           "com.example.hello",
+		Flags:        types.ADHOC,
+		SpecialSlots: make([]types.SpecialSlot, int(types.CSSLOT_LAUNCH_CONSTRAINT_PARENT)),
+	}
+	if _, err := Sign(bytes.NewReader(nil), config); err == nil {
+		t.Fatal("Sign() accepted a code directory with launch constraint slots")
 	}
 }
