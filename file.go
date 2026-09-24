@@ -122,13 +122,30 @@ type FileConfig struct {
 	SectionReader        types.MachoReader
 	CacheReader          types.MachoReader
 	RelativeSelectorBase uint64
-	// StringTableLookup, if set, is called with the LC_SYMTAB string table's
-	// (offset, size) and returns a function yielding the NUL-terminated name at
-	// an offset below size, in place of NewFile reading its own copy of the
-	// table. Offsets are bounds-checked by NewFile, and it retains nothing the
-	// function returns. Returning (nil, nil) declines the table, and NewFile
-	// reads its own copy as if no lookup were set.
-	StringTableLookup func(offset int64, size uint64) (func(off uint64) string, error)
+	// StringTableLookup, if set, replaces NewFile's own read of the LC_SYMTAB
+	// string table. NewFile calls it once per LC_SYMTAB with the command's raw
+	// Stroff and Strsize. offset is in the coordinate space of the reader
+	// NewFile would otherwise read the table from: CacheReader if set, else
+	// SectionReader, else r. Neither value has been checked against that
+	// reader, so a lookup that serves the table must validate
+	// [offset, offset+size) itself.
+	//
+	// nameAt(off) returns the bytes from off up to, but not including, the
+	// first NUL, or up to size if there is none. NewFile calls it only with
+	// off < size and only while NewFile runs, and fails if a returned name
+	// extends past size.
+	//
+	// NewFile keeps neither function, but it stores the returned strings, or
+	// substrings of them, in File.Symtab, and they can outlive the File. They
+	// must stay valid and unmodified for as long as they are used. Ordinary Go
+	// strings satisfy this; a string built with unsafe.String must keep its
+	// backing memory valid and unchanged.
+	//
+	// Returning (nil, nil) declines the table, and NewFile reads its own copy
+	// as if no lookup were set. A non-nil error fails NewFile, whose error
+	// wraps it. Files opened through GetFileSetFileByName do not inherit the
+	// lookup.
+	StringTableLookup func(offset int64, size uint64) (nameAt func(off uint64) string, err error)
 }
 
 // Open opens the named file using os.Open and prepares it for use as a Mach-O binary.
@@ -363,7 +380,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			if stringTableLookup != nil {
 				nameAt, err = stringTableLookup(int64(hdr.Stroff), uint64(hdr.Strsize))
 				if err != nil {
-					return nil, fmt.Errorf("failed to look up string table at Stroff=%#x; %v", int64(hdr.Stroff), err)
+					return nil, fmt.Errorf("failed to look up string table at Stroff=%#x; %w", int64(hdr.Stroff), err)
 				}
 			}
 			if nameAt == nil { // no lookup configured, or it declined this table
@@ -385,7 +402,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			}
 			st, err := f.parseSymtab(symdat, nameAt, cmddat, &hdr, offset)
 			if err != nil {
-				return nil, fmt.Errorf("failed to read parseSymtab: %v", err)
+				return nil, fmt.Errorf("failed to read parseSymtab: %w", err)
 			}
 			st.LoadBytes = cmddat
 			st.LoadCmd = cmd
@@ -1423,10 +1440,10 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 	return f, nil
 }
 
-// parseSymtab decodes the nlist entries in symdat. nameAt returns the
-// NUL-terminated name at an offset into the string table; it is only ever
-// called with offsets below hdr.Strsize, and any name it returns that would
-// extend past the table is rejected here.
+// parseSymtab decodes the nlist entries in symdat. nameAt returns the name at
+// an offset into the string table, without its NUL; it is only ever called
+// with offsets below hdr.Strsize, and any name it returns that would extend
+// past the table is rejected here.
 func (f *File) parseSymtab(symdat []byte, nameAt func(uint64) string, cmddat []byte, hdr *types.SymtabCmd, offset int64) (*Symtab, error) {
 	bo := f.ByteOrder
 	c := saferio.SliceCap[Symbol](uint64(hdr.Nsyms))
