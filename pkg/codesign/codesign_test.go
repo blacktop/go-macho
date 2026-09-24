@@ -120,3 +120,26 @@ func TestSignRejectsWrongLengthSlotHash(t *testing.T) {
 		t.Fatalf("Sign() error = %v, want the 20-byte resource directory hash rejected", err)
 	}
 }
+
+func TestSignKeepsResourceDirWhenReusingSlots(t *testing.T) {
+	rsrc := bytes.Repeat([]byte{1}, 32)
+	config := &Config{
+		ID:           "com.example.hello",
+		Flags:        types.ADHOC,
+		SpecialSlots: make([]types.SpecialSlot, 2), // from a previous 2-slot signature
+	}
+	config.InitSlotHashes()
+	config.SlotHashes.ResourceDir = rsrc
+	sig, err := Sign(bytes.NewReader(nil), config)
+	if err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+	cs, err := ParseCodeSignature(sig)
+	if err != nil {
+		t.Fatalf("ParseCodeSignature() error = %v", err)
+	}
+	slots := cs.CodeDirectories[0].SpecialSlots
+	if len(slots) != 3 || !bytes.Equal(slots[0].Hash, rsrc) {
+		t.Fatalf("special slots = %+v, want 3 with the resource directory hash in slot 3", slots)
+	}
+}

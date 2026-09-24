@@ -508,12 +508,12 @@ func Sign(r io.Reader, config *Config) ([]byte, error) {
 	}
 
 	config.NSpecialSlots = uint32(2)
-	if len(config.SlotHashes.ResourceDir) > 0 && !bytes.Equal(config.SlotHashes.ResourceDir, types.EmptySha256Slot) {
-		config.NSpecialSlots++
-	}
-
 	if len(config.SpecialSlots) > 0 {
 		config.NSpecialSlots = uint32(len(config.SpecialSlots))
+	}
+	if config.NSpecialSlots < uint32(types.CSSLOT_RESOURCEDIR) &&
+		len(config.SlotHashes.ResourceDir) > 0 && !bytes.Equal(config.SlotHashes.ResourceDir, types.EmptySha256Slot) {
+		config.NSpecialSlots = uint32(types.CSSLOT_RESOURCEDIR)
 	}
 	if config.NSpecialSlots > uint32(types.CSSLOT_ENTITLEMENTS_DER) {
 		return nil, fmt.Errorf("cannot re-sign a code directory with %d special slots: "+
