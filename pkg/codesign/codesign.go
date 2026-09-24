@@ -129,35 +129,29 @@ func ParseCodeSignature(cmddat []byte) (*CodeSignature, error) {
 			}
 			cs.CodeDirectories = append(cs.CodeDirectories, *cd)
 		case types.CSSLOT_REQUIREMENTS:
-			req := types.Requirement{}
-			if err := binary.Read(r, binary.BigEndian, &req.RequirementsBlob); err != nil {
+			var hdr types.RequirementsBlob
+			if err := binary.Read(r, binary.BigEndian, &hdr); err != nil {
 				return nil, err
 			}
-			if req.RequirementsBlob.Magic != types.MAGIC_REQUIREMENT && req.RequirementsBlob.Magic != types.MAGIC_REQUIREMENTS {
-				return nil, fmt.Errorf("invalid CSSLOT_REQUIREMENTS blob magic: %s", req.RequirementsBlob.Magic)
+			if hdr.Magic != types.MAGIC_REQUIREMENTS {
+				return nil, fmt.Errorf("invalid CSSLOT_REQUIREMENTS blob magic: %s", hdr.Magic)
 			}
-			datLen, err := payloadLen(req.RequirementsBlob.Length, binary.Size(types.RequirementsBlob{}), index.Offset)
+			datLen, err := payloadLen(hdr.Length, binary.Size(types.RequirementsBlob{}), index.Offset)
 			if err != nil {
 				return nil, err
 			}
-			if datLen > 0 {
-				reqData := make([]byte, datLen)
-				if err := binary.Read(r, binary.BigEndian, &reqData); err != nil {
-					return nil, err
-				}
-				rqr := bytes.NewReader(reqData)
-				if err := binary.Read(rqr, binary.BigEndian, &req.Requirements); err != nil {
-					return nil, err
-				}
-				detail, err := types.ParseRequirements(rqr, req.Requirements)
-				if err != nil {
-					return nil, err
-				}
-				req.Detail = detail
-			} else {
-				req.Detail = "empty requirement set"
+			reqData := make([]byte, datLen)
+			if err := binary.Read(r, binary.BigEndian, &reqData); err != nil {
+				return nil, err
 			}
-			cs.Requirements = append(cs.Requirements, req)
+			reqs, err := types.ParseRequirementSet(hdr, reqData)
+			if err != nil {
+				return nil, err
+			}
+			if len(reqs) == 0 {
+				reqs = append(reqs, types.Requirement{RequirementsBlob: hdr, Detail: "empty requirement set"})
+			}
+			cs.Requirements = append(cs.Requirements, reqs...)
 		case types.CSSLOT_ENTITLEMENTS:
 			entBlob := types.BlobHeader{}
 			if err := binary.Read(r, binary.BigEndian, &entBlob); err != nil {

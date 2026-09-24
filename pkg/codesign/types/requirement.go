@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/asn1"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -528,47 +529,95 @@ func evalExpression(r *bytes.Reader, syntaxLevel int) (string, error) {
 	}
 }
 
-// evalRequirementSet reads and evaluates all expressions of a single requirement
-func evalRequirementSet(r *bytes.Reader) (string, error) {
-	var reqSet []string
-	for {
-		rsPart, err := evalExpression(r, slTop)
-		if err == io.EOF {
-			break
+// evalRequirement evaluates the expressions in the body of one requirement blob.
+// Running out of bytes inside an expression is an error, not the end of the body.
+func evalRequirement(r *bytes.Reader) (string, error) {
+	var parts []string
+	for r.Len() > 0 {
+		part, err := evalExpression(r, slTop)
+		if errors.Is(err, io.EOF) {
+			return "", io.ErrUnexpectedEOF
 		}
 		if err != nil {
 			return "", err
 		}
-		reqSet = append(reqSet, rsPart)
+		parts = append(parts, part)
 	}
-	return strings.Join(reqSet, " "), nil
+	return strings.Join(parts, " "), nil
 }
 
-// ParseRequirements parses the requirements set bytes
-func ParseRequirements(r *bytes.Reader, reqs Requirements) (string, error) {
-	// NOTE: codesign -d -r- MACHO (to display requirement sets)
-	var prefix string
-	switch reqs.Type {
+// requirementPrefix returns the prefix `codesign -d -r-` prints for typ.
+func requirementPrefix(typ RequirementType) (string, error) {
+	switch typ {
 	case DesignatedRequirementType: // bare, without codesign's "designated => "
+		return "", nil
 	case HostRequirementType:
-		prefix = "host => "
+		return "host => ", nil
 	case GuestRequirementType:
-		prefix = "guest => "
+		return "guest => ", nil
 	case LibraryRequirementType:
-		prefix = "library => "
+		return "library => ", nil
 	case PluginRequirementType:
-		prefix = "plugin => "
+		return "plugin => ", nil
 	default:
-		return "", fmt.Errorf("failed to dump requirements set; found unsupported codesign requirement type '%s', please notify author", reqs.Type)
+		return "", fmt.Errorf("failed to dump requirements set; found unsupported codesign requirement type '%s', please notify author", typ)
 	}
+}
 
-	r.Seek(int64(reqs.Offset), io.SeekStart)
-
-	reqSet, err := evalRequirementSet(r)
-	if err != nil {
-		return "", err
+// requirementBody returns the expression bytes of the requirement blob at
+// offset (counted from the start of the set), checking that the blob lies
+// inside the set and after its index.
+func requirementBody(payload []byte, indexEnd, offset uint64) ([]byte, error) {
+	headerSize := uint64(binary.Size(RequirementsBlob{})) // a requirement blob header has the same layout
+	setLen := headerSize + uint64(len(payload))
+	if offset < indexEnd || offset+headerSize > setLen {
+		return nil, fmt.Errorf("offset %#x is outside the %d-byte requirements set", offset, setLen)
 	}
-	return prefix + reqSet, nil
+	var hdr RequirementsBlob
+	if err := binary.Read(bytes.NewReader(payload[offset-headerSize:]), binary.BigEndian, &hdr); err != nil {
+		return nil, err
+	}
+	if hdr.Magic != MAGIC_REQUIREMENT {
+		return nil, fmt.Errorf("invalid requirement blob magic %s at offset %#x", hdr.Magic, offset)
+	}
+	if uint64(hdr.Length) < headerSize || offset+uint64(hdr.Length) > setLen {
+		return nil, fmt.Errorf("requirement blob length %d at offset %#x runs past the %d-byte set", hdr.Length, offset, setLen)
+	}
+	return payload[offset : offset+uint64(hdr.Length)-headerSize], nil
+}
+
+// ParseRequirementSet decodes every requirement in a requirements set, given
+// the set's header and the bytes that follow it. Each requirement is evaluated
+// only from its own blob.
+// NOTE: codesign -d -r- MACHO (to display requirement sets)
+func ParseRequirementSet(hdr RequirementsBlob, payload []byte) ([]Requirement, error) {
+	count := uint64(hdr.Data)
+	indexSize := count * uint64(binary.Size(Requirements{}))
+	if indexSize > uint64(len(payload)) {
+		return nil, fmt.Errorf("requirements set index of %d entries exceeds its %d bytes", count, len(payload))
+	}
+	entries := make([]Requirements, count)
+	if err := binary.Read(bytes.NewReader(payload[:indexSize]), binary.BigEndian, entries); err != nil {
+		return nil, err
+	}
+	indexEnd := uint64(binary.Size(RequirementsBlob{})) + indexSize
+	reqs := make([]Requirement, 0, count)
+	for _, entry := range entries {
+		prefix, err := requirementPrefix(entry.Type)
+		if err != nil {
+			return nil, err
+		}
+		body, err := requirementBody(payload, indexEnd, uint64(entry.Offset))
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", entry.Type, err)
+		}
+		detail, err := evalRequirement(bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("%s at offset %#x: %w", entry.Type, entry.Offset, err)
+		}
+		reqs = append(reqs, Requirement{RequirementsBlob: hdr, Requirements: entry, Detail: prefix + detail})
+	}
+	return reqs, nil
 }
 
 // CreateRequirements creates a requirements set cs blob

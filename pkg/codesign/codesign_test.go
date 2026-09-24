@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -32,33 +33,33 @@ func TestParseCodeSignatureRequirementTypes(t *testing.T) {
 	tests := []struct {
 		name         string
 		requirements string
-		want         string
+		want         []string // one Detail per requirement
 		wantErr      string
 	}{
 		{
 			name:         "designated",
 			requirements: "fade0c010000002c000000010000000300000014fade0c000000001800000001000000020000000161000000",
-			want:         `identifier "a"`,
+			want:         []string{`identifier "a"`},
 		},
 		{
 			name:         "host",
 			requirements: "fade0c0100000024000000010000000100000014fade0c00000000100000000100000003",
-			want:         "host => anchor apple",
+			want:         []string{"host => anchor apple"},
 		},
 		{
 			name:         "guest",
 			requirements: "fade0c0100000024000000010000000200000014fade0c00000000100000000100000003",
-			want:         "guest => anchor apple",
+			want:         []string{"guest => anchor apple"},
 		},
 		{
 			name:         "library",
 			requirements: "fade0c0100000024000000010000000400000014fade0c00000000100000000100000003",
-			want:         "library => anchor apple",
+			want:         []string{"library => anchor apple"},
 		},
 		{
 			name:         "plugin",
 			requirements: "fade0c0100000024000000010000000500000014fade0c00000000100000000100000003",
-			want:         "plugin => anchor apple",
+			want:         []string{"plugin => anchor apple"},
 		},
 		{
 			name:         "unknown type",
@@ -77,6 +78,24 @@ func TestParseCodeSignatureRequirementTypes(t *testing.T) {
 			requirements: "fade0c010000002c000000010000000300000014fade0c00000000180000000100000002ffffffff00000000",
 			wantErr:      "requirement data length 4294967295 exceeds",
 		},
+		{
+			name: "designated and library",
+			requirements: "fade0c010000004400000002000000030000001c0000000400000034" +
+				"fade0c000000001800000001000000020000000161000000" +
+				"fade0c00000000100000000100000003",
+			want: []string{`identifier "a"`, "library => anchor apple"},
+		},
+		{
+			// "anchor apple and" with the second operand missing
+			name:         "truncated expression",
+			requirements: "fade0c0100000028000000010000000400000014fade0c00000000140000000100000006" + "00000003",
+			wantErr:      "unexpected EOF",
+		},
+		{
+			name:         "offset outside the set",
+			requirements: "fade0c0100000024000000010000000300000040fade0c00000000100000000100000003",
+			wantErr:      "outside the 36-byte requirements set",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -90,11 +109,12 @@ func TestParseCodeSignatureRequirementTypes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseCodeSignature() error = %v", err)
 			}
-			if len(cs.Requirements) != 1 {
-				t.Fatalf("len(Requirements) = %d, want 1", len(cs.Requirements))
+			var got []string
+			for _, req := range cs.Requirements {
+				got = append(got, req.Detail)
 			}
-			if got := cs.Requirements[0].Detail; got != tt.want {
-				t.Errorf("Requirements[0].Detail = %q, want %q", got, tt.want)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Requirements details = %q, want %q", got, tt.want)
 			}
 		})
 	}
