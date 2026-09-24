@@ -110,3 +110,13 @@ func TestSignRejectsConstraintSlots(t *testing.T) {
 		t.Fatal("Sign() accepted a code directory with launch constraint slots")
 	}
 }
+
+func TestSignRejectsWrongLengthSlotHash(t *testing.T) {
+	config := &Config{ID: "com.example.hello", Flags: types.ADHOC}
+	config.InitSlotHashes()
+	config.SlotHashes.ResourceDir = bytes.Repeat([]byte{1}, 20) // SHA-1 sized
+	_, err := Sign(bytes.NewReader(nil), config)
+	if err == nil || !strings.Contains(err.Error(), "special slot 3 (Resource Directory) hash is 20 bytes") {
+		t.Fatalf("Sign() error = %v, want the 20-byte resource directory hash rejected", err)
+	}
+}

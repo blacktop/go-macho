@@ -754,7 +754,13 @@ func createCodeDirectory(r io.Reader, config *Config) (*bytes.Buffer, error) {
 		config.SlotHashes.Requirements,
 		config.SlotHashes.InfoPlist,
 	}
-	for _, h := range specialSlots[len(specialSlots)-int(config.NSpecialSlots):] {
+	slots := specialSlots[len(specialSlots)-int(config.NSpecialSlots):]
+	for i, h := range slots {
+		if len(h) != len(types.EmptySha256Slot) {
+			slot := types.SlotType(len(slots) - i)
+			return nil, fmt.Errorf("special slot %d (%s) hash is %d bytes, want %d",
+				slot, slot, len(h), len(types.EmptySha256Slot))
+		}
 		if _, err := cdbuf.Write(h); err != nil {
 			return nil, fmt.Errorf("failed to write special slot hashes: %v", err)
 		}
