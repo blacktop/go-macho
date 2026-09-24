@@ -143,3 +143,26 @@ func TestSignKeepsResourceDirWhenReusingSlots(t *testing.T) {
 		t.Fatalf("special slots = %+v, want 3 with the resource directory hash in slot 3", slots)
 	}
 }
+
+func TestSignReusesFiveSlotSignature(t *testing.T) {
+	const ents = `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict/></plist>`
+	sign := func(previous []types.SpecialSlot) []types.SpecialSlot {
+		t.Helper()
+		config := &Config{ID: "com.example.hello", Flags: types.ADHOC, Entitlements: []byte(ents), SpecialSlots: previous}
+		config.InitSlotHashes()
+		sig, err := Sign(bytes.NewReader(nil), config)
+		if err != nil {
+			t.Fatalf("Sign() error = %v", err)
+		}
+		cs, err := ParseCodeSignature(sig)
+		if err != nil {
+			t.Fatalf("ParseCodeSignature() error = %v", err)
+		}
+		return cs.CodeDirectories[0].SpecialSlots
+	}
+	first := sign(nil)
+	second := sign(first)
+	if len(second) != 5 || !bytes.Equal(second[0].Hash, first[0].Hash) {
+		t.Fatalf("re-signed special slots = %+v, want the 5 slots of %+v", second, first)
+	}
+}

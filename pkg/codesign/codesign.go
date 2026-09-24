@@ -528,12 +528,10 @@ func Sign(r io.Reader, config *Config) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to hash entitlements plist blob: %v", err)
 		}
-		if len(config.SpecialSlots) >= 5 { // if we have previous entitlements plist hash, verify it against the new one
-			if len(config.SpecialSlots[2].Hash) > 0 && !bytes.Equal(config.SpecialSlots[2].Hash, config.SlotHashes.Entitlements) {
-				return nil, fmt.Errorf("previous and calulated entitlements plist hashes do not match")
-			}
+		if prev := previousSlotHash(config.SpecialSlots, types.CSSLOT_ENTITLEMENTS); prev != nil && !bytes.Equal(prev, config.SlotHashes.Entitlements) {
+			return nil, fmt.Errorf("previous and calulated entitlements plist hashes do not match")
 		}
-		if len(config.EntitlementsDER) == 0 && (len(config.SpecialSlots) < 7 || bytes.Equal(config.SpecialSlots[0].Hash, types.EmptySha256Slot)) {
+		if len(config.EntitlementsDER) == 0 && previousSlotHash(config.SpecialSlots, types.CSSLOT_ENTITLEMENTS_DER) == nil {
 			config.NSpecialSlots = 5
 		} else {
 			entDerBlob = types.NewBlob(types.MAGIC_EMBEDDED_ENTITLEMENTS_DER, config.EntitlementsDER)
@@ -541,10 +539,8 @@ func Sign(r io.Reader, config *Config) ([]byte, error) {
 			if err != nil {
 				return nil, fmt.Errorf("failed to hash entitlements asn1/der blob: %v", err)
 			}
-			if len(config.SpecialSlots) >= 7 { // if we have previous entitlements asn1/der hash, verify it against the new one
-				if len(config.SpecialSlots[0].Hash) > 0 && !bytes.Equal(config.SpecialSlots[0].Hash, config.SlotHashes.EntitlementsDER) {
-					return nil, fmt.Errorf("previous and calulated entitlements asn1/der hashes do not match")
-				}
+			if prev := previousSlotHash(config.SpecialSlots, types.CSSLOT_ENTITLEMENTS_DER); prev != nil && !bytes.Equal(prev, config.SlotHashes.EntitlementsDER) {
+				return nil, fmt.Errorf("previous and calulated entitlements asn1/der hashes do not match")
 			}
 		}
 	}
@@ -615,6 +611,21 @@ func EstimateCodeSignatureSize(config *Config) uint64 {
 	return uint64(cdHeaderSize + cdVariableSize + extraSlotsSize + sigSize)
 }
 
+// previousSlotHash returns the hash the previous signature bound to slot, or
+// nil if that signature had no such slot or left it unbound (all zeros).
+func previousSlotHash(slots []types.SpecialSlot, slot types.SlotType) []byte {
+	for _, s := range slots {
+		if s.Index != uint32(slot) {
+			continue
+		}
+		if bytes.Equal(s.Hash, make([]byte, len(s.Hash))) {
+			return nil
+		}
+		return s.Hash
+	}
+	return nil
+}
+
 func createCodeDirectory(r io.Reader, config *Config) (*bytes.Buffer, error) {
 	var cddelta int
 	var cdbuf bytes.Buffer
@@ -626,10 +637,8 @@ func createCodeDirectory(r io.Reader, config *Config) (*bytes.Buffer, error) {
 			return nil, fmt.Errorf("failed to hash Info.plist: %v", err)
 		}
 		config.SlotHashes.InfoPlist = h.Sum(nil)
-		if len(config.SpecialSlots) >= 1 {
-			if len(config.SpecialSlots[len(config.SpecialSlots)-1].Hash) > 0 && !bytes.Equal(config.SpecialSlots[len(config.SpecialSlots)-1].Hash, config.SlotHashes.InfoPlist) {
-				return nil, fmt.Errorf("previous and calulated Info.plist hashes do not match")
-			}
+		if prev := previousSlotHash(config.SpecialSlots, types.CSSLOT_INFOSLOT); prev != nil && !bytes.Equal(prev, config.SlotHashes.InfoPlist) {
+			return nil, fmt.Errorf("previous and calulated Info.plist hashes do not match")
 		}
 	}
 
