@@ -508,6 +508,10 @@ func Sign(r io.Reader, config *Config) ([]byte, error) {
 	}
 
 	config.NSpecialSlots = uint32(2)
+	if len(config.SlotHashes.ResourceDir) > 0 && !bytes.Equal(config.SlotHashes.ResourceDir, types.EmptySha256Slot) {
+		config.NSpecialSlots++
+	}
+
 	if len(config.SpecialSlots) > 0 {
 		config.NSpecialSlots = uint32(len(config.SpecialSlots))
 	}
@@ -525,7 +529,7 @@ func Sign(r io.Reader, config *Config) ([]byte, error) {
 				return nil, fmt.Errorf("previous and calulated entitlements plist hashes do not match")
 			}
 		}
-		if len(config.EntitlementsDER) == 0 && bytes.Equal(config.SpecialSlots[0].Hash, types.EmptySha256Slot) {
+		if len(config.EntitlementsDER) == 0 && (len(config.SpecialSlots) < 7 || bytes.Equal(config.SpecialSlots[0].Hash, types.EmptySha256Slot)) {
 			config.NSpecialSlots = 5
 		} else {
 			entDerBlob = types.NewBlob(types.MAGIC_EMBEDDED_ENTITLEMENTS_DER, config.EntitlementsDER)
@@ -736,35 +740,20 @@ func createCodeDirectory(r io.Reader, config *Config) (*bytes.Buffer, error) {
 			return nil, fmt.Errorf("failed to write team identifier %s: %v", config.TeamID, err)
 		}
 	}
-	if len(config.Entitlements) > 0 {
-		// write CodeDirectory Entitlements ASN1/DER slot hash
-		if _, err := cdbuf.Write(config.SlotHashes.EntitlementsDER); err != nil {
-			return nil, fmt.Errorf("failed to write entitlements asn1/der hash: %v", err)
-		}
-		// write CodeDirectory DMG Specific slot hash
-		if _, err := cdbuf.Write(config.SlotHashes.DmgSpecific); err != nil {
-			return nil, fmt.Errorf("failed to write dmg specific hash: %v", err)
-		}
-		// write CodeDirectory Entitlements Plist slot hash
-		if _, err := cdbuf.Write(config.SlotHashes.Entitlements); err != nil {
-			return nil, fmt.Errorf("failed to write entitlements plist hash: %v", err)
-		}
-		// write CodeDirectory Application Specific slot hash
-		if _, err := cdbuf.Write(config.SlotHashes.AppSpecific); err != nil {
-			return nil, fmt.Errorf("failed to write app specific hash: %v", err)
-		}
-		// write CodeDirectory Resource Directory slot hash
-		if _, err := cdbuf.Write(config.SlotHashes.ResourceDir); err != nil {
-			return nil, fmt.Errorf("failed to write rsc dir hash: %v", err)
-		}
+	// write special slot hashes
+	specialSlots := [][]byte{
+		config.SlotHashes.EntitlementsDER,
+		config.SlotHashes.DmgSpecific,
+		config.SlotHashes.Entitlements,
+		config.SlotHashes.AppSpecific,
+		config.SlotHashes.ResourceDir,
+		config.SlotHashes.Requirements,
+		config.SlotHashes.InfoPlist,
 	}
-	// write CodeDirectory Requirements Blob slot hash
-	if _, err := cdbuf.Write(config.SlotHashes.Requirements); err != nil {
-		return nil, fmt.Errorf("failed to write requirements hash: %v", err)
-	}
-	// write CodeDirectory Bound Info.plist slot hash
-	if _, err := cdbuf.Write(config.SlotHashes.InfoPlist); err != nil {
-		return nil, fmt.Errorf("failed to write info.plist hash: %v", err)
+	for _, h := range specialSlots[len(specialSlots)-int(config.NSpecialSlots):] {
+		if _, err := cdbuf.Write(h); err != nil {
+			return nil, fmt.Errorf("failed to write special slot hashes: %v", err)
+		}
 	}
 	// write page hashes
 	var hashCount int
