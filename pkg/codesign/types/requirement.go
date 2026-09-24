@@ -529,9 +529,12 @@ func evalExpression(r *bytes.Reader, syntaxLevel int) (string, error) {
 	}
 }
 
-// evalRequirement evaluates the expressions in the body of one requirement blob.
-// Running out of bytes inside an expression is an error, not the end of the body.
+// evalRequirement evaluates the expression in the body of one requirement blob.
+// An empty body, or one that ends inside an expression, is io.ErrUnexpectedEOF.
 func evalRequirement(r *bytes.Reader) (string, error) {
+	if r.Len() == 0 {
+		return "", io.ErrUnexpectedEOF
+	}
 	var parts []string
 	for r.Len() > 0 {
 		part, err := evalExpression(r, slTop)
@@ -586,11 +589,38 @@ func requirementBody(payload []byte, indexEnd, offset uint64) ([]byte, error) {
 	return payload[offset : offset+uint64(hdr.Length)-headerSize], nil
 }
 
+// parseRequirement evaluates the requirement blob that entry points to and
+// returns it with its codesign prefix.
+func parseRequirement(payload []byte, indexEnd uint64, entry Requirements) (string, error) {
+	prefix, err := requirementPrefix(entry.Type)
+	if err != nil {
+		return "", err
+	}
+	body, err := requirementBody(payload, indexEnd, uint64(entry.Offset))
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", entry.Type, err)
+	}
+	detail, err := evalRequirement(bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("%s at offset %#x: %w", entry.Type, entry.Offset, err)
+	}
+	return prefix + detail, nil
+}
+
 // ParseRequirementSet decodes every requirement in a requirements set, given
-// the set's header and the bytes that follow it. Each requirement is evaluated
-// only from its own blob.
+// the set's header and the hdr.Length-12 bytes that follow it. Each
+// requirement is evaluated only from its own blob; a set with no entries
+// yields no requirements.
 // NOTE: codesign -d -r- MACHO (to display requirement sets)
 func ParseRequirementSet(hdr RequirementsBlob, payload []byte) ([]Requirement, error) {
+	headerSize := uint64(binary.Size(RequirementsBlob{}))
+	if hdr.Magic != MAGIC_REQUIREMENTS {
+		return nil, fmt.Errorf("invalid requirements set magic %s", hdr.Magic)
+	}
+	if uint64(hdr.Length) != headerSize+uint64(len(payload)) {
+		return nil, fmt.Errorf("requirements set length %d does not match its %d-byte header and %d-byte payload",
+			hdr.Length, headerSize, len(payload))
+	}
 	count := uint64(hdr.Data)
 	indexSize := count * uint64(binary.Size(Requirements{}))
 	if indexSize > uint64(len(payload)) {
@@ -600,24 +630,30 @@ func ParseRequirementSet(hdr RequirementsBlob, payload []byte) ([]Requirement, e
 	if err := binary.Read(bytes.NewReader(payload[:indexSize]), binary.BigEndian, entries); err != nil {
 		return nil, err
 	}
-	indexEnd := uint64(binary.Size(RequirementsBlob{})) + indexSize
 	reqs := make([]Requirement, 0, count)
 	for _, entry := range entries {
-		prefix, err := requirementPrefix(entry.Type)
+		detail, err := parseRequirement(payload, headerSize+indexSize, entry)
 		if err != nil {
 			return nil, err
 		}
-		body, err := requirementBody(payload, indexEnd, uint64(entry.Offset))
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", entry.Type, err)
-		}
-		detail, err := evalRequirement(bytes.NewReader(body))
-		if err != nil {
-			return nil, fmt.Errorf("%s at offset %#x: %w", entry.Type, entry.Offset, err)
-		}
-		reqs = append(reqs, Requirement{RequirementsBlob: hdr, Requirements: entry, Detail: prefix + detail})
+		reqs = append(reqs, Requirement{RequirementsBlob: hdr, Requirements: entry, Detail: detail})
 	}
 	return reqs, nil
+}
+
+// ParseRequirements evaluates the single requirement that reqs points to. r
+// must hold the requirements set's bytes after its 12-byte header; its read
+// position is ignored.
+//
+// Deprecated: use ParseRequirementSet, which parses every requirement in a set.
+func ParseRequirements(r *bytes.Reader, reqs Requirements) (string, error) {
+	payload := make([]byte, r.Size())
+	if _, err := r.ReadAt(payload, 0); err != nil && len(payload) > 0 {
+		return "", err
+	}
+	// the caller has read at least this entry from the set's index
+	indexEnd := uint64(binary.Size(RequirementsBlob{}) + binary.Size(Requirements{}))
+	return parseRequirement(payload, indexEnd, reqs)
 }
 
 // CreateRequirements creates a requirements set cs blob

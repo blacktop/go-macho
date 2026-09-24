@@ -27,6 +27,12 @@ func embeddedSignature(t *testing.T, requirementsHex string) []byte {
 	return append(sig, reqs...)
 }
 
+// desLibSet is the requirements set from
+// `codesign -f -s - -r='designated => identifier "a" library => anchor apple'`.
+const desLibSet = "fade0c010000004400000002000000030000001c0000000400000034" +
+	"fade0c000000001800000001000000020000000161000000" +
+	"fade0c00000000100000000100000003"
+
 // Requirements blobs are copied from `codesign -f -s - -r='<type> => ...' <macho>`.
 // want matches `codesign -d -r-`, except go-macho omits "designated => " and quotes identifiers.
 func TestParseCodeSignatureRequirementTypes(t *testing.T) {
@@ -79,11 +85,18 @@ func TestParseCodeSignatureRequirementTypes(t *testing.T) {
 			wantErr:      "requirement data length 4294967295 exceeds",
 		},
 		{
-			name: "designated and library",
-			requirements: "fade0c010000004400000002000000030000001c0000000400000034" +
-				"fade0c000000001800000001000000020000000161000000" +
-				"fade0c00000000100000000100000003",
-			want: []string{`identifier "a"`, "library => anchor apple"},
+			name:         "designated and library",
+			requirements: desLibSet,
+			want:         []string{`identifier "a"`, "library => anchor apple"},
+		},
+		{
+			name:         "empty set",
+			requirements: "fade0c010000000c00000000",
+		},
+		{
+			name:         "requirement with no expression",
+			requirements: "fade0c0100000020000000010000000500000014fade0c000000000c00000001",
+			wantErr:      "unexpected EOF",
 		},
 		{
 			// "anchor apple and" with the second operand missing
@@ -212,5 +225,39 @@ func TestSignComparesPreviousInfoPlist(t *testing.T) {
 				t.Fatalf("Sign() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestParseRequirementSetChecksHeader(t *testing.T) {
+	set, err := hex.DecodeString(desLibSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := set[12:]
+	tests := []struct {
+		name string
+		hdr  types.RequirementsBlob
+	}{
+		{name: "length shorter than payload", hdr: types.RequirementsBlob{Magic: types.MAGIC_REQUIREMENTS, Length: 12, Data: 2}},
+		{name: "requirement magic", hdr: types.RequirementsBlob{Magic: types.MAGIC_REQUIREMENT, Length: uint32(len(set)), Data: 2}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if reqs, err := types.ParseRequirementSet(tt.hdr, payload); err == nil {
+				t.Fatalf("ParseRequirementSet() = %+v, want an error", reqs)
+			}
+		})
+	}
+}
+
+func TestParseRequirementsReadsOnlyItsBlob(t *testing.T) {
+	set, err := hex.DecodeString(desLibSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := types.Requirements{Type: types.DesignatedRequirementType, Offset: 0x1c}
+	got, err := types.ParseRequirements(bytes.NewReader(set[12:]), entry) //nolint:staticcheck // SA1019: tests the deprecated wrapper itself
+	if err != nil || got != `identifier "a"` {
+		t.Fatalf("ParseRequirements() = %q, %v, want %q", got, err, `identifier "a"`)
 	}
 }

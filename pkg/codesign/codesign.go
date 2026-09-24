@@ -133,9 +133,6 @@ func ParseCodeSignature(cmddat []byte) (*CodeSignature, error) {
 			if err := binary.Read(r, binary.BigEndian, &hdr); err != nil {
 				return nil, err
 			}
-			if hdr.Magic != types.MAGIC_REQUIREMENTS {
-				return nil, fmt.Errorf("invalid CSSLOT_REQUIREMENTS blob magic: %s", hdr.Magic)
-			}
 			datLen, err := payloadLen(hdr.Length, binary.Size(types.RequirementsBlob{}), index.Offset)
 			if err != nil {
 				return nil, err
@@ -146,10 +143,7 @@ func ParseCodeSignature(cmddat []byte) (*CodeSignature, error) {
 			}
 			reqs, err := types.ParseRequirementSet(hdr, reqData)
 			if err != nil {
-				return nil, err
-			}
-			if len(reqs) == 0 {
-				reqs = append(reqs, types.Requirement{RequirementsBlob: hdr, Detail: "empty requirement set"})
+				return nil, fmt.Errorf("failed to parse CSSLOT_REQUIREMENTS: %w", err)
 			}
 			cs.Requirements = append(cs.Requirements, reqs...)
 		case types.CSSLOT_ENTITLEMENTS:

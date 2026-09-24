@@ -673,7 +673,9 @@ func TestNewFile(t *testing.T) {
 	fmt.Println(got.FileTOC.String())
 
 	if cs := got.CodeSignature(); cs != nil {
-		fmt.Println(cs.Requirements[0].Detail)
+		for _, req := range cs.Requirements {
+			fmt.Println(req.Detail)
+		}
 
 		if len(cs.LaunchConstraintsSelf) > 0 {
 			os.WriteFile("lc_self.bin", cs.LaunchConstraintsSelf, 0644)
