@@ -166,3 +166,31 @@ func TestSignReusesFiveSlotSignature(t *testing.T) {
 		t.Fatalf("re-signed special slots = %+v, want the 5 slots of %+v", second, first)
 	}
 }
+
+func TestSignComparesPreviousInfoPlist(t *testing.T) {
+	tests := []struct {
+		name    string
+		slot1   []byte
+		wantErr bool
+	}{
+		{name: "unbound", slot1: make([]byte, 32)},
+		{name: "different bound hash", slot1: bytes.Repeat([]byte{1}, 32), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &Config{
+				ID:        "com.example.hello",
+				Flags:     types.ADHOC,
+				InfoPlist: []byte(`<plist version="1.0"><dict/></plist>`),
+				SpecialSlots: []types.SpecialSlot{
+					{Index: uint32(types.CSSLOT_REQUIREMENTS), Hash: types.EmptySha256ReqSlot},
+					{Index: uint32(types.CSSLOT_INFOSLOT), Hash: tt.slot1},
+				},
+			}
+			config.InitSlotHashes()
+			if _, err := Sign(bytes.NewReader(nil), config); (err != nil) != tt.wantErr {
+				t.Fatalf("Sign() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
