@@ -542,27 +542,28 @@ func evalRequirementSet(r *bytes.Reader) (string, error) {
 // ParseRequirements parses the requirements set bytes
 func ParseRequirements(r *bytes.Reader, reqs Requirements) (string, error) {
 	// NOTE: codesign -d -r- MACHO (to display requirement sets)
+	var prefix string
+	switch reqs.Type {
+	case DesignatedRequirementType: // bare, without codesign's "designated => "
+	case HostRequirementType:
+		prefix = "host => "
+	case GuestRequirementType:
+		prefix = "guest => "
+	case LibraryRequirementType:
+		prefix = "library => "
+	case PluginRequirementType:
+		prefix = "plugin => "
+	default:
+		return "", fmt.Errorf("failed to dump requirements set; found unsupported codesign requirement type '%s', please notify author", reqs.Type)
+	}
+
 	r.Seek(int64(reqs.Offset), io.SeekStart)
 
 	reqSet, err := evalRequirementSet(r)
 	if err != nil {
 		return "", err
 	}
-
-	switch reqs.Type {
-	case DesignatedRequirementType:
-		return reqSet, nil
-	case HostRequirementType:
-		return "host => " + reqSet, nil
-	case GuestRequirementType:
-		return "guest => " + reqSet, nil
-	case LibraryRequirementType:
-		return "library => " + reqSet, nil
-	case PluginRequirementType:
-		return "plugin => " + reqSet, nil
-	default:
-		return "", fmt.Errorf("failed to dump requirements set; found unsupported codesign requirement type '%s', please notify author", reqs.Type)
-	}
+	return prefix + reqSet, nil
 }
 
 // CreateRequirements creates a requirements set cs blob
