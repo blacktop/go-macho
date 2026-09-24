@@ -176,17 +176,22 @@ func getData(r *bytes.Reader) ([]byte, error) {
 		return nil, err
 	}
 
-	// 4 byte align length
-	alignedLength := uint32(mtypes.RoundUp(uint64(idLength), 4))
+	if int64(idLength) > int64(r.Len()) {
+		return nil, fmt.Errorf("requirement data length %d exceeds the %d bytes left", idLength, r.Len())
+	}
 
-	data := make([]byte, alignedLength)
-
-	_, err = r.Read(data)
-	if err != nil {
+	data := make([]byte, idLength)
+	if _, err := io.ReadFull(r, data); err != nil {
 		return nil, err
 	}
 
-	return data[:idLength], nil
+	// skip padding to 4 byte alignment; a blob may end without it
+	padding := int64(mtypes.RoundUp(uint64(idLength), 4)) - int64(idLength)
+	if _, err := r.Seek(padding, io.SeekCurrent); err != nil {
+		return nil, err
+	}
+
+	return data, nil
 }
 
 func getMatch(r *bytes.Reader) (string, error) {

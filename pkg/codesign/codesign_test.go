@@ -72,6 +72,11 @@ func TestParseCodeSignatureRequirementTypes(t *testing.T) {
 			requirements: "fade0c0100000026000000010000000600000014fade0c00000000120000000100000003" + "0000",
 			wantErr:      "unsupported codesign requirement type 'RequirementType(6)'",
 		},
+		{
+			name:         "identifier length past the end",
+			requirements: "fade0c010000002c000000010000000300000014fade0c00000000180000000100000002ffffffff00000000",
+			wantErr:      "requirement data length 4294967295 exceeds",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
