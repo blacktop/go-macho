@@ -2118,22 +2118,15 @@ func (f *File) GetCStrings() (map[string]map[string]uint64, error) {
 			section := fmt.Sprintf("%s.%s", sec.Seg, sec.Name)
 			strs[section] = make(map[string]uint64)
 
-			csr := bytes.NewBuffer(dat)
-
-			for {
-				pos := sec.Addr + uint64(csr.Cap()-csr.Len())
-
-				s, err := csr.ReadString('\x00')
-
-				if err == io.EOF {
+			text := string(dat)
+			for off := 0; off < len(text); {
+				end := strings.IndexByte(text[off:], 0)
+				if end < 0 {
 					break
 				}
-
-				if err != nil {
-					return nil, fmt.Errorf("failed to read string: %v", err)
-				}
-
-				s = strings.Trim(s, "\x00")
+				pos := sec.Addr + uint64(off)
+				s := text[off : off+end]
+				off += end + 1
 
 				if len(s) > 0 {
 					// Check if string contains printable characters (including Unicode like emojis)

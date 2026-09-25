@@ -1348,3 +1348,71 @@ func BenchmarkGetCString(b *testing.B) {
 		}
 	}
 }
+
+// Both benchmarks use the same real Mach-O and include all returned strings.
+func openCStringBenchmark(b *testing.B) *File {
+	b.Helper()
+	for _, path := range []string{"/usr/bin/plutil", "/usr/bin/defaults", "/usr/bin/security"} {
+		f, err := Open(path)
+		var closeFile func() error
+		if err == nil {
+			closeFile = f.Close
+		} else {
+			fat, err := OpenFat(path)
+			if err != nil {
+				continue
+			}
+			if len(fat.Arches) == 0 {
+				_ = fat.Close()
+				continue
+			}
+			f, closeFile = fat.Arches[0].File, fat.Close
+		}
+		if f.Section("__TEXT", "__cstring") != nil && (f.Section("__DATA", "__cfstring") != nil || f.Section("__DATA_CONST", "__cfstring") != nil) {
+			b.Cleanup(func() { _ = closeFile() })
+			b.Logf("fixture: %s (%s)", path, f.CPU)
+			return f
+		}
+		_ = closeFile()
+	}
+	b.Skip("no on-disk macOS Mach-O with __TEXT.__cstring and __cfstring")
+	return nil
+}
+
+func BenchmarkGetCStrings(b *testing.B) {
+	f := openCStringBenchmark(b)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := f.GetCStrings(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkGetCFStrings(b *testing.B) {
+	f := openCStringBenchmark(b)
+	if _, err := f.GetCFStrings(); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := f.GetCFStrings(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestGetCStringsSectionText(t *testing.T) {
+	f := newCStringSectionFile(t)
+	got, err := f.GetCStrings()
+	want := map[string]map[string]uint64{"__TEXT.__cstring": {"hello": 0x10d, "世界 🌍": 0x113}, "__TEXT.__os_log": {"log": 0x180}}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, %v; want %#v", got, err, want)
+	}
+	f.cr = &cstringReader{Reader: bytes.NewReader(nil)}
+	if _, err := f.GetCStrings(); err == nil || err.Error() != "failed to read cstring data in __TEXT.__cstring: EOF" {
+		t.Fatalf("read error: %v", err)
+	}
+}

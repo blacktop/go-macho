@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/blacktop/go-macho/types"
@@ -335,5 +336,170 @@ func TestNormalizeSwiftIvarTypeEncoding(t *testing.T) {
 				t.Fatalf("normalizeSwiftIvarTypeEncoding(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+// An in-memory Mach-O model with C literals, os_log, and 64-bit CFString records.
+func newCStringSectionFile(t *testing.T) *File {
+	t.Helper()
+	f := newObjCTestFile(objcSection("__TEXT", "__cstring"), objcSection("__TEXT", "__os_log"), objcSection("__DATA", "__cfstring"))
+	f.ByteOrder = binary.LittleEndian
+	f.vma = &types.VMAddrConverter{Converter: func(addr uint64) uint64 { return addr }}
+	data := make([]byte, 0x400)
+	literal := "hello\x00\x00bad\x01\x00\x00hello\x00世界 🌍\x00tail"
+	copy(data[0x100:], literal)
+	copy(data[0x180:], "log\x00unfinished")
+	copy(data[0x1a0:], "outside\x00")
+	copy(data[0x1c0:], []byte{'A', 0, 0x3d, 0xd8, 0, 0xde})
+	f.Sections[0].Addr, f.Sections[0].Size, f.Sections[0].Flags = 0x100, uint64(len(literal)), types.CstringLiterals
+	f.Sections[1].Addr, f.Sections[1].Size = 0x180, 14
+	entries := []objc.CFString64Type{
+		{Info: objc.CFStringEncodingASCII, Data: 0x100, Length: 5},
+		{Info: objc.CFStringEncodingASCII, Data: 0x106},
+		{Info: objc.CFStringEncodingASCII, Data: 0x107, Length: 4},
+		{Info: objc.CFStringEncodingASCII, Data: 0x1a0, Length: 7},
+		{Info: objc.CFStringEncodingUnicode, Data: 0x1c0, Length: 3},
+		{Info: objc.CFStringEncodingASCII, Data: 0x102, Length: 1}, // Length does not bound C strings.
+	}
+	var records bytes.Buffer
+	if err := binary.Write(&records, f.ByteOrder, entries); err != nil {
+		t.Fatal(err)
+	}
+	copy(data[0x200:], records.Bytes())
+	f.Sections[2].Addr, f.Sections[2].Size = 0x200, uint64(records.Len())
+	f.cr = &cstringReader{Reader: bytes.NewReader(data)}
+	return f
+}
+
+func TestGetCFStringsSectionText(t *testing.T) {
+	f := newCStringSectionFile(t)
+	got, err := f.GetCFStrings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"hello", "", "bad\x01", "outside", "A😀", "llo"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d strings", len(got))
+	}
+	for i, s := range got {
+		if s.Name != want[i] || s.Address != 0x200+uint64(i*32) {
+			t.Fatalf("entry %d: %#v", i, s)
+		}
+	}
+}
+
+func TestGetCFStringsSectionFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(*File)
+	}{
+		{"terminator outside section", func(f *File) { f.Sections[0].Size = 3 }},
+		{"unreadable whole section", func(f *File) { f.Sections[0].Size = 0x1000 }},
+		{"nonliteral section", func(f *File) { f.Sections[0].Flags = 0 }},
+		{"UTF16 inside literal section", func(f *File) { f.Sections[0].Size = 0x100 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newCStringSectionFile(t)
+			tc.change(f)
+			got, err := f.GetCFStrings()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, s := range got {
+				var want string
+				if s.IsUTF16() {
+					want, err = f.getUTF16String(s.Data, s.Length)
+				} else {
+					want, err = f.GetCString(s.Data)
+				}
+				if err != nil || s.Name != want {
+					t.Fatalf("at %#x got %q, want %q (%v)", s.Data, s.Name, want, err)
+				}
+			}
+		})
+	}
+}
+
+type cstringSectionReadCounter struct {
+	*cstringReader
+	sectionReads int
+}
+
+func (r *cstringSectionReadCounter) ReadAtAddr(p []byte, addr uint64) (int, error) {
+	if addr == 0x100 && len(p) < 0x1000 {
+		r.sectionReads++
+	}
+	return r.cstringReader.ReadAtAddr(p, addr)
+}
+
+func TestGetCFStringsSectionReadOnce(t *testing.T) {
+	f := newCStringSectionFile(t)
+	r := &cstringSectionReadCounter{cstringReader: f.cr.(*cstringReader)}
+	f.cr = r
+	for call := 1; call <= 2; call++ {
+		if _, err := f.GetCFStrings(); err != nil {
+			t.Fatal(err)
+		}
+		if r.sectionReads != call {
+			t.Fatalf("after call %d, section reads = %d", call, r.sectionReads)
+		}
+	}
+}
+
+func TestGetCFStringsSectionErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		addr uint64
+		want string
+	}{
+		{"zero", 0, "unhandled cstring parse case where data is 0"},
+		{"unmapped", 0x500, "failed to read cfstring: " + ErrCStringNotFound.Error() + " at address 0x500"},
+		{"unterminated", 0x3fc, "failed to read cfstring: " + ErrCStringNoTerminator.Error() + " at address 0x3fc"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newCStringSectionFile(t)
+			data := make([]byte, 0x400)
+			if _, err := f.cr.ReadAtAddr(data, 0); err != nil {
+				t.Fatal(err)
+			}
+			f.ByteOrder.PutUint64(data[0x210:], tc.addr)
+			copy(data[0x3fc:], "tail")
+			f.cr = &cstringReader{Reader: bytes.NewReader(data)}
+			if _, err := f.GetCFStrings(); err == nil || err.Error() != tc.want {
+				t.Fatalf("got %v; want %s", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestGetCFStringsBigEndianRecords(t *testing.T) {
+	f := newCStringSectionFile(t)
+	want, err := f.GetCFStrings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := make([]byte, 0x400)
+	if _, err := f.cr.ReadAtAddr(data, 0); err != nil {
+		t.Fatal(err)
+	}
+	var records bytes.Buffer
+	for _, s := range want {
+		if err := binary.Write(&records, binary.BigEndian, s.CFString64Type); err != nil {
+			t.Fatal(err)
+		}
+	}
+	copy(data[0x200:], records.Bytes())
+	// Swap the UTF-16 code units along with the record byte order.
+	for i := 0x1c0; i < 0x1c6; i += 2 {
+		data[i], data[i+1] = data[i+1], data[i]
+	}
+	f.ByteOrder = binary.BigEndian
+	f.cr = &cstringReader{Reader: bytes.NewReader(data)}
+	got, err := f.GetCFStrings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v; want %#v", got, want)
 	}
 }

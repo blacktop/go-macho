@@ -1801,6 +1801,39 @@ func (f *File) GetCFStrings() ([]objc.CFString, error) {
 	var err error
 	var cfstrings []objc.CFString
 
+	// Cache only for this call. A failed section read also gets cached so that
+	// subsequent entries use the existing address reader without retrying it.
+	texts := make(map[*types.Section]string)
+	readCString := func(addr uint64) (string, error) {
+		for _, sec := range f.Sections {
+			if !sec.Flags.IsCstringLiterals() || addr < sec.Addr || addr-sec.Addr >= sec.Size {
+				continue
+			}
+			text, ok := texts[sec]
+			if !ok {
+				dat := make([]byte, sec.Size)
+				if n, err := f.cr.ReadAtAddr(dat, sec.Addr); err == nil && n == len(dat) {
+					text = string(dat)
+				}
+				texts[sec] = text
+			}
+			off := addr - sec.Addr
+			if off < uint64(len(text)) {
+				tail := text[off:]
+				// Match GetCString's 1 MiB limit; preserve its errors and
+				// cross-section reads by falling back when no NUL is found.
+				if len(tail) > 1<<20 {
+					tail = tail[:1<<20]
+				}
+				if end := strings.IndexByte(tail, 0); end >= 0 {
+					return tail[:end], nil
+				}
+			}
+			break
+		}
+		return f.GetCString(addr)
+	}
+
 	for _, s := range f.Segments() {
 		if sec := f.Section(s.Name, "__cfstring"); sec != nil {
 			if err := f.cr.SeekToAddr(sec.Addr); err != nil {
@@ -1812,12 +1845,15 @@ func (f *File) GetCFStrings() ([]objc.CFString, error) {
 				return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 			}
 
-			r := bytes.NewReader(dat)
-
-			cfstrings = make([]objc.CFString, int(sec.Size)/binary.Size(objc.CFString64Type{}))
+			const recordSize = 32 // Four uint64 fields in CFString64Type.
+			cfstrings = make([]objc.CFString, len(dat)/recordSize)
 			for idx := range cfstrings {
-				if err := binary.Read(r, f.ByteOrder, &cfstrings[idx].CFString64Type); err != nil {
-					return nil, fmt.Errorf("failed to read %T structs: %v", cfstrings[idx].CFString64Type, err)
+				record := dat[idx*recordSize : (idx+1)*recordSize]
+				cfstrings[idx].CFString64Type = objc.CFString64Type{
+					IsaVMAddr: f.ByteOrder.Uint64(record[0:8]),
+					Info:      f.ByteOrder.Uint64(record[8:16]),
+					Data:      f.ByteOrder.Uint64(record[16:24]),
+					Length:    f.ByteOrder.Uint64(record[24:32]),
 				}
 			}
 
@@ -1839,7 +1875,7 @@ func (f *File) GetCFStrings() ([]objc.CFString, error) {
 				if cfstrings[idx].CFString64Type.IsUTF16() {
 					cfstrings[idx].Name, err = f.getUTF16String(cfstrings[idx].Data, cfstrings[idx].Length)
 				} else {
-					cfstrings[idx].Name, err = f.GetCString(cfstrings[idx].Data)
+					cfstrings[idx].Name, err = readCString(cfstrings[idx].Data)
 				}
 				if err != nil {
 					return nil, fmt.Errorf("failed to read cfstring: %v", err)
