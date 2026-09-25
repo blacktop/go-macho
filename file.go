@@ -78,7 +78,7 @@ var ErrMachONoBindInfo = errors.New("MachO does not contain bind information (fi
 var ErrCStringNoTerminator = errors.New("cstring has no terminator")
 var ErrCStringNotFound = errors.New("cstring not found")
 
-// cstringBufPool reuses 4 KiB read buffers in GetCString to avoid hammering
+// cstringBufPool reuses 4 KiB read buffers in the C-string readers to avoid hammering
 // the allocator's mcentral lock when many goroutines read C strings concurrently.
 var cstringBufPool = sync.Pool{
 	New: func() any {
@@ -2031,10 +2031,10 @@ func (f *File) GetCString(addr uint64) (string, error) {
 		if n > 0 {
 			nullIdx := bytes.IndexByte(buf[:n], 0)
 			if nullIdx >= 0 {
-				out = append(out, buf[:nullIdx]...)
 				if len(out) == 0 {
-					return "", nil
+					return string(buf[:nullIdx]), nil
 				}
+				out = append(out, buf[:nullIdx]...)
 				return string(out), nil
 			}
 			out = append(out, buf[:n]...)
@@ -2079,11 +2079,29 @@ func (f *File) getUTF16String(addr, charCount uint64) (string, error) {
 	if _, err := f.cr.ReadAtAddr(buf, addr); err != nil {
 		return "", fmt.Errorf("failed to read UTF-16 string at address %#x: %w", addr, err)
 	}
-	codes := make([]uint16, charCount)
-	for i := range codes {
-		codes[i] = f.ByteOrder.Uint16(buf[i*2:])
+	var out strings.Builder
+	// A code unit needs at most three UTF-8 bytes; a surrogate pair needs four.
+	out.Grow(int(charCount) * 3)
+	for i := 0; i < len(buf); i += 2 {
+		code := f.ByteOrder.Uint16(buf[i:])
+		r := rune(code)
+		switch {
+		case code >= 0xd800 && code <= 0xdbff:
+			if i+2 < len(buf) {
+				next := f.ByteOrder.Uint16(buf[i+2:])
+				if next >= 0xdc00 && next <= 0xdfff {
+					r = utf16.DecodeRune(r, rune(next))
+					i += 2
+					break
+				}
+			}
+			r = unicode.ReplacementChar
+		case code >= 0xdc00 && code <= 0xdfff:
+			r = unicode.ReplacementChar
+		}
+		out.WriteRune(r)
 	}
-	return string(utf16.Decode(codes)), nil
+	return out.String(), nil
 }
 
 func (f *File) GetCStrings() (map[string]map[string]uint64, error) {
@@ -2139,12 +2157,11 @@ func (f *File) GetCStrings() (map[string]map[string]uint64, error) {
 
 // GetCStringAtOffset returns a c-string at a given offset into the MachO
 func (f *File) GetCStringAtOffset(strOffset int64) (string, error) {
-	const (
-		chunkSize = 0x1000  // 4 KiB per read attempt
-		maxLength = 1 << 20 // 1 MiB safety cap
-	)
+	const maxLength = 1 << 20 // 1 MiB safety cap
 
-	buf := make([]byte, chunkSize)
+	bp := cstringBufPool.Get().(*[]byte)
+	buf := *bp
+	defer cstringBufPool.Put(bp)
 	var out []byte
 	current := strOffset
 
@@ -2153,10 +2170,10 @@ func (f *File) GetCStringAtOffset(strOffset int64) (string, error) {
 		if n > 0 {
 			nullIdx := bytes.IndexByte(buf[:n], 0)
 			if nullIdx >= 0 {
-				out = append(out, buf[:nullIdx]...)
 				if len(out) == 0 {
-					return "", nil
+					return string(buf[:nullIdx]), nil
 				}
+				out = append(out, buf[:nullIdx]...)
 				return string(out), nil
 			}
 			out = append(out, buf[:n]...)

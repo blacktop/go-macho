@@ -1156,3 +1156,195 @@ func TestNewFileWithObjC(t *testing.T) {
 		}
 	}
 }
+
+// cstringReader maps virtual addresses directly to in-memory offsets.
+type cstringReader struct {
+	*bytes.Reader
+	chunk   int
+	readErr error
+	stall   bool
+}
+
+func (r *cstringReader) SeekToAddr(addr uint64) error {
+	_, err := r.Seek(int64(addr), io.SeekStart)
+	return err
+}
+
+func (r *cstringReader) ReadAt(p []byte, off int64) (int, error) {
+	if r.stall || r.readErr != nil {
+		return 0, r.readErr
+	}
+	if r.chunk > 0 && len(p) > r.chunk {
+		p = p[:r.chunk]
+	}
+	return r.Reader.ReadAt(p, off)
+}
+
+func (r *cstringReader) ReadAtAddr(p []byte, addr uint64) (int, error) {
+	return r.ReadAt(p, int64(addr))
+}
+
+func TestCStringReaders(t *testing.T) {
+	readFailure := errors.New("read failure")
+	for _, tc := range []struct {
+		name    string
+		data    string
+		want    string
+		err     error
+		chunk   int
+		stall   bool
+		readErr error
+	}{
+		{name: "empty", data: "\x00"},
+		{name: "short", data: "hello\x00ignored", want: "hello"},
+		{name: "last byte of chunk", data: strings.Repeat("x", 4095) + "\x00", want: strings.Repeat("x", 4095)},
+		{name: "chunk boundary", data: strings.Repeat("x", 4096) + "\x00", want: strings.Repeat("x", 4096)},
+		{name: "multiple chunks", data: strings.Repeat("x", 9000) + "\x00", want: strings.Repeat("x", 9000)},
+		{name: "short reads", data: "hello world\x00", want: "hello world", chunk: 3},
+		{name: "cap terminator", data: strings.Repeat("x", (1<<20)-1) + "\x00", want: strings.Repeat("x", (1<<20)-1)},
+		{name: "past cap", data: strings.Repeat("x", 1<<20) + "\x00", err: ErrCStringNoTerminator},
+		{name: "missing", err: ErrCStringNotFound},
+		{name: "unterminated", data: "hello", err: ErrCStringNoTerminator},
+		{name: "unterminated chunk", data: strings.Repeat("x", 4096), err: ErrCStringNoTerminator},
+		{name: "stalled", stall: true, err: ErrCStringNotFound},
+		{name: "read error", readErr: readFailure, err: readFailure},
+	} {
+		for _, offset := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/offset=%t", tc.name, offset), func(t *testing.T) {
+				f := &File{cr: &cstringReader{Reader: bytes.NewReader([]byte("pad" + tc.data)), chunk: tc.chunk, stall: tc.stall, readErr: tc.readErr}}
+				var got string
+				var err error
+				location := "address"
+				if offset {
+					location = "offset"
+					got, err = f.GetCStringAtOffset(3)
+				} else {
+					got, err = f.GetCString(3)
+				}
+				if got != tc.want || !errors.Is(err, tc.err) {
+					t.Fatalf("got %q, %v; want string length %d, %v", got, err, len(tc.want), tc.err)
+				}
+				if tc.err != nil {
+					wantErr := fmt.Sprintf("%s at %s 0x3", tc.err, location)
+					if tc.readErr != nil {
+						wantErr = fmt.Sprintf("failed to read at %s 0x3: %s", location, tc.err)
+					}
+					if err.Error() != wantErr {
+						t.Fatalf("error = %q; want %q", err, wantErr)
+					}
+				}
+				// Reusing a pooled buffer must not change a returned string.
+				if tc.err == nil {
+					f.cr = &cstringReader{Reader: bytes.NewReader([]byte("overwrite\x00"))}
+					_, _ = f.GetCString(0)
+					if got != tc.want {
+						t.Fatal("returned string changed after buffer reuse")
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestUTF16String(t *testing.T) {
+	for _, order := range []binary.ByteOrder{binary.LittleEndian, binary.BigEndian} {
+		for _, tc := range []struct {
+			name  string
+			codes []uint16
+			want  string
+		}{
+			{"empty", nil, ""},
+			{"text", []uint16{'A', 0, 0xe9, 0x4e2d}, "A\x00é中"},
+			{"pair", []uint16{0xd83d, 0xde00}, "😀"},
+			{"invalid", []uint16{0xd800, 'A', 0xdc00, 0xd800}, "�A��"},
+			{"adjacent pairs", []uint16{0xd800, 0xd83d, 0xde00, 0xdc00}, "�😀�"},
+		} {
+			t.Run(fmt.Sprintf("%s/%s", order, tc.name), func(t *testing.T) {
+				data := make([]byte, len(tc.codes)*2)
+				for i, code := range tc.codes {
+					order.PutUint16(data[i*2:], code)
+				}
+				f := &File{cr: &cstringReader{Reader: bytes.NewReader(data)}}
+				f.ByteOrder = order
+				got, err := f.getUTF16String(0, uint64(len(tc.codes)))
+				if err != nil || got != tc.want {
+					t.Fatalf("got %q, %v; want %q", got, err, tc.want)
+				}
+			})
+		}
+	}
+	f := &File{cr: &cstringReader{Reader: bytes.NewReader(nil)}}
+	f.ByteOrder = binary.LittleEndian
+	if _, err := f.getUTF16String(0, 1); !errors.Is(err, io.EOF) || err.Error() != "failed to read UTF-16 string at address 0x0: EOF" {
+		t.Fatalf("read error: %v", err)
+	}
+	if _, err := f.getUTF16String(0, (1<<20)+1); err == nil || err.Error() != "implausible UTF-16 char count 1048577 at address 0x0" {
+		t.Fatalf("cap error: %v", err)
+	}
+	f.cr = &cstringReader{Reader: bytes.NewReader(make([]byte, 2<<20))}
+	if got, err := f.getUTF16String(0, 1<<20); err != nil || got != strings.Repeat("\x00", 1<<20) {
+		t.Fatalf("at cap: length=%d err=%v", len(got), err)
+	}
+}
+
+var benchmarkCString string
+
+// One operation reads every C string in the selected on-disk section.
+func BenchmarkGetCString(b *testing.B) {
+	var f *File
+	var closeFile func() error
+	var section *types.Section
+	for _, path := range []string{"/usr/bin/awk", "/usr/bin/strings", "/usr/bin/otool", "/usr/lib/dyld"} {
+		candidate, err := Open(path)
+		var closeCandidate func() error
+		if err == nil {
+			closeCandidate = candidate.Close
+		} else {
+			fat, fatErr := OpenFat(path)
+			if fatErr != nil {
+				continue
+			}
+			if len(fat.Arches) == 0 {
+				_ = fat.Close()
+				continue
+			}
+			candidate = fat.Arches[0].File
+			closeCandidate = fat.Close
+		}
+		if sec := candidate.Section("__TEXT", "__cstring"); sec != nil && sec.Size > 0 {
+			f, closeFile, section = candidate, closeCandidate, sec
+			b.Logf("fixture: %s (%s), section bytes: %d", path, f.CPU, sec.Size)
+			break
+		}
+		_ = closeCandidate()
+	}
+	if f == nil {
+		b.Skip("no on-disk macOS Mach-O with __TEXT.__cstring available")
+	}
+	defer closeFile()
+	data, err := section.Data()
+	if err != nil {
+		b.Fatal(err)
+	}
+	var addresses []uint64
+	for off := 0; off < len(data); {
+		n := bytes.IndexByte(data[off:], 0)
+		if n < 0 {
+			b.Fatal("unterminated __cstring section")
+		}
+		addresses = append(addresses, section.Addr+uint64(off))
+		off += n + 1
+	}
+	b.ReportAllocs()
+	b.SetBytes(int64(len(data)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, addr := range addresses {
+			s, err := f.GetCString(addr)
+			if err != nil {
+				b.Fatal(err)
+			}
+			benchmarkCString = s
+		}
+	}
+}

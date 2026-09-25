@@ -565,7 +565,11 @@ type Thread struct {
 }
 
 func (t *Thread) LoadSize() uint32 {
-	return uint32(binary.Size(t.ThreadCmd))
+	size := uint32(binary.Size(t.ThreadCmd))
+	for _, thread := range t.Threads {
+		size += 8 + uint32(len(thread.Data)) // flavor, count, and state bytes
+	}
+	return size
 }
 func (t *Thread) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if err := binary.Write(buf, o, t.ThreadCmd); err != nil {
