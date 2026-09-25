@@ -248,26 +248,30 @@ func ParseTrieExports(r *bytes.Reader, loadAddress uint64) ([]TrieExport, error)
 
 func ParseTrie(r *bytes.Reader) ([]Node, error) {
 	data := make([]byte, 0, 32768)
-	return parseTrie(r, 0, data)
+	var output []Node
+	if err := parseTrie(r, 0, data, &output); err != nil {
+		return nil, err
+	}
+	return output, nil
 }
 
-func parseTrie(r *bytes.Reader, pos uint64, cummulativeString []byte) ([]Node, error) {
-
-	var output []Node
+// parseTrie appends the terminal nodes of the subtrie at pos to output: the
+// node's own terminal first, then each child's subtrie in edge order.
+func parseTrie(r *bytes.Reader, pos uint64, cummulativeString []byte, output *[]Node) error {
 
 	r.Seek(int64(pos), io.SeekStart)
 
 	terminalSize, err := ReadUleb128(r)
 	if err != nil {
-		return nil, fmt.Errorf("could not parse ULEB128 terminalSize value: %v", err)
+		return fmt.Errorf("could not parse ULEB128 terminalSize value: %v", err)
 	}
 
 	if terminalSize != 0 {
 		off, err := r.Seek(0, io.SeekCurrent)
 		if err != nil {
-			return nil, fmt.Errorf("could not get current offset: %v", err)
+			return fmt.Errorf("could not get current offset: %v", err)
 		}
-		output = append(output, Node{
+		*output = append(*output, Node{
 			Offset: uint64(off),
 			Data:   append([]byte{}, cummulativeString...),
 		})
@@ -277,7 +281,7 @@ func parseTrie(r *bytes.Reader, pos uint64, cummulativeString []byte) ([]Node, e
 
 	childrenRemaining, err := r.ReadByte()
 	if err != nil {
-		return nil, fmt.Errorf("could not read childrenRemaining value: %v", err)
+		return fmt.Errorf("could not read childrenRemaining value: %v", err)
 	}
 
 	for i := 0; i < int(childrenRemaining); i++ {
@@ -295,22 +299,19 @@ func parseTrie(r *bytes.Reader, pos uint64, cummulativeString []byte) ([]Node, e
 
 		childNodeOffset, err := ReadUleb128(r)
 		if err != nil {
-			return nil, fmt.Errorf("could not parse ULEB128 childNodeOffset value: %v", err)
+			return fmt.Errorf("could not parse ULEB128 childNodeOffset value: %v", err)
 		}
 
 		curr, _ := r.Seek(0, io.SeekCurrent)
 
-		nodes, err := parseTrie(r, childNodeOffset, append(cummulativeString, tmp...))
-		if err != nil {
-			return nil, fmt.Errorf("could not parse trie (recursive call): %v", err)
+		if err := parseTrie(r, childNodeOffset, append(cummulativeString, tmp...), output); err != nil {
+			return fmt.Errorf("could not parse trie (recursive call): %v", err)
 		}
 
 		r.Seek(curr, io.SeekStart) // reset the reader
-
-		output = append(output, nodes...)
 	}
 
-	return output, nil
+	return nil
 }
 
 func WalkTrie(r *bytes.Reader, symbol string) (uint64, error) {
