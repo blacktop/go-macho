@@ -1,9 +1,13 @@
 package macho
 
 import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/blacktop/go-macho/pkg/trie"
 	"github.com/blacktop/go-macho/types"
 )
 
@@ -346,5 +350,88 @@ func TestOptimizeLoadCommandsLeavesFunctionVariantsInCache(t *testing.T) {
 	}
 	if ff.Offset != 0x31100 {
 		t.Errorf("FunctionVariantFixups.Offset = %#x, want it unchanged (0x31100)", ff.Offset)
+	}
+}
+
+func TestExportIndirectSymbolPool(t *testing.T) {
+	for _, magic := range []types.Magic{types.Magic32, types.Magic64} {
+		for _, source := range []string{"symtab", "trie"} {
+			for _, target := range []string{"_target", ""} {
+				t.Run(fmt.Sprintf("%v/%s/target=%q", magic, source, target), func(t *testing.T) {
+					indirect := Symbol{Name: "_alias", IndirectName: target, Type: types.N_INDR | types.N_EXT, Value: 0x33b91352}
+					section := Symbol{Name: "_section", Type: types.N_SECT, Sect: 1, Desc: 0x20, Value: 0x12345678}
+					linkedit := &Segment{SegmentHeader: SegmentHeader{Name: "__LINKEDIT", Offset: 0x1000}}
+					f := &File{
+						FileTOC:  FileTOC{FileHeader: types.FileHeader{Magic: magic}, ByteOrder: binary.LittleEndian, Loads: loads{linkedit}},
+						Symtab:   &Symtab{Syms: []Symbol{indirect, section}},
+						Dysymtab: &Dysymtab{},
+					}
+					if source == "trie" {
+						f.Symtab.Syms = []Symbol{section}
+						f.Loads = append(f.Loads, &DyldExportsTrie{})
+						f.exp = []trie.TrieExport{{Name: indirect.Name, ReExport: target, Address: indirect.Value, Flags: types.EXPORT_SYMBOL_FLAGS_REEXPORT}}
+						f.cr = types.NewCustomSectionReader(bytes.NewReader([]byte{0}), nil, 0, 1)
+					}
+					data, err := f.optimizeLinkedit(nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if f.Symtab.Nsyms != 2 {
+						t.Fatalf("Nsyms = %d, want 2", f.Symtab.Nsyms)
+					}
+					poolStart := uint64(f.Symtab.Stroff) - linkedit.Offset
+					pool := data.Bytes()[poolStart : poolStart+uint64(f.Symtab.Strsize)]
+					wantPool := "\x00_section\x00_alias\x00" + target + "\x00"
+					wantPool += strings.Repeat("\x00", pointerAlignPad(len(wantPool), f.pointerSize()))
+					if string(pool) != wantPool {
+						t.Fatalf("pool = %q, want %q", pool, wantPool)
+					}
+					entries := bytes.NewReader(data.Bytes()[uint64(f.Symtab.Symoff)-linkedit.Offset : poolStart])
+					for i, sym := range []Symbol{section, indirect} {
+						var got types.Nlist64
+						if f.is64bit() {
+							err = binary.Read(entries, binary.LittleEndian, &got)
+						} else {
+							var entry types.Nlist32
+							err = binary.Read(entries, binary.LittleEndian, &entry)
+							got = types.Nlist64{Nlist: entry.Nlist, Value: uint64(entry.Value)}
+						}
+						if err != nil {
+							t.Fatal(err)
+						}
+						wantName := uint32(1)
+						if i == 1 {
+							wantName += uint32(len(section.Name) + 1)
+						}
+						wantHeader := types.Nlist{Name: wantName, Type: sym.Type, Sect: sym.Sect, Desc: sym.Desc}
+						if got.Nlist != wantHeader {
+							t.Fatalf("entry %d header = %+v, want %+v", i, got.Nlist, wantHeader)
+						}
+						if !sym.Type.IsIndirectSym() {
+							if got.Value != sym.Value {
+								t.Fatalf("section value = %#x, want %#x", got.Value, sym.Value)
+							}
+							continue
+						}
+						if got.Value >= uint64(len(pool)) {
+							t.Fatalf("indirect value %#x exceeds pool length %d", got.Value, len(pool))
+						}
+						name, _, terminated := bytes.Cut(pool[got.Value:], []byte{0})
+						if !terminated || string(name) != target {
+							t.Fatalf("indirect target = %q (terminated=%v), want %q", name, terminated, target)
+						}
+						if target == "" && got.Value != 0 {
+							t.Fatalf("unknown target value = %d, want 0", got.Value)
+						}
+					}
+					if f.Dysymtab.Nlocalsym != 1 || f.Dysymtab.Iextdefsym != 1 || f.Dysymtab.Nextdefsym != 1 || f.Dysymtab.Nundefsym != 0 {
+						t.Fatalf("unexpected symbol ordering: %+v", f.Dysymtab)
+					}
+					if source == "symtab" && f.Symtab.Syms[0] != indirect {
+						t.Fatal("source indirect symbol was mutated")
+					}
+				})
+			}
+		}
 	}
 }

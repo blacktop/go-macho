@@ -1103,7 +1103,7 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	// locals first, then external defined, then undefined.
 	type symEntry struct {
 		sym  Symbol
-		name string // includes re-export name if applicable
+		name string
 	}
 	var localSyms, extdefSyms, undefSyms []symEntry
 
@@ -1141,13 +1141,14 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 		if !exp.Flags.Regular() || exp.Flags.ReExport() {
 			extdefSyms = append(extdefSyms, symEntry{
 				sym: Symbol{
-					Name:  exp.Name,
-					Type:  (types.N_INDR | types.N_EXT),
-					Sect:  0,
-					Desc:  0,
-					Value: exp.Address,
+					Name:         exp.Name,
+					IndirectName: exp.ReExport,
+					Type:         (types.N_INDR | types.N_EXT),
+					Sect:         0,
+					Desc:         0,
+					Value:        exp.Address,
 				},
-				name: exp.Name + "\x00" + exp.ReExport,
+				name: exp.Name,
 			})
 		}
 	}
@@ -1159,8 +1160,7 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 	// first pool entry is always empty string
 	newSymNames.WriteString("\x00")
 	// write symbols in DYSYMTAB order: locals, external defined, undefined
-	// re-export entries encode both names as "name\x00reexport"; the trailing
-	// \x00 from the write call terminates the second name.
+	// Indirect symbols store their target name immediately after their own name.
 	writeSym := func(e symEntry) error {
 		nlist := types.Nlist{
 			Name: uint32(newSymNames.Len()),
@@ -1168,15 +1168,25 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 			Sect: e.sym.Sect,
 			Desc: e.sym.Desc,
 		}
+		name := e.name + "\x00"
+		value := e.sym.Value
+		if e.sym.Type.IsIndirectSym() {
+			// N_INDR values index the rebuilt pool, not the source string table.
+			value = 0
+			if e.sym.IndirectName != "" {
+				value = uint64(newSymNames.Len()) + uint64(len(name))
+			}
+			name += e.sym.IndirectName + "\x00"
+		}
 		// 32-bit files carry 12-byte nlist entries
-		var entry any = types.Nlist64{Nlist: nlist, Value: e.sym.Value}
+		var entry any = types.Nlist64{Nlist: nlist, Value: value}
 		if !f.is64bit() {
-			entry = types.Nlist32{Nlist: nlist, Value: uint32(e.sym.Value)}
+			entry = types.Nlist32{Nlist: nlist, Value: uint32(value)}
 		}
 		if err := binary.Write(&lebuf, binary.LittleEndian, entry); err != nil {
 			return err
 		}
-		if _, err := newSymNames.WriteString(e.name + "\x00"); err != nil {
+		if _, err := newSymNames.WriteString(name); err != nil {
 			return err
 		}
 		return nil
