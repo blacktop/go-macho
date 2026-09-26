@@ -185,8 +185,8 @@ func ReadExport(r *bytes.Reader, symbol string, loadAddress uint64) (*TrieExport
 
 		for {
 			s, err := r.ReadByte()
-			if err == io.EOF {
-				break
+			if err != nil {
+				return nil, fmt.Errorf("could not parse reexport import name: %v", err)
 			}
 			if s == '\x00' {
 				break
@@ -194,21 +194,21 @@ func ReadExport(r *bytes.Reader, symbol string, loadAddress uint64) (*TrieExport
 			reExportSymBytes = append(reExportSymBytes, s)
 		}
 
-	} else if flags.StubAndResolver() {
-		symOtherInt, err = ReadUleb128(r)
+	} else {
+		symValueInt, err = ReadUleb128(r)
 		if err != nil {
-			return nil, fmt.Errorf("could not parse ULEB128 symbol other stub-n-resolver value: %v", err)
+			return nil, fmt.Errorf("could not parse ULEB128 symbol value: %v", err)
 		}
-		symOtherInt += loadAddress
-	}
-
-	symValueInt, err = ReadUleb128(r)
-	if err != nil {
-		return nil, fmt.Errorf("could not parse ULEB128 symbol value: %v", err)
-	}
-
-	if (flags.Regular() || flags.ThreadLocal()) && !flags.ReExport() {
-		symValueInt += loadAddress
+		if flags.Regular() || flags.ThreadLocal() {
+			symValueInt += loadAddress
+		}
+		if flags.StubAndResolver() {
+			symOtherInt, err = ReadUleb128(r)
+			if err != nil {
+				return nil, fmt.Errorf("could not parse ULEB128 symbol other stub-n-resolver value: %v", err)
+			}
+			symOtherInt += loadAddress
+		}
 	}
 
 	if len(reExportSymBytes) > 0 {

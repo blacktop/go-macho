@@ -254,16 +254,16 @@ func (f ExportFlag) Absolute() bool {
 	return (f & EXPORT_SYMBOL_FLAGS_KIND_MASK) == EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE
 }
 func (f ExportFlag) WeakDefinition() bool {
-	return f == EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION
+	return f&EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION != 0
 }
 func (f ExportFlag) ReExport() bool {
-	return f == EXPORT_SYMBOL_FLAGS_REEXPORT
+	return f&EXPORT_SYMBOL_FLAGS_REEXPORT != 0
 }
 func (f ExportFlag) StubAndResolver() bool {
-	return f == EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER
+	return f&EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER != 0
 }
 func (f ExportFlag) StaticResolver() bool {
-	return f == EXPORT_SYMBOL_FLAGS_STATIC_RESOLVER
+	return f&EXPORT_SYMBOL_FLAGS_STATIC_RESOLVER != 0
 }
 
 func (f ExportFlag) String() string {
@@ -272,17 +272,21 @@ func (f ExportFlag) String() string {
 		fStr += "regular"
 		if f.StubAndResolver() {
 			fStr += "|has_resolver"
-		} else if f.StaticResolver() {
+		}
+		if f.StaticResolver() {
 			fStr += "|static_resolver"
-		} else if f.WeakDefinition() {
+		}
+		if f.WeakDefinition() {
 			fStr += "|weak_def"
 		}
 	} else if f.ThreadLocal() {
 		fStr += "per-thread"
 	} else if f.Absolute() {
 		fStr += "absolute"
-	} else if f.ReExport() {
-		fStr += "[re-export]"
+	}
+	// Preserve the plain re-export string while exposing combined attributes.
+	if f.ReExport() && f != EXPORT_SYMBOL_FLAGS_REEXPORT {
+		fStr += "|[re-export]"
 	}
 	return strings.TrimSpace(fStr)
 }

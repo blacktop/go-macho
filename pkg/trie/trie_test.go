@@ -230,3 +230,56 @@ func BenchmarkParseTrie(b *testing.B) {
 		}
 	}
 }
+
+func TestReadExportFlagBits(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		payload        []byte
+		reexport       string
+		address, other uint64
+	}{
+		{"re-export", []byte{0x08, 0x81, 0x01, '_', 'i', 'm', 'p', 0}, "_imp", 0, 129},
+		{"weak re-export", []byte{0x0c, 0x81, 0x01, '_', 'i', 'm', 'p', 0}, "_imp", 0, 129},
+		{"weak re-export same name", []byte{0x0c, 2, 0}, "", 0, 2},
+		{"resolver", []byte{0x10, 0x80, 0x02, 0x80, 0x04}, "", 0x1100, 0x1200},
+		{"weak resolver", []byte{0x14, 0x80, 0x02, 0x80, 0x04}, "", 0x1100, 0x1200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// A terminal root followed by its zero child count.
+			data := append([]byte{byte(len(tc.payload))}, tc.payload...)
+			data = append(data, 0)
+			nodes, err := ParseTrie(bytes.NewReader(data))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(nodes) != 1 {
+				t.Fatalf("got %d terminal nodes, want 1", len(nodes))
+			}
+			start := nodes[0].Offset
+			// Bound the reader to the payload: consuming the child count is a bug.
+			r := bytes.NewReader(data[start : start+uint64(len(tc.payload))])
+			e, err := ReadExport(r, "_export", 0x1000)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if e.Name != "_export" || e.ReExport != tc.reexport || e.Other != tc.other || e.Address != tc.address || byte(e.Flags) != tc.payload[0] {
+				t.Errorf("ReadExport = %+v, want name=_export reexport=%q address=%#x other=%#x flags=%#x", e, tc.reexport, tc.address, tc.other, tc.payload[0])
+			}
+			if r.Len() != 0 {
+				t.Errorf("%d payload bytes left unread", r.Len())
+			}
+		})
+	}
+}
+
+func TestReadExportTruncatedFlagPayload(t *testing.T) {
+	for _, payload := range [][]byte{
+		{0x0c},              // missing ordinal
+		{0x0c, 1, '_', 'i'}, // unterminated import name
+		{0x14, 0x01},        // missing resolver offset
+	} {
+		if _, err := ReadExport(bytes.NewReader(payload), "_export", 0); err == nil {
+			t.Errorf("ReadExport(%x) succeeded, want truncation error", payload)
+		}
+	}
+}
