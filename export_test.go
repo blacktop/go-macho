@@ -381,7 +381,11 @@ func TestExportIndirectSymbolPool(t *testing.T) {
 					}
 					poolStart := uint64(f.Symtab.Stroff) - linkedit.Offset
 					pool := data.Bytes()[poolStart : poolStart+uint64(f.Symtab.Strsize)]
-					wantPool := "\x00_section\x00_alias\x00" + target + "\x00"
+					wantTarget := target
+					if source == "trie" && wantTarget == "" {
+						wantTarget = indirect.Name
+					}
+					wantPool := "\x00_section\x00_alias\x00" + wantTarget + "\x00"
 					wantPool += strings.Repeat("\x00", pointerAlignPad(len(wantPool), f.pointerSize()))
 					if string(pool) != wantPool {
 						t.Fatalf("pool = %q, want %q", pool, wantPool)
@@ -417,10 +421,13 @@ func TestExportIndirectSymbolPool(t *testing.T) {
 							t.Fatalf("indirect value %#x exceeds pool length %d", got.Value, len(pool))
 						}
 						name, _, terminated := bytes.Cut(pool[got.Value:], []byte{0})
-						if !terminated || string(name) != target {
-							t.Fatalf("indirect target = %q (terminated=%v), want %q", name, terminated, target)
+						if !terminated || string(name) != wantTarget {
+							t.Fatalf("indirect target = %q (terminated=%v), want %q", name, terminated, wantTarget)
 						}
-						if target == "" && got.Value != 0 {
+						if wantTarget != "" && got.Value != uint64(wantName)+uint64(len(sym.Name))+1 {
+							t.Fatalf("indirect value = %d, want target immediately after symbol name", got.Value)
+						}
+						if wantTarget == "" && got.Value != 0 {
 							t.Fatalf("unknown target value = %d, want 0", got.Value)
 						}
 					}
@@ -432,6 +439,72 @@ func TestExportIndirectSymbolPool(t *testing.T) {
 					}
 				})
 			}
+		}
+		for _, tc := range []struct {
+			name       string
+			flags      types.ExportFlag
+			fromSymtab bool
+			wantType   types.NType
+		}{
+			{name: "absolute", flags: types.EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE, wantType: types.N_ABS | types.N_EXT},
+			{name: "thread-local", flags: types.EXPORT_SYMBOL_FLAGS_KIND_THREAD_LOCAL},
+			{name: "thread-local-with-symtab", flags: types.EXPORT_SYMBOL_FLAGS_KIND_THREAD_LOCAL, fromSymtab: true, wantType: types.N_SECT | types.N_EXT},
+		} {
+			t.Run(fmt.Sprintf("%v/trie/%s", magic, tc.name), func(t *testing.T) {
+				linkedit := &Segment{SegmentHeader: SegmentHeader{Name: "__LINKEDIT", Offset: 0x1000}}
+				f := &File{
+					FileTOC: FileTOC{FileHeader: types.FileHeader{Magic: magic}, ByteOrder: binary.LittleEndian, Loads: loads{linkedit, &DyldExportsTrie{}}},
+					Symtab:  &Symtab{}, Dysymtab: &Dysymtab{},
+					exp: []trie.TrieExport{{Name: "_export", Address: 0x12345678, Flags: tc.flags}},
+					cr:  types.NewCustomSectionReader(bytes.NewReader([]byte{0}), nil, 0, 1),
+				}
+				want := Symbol{Name: "_export", Type: tc.wantType, Value: 0x12345678}
+				if tc.fromSymtab {
+					want.Sect, want.Desc, want.Value = 3, 0x20, 0x87654321
+					f.Symtab.Syms = []Symbol{want}
+				}
+				data, err := f.optimizeLinkedit(nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var wantCount uint32
+				wantPool := "\x00"
+				if tc.wantType != 0 {
+					wantCount = 1
+					wantPool += want.Name + "\x00"
+				}
+				if f.Symtab.Nsyms != wantCount || f.Dysymtab.Nextdefsym != wantCount || f.Dysymtab.Nlocalsym != 0 || f.Dysymtab.Nundefsym != 0 {
+					t.Fatalf("unexpected symbol counts: symtab=%+v dysymtab=%+v", f.Symtab, f.Dysymtab)
+				}
+				poolStart := uint64(f.Symtab.Stroff) - linkedit.Offset
+				pool := data.Bytes()[poolStart : poolStart+uint64(f.Symtab.Strsize)]
+				wantPool += strings.Repeat("\x00", pointerAlignPad(len(wantPool), f.pointerSize()))
+				if string(pool) != wantPool {
+					t.Fatalf("pool = %q, want %q", pool, wantPool)
+				}
+				if wantCount == 0 {
+					return
+				}
+				entries := bytes.NewReader(data.Bytes()[uint64(f.Symtab.Symoff)-linkedit.Offset : poolStart])
+				var got types.Nlist64
+				if f.is64bit() {
+					err = binary.Read(entries, binary.LittleEndian, &got)
+				} else {
+					var entry types.Nlist32
+					err = binary.Read(entries, binary.LittleEndian, &entry)
+					got = types.Nlist64{Nlist: entry.Nlist, Value: uint64(entry.Value)}
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantEntry := types.Nlist64{Nlist: types.Nlist{Name: 1, Type: want.Type, Sect: want.Sect, Desc: want.Desc}, Value: want.Value}
+				if got != wantEntry {
+					t.Fatalf("entry = %+v, want %+v", got, wantEntry)
+				}
+				if tc.fromSymtab && f.Symtab.Syms[0] != want {
+					t.Fatal("source thread-local symbol was mutated")
+				}
+			})
 		}
 	}
 }

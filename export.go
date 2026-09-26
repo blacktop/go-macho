@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1136,13 +1137,19 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 			}
 		}
 	}
-	// re-exports from LC_DYLD_EXPORTS_TRIE (external defined)
+	// Re-exports and absolute exports from LC_DYLD_EXPORTS_TRIE (external defined).
 	for _, exp := range exports {
-		if !exp.Flags.Regular() || exp.Flags.ReExport() {
+		switch {
+		case exp.Flags.ReExport():
+			target := exp.ReExport
+			if target == "" {
+				// An empty trie import name means re-exported under the same name.
+				target = exp.Name
+			}
 			extdefSyms = append(extdefSyms, symEntry{
 				sym: Symbol{
 					Name:         exp.Name,
-					IndirectName: exp.ReExport,
+					IndirectName: target,
 					Type:         (types.N_INDR | types.N_EXT),
 					Sect:         0,
 					Desc:         0,
@@ -1150,6 +1157,13 @@ func (f *File) optimizeLinkedit(locals []Symbol) (*bytes.Buffer, error) {
 				},
 				name: exp.Name,
 			})
+		case exp.Flags.Absolute():
+			extdefSyms = append(extdefSyms, symEntry{
+				sym:  Symbol{Name: exp.Name, Type: types.N_ABS | types.N_EXT, Value: exp.Address},
+				name: exp.Name,
+			})
+		case exp.Flags.ThreadLocal():
+			slog.Debug("skipping thread-local trie export; retaining any existing symtab entry", "name", exp.Name)
 		}
 	}
 
