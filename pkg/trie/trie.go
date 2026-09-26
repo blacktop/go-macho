@@ -195,19 +195,20 @@ func ReadExport(r *bytes.Reader, symbol string, loadAddress uint64) (*TrieExport
 		}
 
 	} else {
+		if flags.StubAndResolver() {
+			// Stub-and-resolver terminals store the resolver before the address.
+			symOtherInt, err = ReadUleb128(r)
+			if err != nil {
+				return nil, fmt.Errorf("could not parse ULEB128 symbol other stub-n-resolver value: %v", err)
+			}
+			symOtherInt += loadAddress
+		}
 		symValueInt, err = ReadUleb128(r)
 		if err != nil {
 			return nil, fmt.Errorf("could not parse ULEB128 symbol value: %v", err)
 		}
 		if flags.Regular() || flags.ThreadLocal() {
 			symValueInt += loadAddress
-		}
-		if flags.StubAndResolver() {
-			symOtherInt, err = ReadUleb128(r)
-			if err != nil {
-				return nil, fmt.Errorf("could not parse ULEB128 symbol other stub-n-resolver value: %v", err)
-			}
-			symOtherInt += loadAddress
 		}
 	}
 

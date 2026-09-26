@@ -241,8 +241,11 @@ func TestReadExportFlagBits(t *testing.T) {
 		{"re-export", []byte{0x08, 0x81, 0x01, '_', 'i', 'm', 'p', 0}, "_imp", 0, 129},
 		{"weak re-export", []byte{0x0c, 0x81, 0x01, '_', 'i', 'm', 'p', 0}, "_imp", 0, 129},
 		{"weak re-export same name", []byte{0x0c, 2, 0}, "", 0, 2},
-		{"resolver", []byte{0x10, 0x80, 0x02, 0x80, 0x04}, "", 0x1100, 0x1200},
-		{"weak resolver", []byte{0x14, 0x80, 0x02, 0x80, 0x04}, "", 0x1100, 0x1200},
+		{"resolver", []byte{0x10, 0x80, 0x02, 0x80, 0x04}, "", 0x1200, 0x1100},
+		{"weak resolver", []byte{0x14, 0x80, 0x02, 0x80, 0x04}, "", 0x1200, 0x1100},
+		{"regular", []byte{0x00, 0x80, 0x02}, "", 0x1100, 0},
+		{"thread-local", []byte{0x01, 0x80, 0x02}, "", 0x1100, 0},
+		{"absolute", []byte{0x02, 0x80, 0x02}, "", 0x100, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// A terminal root followed by its zero child count.
@@ -272,11 +275,28 @@ func TestReadExportFlagBits(t *testing.T) {
 	}
 }
 
+func TestReadExportOSAtomicDequeueResolver(t *testing.T) {
+	// libsystem_platform terminal: flags=0x10, resolver=0x94ac, address=0x1290.
+	// dyld_info reports address 0x1290 with dynamic-resolver 0x94ac.
+	r := bytes.NewReader([]byte{0x10, 0xac, 0xa9, 0x02, 0x90, 0x25})
+	e, err := ReadExport(r, "_OSAtomicDequeue", 0x185525000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Address != 0x185526290 || e.Other != 0x18552e4ac {
+		t.Errorf("address=%#x resolver=%#x, want address=0x185526290 resolver=0x18552e4ac", e.Address, e.Other)
+	}
+	if r.Len() != 0 {
+		t.Errorf("%d payload bytes left unread", r.Len())
+	}
+}
+
 func TestReadExportTruncatedFlagPayload(t *testing.T) {
 	for _, payload := range [][]byte{
 		{0x0c},              // missing ordinal
 		{0x0c, 1, '_', 'i'}, // unterminated import name
-		{0x14, 0x01},        // missing resolver offset
+		{0x14},              // missing resolver offset
+		{0x14, 0x01},        // missing address offset
 	} {
 		if _, err := ReadExport(bytes.NewReader(payload), "_export", 0); err == nil {
 			t.Errorf("ReadExport(%x) succeeded, want truncation error", payload)
