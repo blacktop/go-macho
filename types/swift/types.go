@@ -28,6 +28,27 @@ type Type struct {
 	Size           int64
 }
 
+// SuperclassName returns the superclass type, rather than the name of its
+// metadata symbol. Prefer SuperClass because it preserves generic arguments.
+func (c Class) SuperclassName() string {
+	name := c.SuperClass
+	if name == "" && c.ResilientSuperclass != nil && c.ResilientSuperclass.Type != nil {
+		base := c.ResilientSuperclass.Type
+		name = base.Name
+		if name != "" && base.Parent != nil && base.Parent.Name != "" {
+			name = base.Parent.Name + "." + name
+		}
+	}
+	name = strings.TrimPrefix(name, "nominal type descriptor for ")
+	name = strings.TrimPrefix(name, "type metadata for ")
+	if strings.HasPrefix(name, "$s") || strings.HasPrefix(name, "_$s") {
+		// Imported resilient superclasses can be represented by their bound
+		// nominal type descriptor, whose mangling has the Mn suffix.
+		name = strings.TrimSuffix(name, "Mn")
+	}
+	return name
+}
+
 func (t Type) IsCImportedModuleName() bool {
 	if t.Kind == CDKindModule {
 		return t.Name == MANGLING_MODULE_OBJC
@@ -158,14 +179,8 @@ func (t Type) dump(verbose bool) string {
 			}
 		}
 		var superClass string
-		if t.Type.(Class).SuperClass != "" {
-			superClass = fmt.Sprintf(": %s", t.Type.(Class).SuperClass)
-		}
-		if t.Type.(Class).Flags.KindSpecific().HasResilientSuperclass() {
-			superClass = t.Type.(Class).ResilientSuperclass.Type.Name
-			if t.Type.(Class).ResilientSuperclass.Type.Parent.Name != "" {
-				superClass += t.Type.(Class).ResilientSuperclass.Type.Parent.Name + "." + superClass
-			}
+		if name := t.Type.(Class).SuperclassName(); name != "" {
+			superClass = ": " + name
 		}
 		var impinf string
 		if t.ImportInfo != "" {

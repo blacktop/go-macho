@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/blacktop/go-macho/types"
@@ -501,5 +502,166 @@ func TestGetCFStringsBigEndianRecords(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v; want %#v", got, want)
+	}
+}
+
+// A non-generic Swift subclass whose Objective-C metadata is allocated from a
+// resilient pattern. Addresses and names are synthetic; no compiler is needed.
+func newResilientObjCTestFile(t *testing.T) (*File, []byte) {
+	t.Helper()
+	f := newObjCTestFile(objcSection("__TEXT", "__swift5_types"), objcSection("__DATA", "__objc_stublist"))
+	data := make([]byte, 0x2000)
+	put := func(addr uint64, value any) {
+		t.Helper()
+		var b bytes.Buffer
+		if err := binary.Write(&b, binary.LittleEndian, value); err != nil {
+			t.Fatal(err)
+		}
+		copy(data[addr-0x1000:], b.Bytes())
+	}
+	rel := func(from, to uint64) { put(from, int32(int64(to)-int64(from))) }
+	str := func(addr uint64, s string) { copy(data[addr-0x1000:], s+"\x00") }
+	f.ByteOrder = binary.LittleEndian
+	f.swiftAutoDemangle = true
+	f.Sections[0].Addr, f.Sections[0].Size = 0x1100, 4
+	f.Sections[1].Addr, f.Sections[1].Size = 0x2080, 8
+	for i, seg := range f.Segments() {
+		seg.Addr, seg.Offset, seg.Memsz, seg.Filesz = 0x1000+uint64(i)*0x1000, uint64(i)*0x1000, 0x1000, 0x1000
+	}
+	f.vma = &types.VMAddrConverter{Converter: func(v uint64) uint64 { return v }, VMAddr2Offet: f.getOffset, Offet2VMAddr: f.getVMAddress}
+	f.cr = types.NewCustomSectionReader(bytes.NewReader(data), f.vma, 0, int64(len(data)))
+	rel(0x1100, 0x1200)
+	put(0x1200, uint32(0x20010050)) // class, unique, singleton, resilient superclass
+	rel(0x1204, 0x1280)
+	rel(0x1208, 0x1400)
+	rel(0x1214, 0x1440)
+	put(0x121c, uint32(1)) // ObjC resilient class stub present
+	rel(0x122c, 0x1300)    // direct superclass descriptor
+	rel(0x1230, 0x20a0)
+	rel(0x1234, 0x2100)
+	rel(0x123c, 0x2200)
+	rel(0x1288, 0x1410)
+	put(0x1300, uint32(0x50))
+	rel(0x1304, 0x1380)
+	rel(0x1308, 0x1420)
+	rel(0x1388, 0x1430)
+	str(0x1400, "Leaf")
+	str(0x1410, "Child")
+	str(0x1420, "Parent")
+	str(0x1430, "Base")
+	data[0x440] = 1
+	rel(0x1441, 0x1300) // symbolic superclass name
+	str(0x1450, "_TtC5Child4Leaf")
+	str(0x1470, "performAction")
+	str(0x1490, "v16@0:8")
+	str(0x14b0, "make")
+	str(0x14c0, "title")
+	str(0x14d0, "T@\"NSString\",R")
+	put(0x2080, uint64(0x2200))
+	put(0x2200, uint64(1))
+	rel(0x2110, 0x2300)
+	rel(0x2114, 0x2400)
+	put(0x2300, objc.ClassRO64{NameVMAddr: 0x1450, BaseMethodsVMAddr: 0x2500, BasePropertiesVMAddr: 0x2580})
+	put(0x2400, objc.ObjcClass64{DataVMAddrAndFastFlags: 0x2480})
+	put(0x2480, objc.ClassRO64{Flags: objc.RO_META, NameVMAddr: 0x1450, BaseMethodsVMAddr: 0x2540})
+	for _, entry := range []struct{ addr, name uint64 }{{0x2500, 0x1470}, {0x2540, 0x14b0}} {
+		put(entry.addr, uint32(24))
+		put(entry.addr+4, uint32(1))
+		put(entry.addr+8, [3]uint64{entry.name, 0x1490, 0x1500})
+	}
+	put(0x2580, uint32(16))
+	put(0x2584, uint32(1))
+	put(0x2588, [2]uint64{0x14c0, 0x14d0})
+	return f, data
+}
+
+func TestGetObjCResilientClasses(t *testing.T) {
+	f, _ := newResilientObjCTestFile(t)
+	for i := 0; i < 2; i++ {
+		classes, err := f.GetObjCClasses()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(classes) != 1 {
+			t.Fatalf("classes = %d, want 1", len(classes))
+		}
+		c := classes[0]
+		if c.Name != "_TtC5Child4Leaf" || c.SuperClass != "Base.Parent" || !c.IsSwiftStable || c.ClassPtr != 0x2200 {
+			t.Fatalf("unexpected class: %+v", c)
+		}
+		if len(c.InstanceMethods) != 1 || c.InstanceMethods[0].Name != "performAction" {
+			t.Fatalf("instance methods: %+v", c.InstanceMethods)
+		}
+		if len(c.ClassMethods) != 1 || c.ClassMethods[0].Name != "make" {
+			t.Fatalf("class methods: %+v", c.ClassMethods)
+		}
+		if len(c.Props) != 1 || c.Props[0].Name != "title" {
+			t.Fatalf("properties: %+v", c.Props)
+		}
+	}
+}
+
+func TestGetObjCResilientClassesInvalid(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+		change     func(*File, []byte)
+	}{
+		{"truncated stub list", "section size", func(f *File, _ []byte) { f.Sections[1].Size = 7 }},
+		{"bad stub isa", "stub isa", func(_ *File, b []byte) { binary.LittleEndian.PutUint64(b[0x1200:], 2) }},
+		{"missing pattern", "missing resilient class metadata pattern", func(_ *File, b []byte) { binary.LittleEndian.PutUint32(b[0x234:], 0) }},
+		{"missing class RO", "missing Objective-C data", func(_ *File, b []byte) { binary.LittleEndian.PutUint32(b[0x1110:], 0) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, b := newResilientObjCTestFile(t)
+			tc.change(f, b)
+			_, err := f.GetObjCClasses()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("got %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestGetObjCResilientClassSelection(t *testing.T) {
+	t.Run("no stub list", func(t *testing.T) {
+		f, _ := newResilientObjCTestFile(t)
+		f.Sections[1].Size = 0
+		classes, err := f.GetObjCClasses()
+		if err != nil || len(classes) != 0 {
+			t.Fatalf("classes=%v err=%v", classes, err)
+		}
+	})
+	t.Run("duplicate stub", func(t *testing.T) {
+		f, b := newResilientObjCTestFile(t)
+		f.Sections[1].Size = 16
+		binary.LittleEndian.PutUint64(b[0x1088:], 0x2200)
+		classes, err := f.GetObjCClasses()
+		if err != nil || len(classes) != 1 {
+			t.Fatalf("classes=%v err=%v", classes, err)
+		}
+	})
+	t.Run("missing descriptor stub flag", func(t *testing.T) {
+		f, b := newResilientObjCTestFile(t)
+		binary.LittleEndian.PutUint32(b[0x21c:], 0)
+		classes, err := f.GetObjCClasses()
+		if err != nil || len(classes) != 0 {
+			t.Fatalf("classes=%v err=%v", classes, err)
+		}
+	})
+}
+
+func TestGetObjCResilientClassLargeTables(t *testing.T) {
+	for _, flag := range []uint32{1 << 31, 1 << 30} {
+		f, b := newResilientObjCTestFile(t)
+		binary.LittleEndian.PutUint32(b[0x200:], 0x20010050|flag)
+		countOffset := 0x23c
+		if flag == 1<<31 {
+			countOffset += 4
+		}
+		binary.LittleEndian.PutUint32(b[countOffset:], ^uint32(0))
+		_, err := f.GetObjCClasses()
+		if err == nil || !strings.Contains(err.Error(), "table count too large") {
+			t.Fatalf("flag=%#x err=%v", flag, err)
+		}
 	}
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/blacktop/go-macho/types"
 	"github.com/blacktop/go-macho/types/objc"
+	"github.com/blacktop/go-macho/types/swift"
 )
 
 var ErrObjcSectionNotFound = errors.New("missing required ObjC section")
@@ -383,7 +384,7 @@ func (f *File) GetObjCClasses() ([]objc.Class, error) {
 		}
 	}
 
-	return classes, nil
+	return f.appendObjCResilientClasses(classes)
 }
 
 // GetObjCNonLazyClasses returns an array of Objective-C classes that implement +load
@@ -684,64 +685,10 @@ func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 		return nil, fmt.Errorf("failed to get class info at vmaddr: %#x; %v", classPtr.DataVMAddrAndFastFlags&objc.FAST_DATA_MASK64, err)
 	}
 
-	name, err := f.GetCString(info.NameVMAddr)
+	isSwiftClass := classPtr.DataVMAddrAndFastFlags&(objc.FAST_IS_SWIFT_LEGACY|objc.FAST_IS_SWIFT_STABLE) != 0
+	class, err := f.readObjCClassRO(info, isSwiftClass)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read cstring: %v", err)
-	}
-
-	var methods []objc.Method
-	if info.BaseMethodsVMAddr > 0 {
-		info.BaseMethodsVMAddr, err = f.disablePreattachedCategories(info.BaseMethodsVMAddr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to disable preattached categories: %v", err)
-		}
-		methods, err = f.GetObjCMethods(info.BaseMethodsVMAddr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get methods at vmaddr: %#x; %v", info.BaseMethodsVMAddr, err)
-		}
-	}
-
-	var prots []objc.Protocol
-	if info.BaseProtocolsVMAddr > 0 {
-		info.BaseProtocolsVMAddr, err = f.disablePreattachedCategories(info.BaseProtocolsVMAddr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to disable preattached categories: %v", err)
-		}
-		prots, err = f.parseObjcProtocolList(info.BaseProtocolsVMAddr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read protocols vmaddr: %v", err)
-		}
-	}
-
-	isSwiftClass := (classPtr.DataVMAddrAndFastFlags&objc.FAST_IS_SWIFT_LEGACY != 0) || (classPtr.DataVMAddrAndFastFlags&objc.FAST_IS_SWIFT_STABLE != 0)
-
-	var ivars []objc.Ivar
-	if info.IvarsVMAddr > 0 {
-		ivars, err = f.getObjCIvarsWithSwift(info.IvarsVMAddr, isSwiftClass)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get ivars at vmaddr: %#x; %v", info.IvarsVMAddr, err)
-		}
-		if isSwiftClass {
-			if fieldMap, ferr := f.swiftFieldTypesForClass(name); ferr == nil && len(fieldMap) > 0 {
-				for idx := range ivars {
-					if typ, ok := matchSwiftFieldType(ivars[idx].Name, fieldMap); ok {
-						ivars[idx].Type = typ
-					}
-				}
-			}
-		}
-	}
-
-	var props []objc.Property
-	if info.BasePropertiesVMAddr > 0 {
-		info.BasePropertiesVMAddr, err = f.disablePreattachedCategories(info.BasePropertiesVMAddr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to disable preattached categories: %v", err)
-		}
-		props, err = f.getObjCPropertiesWithSwift(info.BasePropertiesVMAddr, isSwiftClass)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get props at vmaddr: %#x; %v", info.BasePropertiesVMAddr, err)
-		}
+		return nil, err
 	}
 
 	superClass := &objc.Class{}
@@ -825,25 +772,18 @@ func (f *File) GetObjCClass2(vmaddr uint64) (*objc.Class, error) {
 		}
 	}
 
-	return &objc.Class{
-		Name:                  name,
-		SuperClass:            superClass.Name,
-		Isa:                   isaClass.Name,
-		InstanceMethods:       methods,
-		ClassMethods:          cMethods,
-		Ivars:                 ivars,
-		Props:                 props,
-		Protocols:             prots,
-		ClassPtr:              f.rebasePtr(vmaddr),
-		IsaVMAddr:             classPtr.IsaVMAddr,
-		SuperclassVMAddr:      classPtr.SuperclassVMAddr,
-		MethodCacheBuckets:    classPtr.MethodCacheBuckets,
-		MethodCacheProperties: classPtr.MethodCacheProperties,
-		DataVMAddr:            classPtr.DataVMAddrAndFastFlags & objc.FAST_DATA_MASK64,
-		IsSwiftLegacy:         (classPtr.DataVMAddrAndFastFlags&objc.FAST_IS_SWIFT_LEGACY != 0),
-		IsSwiftStable:         (classPtr.DataVMAddrAndFastFlags&objc.FAST_IS_SWIFT_STABLE != 0),
-		ReadOnlyData:          *info,
-	}, nil
+	class.SuperClass = superClass.Name
+	class.Isa = isaClass.Name
+	class.ClassMethods = cMethods
+	class.ClassPtr = f.rebasePtr(vmaddr)
+	class.IsaVMAddr = classPtr.IsaVMAddr
+	class.SuperclassVMAddr = classPtr.SuperclassVMAddr
+	class.MethodCacheBuckets = classPtr.MethodCacheBuckets
+	class.MethodCacheProperties = classPtr.MethodCacheProperties
+	class.DataVMAddr = classPtr.DataVMAddrAndFastFlags & objc.FAST_DATA_MASK64
+	class.IsSwiftLegacy = classPtr.DataVMAddrAndFastFlags&objc.FAST_IS_SWIFT_LEGACY != 0
+	class.IsSwiftStable = classPtr.DataVMAddrAndFastFlags&objc.FAST_IS_SWIFT_STABLE != 0
+	return class, nil
 }
 
 // GetObjCCategories returns an array of Objective-C categories by parsing the __objc_catlist data
@@ -1932,4 +1872,335 @@ func (f *File) GetObjCStubs(parse func(uint64, []byte) (map[uint64]*objc.Stub, e
 	}
 
 	return nil, fmt.Errorf("macho does not contain __objc_stubs section: %w", ErrObjcSectionNotFound)
+}
+
+// readObjCClassRO decodes the data shared by static classes and Swift resilient
+// class metadata patterns. It does not require a realized class object.
+func (f *File) readObjCClassRO(info *objc.ClassRO64, isSwiftClass bool) (*objc.Class, error) {
+	name, err := f.GetCString(info.NameVMAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read cstring: %v", err)
+	}
+
+	var methods []objc.Method
+	if info.BaseMethodsVMAddr > 0 {
+		info.BaseMethodsVMAddr, err = f.disablePreattachedCategories(info.BaseMethodsVMAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to disable preattached categories: %v", err)
+		}
+		methods, err = f.GetObjCMethods(info.BaseMethodsVMAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get methods at vmaddr: %#x; %v", info.BaseMethodsVMAddr, err)
+		}
+	}
+
+	var prots []objc.Protocol
+	if info.BaseProtocolsVMAddr > 0 {
+		info.BaseProtocolsVMAddr, err = f.disablePreattachedCategories(info.BaseProtocolsVMAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to disable preattached categories: %v", err)
+		}
+		prots, err = f.parseObjcProtocolList(info.BaseProtocolsVMAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read protocols vmaddr: %v", err)
+		}
+	}
+
+	var ivars []objc.Ivar
+	if info.IvarsVMAddr > 0 {
+		ivars, err = f.getObjCIvarsWithSwift(info.IvarsVMAddr, isSwiftClass)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get ivars at vmaddr: %#x; %v", info.IvarsVMAddr, err)
+		}
+		if isSwiftClass {
+			if fieldMap, ferr := f.swiftFieldTypesForClass(name); ferr == nil && len(fieldMap) > 0 {
+				for idx := range ivars {
+					if typ, ok := matchSwiftFieldType(ivars[idx].Name, fieldMap); ok {
+						ivars[idx].Type = typ
+					}
+				}
+			}
+		}
+	}
+
+	var props []objc.Property
+	if info.BasePropertiesVMAddr > 0 {
+		info.BasePropertiesVMAddr, err = f.disablePreattachedCategories(info.BasePropertiesVMAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to disable preattached categories: %v", err)
+		}
+		props, err = f.getObjCPropertiesWithSwift(info.BasePropertiesVMAddr, isSwiftClass)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get props at vmaddr: %#x; %v", info.BasePropertiesVMAddr, err)
+		}
+	}
+
+	return &objc.Class{
+		Name: name, InstanceMethods: methods, Protocols: prots,
+		Ivars: ivars, Props: props, ReadOnlyData: *info,
+	}, nil
+}
+
+// appendObjCResilientClasses follows Swift descriptors to the static class_ro
+// data for entries in __objc_stublist. A stub is not an objc_class_t: its isa is
+// 1 and its callback materializes the class at runtime. Never execute it.
+func (f *File) appendObjCResilientClasses(classes []objc.Class) ([]objc.Class, error) {
+	stubs := make(map[uint64]bool)
+	for _, sec := range f.Sections {
+		if !strings.HasPrefix(sec.Seg, "__DATA") || sec.Name != "__objc_stublist" || sec.Size == 0 {
+			continue
+		}
+		if f.pointerSize() != 8 || sec.Size%8 != 0 || sec.Size/8 > 1<<20 {
+			return nil, fmt.Errorf("invalid Objective-C class stub section size %#x", sec.Size)
+		}
+		for off := uint64(0); off < sec.Size; off += 8 {
+			if sec.Addr > ^uint64(0)-off {
+				return nil, fmt.Errorf("Objective-C class stub section address overflow")
+			}
+			ptr, err := f.GetSlidPointerAtAddress(sec.Addr + off)
+			if err != nil {
+				return nil, fmt.Errorf("read Objective-C class stub pointer: %w", err)
+			}
+			// Standalone readers can expose image-relative chained targets.
+			if !f.Flags.DylibInCache() && ptr < f.GetBaseAddress() {
+				ptr += f.GetBaseAddress()
+			}
+			var isaRaw [8]byte
+			_, err = f.cr.ReadAtAddr(isaRaw[:], ptr)
+			isa := f.ByteOrder.Uint64(isaRaw[:])
+			if err != nil {
+				return nil, fmt.Errorf("read Objective-C class stub at %#x: %w", ptr, err)
+			}
+			if isa != 1 {
+				return nil, fmt.Errorf("invalid Objective-C class stub isa %#x at %#x", isa, ptr)
+			}
+			stubs[ptr] = true
+		}
+	}
+	if len(stubs) == 0 {
+		return classes, nil
+	}
+	seen := make(map[string]bool, len(classes))
+	for _, class := range classes {
+		seen[class.Name] = true
+	}
+	for _, sec := range f.Sections {
+		if sec.Seg != "__TEXT" || (sec.Name != "__swift5_types" && sec.Name != "__swift5_types2") {
+			continue
+		}
+		if sec.Size%4 != 0 || sec.Size/4 > 1<<20 {
+			return nil, fmt.Errorf("invalid Swift type section size %#x", sec.Size)
+		}
+		for off := uint64(0); off < sec.Size; off += 4 {
+			if sec.Addr > ^uint64(0)-off {
+				return nil, fmt.Errorf("Swift type section address overflow")
+			}
+			var raw [4]byte
+			if _, err := f.cr.ReadAtAddr(raw[:], sec.Addr+off); err != nil {
+				return nil, err
+			}
+			ref := swift.RelativeIndirectablePointer{Address: sec.Addr + off, RelOff: int32(f.ByteOrder.Uint32(raw[:]))}
+			addr, err := ref.GetAddress(f.GetPointerAtAddress)
+			if err != nil {
+				return nil, err
+			}
+			addr = f.vma.Convert(addr)
+			if _, err := f.cr.ReadAtAddr(raw[:], addr); err != nil {
+				return nil, err
+			}
+			flags := swift.ContextDescriptorFlags(f.ByteOrder.Uint32(raw[:]))
+			// Do not parse unrelated Swift structs, enums, or generic templates.
+			if flags.Kind() != swift.CDKindClass || flags.IsGeneric() || !flags.KindSpecific().HasResilientSuperclass() {
+				continue
+			}
+			if err := f.cr.SeekToAddr(addr); err != nil {
+				return nil, err
+			}
+			var descriptor swift.TargetClassDescriptor
+			if err := descriptor.Read(f.cr, addr); err != nil {
+				return nil, err
+			}
+			if !descriptor.HasObjCResilientClassStub() {
+				continue
+			}
+			c, err := f.readObjCResilientDescriptor(addr, descriptor)
+			if err != nil {
+				return nil, fmt.Errorf("read resilient class descriptor at %#x: %w", addr, err)
+			}
+			stubRef := c.ObjCResilientClassStubInfo.Stub
+			stub, err := objcRelativeAddress(stubRef.Address, stubRef.RelOff)
+			if err != nil {
+				return nil, err
+			}
+			if !stubs[stub] {
+				continue
+			}
+			if c.SuperclassType.IsSet() {
+				c.SuperClass, err = f.makeSymbolicMangledNameStringRef(c.SuperclassType.GetAddress())
+				if err != nil {
+					return nil, fmt.Errorf("read resilient superclass name: %w", err)
+				}
+			}
+			class, err := f.readObjCResilientClass(c, stub)
+			if err != nil {
+				return nil, fmt.Errorf("read resilient class at %#x: %w", addr, err)
+			}
+			if !seen[class.Name] {
+				classes = append(classes, *class)
+				seen[class.Name] = true
+			}
+			f.PutObjC(stub, class)
+			delete(stubs, stub)
+			if len(stubs) == 0 {
+				return classes, nil
+			}
+		}
+	}
+	// Singleton metadata (for example, concrete subclasses of generic Swift
+	// classes) also uses stubs, but has no resilient descriptor stub trailer.
+	// Preserve the existing handling of these unsupported classes.
+	return classes, nil
+}
+
+func objcRelativeAddress(base uint64, offset int32) (uint64, error) {
+	if offset < 0 {
+		delta := uint64(-int64(offset))
+		if base < delta {
+			return 0, fmt.Errorf("relative Objective-C address underflow")
+		}
+		return base - delta, nil
+	}
+	if base > ^uint64(0)-uint64(offset) {
+		return 0, fmt.Errorf("relative Objective-C address overflow")
+	}
+	return base + uint64(offset), nil
+}
+
+func (f *File) readObjCResilientClass(c swift.Class, stub uint64) (*objc.Class, error) {
+	if c.SingletonMetadata == nil || !c.SingletonMetadata.IncompleteMetadata.IsSet() {
+		return nil, fmt.Errorf("missing resilient class metadata pattern")
+	}
+	ref := c.SingletonMetadata.IncompleteMetadata
+	addr, err := objcRelativeAddress(ref.Address, ref.RelOff)
+	if err != nil {
+		return nil, err
+	}
+	if addr > ^uint64(0)-24 {
+		return nil, fmt.Errorf("resilient class metadata pattern address overflow")
+	}
+	var raw [24]byte
+	if _, err := f.cr.ReadAtAddr(raw[:], addr); err != nil {
+		return nil, fmt.Errorf("read resilient class metadata pattern: %w", err)
+	}
+	var pattern swift.TargetResilientClassMetadataPattern
+	if err := binary.Read(bytes.NewReader(raw[:]), f.ByteOrder, &pattern); err != nil {
+		return nil, err
+	}
+	if pattern.Data == 0 || pattern.Metaclass == 0 {
+		return nil, fmt.Errorf("missing Objective-C data in resilient class metadata pattern")
+	}
+	dataAddr, err := objcRelativeAddress(addr+16, pattern.Data)
+	if err != nil {
+		return nil, err
+	}
+	metaAddr, err := objcRelativeAddress(addr+20, pattern.Metaclass)
+	if err != nil {
+		return nil, err
+	}
+	info, err := f.GetObjCClassInfo(dataAddr)
+	if err != nil {
+		return nil, err
+	}
+	class, err := f.readObjCClassRO(info, true)
+	if err != nil {
+		return nil, err
+	}
+	if c.SuperclassName() == "" {
+		return nil, fmt.Errorf("missing resilient superclass name")
+	}
+	class.SuperClass = c.SuperclassName()
+	class.IsSwiftStable = true
+	class.ClassPtr = stub
+	class.DataVMAddr = dataAddr
+	class.IsaVMAddr = metaAddr
+	// Read only the metaclass's static RO data; its superclass may itself be a
+	// resilient stub and must not be interpreted as an ordinary class object.
+	if err := f.cr.SeekToAddr(metaAddr); err != nil {
+		return nil, err
+	}
+	var meta objc.ObjcClass64
+	if err := binary.Read(f.cr, f.ByteOrder, &meta); err != nil {
+		return nil, err
+	}
+	metaInfo, err := f.GetObjCClassInfo(f.vma.Convert(meta.DataVMAddrAndFastFlags) & objc.FAST_DATA_MASK64)
+	if err != nil {
+		return nil, err
+	}
+	metaClass, err := f.readObjCClassRO(metaInfo, true)
+	if err != nil {
+		return nil, err
+	}
+	class.Isa = metaClass.Name
+	class.ClassMethods = metaClass.InstanceMethods
+	return class, nil
+}
+
+// readObjCResilientDescriptor reads only the trailers needed for class discovery.
+// Swift vtable and override records are skipped with bounded counts: their
+// implementations are irrelevant to the Objective-C method lists in class_ro.
+func (f *File) readObjCResilientDescriptor(addr uint64, descriptor swift.TargetClassDescriptor) (swift.Class, error) {
+	c := swift.Class{TargetClassDescriptor: descriptor}
+	if addr > ^uint64(0)-uint64(descriptor.Size())-4 {
+		return c, fmt.Errorf("resilient descriptor address overflow")
+	}
+	cursor := addr + uint64(descriptor.Size()) + 4 // resilient superclass reference
+	if !descriptor.Flags.KindSpecific().MetadataInitialization().Singleton() {
+		return c, fmt.Errorf("resilient class has no singleton metadata initialization")
+	}
+	if err := f.cr.SeekToAddr(cursor); err != nil {
+		return c, err
+	}
+	c.SingletonMetadata = &swift.TargetSingletonMetadataInitialization{}
+	if err := c.SingletonMetadata.Read(f.cr, cursor); err != nil {
+		return c, err
+	}
+	if cursor > ^uint64(0)-uint64(c.SingletonMetadata.Size()) {
+		return c, fmt.Errorf("resilient descriptor address overflow")
+	}
+	cursor += uint64(c.SingletonMetadata.Size())
+	for _, table := range []struct {
+		present        bool
+		header, stride uint64
+	}{
+		{descriptor.Flags.KindSpecific().HasVTable(), 8, 8},
+		{descriptor.Flags.KindSpecific().HasOverrideTable(), 4, 12},
+	} {
+		if !table.present {
+			continue
+		}
+		if cursor > ^uint64(0)-table.header {
+			return c, fmt.Errorf("resilient descriptor table address overflow")
+		}
+		var raw [4]byte
+		if _, err := f.cr.ReadAtAddr(raw[:], cursor+table.header-4); err != nil {
+			return c, err
+		}
+		count := uint64(f.ByteOrder.Uint32(raw[:]))
+		if count > 1<<20 {
+			return c, fmt.Errorf("resilient descriptor table count too large: %d", count)
+		}
+		size := table.header + count*table.stride
+		if cursor > ^uint64(0)-size {
+			return c, fmt.Errorf("resilient descriptor table address overflow")
+		}
+		cursor += size
+	}
+	if err := f.cr.SeekToAddr(cursor); err != nil {
+		return c, err
+	}
+	c.ObjCResilientClassStubInfo = &swift.TargetObjCResilientClassStubInfo{}
+	if err := c.ObjCResilientClassStubInfo.Read(f.cr, cursor); err != nil {
+		return c, err
+	}
+	return c, nil
 }
