@@ -2077,7 +2077,7 @@ func objcRelativeAddress(base uint64, offset int32) (uint64, error) {
 }
 
 func (f *File) readObjCResilientClass(c swift.Class, stub uint64) (*objc.Class, error) {
-	if c.SingletonMetadata == nil || !c.SingletonMetadata.IncompleteMetadata.IsSet() {
+	if !c.SingletonMetadata.IncompleteMetadata.IsSet() {
 		return nil, fmt.Errorf("missing resilient class metadata pattern")
 	}
 	ref := c.SingletonMetadata.IncompleteMetadata
@@ -2092,18 +2092,16 @@ func (f *File) readObjCResilientClass(c swift.Class, stub uint64) (*objc.Class, 
 	if _, err := f.cr.ReadAtAddr(raw[:], addr); err != nil {
 		return nil, fmt.Errorf("read resilient class metadata pattern: %w", err)
 	}
-	var pattern swift.TargetResilientClassMetadataPattern
-	if err := binary.Read(bytes.NewReader(raw[:]), f.ByteOrder, &pattern); err != nil {
-		return nil, err
-	}
-	if pattern.Data == 0 || pattern.Metaclass == 0 {
+	dataOffset := int32(f.ByteOrder.Uint32(raw[16:20]))
+	metaOffset := int32(f.ByteOrder.Uint32(raw[20:24]))
+	if dataOffset == 0 || metaOffset == 0 {
 		return nil, fmt.Errorf("missing Objective-C data in resilient class metadata pattern")
 	}
-	dataAddr, err := objcRelativeAddress(addr+16, pattern.Data)
+	dataAddr, err := objcRelativeAddress(addr+16, dataOffset)
 	if err != nil {
 		return nil, err
 	}
-	metaAddr, err := objcRelativeAddress(addr+20, pattern.Metaclass)
+	metaAddr, err := objcRelativeAddress(addr+20, metaOffset)
 	if err != nil {
 		return nil, err
 	}
@@ -2115,10 +2113,10 @@ func (f *File) readObjCResilientClass(c swift.Class, stub uint64) (*objc.Class, 
 	if err != nil {
 		return nil, err
 	}
-	if c.SuperclassName() == "" {
+	class.SuperClass = c.SuperclassName()
+	if class.SuperClass == "" {
 		return nil, fmt.Errorf("missing resilient superclass name")
 	}
-	class.SuperClass = c.SuperclassName()
 	class.IsSwiftStable = true
 	class.ClassPtr = stub
 	class.DataVMAddr = dataAddr
