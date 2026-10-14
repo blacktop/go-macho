@@ -1965,14 +1965,15 @@ func (f *File) appendObjCResilientClasses(classes []objc.Class) ([]objc.Class, e
 			if !f.Flags.DylibInCache() && ptr < f.GetBaseAddress() {
 				ptr += f.GetBaseAddress()
 			}
-			var isaRaw [8]byte
-			_, err = f.cr.ReadAtAddr(isaRaw[:], ptr)
-			isa := f.ByteOrder.Uint64(isaRaw[:])
-			if err != nil {
-				return nil, fmt.Errorf("read Objective-C class stub at %#x: %w", ptr, err)
+			if !f.customAddressReader && !f.objcClassStubHasFileData(ptr) {
+				continue
 			}
-			if isa != 1 {
-				return nil, fmt.Errorf("invalid Objective-C class stub isa %#x at %#x", isa, ptr)
+			var isaRaw [8]byte
+			n, err := f.cr.ReadAtAddr(isaRaw[:], ptr)
+			// Some binaries fill these entries at runtime. Only recognizable
+			// static Swift stubs can participate in resilient class recovery.
+			if err != nil || n != len(isaRaw) || f.ByteOrder.Uint64(isaRaw[:]) != 1 {
+				continue
 			}
 			stubs[ptr] = true
 		}
@@ -2060,6 +2061,38 @@ func (f *File) appendObjCResilientClasses(classes []objc.Class) ([]objc.Class, e
 	// classes) also uses stubs, but has no resilient descriptor stub trailer.
 	// Preserve the existing handling of these unsupported classes.
 	return classes, nil
+}
+
+// objcClassStubHasFileData prevents a zero-fill address from being mapped onto
+// unrelated bytes later in a standalone file by the segment VM converter.
+func (f *File) objcClassStubHasFileData(addr uint64) bool {
+	const size = uint64(8)
+	if addr > ^uint64(0)-(size-1) {
+		return false
+	}
+	for _, seg := range f.Segments() {
+		if addr < seg.Addr || addr-seg.Addr >= seg.Memsz {
+			continue
+		}
+		offset := addr - seg.Addr
+		if seg.Memsz-offset < size || offset > seg.Filesz || seg.Filesz-offset < size {
+			return false
+		}
+		for _, sec := range f.Sections {
+			if sec.Size == 0 || !(sec.Flags.IsZerofill() || sec.Flags.IsGbZerofill() || sec.Flags.IsThreadLocalZerofill()) {
+				continue
+			}
+			if addr >= sec.Addr {
+				if addr-sec.Addr < sec.Size {
+					return false
+				}
+			} else if sec.Addr-addr < size {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 func objcRelativeAddress(base uint64, offset int32) (uint64, error) {

@@ -64,6 +64,8 @@ type File struct {
 	sr     types.MachoReader
 	cr     types.MachoReader
 	closer io.Closer
+
+	customAddressReader bool // cr was supplied through FileConfig
 }
 
 /*
@@ -197,6 +199,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 	f.cr = f.sr
 
 	if config != nil {
+		f.customAddressReader = config[0].SectionReader != nil || config[0].CacheReader != nil
 		if config[0].SectionReader != nil {
 			f.sr = config[0].SectionReader
 			f.sr.Seek(config[0].Offset, io.SeekStart)

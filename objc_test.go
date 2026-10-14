@@ -607,7 +607,6 @@ func TestGetObjCResilientClassesInvalid(t *testing.T) {
 		change     func(*File, []byte)
 	}{
 		{"truncated stub list", "section size", func(f *File, _ []byte) { f.Sections[1].Size = 7 }},
-		{"bad stub isa", "stub isa", func(_ *File, b []byte) { binary.LittleEndian.PutUint64(b[0x1200:], 2) }},
 		{"missing pattern", "missing resilient class metadata pattern", func(_ *File, b []byte) { binary.LittleEndian.PutUint32(b[0x234:], 0) }},
 		{"missing class RO", "missing Objective-C data", func(_ *File, b []byte) { binary.LittleEndian.PutUint32(b[0x1110:], 0) }},
 	} {
@@ -617,6 +616,116 @@ func TestGetObjCResilientClassesInvalid(t *testing.T) {
 			_, err := f.GetObjCClasses()
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("got %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestGetObjCClassesSkipsUnavailableStubs(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		pointer uint64
+		change  func(*File, []byte)
+	}{
+		{name: "null pointer"},
+		{name: "uninitialized", pointer: 0x2800},
+		{name: "unsupported isa", pointer: 0x2800, change: func(_ *File, b []byte) {
+			binary.LittleEndian.PutUint64(b[0x1800:], 2)
+		}},
+		{name: "unmapped", pointer: 0x5000},
+		{name: "zero-fill tail", pointer: 0x3100, change: func(f *File, _ []byte) {
+			f.Segment("__DATA").Memsz = 0x2000
+		}},
+		{name: "zero-fill aliases file data", pointer: 0x2800, change: func(f *File, b []byte) {
+			f.Segment("__DATA").Filesz = 0x800
+			binary.LittleEndian.PutUint64(b[0x1800:], 1)
+		}},
+		{name: "stub crosses file backing", pointer: 0x2800, change: func(f *File, b []byte) {
+			f.Segment("__DATA").Filesz = 0x804
+			binary.LittleEndian.PutUint64(b[0x1800:], 1)
+		}},
+		{name: "zero-fill section", pointer: 0x2800, change: func(f *File, b []byte) {
+			f.AddSection(&types.Section{SectionHeader: types.SectionHeader{
+				Seg: "__DATA", Name: "__bss", Addr: 0x2800, Size: 16, Flags: types.Zerofill,
+			}})
+			binary.LittleEndian.PutUint64(b[0x1800:], 1)
+		}},
+		{name: "short read", pointer: 0x2fff, change: func(_ *File, b []byte) {
+			b[0x1fff] = 1
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, b := newResilientObjCTestFile(t)
+			put := func(addr uint64, value any) {
+				t.Helper()
+				var encoded bytes.Buffer
+				if err := binary.Write(&encoded, binary.LittleEndian, value); err != nil {
+					t.Fatal(err)
+				}
+				copy(b[addr-0x1000:], encoded.Bytes())
+			}
+			f.AddSection(&types.Section{SectionHeader: types.SectionHeader{
+				Seg: "__DATA", Name: "__objc_classlist", Addr: 0x2090, Size: 8,
+			}})
+			put(0x2090, uint64(0x2600))
+			put(0x2600, objc.SwiftClassMetadata64{ObjcClass64: objc.ObjcClass64{DataVMAddrAndFastFlags: 0x2700}})
+			put(0x2700, objc.ClassRO64{Flags: objc.RO_ROOT, NameVMAddr: 0x15a0})
+			copy(b[0x5a0:], "Ordinary\x00")
+			put(0x2080, tc.pointer)
+			if tc.change != nil {
+				tc.change(f, b)
+			}
+			check := func(want ...string) {
+				t.Helper()
+				classes, err := f.GetObjCClasses()
+				if err != nil {
+					t.Fatal(err)
+				}
+				var got []string
+				for _, class := range classes {
+					got = append(got, class.Name)
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("class names = %v, want %v", got, want)
+				}
+			}
+			// Unrecognized stubs must not activate Swift descriptor parsing.
+			f.Sections[0].Size = 3
+			check("Ordinary")
+			f.Sections[0].Size = 4
+			f.Sections[1].Size = 16
+			put(0x2088, uint64(0x2200))
+			check("Ordinary", "_TtC5Child4Leaf")
+		})
+	}
+}
+
+func TestGetObjCResilientClassesCustomAddressReader(t *testing.T) {
+	for _, cacheReader := range []bool{false, true} {
+		name := "section reader"
+		if cacheReader {
+			name = "cache reader"
+		}
+		t.Run(name, func(t *testing.T) {
+			fixture, b := newResilientObjCTestFile(t)
+			// The caller's address reader supplies valid data outside the
+			// embedded Mach-O's file-backed segment range.
+			fixture.Segment("__DATA").Filesz = 0x200
+			header := types.FileHeader{Magic: types.Magic64, CPU: types.CPUArm64, Type: types.MH_EXECUTE}
+			header.Put(b, binary.LittleEndian)
+			config := FileConfig{SectionReader: fixture.cr}
+			if cacheReader {
+				config = FileConfig{CacheReader: fixture.cr}
+			}
+			f, err := NewFile(bytes.NewReader(b), config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.FileTOC = fixture.FileTOC
+			f.vma = fixture.vma
+			classes, err := f.GetObjCClasses()
+			if err != nil || len(classes) != 1 || classes[0].Name != "_TtC5Child4Leaf" {
+				t.Fatalf("classes=%v err=%v", classes, err)
 			}
 		})
 	}
