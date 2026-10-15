@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/bits"
 	"regexp"
 	"strings"
 	"unicode"
@@ -66,7 +67,7 @@ func (f *File) GetSwiftTOC() swift.TOC {
 // GetSwiftEntry parses the __TEXT.__swift5_entry section
 func (f *File) GetSwiftEntry() (uint64, error) {
 	if sec := f.Section("__TEXT", "__swift5_entry"); sec != nil {
-		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
+		off, err := f.vma.GetOffset(sec.Addr)
 		if err != nil {
 			return 0, fmt.Errorf("failed to convert vmaddr: %v", err)
 		}
@@ -130,7 +131,7 @@ func (f *File) GetSwiftBuiltinTypes() (builtins []swift.BuiltinType, err error) 
 func (f *File) GetSwiftReflectionStrings() (map[uint64]string, error) {
 	reflStrings := make(map[uint64]string)
 	if sec := f.Section("__TEXT", "__swift5_reflstr"); sec != nil {
-		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
+		off, err := f.vma.GetOffset(sec.Addr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert vmaddr: %w", err)
 		}
@@ -166,7 +167,7 @@ func (f *File) GetSwiftReflectionStrings() (map[uint64]string, error) {
 // GetSwiftFields parses all the fields in the __TEXT.__swift5_fields section
 func (f *File) GetSwiftFields() (fields []swift.Field, err error) {
 	if sec := f.Section("__TEXT", "__swift5_fieldmd"); sec != nil {
-		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
+		off, err := f.vma.GetOffset(sec.Addr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
 		}
@@ -496,7 +497,7 @@ func (f *File) GetSwiftClosures() (closures []swift.Capture, err error) {
 // GetSwiftDynamicReplacementInfo parses the __TEXT.__swift5_replace section
 func (f *File) GetSwiftDynamicReplacementInfo() (*swift.AutomaticDynamicReplacements, error) {
 	if sec := f.Section("__TEXT", "__swift5_replace"); sec != nil {
-		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
+		off, err := f.vma.GetOffset(sec.Addr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
 		}
@@ -528,7 +529,7 @@ func (f *File) GetSwiftDynamicReplacementInfo() (*swift.AutomaticDynamicReplacem
 // GetSwiftDynamicReplacementInfoForOpaqueTypes parses the __TEXT.__swift5_replac2 section
 func (f *File) GetSwiftDynamicReplacementInfoForOpaqueTypes() (*swift.AutomaticDynamicReplacementsSome, error) {
 	if sec := f.Section("__TEXT", "__swift5_replac2"); sec != nil {
-		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
+		off, err := f.vma.GetOffset(sec.Addr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
 		}
@@ -560,7 +561,7 @@ func (f *File) GetSwiftDynamicReplacementInfoForOpaqueTypes() (*swift.AutomaticD
 // GetSwiftAccessibleFunctions parses the __TEXT.__swift5_acfuncs section
 func (f *File) GetSwiftAccessibleFunctions() (funcs []swift.AccessibleFunction, err error) {
 	if sec := f.Section("__TEXT", "__swift5_acfuncs"); sec != nil {
-		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
+		off, err := f.vma.GetOffset(sec.Addr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
 		}
@@ -603,17 +604,10 @@ func (f *File) GetSwiftAccessibleFunctions() (funcs []swift.AccessibleFunction, 
 				}
 			}
 
-			fnAddr := afr.Function.GetAddress()
-			if f.vma != nil {
-				if converted := f.vma.Convert(fnAddr); converted != 0 {
-					fnAddr = converted
-				}
-			}
-
 			funcs = append(funcs, swift.AccessibleFunction{
 				Name:               name,
 				FunctionType:       functionType,
-				FunctionAddress:    fnAddr,
+				FunctionAddress:    afr.Function.GetAddress(),
 				GenericEnvironment: afr.GenericEnvironment.GetAddress(),
 				Flags:              afr.Flags,
 			})
@@ -725,7 +719,7 @@ func (f *File) swiftTypeRefRecordSize(addr, maxSize uint64) (uint64, bool, error
 // GetSwiftMultiPayloadEnums TODO: finish me
 func (f *File) GetSwiftMultiPayloadEnums() (mpenums []swift.MultiPayloadEnum, err error) {
 	if sec := f.Section("__TEXT", "__swift5_mpenum"); sec != nil {
-		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
+		off, err := f.vma.GetOffset(sec.Addr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
 		}
@@ -796,12 +790,14 @@ func (f *File) GetSwiftColocateTypeDescriptors() ([]swift.Type, error) {
 	if sec := f.Section("__TEXT", "__constg_swiftt"); sec != nil {
 		var typs []swift.Type
 
-		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
+		off, err := f.vma.GetOffset(sec.Addr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert vmaddr: %w", err)
 		}
 
-		f.cr.Seek(int64(off), io.SeekStart)
+		if _, err := f.cr.Seek(int64(off), io.SeekStart); err != nil {
+			return nil, fmt.Errorf("failed to seek to colocated type descriptors: %w", err)
+		}
 
 		dat := make([]byte, sec.Size)
 		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
@@ -810,18 +806,30 @@ func (f *File) GetSwiftColocateTypeDescriptors() ([]swift.Type, error) {
 
 		r := bytes.NewReader(dat)
 
-		for {
+		for r.Len() > 0 {
 			curr, _ := r.Seek(0, io.SeekCurrent)
+			if uint64(curr) > ^uint64(0)-sec.Addr {
+				return nil, fmt.Errorf("swift colocated type address overflows")
+			}
 
 			typ, err := f.readType(r, sec.Addr+uint64(curr))
 			if err != nil {
-				if errors.Is(err, io.EOF) {
-					break
-				}
-				return nil, fmt.Errorf("failed to read swift colocate type at address %#x: %w", sec.Addr+uint64(curr), err)
+				return nil, fmt.Errorf("failed to read swift colocate type at address %#x: %w",
+					sec.Addr+uint64(curr), err)
 			}
 
 			typs = append(typs, *typ)
+			end, _ := r.Seek(0, io.SeekCurrent)
+			if end <= curr || end > int64(len(dat)) || uint64(end) > ^uint64(0)-sec.Addr {
+				return nil, fmt.Errorf("invalid swift colocated type size at %#x", typ.Address)
+			}
+			padding := int64(-(sec.Addr + uint64(end)) & 3)
+			if padding > int64(r.Len()) {
+				padding = int64(r.Len())
+			}
+			if _, err := r.Seek(padding, io.SeekCurrent); err != nil {
+				return nil, err
+			}
 		}
 
 		return typs, nil
@@ -833,7 +841,7 @@ func (f *File) GetSwiftColocateTypeDescriptors() ([]swift.Type, error) {
 // GetSwiftColocateMetadata parses all the colocated metadata in the __TEXT.__textg_swiftm section
 func (f *File) GetSwiftColocateMetadata() ([]swift.ConformanceDescriptor, error) {
 	if sec := f.Section("__TEXT", "__textg_swiftm"); sec != nil {
-		off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
+		off, err := f.vma.GetOffset(sec.Addr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
 		}
@@ -847,7 +855,7 @@ func (f *File) GetSwiftColocateMetadata() ([]swift.ConformanceDescriptor, error)
 func (f *File) GetSwiftTypes() (typs []swift.Type, err error) {
 	for _, sec := range f.Sections {
 		if sec.Seg == "__TEXT" && (sec.Name == "__swift5_types" || sec.Name == "__swift5_types2") {
-			off, err := f.vma.GetOffset(f.vma.Convert(sec.Addr))
+			off, err := f.vma.GetOffset(sec.Addr)
 			if err != nil {
 				return nil, fmt.Errorf("failed to convert vmaddr: %v", err)
 			}
@@ -880,11 +888,7 @@ func (f *File) GetSwiftTypes() (typs []swift.Type, err error) {
 						typs = append(typs, *typ)
 					}
 				} else {
-					if err := f.cr.SeekToAddr(addr); err != nil {
-						return nil, fmt.Errorf("failed to seek to swift type address %#x: %v", addr, err)
-					}
-
-					typ, err := f.readType(f.cr, addr)
+					typ, err := f.readTypeAtAddress(addr)
 					if err != nil {
 						return nil, fmt.Errorf("failed to read type at address %#x: %v", addr, err)
 					}
@@ -902,55 +906,169 @@ func (f *File) GetSwiftTypes() (typs []swift.Type, err error) {
 	return nil, fmt.Errorf("MachO has no '__swift5_types' or '__swift5_types2' sections: %w", ErrSwiftSectionError)
 }
 
-func (f *File) readType(r io.ReadSeeker, addr uint64) (typ *swift.Type, err error) {
+// readTypeAtAddress reads a type descriptor through its own cursor. Name, parent
+// and field resolution seek f.cr, so sharing that cursor would corrupt the inline
+// descriptor reads, the recorded Size, and any trailing fields.
+func (f *File) readTypeAtAddress(addr uint64) (*swift.Type, error) {
+	limit := int64(f.fileDataSize(addr, 1<<63-1))
+	if limit == 0 {
+		return nil, fmt.Errorf("no file data for swift type at address %#x", addr)
+	}
+	return f.readType(io.NewSectionReader(swiftTypeAddressReader{f.cr, addr}, 0, limit), addr)
+}
+
+// swiftTypeAddressReader keeps cache-file selection tied to the VM address.
+type swiftTypeAddressReader struct {
+	reader types.MachoReader
+	base   uint64
+}
+
+func (r swiftTypeAddressReader) ReadAt(p []byte, off int64) (int, error) {
+	if off < 0 || uint64(off) > ^uint64(0)-r.base {
+		return 0, io.EOF
+	}
+	return r.reader.ReadAtAddr(p, r.base+uint64(off))
+}
+
+// readType parses the descriptor at the reader's current position. The reader
+// must be independent of f.cr; the colocated section buffer and the address
+// reader built by readTypeAtAddress both are.
+func (f *File) readType(r io.ReadSeeker, addr uint64) (*swift.Type, error) {
 	var desc swift.TargetContextDescriptor
 	if err := desc.Read(r, addr); err != nil {
 		return nil, fmt.Errorf("failed to read swift type context descriptor: %w", err)
 	}
-	r.Seek(-desc.Size(), io.SeekCurrent) // rewind
-
-	typ = &swift.Type{Address: addr, Kind: desc.Flags.Kind()}
-
-	switch desc.Flags.Kind() {
-	case swift.CDKindModule:
-		if err := f.parseModule(r, typ); err != nil {
-			return nil, fmt.Errorf("failed to read type kind %s flags(%s): %w", typ.Kind, desc.Flags, err)
-		}
-	case swift.CDKindExtension:
-		if err := f.parseExtension(r, typ); err != nil {
-			return nil, fmt.Errorf("failed to read type kind %s flags(%s): %w", typ.Kind, desc.Flags, err)
-		}
-	case swift.CDKindAnonymous:
-		if err := f.parseAnonymous(r, typ); err != nil {
-			return nil, fmt.Errorf("failed to read type kind %s flags(%s): %w", typ.Kind, desc.Flags, err)
-		}
-	case swift.CDKindProtocol:
-		if _, err := f.parseProtocol(r, typ); err != nil {
-			return nil, fmt.Errorf("failed to read type kind %s flags(%s): %w", typ.Kind, desc.Flags, err)
-		}
-	case swift.CDKindOpaqueType:
-		if err := f.parseOpaqueType(r, typ); err != nil {
-			return nil, fmt.Errorf("failed to read type kind %s flags(%s): %w", typ.Kind, desc.Flags, err)
-		}
-	case swift.CDKindClass:
-		if err := f.parseClassDescriptor(r, typ); err != nil {
-			return nil, fmt.Errorf("failed to read type kind %s flags(%s): %w", typ.Kind, desc.Flags, err)
-		}
-	case swift.CDKindStruct:
-		if err := f.parseStructDescriptor(r, typ); err != nil {
-			return nil, fmt.Errorf("failed to read type kind %s flags(%s): %w", typ.Kind, desc.Flags, err)
-		}
-	case swift.CDKindEnum:
-		if err := f.parseEnumDescriptor(r, typ); err != nil {
-			return nil, fmt.Errorf("failed to read type kind %s flags(%s): %w", typ.Kind, desc.Flags, err)
-		}
-	default:
-		return nil, fmt.Errorf("unknown swift type kind: %v flags(%s)", desc.Flags.Kind(), desc.Flags)
+	if _, err := r.Seek(-desc.Size(), io.SeekCurrent); err != nil {
+		return nil, fmt.Errorf("failed to rewind swift type descriptor: %w", err)
 	}
-
-	f.swift[typ.Address] = typ // cache type
-
+	if desc.Flags.HasInvertibleProtocols() {
+		switch desc.Flags.Kind() {
+		case swift.CDKindClass, swift.CDKindStruct, swift.CDKindEnum, swift.CDKindOpaqueType:
+		default:
+			return nil, fmt.Errorf("inverted protocols on unsupported type kind %s", desc.Flags.Kind())
+		}
+	}
+	typ := &swift.Type{Address: addr, Kind: desc.Flags.Kind()}
+	if err := f.parseType(r, typ, desc.Flags); err != nil {
+		return nil, err
+	}
+	if desc.Flags.HasInvertibleProtocols() {
+		if err := f.readInvertedProtocols(r, typ); err != nil {
+			return nil, err
+		}
+	}
+	f.swift[typ.Address] = typ
 	return typ, nil
+}
+
+func (f *File) parseType(
+	r io.ReadSeeker, typ *swift.Type, flags swift.ContextDescriptorFlags,
+) error {
+	var err error
+	switch flags.Kind() {
+	case swift.CDKindModule:
+		err = f.parseModule(r, typ)
+	case swift.CDKindExtension:
+		err = f.parseExtension(r, typ)
+	case swift.CDKindAnonymous:
+		err = f.parseAnonymous(r, typ)
+	case swift.CDKindProtocol:
+		_, err = f.parseProtocol(r, typ)
+	case swift.CDKindOpaqueType:
+		err = f.parseOpaqueType(r, typ)
+	case swift.CDKindClass:
+		err = f.parseClassDescriptor(r, typ)
+	case swift.CDKindStruct:
+		err = f.parseStructDescriptor(r, typ)
+	case swift.CDKindEnum:
+		err = f.parseEnumDescriptor(r, typ)
+	default:
+		return fmt.Errorf("unknown swift type kind: %v flags(%s)", flags.Kind(), flags)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to read type kind %s flags(%s): %w", typ.Kind, flags, err)
+	}
+	return nil
+}
+
+func (f *File) readInvertedProtocols(r io.Reader, typ *swift.Type) error {
+	var flags swift.GenericContextDescriptorFlags
+	switch value := typ.Type.(type) {
+	case swift.Class:
+		if value.GenericContext != nil {
+			flags = value.GenericContext.Base.Flags
+		}
+	case swift.Struct:
+		if value.GenericContext != nil {
+			flags = value.GenericContext.Base.Flags
+		}
+	case swift.Enum:
+		if value.GenericContext != nil {
+			flags = value.GenericContext.Base.Flags
+		}
+	case swift.OpaqueType:
+		if value.GenericContext != nil {
+			flags = value.GenericContext.Flags
+		}
+	}
+	if flags&^7 != 0 {
+		return fmt.Errorf("unsupported swift generic context flags %#x", flags)
+	}
+	var protocols swift.InvertibleProtocolSet
+	if err := binary.Read(r, f.ByteOrder, &protocols); err != nil {
+		return fmt.Errorf("failed to read swift inverted protocols: %w", err)
+	}
+	typ.InvertedProtocols = &protocols
+	typ.Size += int64(binary.Size(protocols))
+	return nil
+}
+
+// skipSwiftGenericContextTail advances past records that are not yet exposed
+// by GenericContext, so subsequent type-descriptor fields retain their layout.
+func (f *File) skipSwiftGenericContextTail(
+	r io.Reader, flags swift.GenericContextDescriptorFlags, numParams uint16,
+) error {
+	if flags&2 != 0 {
+		if err := f.skipSwiftConditionalProtocols(r); err != nil {
+			return fmt.Errorf("failed to read conditional inverted protocols: %w", err)
+		}
+	}
+	if flags&4 != 0 {
+		var count uint32
+		if err := binary.Read(r, f.ByteOrder, &count); err != nil {
+			return fmt.Errorf("failed to read generic value count: %w", err)
+		}
+		if count > uint32(numParams) {
+			return fmt.Errorf("generic value count %d exceeds parameter count %d", count, numParams)
+		}
+		if _, err := io.CopyN(io.Discard, r, int64(count)*4); err != nil {
+			return fmt.Errorf("failed to read generic value descriptors: %w", err)
+		}
+	}
+	return nil
+}
+
+func (f *File) skipSwiftConditionalProtocols(r io.Reader) error {
+	var protocols, total uint16
+	if err := binary.Read(r, f.ByteOrder, &protocols); err != nil {
+		return err
+	}
+	count := bits.OnesCount16(protocols)
+	for i := 0; i < count; i++ {
+		var next uint16
+		if err := binary.Read(r, f.ByteOrder, &next); err != nil {
+			return err
+		}
+		if next < total {
+			return fmt.Errorf("conditional protocol requirement counts decrease")
+		}
+		total = next
+	}
+	// The uint16 set and cumulative counts precede four-byte-aligned
+	// generic requirement records, each containing three uint32 fields.
+	padding := int64((count+1)&1) * 2
+	_, err := io.CopyN(io.Discard, r, padding+int64(total)*12)
+	return err
 }
 
 /***************
@@ -1025,6 +1143,10 @@ func (f *File) parseExtension(r io.ReadSeeker, typ *swift.Type) (err error) {
 				return fmt.Errorf("failed to read generic pack shape descriptors: %v", err)
 			}
 		}
+		if err := f.skipSwiftGenericContextTail(r,
+			ext.GenericContext.Flags, ext.GenericContext.NumParams); err != nil {
+			return err
+		}
 	}
 
 	if ext.ParentOffset.IsSet() {
@@ -1089,6 +1211,10 @@ func (f *File) parseAnonymous(r io.ReadSeeker, typ *swift.Type) (err error) {
 			if err := binary.Read(r, f.ByteOrder, &anon.GenericContext.TypePacks); err != nil {
 				return fmt.Errorf("failed to read generic pack shape descriptors: %v", err)
 			}
+		}
+		if err := f.skipSwiftGenericContextTail(r,
+			anon.GenericContext.Flags, anon.GenericContext.NumParams); err != nil {
+			return err
 		}
 	}
 
@@ -1334,7 +1460,6 @@ func (f *File) readProtocolConformance(r io.ReadSeeker, addr uint64) (pcd *swift
 	if err != nil {
 		return nil, fmt.Errorf("failed to read protocol offset pointer flags(%s): %v", pcd.Flags.String(), err)
 	}
-	paddr = f.vma.Convert(paddr)
 	if paddr == 0 {
 		pcd.Protocol = "<stripped>"
 		paddr = pcd.ProtocolOffsest.GetRelPtrAddress()
@@ -1360,8 +1485,7 @@ func (f *File) readProtocolConformance(r io.ReadSeeker, addr uint64) (pcd *swift
 	// parse type reference
 	switch pcd.Flags.GetTypeReferenceKind() {
 	case swift.DirectTypeDescriptor:
-		f.cr.SeekToAddr(pcd.TypeRefOffsest.GetRelPtrAddress())
-		pcd.TypeRef, err = f.readType(f.cr, pcd.TypeRefOffsest.GetRelPtrAddress())
+		pcd.TypeRef, err = f.readTypeAtAddress(pcd.TypeRefOffsest.GetRelPtrAddress())
 		if err != nil {
 			return nil, fmt.Errorf("failed to read type: %v", err)
 		}
@@ -1374,7 +1498,6 @@ func (f *File) readProtocolConformance(r io.ReadSeeker, addr uint64) (pcd *swift
 		if err != nil {
 			return nil, fmt.Errorf("failed to get indirect type descriptor pointer: %v", err)
 		}
-		ptr = f.vma.Convert(ptr)
 		if ptr == 0 {
 			if (addr & 1) == 1 {
 				addr = addr &^ 1
@@ -1427,7 +1550,6 @@ func (f *File) readProtocolConformance(r io.ReadSeeker, addr uint64) (pcd *swift
 		if err != nil {
 			return nil, fmt.Errorf("failed to get indirect type descriptor pointer: %v", err)
 		}
-		ptr = f.vma.Convert(ptr)
 		name, err := f.GetCString(ptr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read swift indirect objc class name : %v", err)
@@ -1469,7 +1591,6 @@ func (f *File) readProtocolConformance(r io.ReadSeeker, addr uint64) (pcd *swift
 				if err != nil {
 					return nil, fmt.Errorf("failed to read conditional requirement protocol pointer: %v", err)
 				}
-				ptr = f.vma.Convert(ptr)
 				if ptr == 0 {
 					ptr = req.TypeOrProtocolOrConformanceOrLayoutOff.GetRelPtrAddress()
 					if (ptr & 1) == 1 {
@@ -1637,6 +1758,10 @@ func (f *File) parseOpaqueType(r io.ReadSeeker, typ *swift.Type) (err error) {
 				return fmt.Errorf("failed to read generic pack shape descriptors: %v", err)
 			}
 		}
+		if err := f.skipSwiftGenericContextTail(r,
+			ot.GenericContext.Flags, ot.GenericContext.NumParams); err != nil {
+			return err
+		}
 	}
 
 	if uint32(ot.Flags.KindSpecific()) > 0 { // TypeArgs
@@ -1720,6 +1845,10 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 			if err := binary.Read(r, f.ByteOrder, &class.GenericContext.TypePacks); err != nil {
 				return fmt.Errorf("failed to read generic pack shape descriptors: %v", err)
 			}
+		}
+		if err := f.skipSwiftGenericContextTail(r,
+			class.GenericContext.Base.Flags, class.GenericContext.Base.NumParams); err != nil {
+			return err
 		}
 	}
 
@@ -1836,7 +1965,6 @@ func (f *File) parseClassDescriptor(r io.ReadSeeker, typ *swift.Type) (err error
 				return fmt.Errorf("failed to read targer relative direct pointer: %v", err)
 			}
 		}
-		addr = f.vma.Convert(addr)
 		if bind, err := f.GetBindName(addr); err == nil {
 			class.ResilientSuperclass.Type = &swift.Type{
 				Address: class.ParentOffset.GetAddress(),
@@ -2039,6 +2167,10 @@ func (f *File) parseStructDescriptor(r io.ReadSeeker, typ *swift.Type) (err erro
 				return fmt.Errorf("failed to read generic pack shape descriptors: %v", err)
 			}
 		}
+		if err := f.skipSwiftGenericContextTail(r,
+			st.GenericContext.Base.Flags, st.GenericContext.Base.NumParams); err != nil {
+			return err
+		}
 	}
 
 	if st.Flags.KindSpecific().MetadataInitialization().Foreign() {
@@ -2176,6 +2308,10 @@ func (f *File) parseEnumDescriptor(r io.ReadSeeker, typ *swift.Type) (err error)
 			if err := binary.Read(r, f.ByteOrder, &enum.GenericContext.TypePacks); err != nil {
 				return fmt.Errorf("failed to read generic pack shape descriptors: %v", err)
 			}
+		}
+		if err := f.skipSwiftGenericContextTail(r,
+			enum.GenericContext.Base.Flags, enum.GenericContext.Base.NumParams); err != nil {
+			return err
 		}
 	}
 
@@ -2354,7 +2490,6 @@ func (f *File) parseGenericContext(ctx *swift.TypeGenericContext) (err error) {
 					if err != nil {
 						return fmt.Errorf("failed to read generic requirement param protocol pointer: %v", err)
 					}
-					ptr = f.vma.Convert(ptr)
 					if ptr == 0 {
 						ptr = req.TypeOrProtocolOrConformanceOrLayoutOff.GetRelPtrAddress()
 						if (ptr & 1) == 1 {
@@ -2520,7 +2655,6 @@ func (f *File) symbolLookup(addr uint64) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to read protocol pointer @ %#x: %v", addr, err)
 		}
-		ptr = f.vma.Convert(ptr)
 	} else {
 		ptr = addr
 	}
@@ -2567,9 +2701,6 @@ func (f *File) objcProtocolSymbolicName(addr uint64) (string, error) {
 	}
 
 	addCandidate(addr)
-	if f.vma != nil {
-		addCandidate(f.vma.Convert(addr))
-	}
 	if ptr, err := f.GetPointerAtAddress(addr); err == nil {
 		addCandidate(ptr)
 	}
@@ -2636,14 +2767,15 @@ func (f *File) getContextDesc(addr uint64) (ctx *swift.TargetModuleContext, err 
 		// value is not a valid VM address.  Fall back to a bind-name lookup
 		// rather than returning a hard error.
 		addr = addr &^ 1
-		ptr, err = f.GetPointerAtAddress(addr)
+		if err = f.checkFileData(addr, sizeOfInt64); err == nil {
+			ptr, err = f.GetPointerAtAddress(addr)
+		}
 		if err != nil {
 			if bind, err := f.GetBindName(addr); err == nil {
 				return &swift.TargetModuleContext{Name: bind}, nil
 			}
 			return &swift.TargetModuleContext{}, nil
 		}
-		ptr = f.vma.Convert(ptr)
 	} else {
 		ptr = addr
 	}
@@ -2652,7 +2784,8 @@ func (f *File) getContextDesc(addr uint64) (ctx *swift.TargetModuleContext, err 
 		return &swift.TargetModuleContext{}, nil
 	}
 
-	if err := f.cr.SeekToAddr(ptr); err != nil {
+	descSize := uint64((swift.TargetModuleContextDescriptor{}).Size())
+	if err := f.checkFileData(ptr, descSize); err != nil || f.cr.SeekToAddr(ptr) != nil {
 		if bind, err := f.GetBindName(ptr); err == nil {
 			return &swift.TargetModuleContext{Name: bind}, nil
 		} else if syms, err := f.FindAddressSymbols(ptr); err == nil {
@@ -2664,8 +2797,8 @@ func (f *File) getContextDesc(addr uint64) (ctx *swift.TargetModuleContext, err 
 				}
 			}
 		}
-		// Address is not in this binary (external reference); return an empty
-		// context so callers can continue without the parent qualification.
+		// The descriptor is unavailable in this binary; return an empty context
+		// so callers can continue without the parent qualification.
 		return &swift.TargetModuleContext{}, nil
 	}
 
@@ -2716,6 +2849,10 @@ func (f *File) swiftSymbolicName(addr uint64) (string, error) {
 	reader := f.cr
 
 	header := make([]byte, 8)
+	if err := f.checkFileData(addr, uint64(len(header))); err != nil {
+		return "", fmt.Errorf(
+			"failed to read swift symbolic reference header at %#x: %w", addr, err)
+	}
 	n, err := reader.ReadAtAddr(header, addr)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return "", fmt.Errorf("failed to read swift symbolic reference header at %#x: %w", addr, err)
@@ -2727,35 +2864,24 @@ func (f *File) swiftSymbolicName(addr uint64) (string, error) {
 	offset := int32(f.ByteOrder.Uint32(header[0:4]))
 	flags := f.ByteOrder.Uint32(header[4:8])
 
-	var (
-		target          uint64
-		canSymbolically bool
-	)
-	switch {
-	case offset == 0:
+	target := addr + uint64(int64(offset))
+	if offset == 0 {
 		target = addr + 8
-		canSymbolically = true
-	case offset != 0:
-		target = uint64(int64(addr) + int64(offset))
-		canSymbolically = true
 	}
-
-	if canSymbolically {
-		name, err := f.makeSymbolicMangledNameStringRef(target)
+	if (offset < 0 && target > addr) || (offset >= 0 && target < addr) {
+		return "", fmt.Errorf("swift symbolic reference target at %#x overflows", addr)
+	}
+	if err = f.checkFileData(target, 1); err == nil {
+		var name string
+		name, err = f.makeSymbolicMangledNameStringRef(target)
 		if err == nil {
 			return name, nil
 		}
-		if fallback, fbErr := f.swiftFallbackSymbolicName(reader, addr, offset, flags); fbErr == nil {
-			return fallback, nil
-		}
-		return "", err
 	}
-
-	if fallback, fbErr := f.swiftFallbackSymbolicName(reader, addr, offset, flags); fbErr == nil {
+	if fallback, fbErr := f.swiftFallbackSymbolicName(addr, target, offset, flags); fbErr == nil {
 		return fallback, nil
 	}
-
-	return "", fmt.Errorf("swift symbolic reference offset %d out of expected range", offset)
+	return "", err
 }
 
 func isPrintableASCII(s string) bool {
@@ -2770,9 +2896,18 @@ func isPrintableASCII(s string) bool {
 	return true
 }
 
-func collectSwiftStrings(reader types.MachoReader, addr uint64, max int) ([]string, error) {
-	buf := make([]byte, max)
-	n, err := reader.ReadAtAddr(buf, addr)
+func (f *File) collectSwiftStrings(addr uint64, max int) ([]string, error) {
+	if max <= 0 {
+		return nil, io.EOF
+	}
+	// A string may use the full scan budget. Read one additional byte to
+	// recognize its terminator without accepting an unterminated prefix.
+	limit := f.fileDataSize(addr, uint64(max)+1)
+	if limit == 0 {
+		return nil, io.EOF
+	}
+	buf := make([]byte, limit)
+	n, err := f.cr.ReadAtAddr(buf, addr)
 	if err != nil && err != io.EOF {
 		return nil, err
 	}
@@ -2790,6 +2925,9 @@ func collectSwiftStrings(reader types.MachoReader, addr uint64, max int) ([]stri
 		j := i
 		for j < len(buf) && buf[j] != 0 {
 			j++
+		}
+		if j == len(buf) {
+			break
 		}
 		if j > i {
 			parts = append(parts, string(buf[i:j]))
@@ -2936,12 +3074,13 @@ func selectSwiftStringFromJoined(parts []string) (string, bool) {
 	return "", false
 }
 
-func (f *File) swiftFallbackSymbolicName(reader types.MachoReader, addr uint64, offset int32, flags uint32) (string, error) {
+func (f *File) swiftFallbackSymbolicName(
+	addr, target uint64, offset int32, flags uint32,
+) (string, error) {
 	const readLimit = 0x1000
 
 	if offset != 0 {
-		target := uint64(int64(addr) + int64(offset))
-		parts, err := collectSwiftStrings(reader, target, readLimit)
+		parts, err := f.collectSwiftStrings(target, readLimit)
 		if err != nil {
 			return "", err
 		}
@@ -2957,7 +3096,7 @@ func (f *File) swiftFallbackSymbolicName(reader types.MachoReader, addr uint64, 
 				return "", fmt.Errorf("unexpected swift inline flags %#x", flags)
 			}
 		}
-		parts, err := collectSwiftStrings(reader, addr+8, readLimit)
+		parts, err := f.collectSwiftStrings(target, readLimit)
 		if err == nil {
 			if candidate, ok := selectSwiftString(parts, true); ok {
 				return candidate, nil
@@ -2968,7 +3107,7 @@ func (f *File) swiftFallbackSymbolicName(reader types.MachoReader, addr uint64, 
 		}
 	}
 
-	parts, err := collectSwiftStrings(reader, addr, readLimit)
+	parts, err := f.collectSwiftStrings(addr, readLimit)
 	if err != nil {
 		return "", err
 	}
@@ -2987,6 +3126,11 @@ func (f *File) swiftFallbackSymbolicName(reader types.MachoReader, addr uint64, 
 // ref: https://github.com/apple/swift/blob/main/lib/Demangling/Demangler.cpp (demangleSymbolicReference)
 // ref: https://github.com/apple/swift/blob/main/docs/ABI/Mangling.rst#symbolic-references
 func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
+	limit := int64(f.fileDataSize(addr, 1<<63-1))
+	if limit == 0 {
+		return "", fmt.Errorf(
+			"%w: no file data at %#x", errSwiftSymbolicControlDataDecode, addr)
+	}
 
 	type lookup struct {
 		Kind uint8
@@ -3007,7 +3151,8 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 		}
 		off, _ := f.cr.Seek(0, io.SeekCurrent)
 		curr, _ = f.cr.Seek(0, io.SeekCurrent)
-		if _, err := f.cr.Read(seqData); err != nil {
+		reader := io.LimitReader(f.cr, limit)
+		if _, err := reader.Read(seqData); err != nil {
 			return nil, fmt.Errorf("%w: failed to read swift symbolic mangled name control data: %w", errSwiftSymbolicControlDataDecode, err)
 		}
 
@@ -3028,7 +3173,7 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				// symbolic = true
 				rawKind = seqData[0]
 				var reference int32
-				if err := binary.Read(f.cr, f.ByteOrder, &reference); err != nil {
+				if err := binary.Read(reader, f.ByteOrder, &reference); err != nil {
 					return nil, fmt.Errorf("%w: failed to read swift symbolic reference: %w", errSwiftSymbolicControlDataDecode, err)
 				}
 				elements = append(elements, lookup{
@@ -3042,7 +3187,7 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				}
 				// symbolic = true
 				var reference uint64
-				if err := binary.Read(f.cr, f.ByteOrder, &reference); err != nil {
+				if err := binary.Read(reader, f.ByteOrder, &reference); err != nil {
 					return nil, fmt.Errorf("%w: failed to read swift symbolic reference: %w", errSwiftSymbolicControlDataDecode, err)
 				}
 				elements = append(elements, lookup{
@@ -3054,9 +3199,9 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 			}
 
 			curr, _ = f.cr.Seek(0, io.SeekCurrent)
-			_, err := f.cr.Read(seqData)
+			_, err := reader.Read(seqData)
 			if err != nil {
-				if err == io.EOF {
+				if err == io.EOF && f.customAddressReader {
 					break
 				}
 				return nil, fmt.Errorf("%w: failed to read swift symbolic reference control data: %w", errSwiftSymbolicControlDataDecode, err)
@@ -3161,7 +3306,6 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 				if err != nil {
 					return "", fmt.Errorf("failed to get pointer for indirect context descriptor: %v", err)
 				}
-				ptr = f.vma.Convert(ptr)
 				if bind, err := f.GetBindName(ptr); err == nil {
 					name = bind
 				} else {
@@ -3171,10 +3315,10 @@ func (f *File) makeSymbolicMangledNameStringRef(addr uint64) (string, error) {
 							name = "(private)"
 						}
 					} else {
-						if err := f.cr.SeekToAddr(f.vma.Convert(ptr)); err != nil {
+						if err := f.cr.SeekToAddr(ptr); err != nil {
 							return "", fmt.Errorf("failed to seek to indirect context descriptor: %v", err)
 						}
-						ctx, err := f.getContextDesc(f.vma.Convert(ptr))
+						ctx, err := f.getContextDesc(ptr)
 						if err != nil {
 							return "", fmt.Errorf("failed to read indirect context descriptor: %v", err)
 						}

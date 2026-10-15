@@ -1,8 +1,6 @@
 package macho
 
 import (
-	"errors"
-	"io"
 	"strings"
 
 	"github.com/blacktop/go-macho/types/swift"
@@ -16,20 +14,6 @@ func fullSwiftTypeName(typ *swift.Type) string {
 		}
 	}
 	return strings.Join(parts, ".")
-}
-
-func matchSwiftFieldType(name string, fieldMap map[string]string) (string, bool) {
-	if fieldMap == nil {
-		return "", false
-	}
-	if typ, ok := fieldMap[name]; ok {
-		return typ, true
-	}
-	trimmed := strings.TrimPrefix(name, "_")
-	if typ, ok := fieldMap[trimmed]; ok {
-		return typ, true
-	}
-	return "", false
 }
 
 func swiftClassLookupNames(fullName string, normalize func(string) string) map[string]struct{} {
@@ -184,33 +168,19 @@ func (f *File) swiftFieldTypesForClass(fullName string) (map[string]string, erro
 }
 
 func (f *File) swiftASCIITypeGuess(addr uint64) (string, bool) {
-	buf := make([]byte, 0x400)
-	n, err := f.ReadAtAddr(buf, addr)
-	if err != nil && !errors.Is(err, io.EOF) {
+	parts, err := f.collectSwiftStrings(addr, 0x400)
+	if err != nil {
 		return "", false
 	}
-	buf = buf[:n]
 
 	best := ""
 	bestScore := -1
-	for i := 0; i < len(buf); {
-		for i < len(buf) && buf[i] == 0 {
-			i++
-		}
-		if i >= len(buf) {
-			break
-		}
-		j := i
-		for j < len(buf) && buf[j] != 0 {
-			j++
-		}
-		candidate := string(buf[i:j])
+	for _, candidate := range parts {
 		score := swiftAsciiScore(candidate)
 		if score > bestScore {
 			bestScore = score
 			best = candidate
 		}
-		i = j + 1
 	}
 	if bestScore > 0 {
 		return best, true

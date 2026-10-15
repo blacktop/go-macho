@@ -26,6 +26,9 @@ type Type struct {
 	Fields         *Field
 	Type           any
 	Size           int64
+	// InvertedProtocols is present when the context descriptor carries its
+	// trailing primary invertible-protocol set.
+	InvertedProtocols *InvertibleProtocolSet `json:",omitempty"`
 }
 
 // SuperclassName returns the superclass type, rather than the name of its
@@ -611,6 +614,9 @@ func (f ContextDescriptorFlags) IsGeneric() bool {
 }
 func (f ContextDescriptorFlags) IsUnique() bool {
 	return (f & 0x40) != 0
+}
+func (f ContextDescriptorFlags) HasInvertibleProtocols() bool {
+	return (f & 0x20) != 0
 }
 func (f ContextDescriptorFlags) Version() uint8 {
 	return uint8(f >> 8 & 0xFF)

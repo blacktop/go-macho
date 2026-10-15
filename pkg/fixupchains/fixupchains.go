@@ -216,9 +216,11 @@ func (dcf *DyldChainedFixups) EnsureImports() error {
 	return nil
 }
 
-// Rebase returns the rebased target encoded at the given file offset if the location contains
-// a chained rebase pointer. The offset must be a file offset matching the coordinate system used
-// by dyld chained fixups metadata. The result matches the semantics of IsRebase (runtime offset).
+// Rebase reads and decodes a chained rebase at offset, using that source slot to select the format.
+// The offset uses the file-coordinate system configured in the chained-fixups segment metadata.
+// The result is a runtime offset: address-based formats subtract preferredLoadAddress, while
+// offset-based formats retain their encoded offset. Add the preferred load address once to obtain
+// a preferred VM address. The caller must identify an actual chain slot.
 func (dcf *DyldChainedFixups) Rebase(offset uint64, preferredLoadAddress uint64) (uint64, error) {
 	start, pageStart, err := dcf.locateStartForOffset(offset)
 	if err != nil {
@@ -237,9 +239,13 @@ func (dcf *DyldChainedFixups) Rebase(offset uint64, preferredLoadAddress uint64)
 	return dcf.decodeRebaseTarget(start.PointerFormat, offset, raw, preferredLoadAddress)
 }
 
-// RebaseRaw decodes a chained rebase pointer given the file offset and raw pointer bits.
-// preferredLoadAddress is used to produce the runtime offset consistent with IsRebase.
-func (dcf *DyldChainedFixups) RebaseRaw(offset uint64, raw uint64, preferredLoadAddress uint64) (uint64, error) {
+// RebaseRaw decodes raw chained-pointer bits using offset to select the source slot's format.
+// The offset uses the file-coordinate system configured in the chained-fixups segment metadata.
+// Like Rebase and IsRebase, it returns a runtime offset rather than a VM address. The caller must
+// identify an actual chain slot and must not pass already converted pointer bits.
+func (dcf *DyldChainedFixups) RebaseRaw(
+	offset uint64, raw uint64, preferredLoadAddress uint64,
+) (uint64, error) {
 	start, pageStart, err := dcf.locateStartForOffset(offset)
 	if err != nil {
 		return 0, err
@@ -292,7 +298,9 @@ func (dcf *DyldChainedFixups) locateStartForOffset(offset uint64) (*DyldChainedS
 	return start, start.PageStarts[pageIndex], nil
 }
 
-func (dcf *DyldChainedFixups) decodeRebaseTarget(format DCPtrKind, offset uint64, raw uint64, preferredLoadAddress uint64) (uint64, error) {
+func (dcf *DyldChainedFixups) decodeRebaseTarget(
+	format DCPtrKind, offset uint64, raw uint64, preferredLoadAddress uint64,
+) (uint64, error) {
 	switch format {
 	case DYLD_CHAINED_PTR_ARM64E, DYLD_CHAINED_PTR_ARM64E_USERLAND, DYLD_CHAINED_PTR_ARM64E_USERLAND24,
 		DYLD_CHAINED_PTR_ARM64E_KERNEL, DYLD_CHAINED_PTR_ARM64E_FIRMWARE:
@@ -305,7 +313,7 @@ func (dcf *DyldChainedFixups) decodeRebaseTarget(format DCPtrKind, offset uint64
 		}
 		rebase := DyldChainedPtrArm64eRebase{Pointer: raw, Fixup: offset}
 		target := rebase.UnpackTarget()
-		if format == DYLD_CHAINED_PTR_ARM64E || format == DYLD_CHAINED_PTR_ARM64E_USERLAND24 || format == DYLD_CHAINED_PTR_ARM64E_FIRMWARE {
+		if format == DYLD_CHAINED_PTR_ARM64E || format == DYLD_CHAINED_PTR_ARM64E_FIRMWARE {
 			target -= preferredLoadAddress
 		}
 		return target, nil
@@ -322,9 +330,7 @@ func (dcf *DyldChainedFixups) decodeRebaseTarget(format DCPtrKind, offset uint64
 			return 0, fmt.Errorf("offset %#x encodes a bind pointer, not a rebase", offset)
 		}
 		rebase := DyldChainedPtr64RebaseOffset{Pointer: raw, Fixup: offset}
-		target := rebase.UnpackedTarget()
-		target -= preferredLoadAddress
-		return target, nil
+		return rebase.UnpackedTarget(), nil
 	case DYLD_CHAINED_PTR_64_KERNEL_CACHE, DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE:
 		rebase := DyldChainedPtr64KernelCacheRebase{Pointer: raw, Fixup: offset}
 		return rebase.Target(), nil
@@ -717,6 +723,11 @@ func (dcf *DyldChainedFixups) parseImports() error {
 	return nil
 }
 
+// IsRebase decodes raw pointer bits using PointerFormat and reports whether they encode a rebase.
+// Its result is a runtime offset: address-based formats subtract preferredLoadAddress, while
+// offset-based formats retain their encoded offset. Add the preferred load address once to obtain
+// a preferred VM address. This does not establish chain membership; use Rebase or RebaseRaw when
+// the source slot is known, particularly when an image uses more than one pointer format.
 func (dcf *DyldChainedFixups) IsRebase(addr, preferredLoadAddress uint64) (uint64, bool) {
 	var targetRuntimeOffset uint64
 	switch dcf.PointerFormat {
@@ -737,7 +748,8 @@ func (dcf *DyldChainedFixups) IsRebase(addr, preferredLoadAddress uint64) (uint6
 		}
 		if DcpArm64eIsRebase(addr) {
 			targetRuntimeOffset = DyldChainedPtrArm64eRebase{Pointer: addr}.UnpackTarget()
-			if (dcf.PointerFormat == DYLD_CHAINED_PTR_ARM64E) || (dcf.PointerFormat == DYLD_CHAINED_PTR_ARM64E_USERLAND24) || (dcf.PointerFormat == DYLD_CHAINED_PTR_ARM64E_FIRMWARE) {
+			if dcf.PointerFormat == DYLD_CHAINED_PTR_ARM64E ||
+				dcf.PointerFormat == DYLD_CHAINED_PTR_ARM64E_FIRMWARE {
 				targetRuntimeOffset -= preferredLoadAddress
 			}
 			return targetRuntimeOffset, true
@@ -748,7 +760,7 @@ func (dcf *DyldChainedFixups) IsRebase(addr, preferredLoadAddress uint64) (uint6
 			return targetRuntimeOffset, false
 		}
 		targetRuntimeOffset = DyldChainedPtr64Rebase{Pointer: addr}.UnpackedTarget()
-		if dcf.PointerFormat == DYLD_CHAINED_PTR_64 || dcf.PointerFormat == DYLD_CHAINED_PTR_64_OFFSET {
+		if dcf.PointerFormat == DYLD_CHAINED_PTR_64 {
 			targetRuntimeOffset -= preferredLoadAddress
 		}
 		return targetRuntimeOffset, true
@@ -759,10 +771,12 @@ func (dcf *DyldChainedFixups) IsRebase(addr, preferredLoadAddress uint64) (uint6
 		if Generic32IsBind(uint32(addr)) {
 			return targetRuntimeOffset, false
 		}
-		targetRuntimeOffset = uint64(DyldChainedPtr32Rebase{Pointer: uint32(addr)}.Target()) - preferredLoadAddress
+		targetRuntimeOffset = DyldChainedPtr32Rebase{Pointer: uint32(addr)}.Target()
+		targetRuntimeOffset -= preferredLoadAddress
 		return targetRuntimeOffset, true
 	case DYLD_CHAINED_PTR_32_FIRMWARE:
-		targetRuntimeOffset = uint64(DyldChainedPtr32FirmwareRebase{Pointer: uint32(addr)}.Target()) - preferredLoadAddress
+		targetRuntimeOffset = DyldChainedPtr32FirmwareRebase{Pointer: uint32(addr)}.Target()
+		targetRuntimeOffset -= preferredLoadAddress
 		return targetRuntimeOffset, true
 	default:
 		return 0, false

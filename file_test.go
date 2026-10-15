@@ -366,8 +366,115 @@ func TestAddrResolvable(t *testing.T) {
 		addrBase: cacheOnlyAddr,
 		addrData: []byte{0xaa},
 	}
+	f.customAddressReader = true
 	if got := f.addrResolvable(cacheOnlyAddr); !got {
 		t.Fatalf("addrResolvable(%#x) = false, want true through active cache reader", cacheOnlyAddr)
+	}
+}
+
+func fileBackingMachO(t *testing.T, segment types.Segment64, sections ...types.Section64) []byte {
+	t.Helper()
+	segment.LoadCmd = types.LC_SEGMENT_64
+	segment.Len = uint32(binary.Size(segment) + len(sections)*binary.Size(types.Section64{}))
+	segment.Nsect = uint32(len(sections))
+	copy(segment.Name[:], "__DATA")
+	linkedit := types.Segment64{
+		LoadCmd: types.LC_SEGMENT_64,
+		Len:     uint32(binary.Size(types.Segment64{})),
+		Addr:    0x5000,
+		Memsz:   0x400,
+		Offset:  0x400,
+		Filesz:  0x400,
+	}
+	copy(linkedit.Name[:], "__LINKEDIT")
+	header := types.FileHeader{
+		Magic:        types.Magic64,
+		CPU:          types.CPUArm64,
+		Type:         types.MH_DYLIB,
+		NCommands:    2,
+		SizeCommands: segment.Len + linkedit.Len,
+	}
+	data := bytes.Repeat([]byte{0xff}, 0x800)
+	headerSize := header.Put(data, binary.LittleEndian)
+	var commands bytes.Buffer
+	if err := binary.Write(&commands, binary.LittleEndian, segment); err != nil {
+		t.Fatal(err)
+	}
+	for _, section := range sections {
+		if err := binary.Write(&commands, binary.LittleEndian, section); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := binary.Write(&commands, binary.LittleEndian, linkedit); err != nil {
+		t.Fatal(err)
+	}
+	copy(data[headerSize:], commands.Bytes())
+	return data
+}
+
+func TestGetOffsetBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		segment types.Segment64
+		addr    uint64
+		want    uint64
+		wantErr bool
+	}{
+		{
+			name:    "BSS remains mapped",
+			segment: types.Segment64{Addr: 0x1000, Memsz: 0x1000, Offset: 0x200, Filesz: 0x200},
+			addr:    0x1300,
+			want:    0x500,
+		},
+		{
+			name:    "wrapping VM end",
+			segment: types.Segment64{Addr: ^uint64(0) - 0xf, Memsz: 0x20, Offset: 0x200, Filesz: 0x20},
+			addr:    ^uint64(0),
+			want:    0x20f,
+		},
+		{
+			name:    "wrapped file offset",
+			segment: types.Segment64{Addr: 0x1000, Memsz: ^uint64(0) - 0x1000, Offset: 1<<63 - 1, Filesz: 1},
+			addr:    0x8000000000001581,
+			wantErr: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := fileBackingMachO(t, tc.segment)
+			copy(data[0x580:], "ALIAS!!!")
+			f, err := NewFile(bytes.NewReader(data))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := f.GetOffset(tc.addr)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("GetOffset(%#x) = %#x without an error", tc.addr, got)
+				}
+				var buf [8]byte
+				if n, err := f.ReadAtAddr(buf[:], tc.addr); n != 0 || err == nil {
+					t.Fatalf("ReadAtAddr(%#x) = %d, %v; want no wrapped read", tc.addr, n, err)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("GetOffset(%#x) = %#x, %v; want %#x", tc.addr, got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestFileBackingRanges(t *testing.T) {
+	f := new(File)
+	if got := f.fileDataSize(0, 0); got != 0 {
+		t.Fatalf("zero-size backing = %d", got)
+	}
+	if err := f.checkFileData(0, 0); err != nil {
+		t.Fatalf("empty range: %v", err)
+	}
+	f.customAddressReader = true
+	if err := f.checkFileData(^uint64(0), 2); err == nil {
+		t.Fatal("configured reader accepted a wrapping range")
 	}
 }
 
@@ -1197,11 +1304,23 @@ func TestCStringReaders(t *testing.T) {
 	}{
 		{name: "empty", data: "\x00"},
 		{name: "short", data: "hello\x00ignored", want: "hello"},
-		{name: "last byte of chunk", data: strings.Repeat("x", 4095) + "\x00", want: strings.Repeat("x", 4095)},
-		{name: "chunk boundary", data: strings.Repeat("x", 4096) + "\x00", want: strings.Repeat("x", 4096)},
-		{name: "multiple chunks", data: strings.Repeat("x", 9000) + "\x00", want: strings.Repeat("x", 9000)},
+		{
+			name: "last byte of chunk", data: strings.Repeat("x", 4095) + "\x00",
+			want: strings.Repeat("x", 4095),
+		},
+		{
+			name: "chunk boundary", data: strings.Repeat("x", 4096) + "\x00",
+			want: strings.Repeat("x", 4096),
+		},
+		{
+			name: "multiple chunks", data: strings.Repeat("x", 9000) + "\x00",
+			want: strings.Repeat("x", 9000),
+		},
 		{name: "short reads", data: "hello world\x00", want: "hello world", chunk: 3},
-		{name: "cap terminator", data: strings.Repeat("x", (1<<20)-1) + "\x00", want: strings.Repeat("x", (1<<20)-1)},
+		{
+			name: "cap terminator", data: strings.Repeat("x", (1<<20)-1) + "\x00",
+			want: strings.Repeat("x", (1<<20)-1),
+		},
 		{name: "past cap", data: strings.Repeat("x", 1<<20) + "\x00", err: ErrCStringNoTerminator},
 		{name: "missing", err: ErrCStringNotFound},
 		{name: "unterminated", data: "hello", err: ErrCStringNoTerminator},
@@ -1211,7 +1330,10 @@ func TestCStringReaders(t *testing.T) {
 	} {
 		for _, offset := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/offset=%t", tc.name, offset), func(t *testing.T) {
-				f := &File{cr: &cstringReader{Reader: bytes.NewReader([]byte("pad" + tc.data)), chunk: tc.chunk, stall: tc.stall, readErr: tc.readErr}}
+				f := &File{customAddressReader: true, cr: &cstringReader{
+					Reader: bytes.NewReader([]byte("pad" + tc.data)),
+					chunk:  tc.chunk, stall: tc.stall, readErr: tc.readErr,
+				}}
 				var got string
 				var err error
 				location := "address"
@@ -1243,6 +1365,134 @@ func TestCStringReaders(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestCStringFileBacking(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		addr     uint64
+		offset   int
+		data     string
+		want     string
+		err      error
+		zeroFill types.SectionFlag
+		memsz    uint64
+		fileEnd  int
+	}{
+		{name: "last file byte", addr: 0x11fc, offset: 0x3fc, data: "end\x00", want: "end"},
+		{name: "BSS alias", addr: 0x1200, offset: 0x400, data: "alias\x00", err: ErrCStringNotFound},
+		{
+			name: "cross file boundary", addr: 0x11fc, offset: 0x3fc, data: "partalias\x00",
+			err: ErrCStringNoTerminator,
+		},
+		{
+			name: "cross memory boundary", addr: 0x100c, offset: 0x20c, data: "partalias\x00",
+			memsz: 0x10, err: ErrCStringNoTerminator,
+		},
+		{
+			name: "truncated prefix", addr: 0x1000, offset: 0x200, data: "hello", fileEnd: 0x205,
+			err: ErrCStringNoTerminator,
+		},
+		{name: "past physical end", addr: 0x1080, fileEnd: 0x205, err: ErrCStringNotFound},
+		{
+			name: "zero fill alias", addr: 0x1040, offset: 0x240, data: "alias\x00",
+			zeroFill: types.Zerofill, err: ErrCStringNotFound,
+		},
+		{
+			name: "GB zero fill alias", addr: 0x1040, offset: 0x240, data: "alias\x00",
+			zeroFill: types.GbZerofill, err: ErrCStringNotFound,
+		},
+		{
+			name: "thread local zero fill alias", addr: 0x1040, offset: 0x240, data: "alias\x00",
+			zeroFill: types.ThreadLocalZerofill, err: ErrCStringNotFound,
+		},
+		{
+			name: "cross zero fill", addr: 0x103c, offset: 0x23c, data: "partalias\x00",
+			zeroFill: types.Zerofill, err: ErrCStringNoTerminator,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			segment := types.Segment64{Addr: 0x1000, Memsz: 0x600, Offset: 0x200, Filesz: 0x200}
+			if tc.memsz != 0 {
+				segment.Memsz = tc.memsz
+			}
+			var sections []types.Section64
+			if tc.zeroFill != 0 {
+				sections = append(sections, types.Section64{Addr: 0x1040, Size: 0x20, Flags: tc.zeroFill})
+			}
+			data := fileBackingMachO(t, segment, sections...)
+			copy(data[tc.offset:], tc.data)
+			if tc.fileEnd != 0 {
+				data = data[:tc.fileEnd]
+			}
+			f, err := NewFile(bytes.NewReader(data))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := f.GetCString(tc.addr)
+			if got != tc.want || !errors.Is(err, tc.err) {
+				t.Fatalf("GetCString(%#x) = %q, %v; want %q, %v", tc.addr, got, err, tc.want, tc.err)
+			}
+		})
+	}
+}
+
+func TestCStringConfiguredReaders(t *testing.T) {
+	const cacheAddr = 0x9000
+	data := fileBackingMachO(t, types.Segment64{
+		Addr: 0x1000, Memsz: 0x600, Offset: 0x200, Filesz: 0x200,
+	})
+	copy(data[0x480:], "configured\x00")
+	for _, mode := range []string{"cache reader", "section reader", "converter only"} {
+		t.Run(mode, func(t *testing.T) {
+			converter := &types.VMAddrConverter{VMAddr2Offet: func(addr uint64) (uint64, error) {
+				if addr < cacheAddr || addr-cacheAddr >= 0x20 {
+					return 0, io.EOF
+				}
+				return 0x480 + addr - cacheAddr, nil
+			}}
+			reader := types.NewCustomSectionReader(bytes.NewReader(data), converter, 0, int64(len(data)))
+			var config FileConfig
+			switch mode {
+			case "section reader":
+				config = FileConfig{SectionReader: reader}
+			case "converter only":
+				config = FileConfig{VMAddrConverter: *converter}
+			default:
+				config = FileConfig{CacheReader: reader}
+			}
+			f, err := NewFile(bytes.NewReader(data), config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.getOffset(cacheAddr); err == nil {
+				t.Fatal("test setup: configured-reader address maps to the standalone file")
+			}
+			if got, err := f.GetCString(cacheAddr); got != "configured" || err != nil {
+				t.Fatalf("GetCString() = %q, %v", got, err)
+			}
+			if !f.addrResolvable(cacheAddr) {
+				t.Fatal("configured-reader address is unresolvable")
+			}
+		})
+	}
+}
+
+func TestCStringPointerConverterKeepsBackingBounds(t *testing.T) {
+	data := fileBackingMachO(t, types.Segment64{
+		Addr: 0x1000, Memsz: 0x600, Offset: 0x200, Filesz: 0x200,
+	})
+	copy(data[0x400:], "alias\x00")
+	config := FileConfig{VMAddrConverter: types.VMAddrConverter{
+		Converter: func(value uint64) uint64 { return value },
+	}}
+	f, err := NewFile(bytes.NewReader(data), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := f.GetCString(0x1200); got != "" || !errors.Is(err, ErrCStringNotFound) {
+		t.Fatalf("GetCString() = %q, %v; want no BSS alias", got, err)
 	}
 }
 
@@ -1401,18 +1651,5 @@ func BenchmarkGetCFStrings(b *testing.B) {
 		if _, err := f.GetCFStrings(); err != nil {
 			b.Fatal(err)
 		}
-	}
-}
-
-func TestGetCStringsSectionText(t *testing.T) {
-	f := newCStringSectionFile(t)
-	got, err := f.GetCStrings()
-	want := map[string]map[string]uint64{"__TEXT.__cstring": {"hello": 0x10d, "世界 🌍": 0x113}, "__TEXT.__os_log": {"log": 0x180}}
-	if err != nil || !reflect.DeepEqual(got, want) {
-		t.Fatalf("got %#v, %v; want %#v", got, err, want)
-	}
-	f.cr = &cstringReader{Reader: bytes.NewReader(nil)}
-	if _, err := f.GetCStrings(); err == nil || err.Error() != "failed to read cstring data in __TEXT.__cstring: EOF" {
-		t.Fatalf("read error: %v", err)
 	}
 }

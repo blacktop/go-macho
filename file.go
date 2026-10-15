@@ -20,6 +20,7 @@ import (
 
 	"github.com/blacktop/go-dwarf"
 
+	"github.com/blacktop/go-macho/internal/objcreader"
 	"github.com/blacktop/go-macho/internal/saferio"
 	"github.com/blacktop/go-macho/pkg/codesign"
 	"github.com/blacktop/go-macho/pkg/fixupchains"
@@ -48,24 +49,21 @@ type File struct {
 	dyldInfoRebaseValues  map[uint64]struct{}
 	dyldInfoBindsByAddr   map[uint64]types.Bind
 
-	objc   map[uint64]any
+	objc   *objcreader.Reader
 	swift  map[uint64]any
 	ledata *bytes.Buffer // tmp storage of linkedit data
 
-	objcRuntimeOnce          sync.Once
-	objcHasNonFragileRuntime bool
-	objcHasFragileRuntime    bool
+	objcOnce sync.Once
 
 	sharedCacheRelativeSelectorBaseVMAddress uint64 // objc_opt version 16
-	objcSelectorBaseUnavailable              bool   // relative method selectors needed the shared cache's selector base
 	swiftAutoDemangle                        bool
 
-	mu     sync.Mutex
 	sr     types.MachoReader
 	cr     types.MachoReader
 	closer io.Closer
 
-	customAddressReader bool // cr was supplied through FileConfig
+	customAddressReader    bool // the active reader or address map was supplied through FileConfig
+	customPointerConverter bool // FileConfig supplied the pointer representation's decoder
 }
 
 /*
@@ -177,6 +175,20 @@ func (f *File) Close() error {
 	return err
 }
 
+func (f *File) configureVMAddrConverter(vma types.VMAddrConverter) {
+	if vma.Converter == nil {
+		vma.Converter = f.convertToVMAddr
+	}
+	if vma.VMAddr2Offet == nil {
+		vma.VMAddr2Offet = f.getOffset
+	}
+	if vma.Offet2VMAddr == nil {
+		vma.Offet2VMAddr = f.getVMAddress
+	}
+	// The default section reader retains this pointer.
+	*f.vma = vma
+}
+
 // NewFile creates a new File for accessing a Mach-O binary in an underlying reader.
 // The Mach-O binary is expected to start at position 0 in the ReaderAt.
 func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
@@ -186,7 +198,6 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 
 	f := new(File)
 
-	f.objc = make(map[uint64]any)
 	f.swift = make(map[uint64]any)
 	f.swiftAutoDemangle = true
 
@@ -199,7 +210,9 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 	f.cr = f.sr
 
 	if config != nil {
-		f.customAddressReader = config[0].SectionReader != nil || config[0].CacheReader != nil
+		f.customAddressReader = config[0].SectionReader != nil ||
+			config[0].CacheReader != nil || config[0].VMAddrConverter.VMAddr2Offet != nil
+		f.customPointerConverter = config[0].VMAddrConverter.Converter != nil
 		if config[0].SectionReader != nil {
 			f.sr = config[0].SectionReader
 			f.sr.Seek(config[0].Offset, io.SeekStart)
@@ -208,9 +221,7 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 		if config[0].CacheReader != nil {
 			f.cr = config[0].CacheReader
 		}
-		if config[0].VMAddrConverter.Converter != nil {
-			f.vma = &config[0].VMAddrConverter
-		}
+		f.configureVMAddrConverter(config[0].VMAddrConverter)
 		loadIncluding = config[0].LoadIncluding
 		loadExcluding = config[0].LoadExcluding
 		f.sharedCacheRelativeSelectorBaseVMAddress = config[0].RelativeSelectorBase
@@ -1680,15 +1691,6 @@ func (f *File) GetOffset(address uint64) (uint64, error) {
 	return f.vma.GetOffset(address)
 }
 
-func (f *File) getOffset(address uint64) (uint64, error) {
-	for _, seg := range f.Segments() {
-		if seg.Addr <= address && address < seg.Addr+seg.Memsz {
-			return (address - seg.Addr) + seg.Offset, nil
-		}
-	}
-	return 0, fmt.Errorf("address %#x not within any segment's adress range", address)
-}
-
 // addrResolvable reports whether vmaddr can be read from this file's reader.
 //
 // In-cache files resolve addresses against the entire shared cache, so
@@ -1699,8 +1701,10 @@ func (f *File) addrResolvable(vmaddr uint64) bool {
 	if vmaddr == 0 || f.cr == nil {
 		return false
 	}
-	// Probe with a real read so segments whose Memsz exceeds Filesz (bss tails)
-	// report unresolvable, which a segment-table lookup alone would not catch.
+	if !f.hasFileData(vmaddr, 1) {
+		return false
+	}
+	// Also probe the reader so physically truncated files are unresolvable.
 	var buf [1]byte
 	n, _ := f.cr.ReadAtAddr(buf[:], vmaddr)
 	return n == len(buf)
@@ -1725,7 +1729,10 @@ func (f *File) GetBaseAddress() uint64 {
 	return f.preferredLoadAddress()
 }
 
-// GetPointer returns pointer at a given offset
+// GetPointer reads a 64-bit pointer at a file offset and applies the configured VM converter.
+// The default converter returns decoded rebases as preferred VM addresses, not runtime offsets.
+// The result is already converted; do not pass it to SlidePointer again. Use
+// GetSlidPointerAtAddress when the pointer format must be selected from its source slot.
 func (f *File) GetPointer(offset uint64) (uint64, error) {
 	// Thread-safe: Use ReadAt which doesn't modify shared state
 	buf := make([]byte, 8)
@@ -1737,15 +1744,27 @@ func (f *File) GetPointer(offset uint64) (uint64, error) {
 	return f.vma.Convert(ptr), nil
 }
 
-// GetPointerAtAddress returns pointer at a given virtual address
+// GetPointerAtAddress reads a 64-bit pointer at a VM address and applies the configured converter.
+// The default converter returns decoded rebases as preferred VM addresses, not runtime offsets.
+// The result is already converted; do not pass it to SlidePointer again. Use
+// GetSlidPointerAtAddress when the pointer format must be selected from its source slot.
 func (f *File) GetPointerAtAddress(address uint64) (uint64, error) {
-	// Thread-safe: Use ReadAtAddr which doesn't modify shared state
-	buf := make([]byte, 8)
-	if _, err := f.cr.ReadAtAddr(buf, address); err != nil {
+	return f.readPointerAtAddress(address, 8)
+}
+
+func (f *File) readPointerAtAddress(address uint64, size int) (uint64, error) {
+	var buf [8]byte
+	n, err := f.cr.ReadAtAddr(buf[:size], address)
+	if err == nil && n != size {
+		err = io.ErrUnexpectedEOF
+	}
+	if err != nil {
 		return 0, fmt.Errorf("failed to read pointer @ %#x: %w", address, err)
 	}
-	ptr := f.ByteOrder.Uint64(buf)
-	// CRITICAL: Convert handles pointer sliding/rebasing for relocated pointers
+	ptr := uint64(f.ByteOrder.Uint32(buf[:4]))
+	if size == 8 {
+		ptr = f.ByteOrder.Uint64(buf[:])
+	}
 	return f.vma.Convert(ptr), nil
 }
 
@@ -1765,10 +1784,14 @@ func (f *File) ResetFixupsCache() {
 	}
 }
 
-// GetSlidPointerAtAddress reads the raw pointer at the given virtual address and, if it is a
-// chained rebase pointer, returns the rebased (slid) target using the fast fixup lookup. When the
-// pointer is not part of a chained rebase, the result falls back to SlidePointer behaviour.
+// GetSlidPointerAtAddress reads a pointer from a source VM address. A configured pointer converter
+// or explicitly rebased content takes precedence over image fixups. Otherwise the source slot
+// selects its chained-pointer format, and decoded rebases are returned as preferred VM addresses.
+// Do not convert the source address or result again.
 func (f *File) GetSlidPointerAtAddress(address uint64) (uint64, error) {
+	if f.customPointerConverter || f.vma.IsContentRebased {
+		return f.readPointerAtAddress(address, int(f.pointerSize()))
+	}
 	offset, offErr := f.vma.GetOffset(address)
 	var rawBuf [8]byte
 	var raw uint64
@@ -1944,8 +1967,14 @@ func (f *File) decodeDyldInfoPointerAtAddress(address, raw uint64) (uint64, bool
 	return 0, false
 }
 
-// SlidePointer returns slid or un-chained pointer
+// SlidePointer converts stored pointer bits to a VM address using the configured converter or
+// the image's fixups. Decoded chained rebases use the preferred load address.
+// Do not pass a source-slot address or an already converted result.
+// Use GetSlidPointerAtAddress when the source slot is available, especially for mixed formats.
 func (f *File) SlidePointer(ptr uint64) uint64 {
+	if f.customPointerConverter || f.vma.IsContentRebased {
+		return f.vma.Convert(ptr)
+	}
 	if resolved, ok := f.decodeChainedPointer(ptr); ok {
 		return resolved
 	}
@@ -1958,6 +1987,9 @@ func (f *File) SlidePointer(ptr uint64) uint64 {
 func (f *File) convertToVMAddr(value uint64) uint64 {
 	if value == 0 {
 		return 0
+	}
+	if f.vma.IsContentRebased {
+		return value - uint64(f.vma.Slide)
 	}
 	if resolved, ok := f.decodeChainedPointer(value); ok {
 		return resolved
@@ -2021,6 +2053,7 @@ func (f *File) GetBindName(pointer uint64) (string, error) {
 // GetCString returns a c-string at a given virtual address in the MachO
 func (f *File) GetCString(addr uint64) (string, error) {
 	const maxLength = 1 << 20 // 1 MiB safety cap
+	limit := f.fileDataSize(addr, maxLength)
 
 	bp := cstringBufPool.Get().(*[]byte)
 	buf := *bp
@@ -2029,8 +2062,12 @@ func (f *File) GetCString(addr uint64) (string, error) {
 	var out []byte
 	current := addr
 
-	for len(out) < maxLength {
-		n, err := f.cr.ReadAtAddr(buf, current)
+	for uint64(len(out)) < limit {
+		readBuf := buf
+		if remaining := limit - uint64(len(out)); uint64(len(readBuf)) > remaining {
+			readBuf = readBuf[:remaining]
+		}
+		n, err := f.cr.ReadAtAddr(readBuf, current)
 		if n > 0 {
 			nullIdx := bytes.IndexByte(buf[:n], 0)
 			if nullIdx >= 0 {
@@ -2286,12 +2323,7 @@ func (f *File) FindSegmentForVMAddr(vmAddr uint64) *Segment {
 			}
 		}
 	}
-	for _, seg := range f.Segments() {
-		if seg.Addr <= vmAddr && vmAddr < seg.Addr+seg.Memsz {
-			return seg
-		}
-	}
-	return nil
+	return f.segmentForFileAddress(vmAddr)
 }
 
 // FindSectionForVMAddr returns the section containing a given virtual memory ddress.

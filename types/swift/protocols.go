@@ -215,9 +215,9 @@ const (
 	GRKindLayout GenericRequirementKind = 0x1F // layout
 )
 
-// InvertibleProtocolSet is a bitset of the invertible protocols (Copyable,
-// Escapable) named by a GRKindInvertedProtocols generic requirement. The
-// requirement's payload word stores this set in its high 16 bits.
+// InvertibleProtocolSet is a bitset of invertible protocols such as Copyable
+// and Escapable. A context descriptor can carry it in a trailing uint16;
+// a GRKindInvertedProtocols requirement stores it in its payload's high 16 bits.
 type InvertibleProtocolSet uint16
 
 const (
