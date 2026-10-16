@@ -49,9 +49,10 @@ type File struct {
 	dyldInfoRebaseValues  map[uint64]struct{}
 	dyldInfoBindsByAddr   map[uint64]types.Bind
 
-	objc   *objcreader.Reader
-	swift  map[uint64]any
-	ledata *bytes.Buffer // tmp storage of linkedit data
+	objc         *objcreader.Reader
+	swift        map[uint64]any
+	swiftClasses *swiftClassIndex // built lazily from GetSwiftTypes for ivar type lookups
+	ledata       *bytes.Buffer    // tmp storage of linkedit data
 
 	objcOnce sync.Once
 

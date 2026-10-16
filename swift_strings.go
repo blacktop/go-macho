@@ -59,22 +59,6 @@ func swiftClassLookupNames(fullName string, normalize func(string) string) map[s
 	return names
 }
 
-func swiftClassTypeMatches(typeName string, lookupNames map[string]struct{}, normalize func(string) string) bool {
-	typeName = strings.TrimSpace(typeName)
-	if typeName == "" {
-		return false
-	}
-	if _, ok := lookupNames[typeName]; ok {
-		return true
-	}
-	if normalize != nil {
-		if _, ok := lookupNames[normalize(typeName)]; ok {
-			return true
-		}
-	}
-	return false
-}
-
 func legacySwiftObjCClassName(fullName string) (string, bool) {
 	name := strings.TrimSpace(fullName)
 	name = strings.TrimPrefix(name, "_")
@@ -135,36 +119,94 @@ func consumeDecimalPrefix(input string) (value int, digits int) {
 	return value, digits
 }
 
-func (f *File) swiftFieldTypesForClass(fullName string) (map[string]string, error) {
-	types, err := f.GetSwiftTypes()
-	if err != nil {
-		return nil, err
-	}
+// swiftClassIndex resolves the Swift class descriptor for an Objective-C class
+// name without rescanning the type catalog. Each lookup name maps to the first
+// class in GetSwiftTypes order that carries it, raw or normalized, so lookups
+// keep the source-order first-match semantics of a linear scan.
+type swiftClassIndex struct {
+	autoDemangle bool
+	fields       []*swift.Field
+	byName       map[string]int
+}
 
-	lookupNames := swiftClassLookupNames(fullName, f.normalizeSwiftIdentifier)
-
+func buildSwiftClassIndex(
+	types []swift.Type, autoDemangle bool, normalize func(string) string,
+) *swiftClassIndex {
+	idx := &swiftClassIndex{autoDemangle: autoDemangle, byName: make(map[string]int)}
 	for i := range types {
 		typ := &types[i]
 		if typ.Kind != swift.CDKindClass {
 			continue
 		}
-		if !swiftClassTypeMatches(fullSwiftTypeName(typ), lookupNames, f.normalizeSwiftIdentifier) {
+		name := strings.TrimSpace(fullSwiftTypeName(typ))
+		if name == "" {
 			continue
 		}
-		if typ.Fields == nil {
-			return nil, nil
+		pos := len(idx.fields)
+		idx.fields = append(idx.fields, typ.Fields)
+		idx.add(name, pos)
+		if normalize != nil {
+			idx.add(normalize(name), pos)
 		}
-		fieldMap := make(map[string]string)
-		for _, rec := range typ.Fields.Records {
-			if rec.Name == "" || rec.MangledType == "" {
-				continue
-			}
-			fieldMap[rec.Name] = rec.MangledType
-		}
-		return fieldMap, nil
 	}
+	return idx
+}
 
-	return nil, nil
+func (idx *swiftClassIndex) add(name string, pos int) {
+	if _, ok := idx.byName[name]; !ok {
+		idx.byName[name] = pos
+	}
+}
+
+// lookup returns the field descriptor of the first indexed class matching any
+// lookup name. Map iteration order cannot change the result because the
+// lowest class position wins.
+func (idx *swiftClassIndex) lookup(lookupNames map[string]struct{}) (*swift.Field, bool) {
+	best := -1
+	for name := range lookupNames {
+		if pos, ok := idx.byName[name]; ok && (best < 0 || pos < best) {
+			best = pos
+		}
+	}
+	if best < 0 {
+		return nil, false
+	}
+	return idx.fields[best], true
+}
+
+// swiftClassIndexFor returns the class index for the current normalization
+// mode, building it from a complete GetSwiftTypes result. A failed catalog
+// parse is not cached, so later calls report the same error.
+func (f *File) swiftClassIndexFor() (*swiftClassIndex, error) {
+	if idx := f.swiftClasses; idx != nil && idx.autoDemangle == f.swiftAutoDemangle {
+		return idx, nil
+	}
+	types, err := f.GetSwiftTypes()
+	if err != nil {
+		return nil, err
+	}
+	idx := buildSwiftClassIndex(types, f.swiftAutoDemangle, f.normalizeSwiftIdentifier)
+	f.swiftClasses = idx
+	return idx, nil
+}
+
+func (f *File) swiftFieldTypesForClass(fullName string) (map[string]string, error) {
+	idx, err := f.swiftClassIndexFor()
+	if err != nil {
+		return nil, err
+	}
+	fields, ok := idx.lookup(swiftClassLookupNames(fullName, f.normalizeSwiftIdentifier))
+	if !ok || fields == nil {
+		return nil, nil
+	}
+	fieldMap := make(map[string]string, len(fields.Records))
+	for _, rec := range fields.Records {
+		if rec.Name == "" || rec.MangledType == "" {
+			continue
+		}
+		fieldMap[rec.Name] = rec.MangledType
+	}
+	return fieldMap, nil
 }
 
 func (f *File) swiftASCIITypeGuess(addr uint64) (string, bool) {
