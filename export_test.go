@@ -1039,6 +1039,33 @@ func TestSplitInfoSectionLocationUsesEmptySectionAtTarget(t *testing.T) {
 	}
 }
 
+func TestCreateSymtabKeepsResolvedImportsUndefined(t *testing.T) {
+	f := &File{}
+	f.Symtab = &Symtab{Syms: []Symbol{
+		{Name: "_local", Type: types.N_SECT},
+		{Name: "_import", Type: types.N_UNDF | types.N_EXT},
+		{Name: "_export", Type: types.N_SECT | types.N_EXT},
+	}}
+	resolved := []Symbol{{Name: "_import", Type: types.N_ABS | types.N_EXT, Value: 0xfffffe0007001000}}
+	nLocal, nExtdef, nUndef, _, _, indexMap, err := f.createSymtabWithIndexMap(0, nil, resolved, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nLocal != 1 || nExtdef != 1 || nUndef != 1 {
+		t.Fatalf("symbol counts = %d/%d/%d, want 1/1/1", nLocal, nExtdef, nUndef)
+	}
+	if want := []int{0, 2, 1}; !slices.Equal(indexMap, want) {
+		t.Fatalf("index map = %v, want %v", indexMap, want)
+	}
+	f.Dysymtab = &Dysymtab{IndirectSyms: []uint32{1, types.INDIRECT_SYMBOL_LOCAL, 2}}
+	if _, err := f.createIndirectSymtab(indexMap); err != nil {
+		t.Fatal(err)
+	}
+	if want := []uint32{2, types.INDIRECT_SYMBOL_LOCAL, 1}; !slices.Equal(f.Dysymtab.IndirectSyms, want) {
+		t.Fatalf("indirect symbols = %#x, want %#x", f.Dysymtab.IndirectSyms, want)
+	}
+}
+
 func TestEncodeFunctionStartsUsesExportedBase(t *testing.T) {
 	got := encodeFunctionStarts(0, []uint64{0x4000, 0x4060, 0x40b8})
 	if want := []byte{0x80, 0x80, 0x01, 0x60, 0x58, 0x00, 0x00, 0x00}; !bytes.Equal(got, want) {

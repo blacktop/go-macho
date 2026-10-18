@@ -3065,6 +3065,18 @@ func (f *File) createSymtabWithIndexMap(offset uint32, segMap exportSegMap, loca
 		orig int // index in f.Symtab.Syms, or -1
 	}
 	var localSyms, extdefSyms, undefSyms []symEntry
+	// Extra symbols that name one of this image's imports are the kernelcache
+	// definitions used to resolve them. They are not definitions of this image
+	// and must stay undefined, or a rebuilt collection would link other images
+	// against these stale absolute addresses.
+	imports := make(map[string]struct{})
+	if f.Symtab != nil {
+		for _, sym := range f.Symtab.Syms {
+			if sym.Type.IsUndefinedSym() {
+				imports[sym.Name] = struct{}{}
+			}
+		}
+	}
 	remap := func(sym Symbol) (Symbol, error) {
 		if !sym.Type.IsDefinedInSection() || sym.Value == 0 {
 			return sym, nil
@@ -3079,6 +3091,9 @@ func (f *File) createSymtabWithIndexMap(offset uint32, segMap exportSegMap, loca
 
 	// extra symbols (unmapped locals from DSC, or resolved imports from fileset KC)
 	for _, lsym := range locals {
+		if _, isImport := imports[lsym.Name]; isImport && lsym.Type.IsExternalSym() {
+			continue
+		}
 		var err error
 		lsym, err = remap(lsym)
 		if err != nil {
