@@ -2,6 +2,8 @@ package macho
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"log/slog"
@@ -397,6 +399,12 @@ func (f *File) patchExportFile(segMap exportSegMap, exportData []byte, exportFil
 		if err != nil {
 			return nil, err
 		}
+		if err := exportFile.clearKmodInfoCacheFields(segMap, exportData, locals); err != nil {
+			return nil, err
+		}
+		if err := exportFile.restoreFIPSHMAC(exportData); err != nil {
+			return nil, err
+		}
 	}
 
 	// Recreate LINKEDIT segment
@@ -410,6 +418,71 @@ func (f *File) patchExportFile(segMap exportSegMap, exportData []byte, exportFil
 	}
 
 	return exportData, nil
+}
+
+// restoreFIPSHMAC reproduces the kernel-collection builder's final FIPS seal:
+// HMAC-SHA256 of the post-rewrite __text section with the one-byte key {0}.
+func (f *File) restoreFIPSHMAC(exportData []byte) error {
+	seal := f.Section("__TEXT", "__fips_hmacs")
+	if seal == nil {
+		return nil
+	}
+	text := f.Section("__TEXT", "__text")
+	if text == nil {
+		text = f.Section("__TEXT_EXEC", "__text")
+	}
+	if text == nil {
+		return fmt.Errorf("cannot seal __fips_hmacs without a __text section")
+	}
+	if seal.Size < sha256.Size {
+		return fmt.Errorf("__fips_hmacs is %d bytes; need at least %d", seal.Size, sha256.Size)
+	}
+	textEnd := uint64(text.Offset) + text.Size
+	sealEnd := uint64(seal.Offset) + sha256.Size
+	if textEnd > uint64(len(exportData)) || sealEnd > uint64(len(exportData)) {
+		return fmt.Errorf("FIPS sections exceed exported data bounds")
+	}
+	mac := hmac.New(sha256.New, []byte{0})
+	_, _ = mac.Write(exportData[text.Offset:textEnd])
+	copy(exportData[seal.Offset:sealEnd], mac.Sum(nil))
+	return nil
+}
+
+func (f *File) clearKmodInfoCacheFields(segMap exportSegMap, exportData []byte, extra ...[]Symbol) error {
+	var candidates []Symbol
+	if f.Symtab != nil {
+		candidates = append(candidates, f.Symtab.Syms...)
+	}
+	// Stripped collections carry no _kmod_info symbol; callers pass it in.
+	for _, syms := range extra {
+		candidates = append(candidates, syms...)
+	}
+	for _, sym := range candidates {
+		if sym.Name != "_kmod_info" || !sym.Type.IsDefinedInSection() {
+			continue
+		}
+		address, err := segMap.RemapAddress(sym.Value)
+		if err != nil {
+			return fmt.Errorf("failed to remap _kmod_info at %#x: %w", sym.Value, err)
+		}
+		offset, err := f.GetOffset(address)
+		if err != nil {
+			return fmt.Errorf("failed to locate recovered _kmod_info: %w", err)
+		}
+		// kmutil fills address and size in the cached kmod_info. The
+		// standalone KEXT stores zero for both 64-bit fields. kmod_info is
+		// packed to 4-byte alignment, placing them at 0x9c and 0xa4.
+		const cacheFieldsOffset = uint64(0x9c)
+		const cacheFieldsSize = uint64(16)
+		start := offset + cacheFieldsOffset
+		end := start + cacheFieldsSize
+		if end > uint64(len(exportData)) {
+			return fmt.Errorf("_kmod_info cache fields exceed exported file size")
+		}
+		clear(exportData[start:end])
+		return nil
+	}
+	return nil
 }
 
 // createCacheAddressSegmentMap keeps every segment at its cache address and

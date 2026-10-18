@@ -2,6 +2,8 @@ package macho
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"slices"
@@ -12,6 +14,22 @@ import (
 	"github.com/blacktop/go-macho/pkg/trie"
 	"github.com/blacktop/go-macho/types"
 )
+
+func TestRestoreFIPSHMAC(t *testing.T) {
+	seal := &types.Section{SectionHeader: types.SectionHeader{Name: "__fips_hmacs", Seg: "__TEXT", Offset: 0x20, Size: 32}}
+	text := &types.Section{SectionHeader: types.SectionHeader{Name: "__text", Seg: "__TEXT_EXEC", Offset: 0x80, Size: 5}}
+	f := &File{FileTOC: FileTOC{Sections: []*types.Section{seal, text}}}
+	data := make([]byte, 0x100)
+	copy(data[text.Offset:], []byte("hello"))
+	if err := f.restoreFIPSHMAC(data); err != nil {
+		t.Fatal(err)
+	}
+	mac := hmac.New(sha256.New, []byte{0})
+	_, _ = mac.Write([]byte("hello"))
+	if got, want := data[seal.Offset:seal.Offset+32], mac.Sum(nil); !bytes.Equal(got, want) {
+		t.Fatalf("FIPS HMAC = %x, want %x", got, want)
+	}
+}
 
 func newReferenceAdjustmentFile() (*File, exportSegMap, []byte) {
 	f := newTextSegmentFile(SegmentHeader{
@@ -438,6 +456,42 @@ func TestOrderFixupsForImportsSeparatesDataAfterNamedVtable(t *testing.T) {
 	want := []string{"_vtable_high", "_vtable_low", "_data_high", "_data_low"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("import order = %v, want %v", got, want)
+	}
+}
+
+func TestClearKmodInfoCacheFields(t *testing.T) {
+	segment := &Segment{SegmentHeader: SegmentHeader{
+		LoadCmd: types.LC_SEGMENT_64,
+		Name:    "__DATA",
+		Addr:    0x8000,
+		Memsz:   0x1000,
+		Offset:  0x4000,
+		Filesz:  0x1000,
+	}}
+	f := &File{
+		FileTOC: FileTOC{Loads: loads{segment}},
+		Symtab: &Symtab{Syms: []Symbol{{
+			Name: "_kmod_info", Type: types.N_SECT | types.N_EXT, Sect: 1, Value: 0x1000,
+		}}},
+	}
+	f.vma = &types.VMAddrConverter{VMAddr2Offet: f.getOffset}
+	segMap := exportSegMap{{
+		Name: "__DATA",
+		Old:  segInfo{VirtStart: 0x1000, VirtEnd: 0x2000},
+		New:  segInfo{Start: 0x4000, End: 0x5000, VirtStart: 0x8000, VirtEnd: 0x9000},
+	}}
+	data := make([]byte, 0x5000)
+	for i := 0x409c; i < 0x40ac; i++ {
+		data[i] = 0xff
+	}
+
+	if err := f.clearKmodInfoCacheFields(segMap, data); err != nil {
+		t.Fatal(err)
+	}
+	for i, value := range data[0x409c:0x40ac] {
+		if value != 0 {
+			t.Fatalf("cache field byte %d = %#x, want zero", i, value)
+		}
 	}
 }
 
