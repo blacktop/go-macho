@@ -317,6 +317,143 @@ func TestCreateSymtabRemapsDefinedSymbolValues(t *testing.T) {
 	}
 }
 
+func TestPointerAuthStringDiscriminator(t *testing.T) {
+	tests := map[string]uint16{
+		"_ZN15OSMetaClassBase25_RESERVEDOSMetaClassBase3Ev": 0x8ee2,
+		"_ZN15OSMetaClassBase8DispatchE5IORPC":              0x9209,
+		"_ZNK11OSMetaClass7releaseEi":                       0x513b,
+	}
+	for name, want := range tests {
+		if got := pointerAuthStringDiscriminator(name); got != want {
+			t.Errorf("discriminator(%q) = %#x, want %#x", name, got, want)
+		}
+	}
+}
+
+func TestAuthenticatedSymbolPrefersEnclosingVtableOwner(t *testing.T) {
+	const target = 0x200000
+	symbols := []Symbol{
+		{Name: "__ZNK8OSObject12taggedRetainEPKv", Value: target},
+		{Name: "__ZNK7MyClass12taggedRetainEPKv", Value: target},
+		{Name: "__ZTV7MyClass", Value: 0x100000},
+	}
+	owner := vtableOwnerAt(symbols, 0x100080)
+	if owner != "MyClass" {
+		t.Fatalf("vtable owner = %q, want MyClass", owner)
+	}
+	symbol, ok := authenticatedSymbol(symbols, 0x5635, target, owner)
+	if !ok {
+		t.Fatal("authenticated symbol was not found")
+	}
+	if got, want := symbol.Name, "__ZNK7MyClass12taggedRetainEPKv"; got != want {
+		t.Fatalf("authenticated symbol = %q, want %q", got, want)
+	}
+}
+
+func TestAdjustReferencesUsesLocalVtableOwnerForImportedAlias(t *testing.T) {
+	f, segMap, data := newReferenceAdjustmentFile()
+	const source = 0x100000
+	const target = 0x200000
+	sourceSymbols := []Symbol{
+		{Name: "__ZTV7MyClass", Type: types.N_SECT, Value: source - 0x20},
+		{Name: "__ZNK7MyClass12taggedRetainEPKv", Type: types.N_UNDF | types.N_EXT},
+	}
+	original := fixupchains.NewDyldChainedPtrArm64eAuthRebase(0, target, 0x5635, 1, 0, 0)
+	binary.LittleEndian.PutUint64(data[0x8000:], original.Raw())
+
+	binds, _, _, _, err := f.adjustReferencesWithSourceSymbols(segMap, data, []Symbol{
+		{Name: "__ZNK8OSObject12taggedRetainEPKv", Value: target},
+	}, sourceSymbols, []*types.SplitInfoEntry{{
+		Kind: types.DYLD_CACHE_ADJ_V2_POINTER_64, SourceVmAddr: source, TargetVmAddr: target,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := binds[0x8000].Name, "__ZNK7MyClass12taggedRetainEPKv"; got != want {
+		t.Fatalf("authenticated bind = %q, want %q", got, want)
+	}
+}
+
+func TestAdjustReferencesRecoversOwnerAuthSymbolWithoutDefinedTarget(t *testing.T) {
+	f, segMap, data := newReferenceAdjustmentFile()
+	const source = 0x100000
+	const internalSource = 0x100008
+	const derivedSource = 0x100100
+	const target = 0x300000
+	const name = "__ZN25AppleRAIDMemoryDescriptor4freeEv"
+	sourceSymbols := []Symbol{
+		{Name: "__ZTV25AppleRAIDMemoryDescriptor", Type: types.N_SECT, Value: source - 0x20},
+		{Name: "__ZTV31AppleRAIDMirrorMemoryDescriptor", Type: types.N_SECT, Value: derivedSource - 0x20},
+		{Name: name, Type: types.N_UNDF | types.N_EXT},
+	}
+	// The inherited slot retains a base declaration's discriminator, so it does
+	// not hash to the derived import name.
+	original := fixupchains.NewDyldChainedPtrArm64eAuthRebase(0, target, 0xedc5, 1, 0, 0)
+	binary.LittleEndian.PutUint64(data[0x8000:], original.Raw())
+	binary.LittleEndian.PutUint64(data[0x8100:], original.Raw())
+	internal := fixupchains.NewDyldChainedPtrArm64eAuthRebase(0, 0x100200, 0x1234, 1, 0, 0)
+	binary.LittleEndian.PutUint64(data[0x8008:], internal.Raw())
+
+	binds, rebases, _, _, err := f.adjustReferencesWithSourceSymbols(segMap, data, nil, sourceSymbols, []*types.SplitInfoEntry{
+		// Put the copied derived vtable first to verify reference order does not
+		// control whether the primary vtable teaches us the import identity.
+		{Kind: types.DYLD_CACHE_ADJ_V2_POINTER_64, SourceVmAddr: derivedSource, TargetVmAddr: target},
+		{Kind: types.DYLD_CACHE_ADJ_V2_POINTER_64, SourceVmAddr: internalSource, TargetVmAddr: 0x100200},
+		{Kind: types.DYLD_CACHE_ADJ_V2_POINTER_64, SourceVmAddr: source, TargetVmAddr: target},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, address := range []uint64{0x8000, 0x8100} {
+		if got := binds[address].Name; got != name {
+			t.Errorf("authenticated bind at %#x = %q, want %q", address, got, name)
+		}
+	}
+	if got, want := rebases[0x8008], uint64(0x8200); got != want {
+		t.Errorf("internal authenticated rebase = %#x, want %#x", got, want)
+	}
+}
+
+func TestSortFixupsPreservesRecoveredBindAddend(t *testing.T) {
+	symbol, ok := symbolWithBindAddend([]Symbol{{Name: "_table", Value: 0x300000}}, 0x300018)
+	if !ok {
+		t.Fatal("symbol with bind addend was not found")
+	}
+	f := &File{}
+	fixups := f.sortFixups(map[uint64]Symbol{0x1000: symbol}, nil, nil)
+	if len(fixups) != 1 {
+		t.Fatalf("fixup count = %d, want 1", len(fixups))
+	}
+	bind, ok := fixups[0].(fixupchains.DyldChainedPtrArm64eBind)
+	if !ok {
+		t.Fatalf("fixup type = %T, want DyldChainedPtrArm64eBind", fixups[0])
+	}
+	if got, want := bind.SignExtendedAddend(), int64(0x18); got != want {
+		t.Fatalf("bind addend = %#x, want %#x", got, want)
+	}
+}
+
+func TestAdjustReferencesUsesAuthDiscriminatorForRedirectedSymbol(t *testing.T) {
+	f, segMap, data := newReferenceAdjustmentFile()
+	const source = 0x100000
+	const cacheTarget = 0x200000
+	original := fixupchains.NewDyldChainedPtrArm64eAuthRebase(0, cacheTarget, 0x8ee2, 1, 0, 0)
+	binary.LittleEndian.PutUint64(data[0x8000:], original.Raw())
+
+	binds, _, _, _, err := f.adjustReferences(segMap, data, []Symbol{
+		{Name: "__ZN15OSMetaClassBase8DispatchE5IORPC", Value: cacheTarget},
+		{Name: "__ZN15OSMetaClassBase25_RESERVEDOSMetaClassBase3Ev", Value: 0x300000},
+	}, []*types.SplitInfoEntry{{
+		Kind: types.DYLD_CACHE_ADJ_V2_POINTER_64, SourceVmAddr: source, TargetVmAddr: cacheTarget,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := binds[0x8000].Name, "__ZN15OSMetaClassBase25_RESERVEDOSMetaClassBase3Ev"; got != want {
+		t.Fatalf("authenticated bind = %q, want %q", got, want)
+	}
+}
+
 func TestAdjustReferencesKeepsVirtualOverrideTarget(t *testing.T) {
 	f, segMap, data := newReferenceAdjustmentFile()
 	const source = 0x100000

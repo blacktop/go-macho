@@ -378,6 +378,7 @@ type Symbol struct {
 	Sect         uint8
 	Desc         types.NDescType
 	Value        uint64
+	bindAddend   int64
 }
 
 func (s Symbol) GetType(m *File) string {

@@ -54,7 +54,8 @@ type File struct {
 	swiftClasses *swiftClassIndex // built lazily from GetSwiftTypes for ivar type lookups
 	ledata       *bytes.Buffer    // tmp storage of linkedit data
 
-	objcOnce sync.Once
+	objcOnce               sync.Once
+	exportAddressOnlyBinds bool // see WithAddressOnlyBinds
 
 	sharedCacheRelativeSelectorBaseVMAddress uint64 // objc_opt version 16
 	swiftAutoDemangle                        bool

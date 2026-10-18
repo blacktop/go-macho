@@ -208,7 +208,8 @@ func textSegmentWriteStart(firstSectionRelOff, endOfLoadsOffset, dataLen uint64)
 type ExportOption func(*exportOptions)
 
 type exportOptions struct {
-	references []*types.SplitInfoEntry
+	addressOnlyBinds bool
+	references       []*types.SplitInfoEntry
 }
 
 // WithReferences passes the split-segment references of a cached image, e.g.
@@ -218,6 +219,14 @@ type exportOptions struct {
 // cache addresses.
 func WithReferences(references []*types.SplitInfoEntry) ExportOption {
 	return func(o *exportOptions) { o.references = references }
+}
+
+// WithAddressOnlyBinds names binds only by the address of the extra symbols
+// passed to Export. Use it when those names are synthetic (for example for a
+// stripped kernel collection): the heuristics that pick among real aliases by
+// C++ owner or pointer-auth discriminator would otherwise misfire on them.
+func WithAddressOnlyBinds() ExportOption {
+	return func(o *exportOptions) { o.addressOnlyBinds = true }
 }
 
 // Export exports an in-memory or cached dylib|kext MachO to a file
@@ -246,6 +255,7 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 	}
 
 	// Third Phase: Patching the content
+	exportFile.exportAddressOnlyBinds = options.addressOnlyBinds
 	newFileData, err = f.patchExportFile(segMap, newFileData, exportFile, dcf, locals, references, pack)
 	if err != nil {
 		return err
@@ -394,8 +404,12 @@ func (f *File) patchExportFile(segMap exportSegMap, exportData []byte, exportFil
 		}
 
 		// Patch relative references
+		var sourceSymbols []Symbol
+		if f.Symtab != nil {
+			sourceSymbols = f.Symtab.Syms
+		}
 		var err error
-		binds, rebases, others, auths, err = exportFile.adjustReferences(segMap, exportData, locals, references)
+		binds, rebases, others, auths, err = exportFile.adjustReferencesWithSourceSymbols(segMap, exportData, locals, sourceSymbols, references)
 		if err != nil {
 			return nil, err
 		}
@@ -1389,15 +1403,237 @@ func (f *File) indirectPointerSymbol(address uint64) (Symbol, bool) {
 	return f.Symtab.Syms[symbolIndex], true
 }
 
-// adjustReferences rewrites cache-relative references for a standalone image.
-// symbols contains the resolved imports.
+// authenticatedSymbol identifies the import behind an authenticated pointer.
+// The discriminator normally identifies a method name, while preferredOwner
+// resolves address aliases to the class whose vtable contains the pointer.
+func authenticatedSymbol(symbols []Symbol, diversity uint16, target uint64, preferredOwner string) (Symbol, bool) {
+	if diversity == 0 {
+		return Symbol{}, false
+	}
+	// An inherited vtable slot keeps the base declaration's discriminator even
+	// when a derived override is selected. In that case the derived symbol's own
+	// name does not hash to the slot discriminator, but its address and owner do.
+	if preferredOwner != "" {
+		for _, symbol := range symbols {
+			if symbol.Value == target && itaniumSymbolOwner(symbol.Name) == preferredOwner {
+				return symbol, true
+			}
+		}
+	}
+	var matches []Symbol
+	for _, symbol := range symbols {
+		// Mach-O adds an underscore to the Itanium mangled name used by
+		// Clang to derive a virtual function's pointer-auth discriminator.
+		if !strings.HasPrefix(symbol.Name, "__Z") || pointerAuthStringDiscriminator(symbol.Name[1:]) != diversity {
+			continue
+		}
+		matches = append(matches, symbol)
+	}
+	for _, symbol := range matches {
+		if symbol.Value == target {
+			return symbol, true
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], true
+	}
+	return Symbol{}, false
+}
+
+// ownerAuthenticatedSymbol recovers an unresolved virtual method from the
+// enclosing vtable owner. The PAC discriminator selects an exact name when it
+// can; an owner with only one unresolved method is also unambiguous because an
+// inherited slot can retain the base declaration's discriminator. This matters
+// when the kernel collection target address has no surviving defined symbol,
+// while the fileset symbol table still preserves the original import name.
+func ownerAuthenticatedSymbol(symbols []Symbol, owner string, diversity uint16) (Symbol, bool) {
+	if owner == "" || diversity == 0 {
+		return Symbol{}, false
+	}
+	var match Symbol
+	var ownerOnly Symbol
+	ownerCount := 0
+	for _, symbol := range symbols {
+		if !symbol.Type.IsUndefinedSym() || itaniumSymbolOwner(symbol.Name) != owner {
+			continue
+		}
+		ownerOnly = symbol
+		ownerCount++
+		if len(symbol.Name) >= 2 && pointerAuthStringDiscriminator(symbol.Name[1:]) == diversity {
+			if match.Name != "" {
+				return Symbol{}, false
+			}
+			match = symbol
+		}
+	}
+	if match.Name != "" {
+		return match, true
+	}
+	// A virtual override can retain its base declaration's discriminator, so
+	// the derived method's own mangled name will not necessarily hash to it.
+	// If the vtable owner has exactly one unresolved method, owner identity is
+	// sufficient to recover that original import without guessing by address.
+	return ownerOnly, ownerCount == 1
+}
+
+// symbolWithBindAddend resolves a pointer into a nearby imported data symbol.
+// Kernel collection fixups contain only the resolved address, while standalone
+// Mach-O files preserve references such as symbol+4 as binds with an addend.
+func symbolWithBindAddend(symbols []Symbol, target uint64) (Symbol, bool) {
+	const maxAddend = uint64(0xff)
+	var match Symbol
+	bestAddend := maxAddend + 1
+	for _, symbol := range symbols {
+		if symbol.Value == 0 || symbol.Value > target {
+			continue
+		}
+		addend := target - symbol.Value
+		if addend > maxAddend || addend >= bestAddend {
+			continue
+		}
+		match = symbol
+		match.bindAddend = int64(addend)
+		bestAddend = addend
+	}
+	return match, bestAddend <= maxAddend
+}
+
+// itaniumVtableOwner extracts the qualified C++ type from an Itanium vtable
+// symbol, for example "__ZTVN3foo3BarE" becomes "foo::Bar".
+func itaniumVtableOwner(name string) string {
+	if !strings.HasPrefix(name, "__ZTV") {
+		return ""
+	}
+	name = name[5:]
+	name = strings.TrimPrefix(name, "N")
+	var components []string
+	for len(name) > 0 && name[0] != 'E' {
+		length := 0
+		index := 0
+		for index < len(name) && name[index] >= '0' && name[index] <= '9' {
+			length = length*10 + int(name[index]-'0')
+			index++
+		}
+		if index == 0 || length == 0 || index+length > len(name) {
+			return ""
+		}
+		components = append(components, name[index:index+length])
+		name = name[index+length:]
+	}
+	return strings.Join(components, "::")
+}
+
+// vtableOwnerAt returns the owner of the vtable atom containing address. Local
+// vtable symbols are important during kernelcache recovery because linking can
+// fold a derived override and its base implementation to the same address. The
+// address and pointer-auth discriminator alone then identify the implementation
+// and slot, but not the original symbol name. The enclosing vtable's Itanium
+// owner supplies the missing class identity needed to reconstruct that import.
+func vtableOwnerAt(symbols []Symbol, address uint64) string {
+	var nearest Symbol
+	var bestAddress uint64
+	for _, symbol := range symbols {
+		if symbol.Value > address || (nearest.Name != "" && symbol.Value < bestAddress) {
+			continue
+		}
+		nearest = symbol
+		bestAddress = symbol.Value
+	}
+	return itaniumVtableOwner(nearest.Name)
+}
+
+// itaniumMethodSuffix removes the encoded owner from a nested method name. It
+// leaves the method and parameter encoding, which is shared by corresponding
+// base and derived declarations.
+func itaniumMethodSuffix(name string) string {
+	owner := itaniumSymbolOwner(name)
+	if owner == "" {
+		return ""
+	}
+	components := strings.Split(owner, "::")
+	className := components[len(components)-1]
+	marker := fmt.Sprintf("%d%s", len(className), className)
+	index := strings.LastIndex(name, marker)
+	if index < 0 {
+		return ""
+	}
+	return name[index+len(marker):]
+}
+
+// ownerAliasSymbol finds an undefined method declared by owner that corresponds
+// to model. Such a name can survive in the fileset symbol table even when the
+// cache has resolved its pointer to a differently named base-class address.
+func ownerAliasSymbol(symbols []Symbol, owner string, model Symbol) (Symbol, bool) {
+	if owner == "" {
+		return Symbol{}, false
+	}
+	suffix := itaniumMethodSuffix(model.Name)
+	if suffix == "" {
+		return Symbol{}, false
+	}
+	for _, symbol := range symbols {
+		if symbol.Type.IsUndefinedSym() && itaniumSymbolOwner(symbol.Name) == owner && itaniumMethodSuffix(symbol.Name) == suffix {
+			return symbol, true
+		}
+	}
+	return Symbol{}, false
+}
+
+// itaniumSymbolOwner extracts the qualified owning type from an Itanium nested
+// method symbol. Owner identity is used only to disambiguate otherwise valid
+// symbols; it never substitutes for pointer target or authentication evidence.
+func itaniumSymbolOwner(name string) string {
+	if !strings.HasPrefix(name, "__ZN") {
+		return ""
+	}
+	// Strip Mach-O's leading underscore, then the Itanium nested-name prefix.
+	name = name[4:]
+	for len(name) > 0 && strings.ContainsRune("KVRrO", rune(name[0])) {
+		name = name[1:]
+	}
+	var components []string
+	for len(name) > 0 && name[0] != 'E' {
+		length := 0
+		index := 0
+		for index < len(name) && name[index] >= '0' && name[index] <= '9' {
+			length = length*10 + int(name[index]-'0')
+			index++
+		}
+		if index == 0 || length == 0 || index+length > len(name) {
+			break
+		}
+		components = append(components, name[index:index+length])
+		name = name[index+length:]
+	}
+	if len(components) < 2 {
+		return ""
+	}
+	return strings.Join(components[:len(components)-1], "::")
+}
+
+// adjustReferences recovers split-segment references when no original fileset
+// symbol table is available for class-owner disambiguation.
 func (f *File) adjustReferences(segMap exportSegMap, exportData []byte, symbols []Symbol, references []*types.SplitInfoEntry) (map[uint64]Symbol, map[uint64]uint64, map[uint64]uint64, map[uint64]chainedFixupAuth, error) {
+	return f.adjustReferencesWithSourceSymbols(segMap, exportData, symbols, nil, references)
+}
+
+// adjustReferencesWithSourceSymbols rewrites cache-relative references for a
+// standalone image. symbols contains resolved imports; sourceSymbols is the
+// original fileset symbol table and retains local vtable and undefined alias
+// names that are not present in the global resolved-symbol map.
+func (f *File) adjustReferencesWithSourceSymbols(segMap exportSegMap, exportData []byte, symbols, sourceSymbols []Symbol, references []*types.SplitInfoEntry) (map[uint64]Symbol, map[uint64]uint64, map[uint64]uint64, map[uint64]chainedFixupAuth, error) {
 	bindReferences := make(map[uint64]Symbol)
 	rebaseReferences := make(map[uint64]uint64)
 	handledReferences := make(map[uint64]uint64)
 	authReferences := make(map[uint64]chainedFixupAuth)
 	externalBranches := make(map[uint64]Symbol)
 	adrpTargets := make(map[uint64]*types.SplitInfoEntry)
+	type authIdentity struct {
+		target    uint64
+		diversity uint16
+	}
+	authAliases := make(map[authIdentity]Symbol)
+	ambiguousAuthAliases := make(map[authIdentity]struct{})
 	resolvedTargets := make(map[uint64]struct{}, len(symbols))
 	for _, symbol := range symbols {
 		resolvedTargets[symbol.Value] = struct{}{}
@@ -1429,6 +1665,48 @@ func (f *File) adjustReferences(segMap exportSegMap, exportData []byte, symbols 
 		current, ok := adrpTargets[ref.ExtraVmAddr]
 		if !ok || ref.SourceVmAddr < current.SourceVmAddr {
 			adrpTargets[ref.ExtraVmAddr] = ref
+		}
+	}
+	// Learn authenticated import identities from their defining vtable before
+	// processing references. Copies of that vtable can live under derived-class
+	// owners, and reference order is not stable because cache fixups are grouped
+	// through maps by the extractor.
+	for _, ref := range references {
+		if ref.Kind != types.DYLD_CACHE_ADJ_V2_POINTER_64 {
+			continue
+		}
+		if _, err := segMap.RemapAddress(ref.TargetVmAddr); err == nil {
+			continue
+		}
+		if _, ok := resolvedTargets[ref.TargetVmAddr]; ok {
+			continue
+		}
+		newSourceVmAddr, err := segMap.RemapAddress(ref.SourceVmAddr)
+		if err != nil {
+			continue
+		}
+		sourceOffset, err := f.GetOffset(newSourceVmAddr)
+		if err != nil || sourceOffset+8 > uint64(len(exportData)) {
+			continue
+		}
+		raw := binary.LittleEndian.Uint64(exportData[sourceOffset:])
+		if !fixupchains.DcpArm64eIsAuth(raw) || fixupchains.DcpArm64eIsBind(raw) {
+			continue
+		}
+		auth := fixupchains.DyldChainedPtrArm64eAuthRebase{Pointer: raw}
+		owner := vtableOwnerAt(sourceSymbols, ref.SourceVmAddr)
+		symbol, ok := ownerAuthenticatedSymbol(sourceSymbols, owner, uint16(auth.Diversity()))
+		if ok {
+			identity := authIdentity{target: ref.TargetVmAddr, diversity: uint16(auth.Diversity())}
+			if _, ambiguous := ambiguousAuthAliases[identity]; ambiguous {
+				continue
+			}
+			if existing, exists := authAliases[identity]; exists && existing.Name != symbol.Name {
+				delete(authAliases, identity)
+				ambiguousAuthAliases[identity] = struct{}{}
+				continue
+			}
+			authAliases[identity] = symbol
 		}
 	}
 	for _, ref := range references {
@@ -1622,6 +1900,28 @@ func (f *File) adjustReferences(segMap exportSegMap, exportData []byte, symbols 
 			if !found {
 				if _, ambiguous := ambiguousPointerTargets[targetVmAddr]; !ambiguous {
 					sym, found = pointerTargetSymbols[targetVmAddr]
+				}
+			}
+			_, isAuth := authReferences[newSourceVmAddr]
+			if !found && !isAuth && ref.Kind == types.DYLD_CACHE_ADJ_V2_POINTER_64 {
+				sym, found = symbolWithBindAddend(symbols, targetVmAddr)
+			}
+			if ref.Kind == types.DYLD_CACHE_ADJ_V2_POINTER_64 && !f.exportAddressOnlyBinds {
+				if auth, ok := authReferences[newSourceVmAddr]; ok {
+					owner := vtableOwnerAt(sourceSymbols, ref.SourceVmAddr)
+					if found {
+						if alias, aliasFound := ownerAliasSymbol(sourceSymbols, owner, sym); aliasFound {
+							sym = alias
+						}
+					}
+					if authSym, authFound := authenticatedSymbol(symbols, auth.diversity, targetVmAddr, owner); authFound &&
+						((owner != "" && itaniumSymbolOwner(authSym.Name) == owner) || !found ||
+							(itaniumSymbolOwner(authSym.Name) != "" && itaniumSymbolOwner(authSym.Name) == itaniumSymbolOwner(sym.Name))) {
+						sym, found = authSym, true
+					}
+					if alias, aliasFound := authAliases[authIdentity{target: targetVmAddr, diversity: auth.diversity}]; aliasFound {
+						sym, found = alias, true
+					}
 				}
 			}
 			if !found {
@@ -1989,7 +2289,7 @@ func (f *File) sortFixups(binds map[uint64]Symbol, rebases map[uint64]uint64, au
 		if auth, ok := auths[addr]; ok {
 			fixups = append(fixups, fixupchains.NewDyldChainedPtrArm64eAuthBind(addr, 0, auth.diversity, auth.addrDiv, auth.key, 0, sym.Name))
 		} else {
-			bind, err := fixupchains.NewDyldChainedPtrArm64eBind(addr, 0, 0, 0, sym.Name)
+			bind, err := fixupchains.NewDyldChainedPtrArm64eBind(addr, 0, sym.bindAddend, 0, sym.Name)
 			if err == nil {
 				fixups = append(fixups, bind)
 			}
