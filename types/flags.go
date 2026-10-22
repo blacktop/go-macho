@@ -224,7 +224,16 @@ func (k SplitInfoKind) String() string {
 	default:
 		return fmt.Sprintf("unknown kind %#02x", uint64(k))
 	}
+}
 
+// SplitInfoEntry is one decoded LC_SEGMENT_SPLIT_INFO (v2) reference: a
+// location of Kind at SourceVmAddr that refers to TargetVmAddr. ExtraVmAddr
+// is the address of the ADRP paired with an ARM64_OFF12 reference.
+type SplitInfoEntry struct {
+	Kind         SplitInfoKind
+	SourceVmAddr uint64
+	TargetVmAddr uint64
+	ExtraVmAddr  uint64
 }
 
 type ExportFlag int

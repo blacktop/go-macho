@@ -1,6 +1,6 @@
 module github.com/blacktop/go-macho
 
-go 1.20
+go 1.21
 
 require github.com/blacktop/go-dwarf v1.0.14
 
