@@ -3,7 +3,6 @@ package macho
 // High level access to low level data structures.
 
 import (
-	"bufio"
 	"bytes"
 	"compress/zlib"
 	"encoding/binary"
@@ -13,6 +12,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"unicode"
@@ -107,12 +107,7 @@ func (e *FormatError) Error() string {
 }
 
 func loadInSlice(c types.LoadCmd, list []types.LoadCmd) bool {
-	for _, b := range list {
-		if b == c {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, c)
 }
 
 // FileConfig is a MachO file config object
@@ -551,16 +546,19 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			br := bufio.NewReader(b)
-			for {
-				o, err := br.ReadString('\x00')
-				if err == io.EOF {
+			data := cmddat[binary.Size(hdr):]
+			if len(data) > 0 && data[len(data)-1] != 0 {
+				return nil, &FormatError{offset, "unterminated string in LC_IDENT command", nil}
+			}
+			data = bytes.TrimRight(data, "\x00")
+			for len(data) > 0 {
+				end := bytes.IndexByte(data, 0)
+				if end < 0 {
+					l.StrTable = append(l.StrTable, string(data))
 					break
 				}
-				if err != nil {
-					return nil, fmt.Errorf("failed to read LC_IDENT options: %v", err)
-				}
-				l.StrTable = append(l.StrTable, o)
+				l.StrTable = append(l.StrTable, string(data[:end]))
+				data = data[end+1:]
 			}
 			f.Loads = append(f.Loads, l)
 		case types.LC_FVMFILE:
@@ -715,10 +713,19 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			}
 			l.NumModules = hdr.NumModules
 			l.Name = cstring(cmddat[hdr.NameOffset:])
-			if hdr.LinkedModulesOffset >= uint32(len(cmddat)) {
-				return nil, &FormatError{offset, "invalid linked modules in LC_PREBOUND_DYLIB command", hdr.NameOffset}
+			l.LinkedModulesOffset = hdr.LinkedModulesOffset
+			modulesStart := uint64(hdr.LinkedModulesOffset)
+			modulesSize := (uint64(hdr.NumModules) + 7) / 8
+			if !preboundDylibRangeValid(modulesStart, modulesSize, 0, uint64(len(cmddat))) {
+				return nil, &FormatError{
+					offset, "invalid linked modules in LC_PREBOUND_DYLIB command",
+					hdr.LinkedModulesOffset,
+				}
 			}
-			l.LinkedModulesBitVector = cstring(cmddat[hdr.LinkedModulesOffset:])
+			l.LinkedModulesBitVector = string(cmddat[modulesStart : modulesStart+modulesSize])
+			if err := l.validateLayout(hdr); err != nil {
+				return nil, &FormatError{offset, err.Error(), nil}
+			}
 			f.Loads = append(f.Loads, l)
 		case types.LC_ROUTINES:
 			var rt types.RoutinesCmd
@@ -1192,12 +1199,15 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadBytes = cmddat
 			l.LoadCmd = cmd
 			l.Len = siz
-			for i := 0; i < int(lo.Count); i++ {
-				o, err := bufio.NewReader(b).ReadString('\x00')
-				if err != nil {
-					break // FIXME: should this error?
+			l.Count = lo.Count
+			data := cmddat[binary.Size(lo):]
+			for i := uint32(0); i < lo.Count; i++ {
+				end := bytes.IndexByte(data, 0)
+				if end < 0 {
+					return nil, &FormatError{offset, "unterminated option in LC_LINKER_OPTION command", i}
 				}
-				l.Options = append(l.Options, o)
+				l.Options = append(l.Options, string(data[:end]))
+				data = data[end+1:]
 			}
 			f.Loads = append(f.Loads, l)
 		case types.LC_LINKER_OPTIMIZATION_HINT:

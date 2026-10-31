@@ -745,6 +745,7 @@ func newTextSection(addr uint64, offset uint32) *types.Section {
 			Name:   "__text",
 			Seg:    "__TEXT",
 			Addr:   addr,
+			Size:   1,
 			Offset: offset,
 		},
 	}
@@ -776,6 +777,21 @@ func TestTextSegmentFirstSectionRelOffUsesVMAddrForCachedImages(t *testing.T) {
 	}
 	if got != 0x4000 {
 		t.Errorf("textSegmentFirstSectionRelOff(true) = %#x, want 0x4000", got)
+	}
+}
+
+func TestTextSegmentFirstSectionRelOffFindsEarliestFileData(t *testing.T) {
+	zero := newTextSection(0x1000, 0)
+	zero.Flags = types.Zerofill
+	f := newTextSegmentFile(
+		SegmentHeader{Addr: 0x1000, Offset: 0x4000, Nsect: 3},
+		newTextSection(0x1300, 0x4300), zero, newTextSection(0x1200, 0x4200),
+	)
+	for _, inCache := range []bool{false, true} {
+		got, err := f.textSegmentFirstSectionRelOff(inCache)
+		if err != nil || got != 0x200 {
+			t.Fatalf("inCache=%v: offset=%#x error=%v", inCache, got, err)
+		}
 	}
 }
 
@@ -846,14 +862,9 @@ func TestTextSegmentWriteStartRejectsOutOfRangeStart(t *testing.T) {
 	requireErrorContains(t, err, "exceeds segment data length")
 }
 
-func TestTextSegmentWriteStartUsesEndOfLoadsWhenLarger(t *testing.T) {
-	got, err := textSegmentWriteStart(0x1000, 0x2000, 0x4000)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != 0x2000 {
-		t.Errorf("textSegmentWriteStart = %#x, want 0x2000", got)
-	}
+func TestTextSegmentWriteStartRejectsSectionOverlap(t *testing.T) {
+	_, err := textSegmentWriteStart(0x1000, 0x2000, 0x4000)
+	requireErrorContains(t, err, "overlap first __TEXT section")
 }
 
 func TestSegMapRemap(t *testing.T) {

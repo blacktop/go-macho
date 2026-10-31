@@ -246,10 +246,7 @@ func (fr *fileReader) Read(p []byte) (n int, err error) {
 		return 0, io.EOF
 	}
 
-	n = int(fr.f.length - fr.offset)
-	if len(p) < n {
-		n = len(p)
-	}
+	n = min(len(p), int(fr.f.length-fr.offset))
 
 	if _, err := fr.f.heap.ReadAt(p[:n], fr.f.offset+fr.offset); err != nil {
 		return 0, err

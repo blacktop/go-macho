@@ -170,34 +170,53 @@ func (f *File) textSegmentFirstSectionRelOff(inCache bool) (uint64, error) {
 	if textSeg == nil {
 		return 0, nil
 	}
+	first := ^uint64(0)
 	for i := uint32(0); i < textSeg.Nsect; i++ {
 		idx := uint64(textSeg.Firstsect) + uint64(i)
 		if idx >= uint64(len(f.Sections)) {
 			return 0, fmt.Errorf("__TEXT section index %d out of range", idx)
 		}
 		sec := f.Sections[int(idx)]
-		if sec.Offset == 0 {
+		if sec.Size == 0 || zeroFillContains(sec, sec.Addr, sec.Size) {
 			continue
 		}
-		if inCache {
-			if sec.Addr < textSeg.Addr {
-				return 0, fmt.Errorf("__TEXT section %s address %#x precedes segment address %#x", sec.Name, sec.Addr, textSeg.Addr)
-			}
-			return sec.Addr - textSeg.Addr, nil
+		rel, err := textSectionRelativeOffset(textSeg, sec, inCache)
+		if err != nil {
+			return 0, err
 		}
-		if uint64(sec.Offset) < textSeg.Offset {
-			return 0, fmt.Errorf("__TEXT section %s offset %#x precedes segment offset %#x", sec.Name, sec.Offset, textSeg.Offset)
-		}
-		return uint64(sec.Offset) - textSeg.Offset, nil
+		first = min(first, rel)
 	}
-	return 0, nil
+	if first == ^uint64(0) {
+		return 0, nil
+	}
+	return first, nil
 }
 
-func textSegmentWriteStart(firstSectionRelOff, endOfLoadsOffset, dataLen uint64) (uint64, error) {
-	dataStart := firstSectionRelOff
-	if endOfLoadsOffset > dataStart {
-		dataStart = endOfLoadsOffset
+func textSectionRelativeOffset(
+	seg *Segment, sec *types.Section, inCache bool,
+) (uint64, error) {
+	base, location, kind := seg.Offset, uint64(sec.Offset), "offset"
+	if inCache {
+		base, location, kind = seg.Addr, sec.Addr, "address"
 	}
+	if location < base {
+		return 0, fmt.Errorf("__TEXT section %s %s %#x precedes segment %s %#x",
+			sec.Name, kind, location, kind, base)
+	}
+	if location == base {
+		return 0, fmt.Errorf("__TEXT section %s overlaps the Mach-O header", sec.Name)
+	}
+	return location - base, nil
+}
+
+func textSegmentWriteStart(
+	firstSectionRelOff, endOfLoadsOffset, dataLen uint64,
+) (uint64, error) {
+	if firstSectionRelOff != 0 && endOfLoadsOffset > firstSectionRelOff {
+		return 0, fmt.Errorf("load commands overlap first __TEXT section at %#x",
+			firstSectionRelOff)
+	}
+	dataStart := max(endOfLoadsOffset, firstSectionRelOff)
 	if dataStart > dataLen {
 		return 0, fmt.Errorf("__TEXT data start %#x exceeds segment data length %#x", dataStart, dataLen)
 	}
@@ -239,7 +258,7 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 	references := options.references
 	pack := len(references) > 0
 	// First Phase: Building of a Segment Map
-	segMap, fileHeader, loads, err := f.createExportFileLayout(baseAddress, pack)
+	segMap, fileHeader, loadData, err := f.createExportFileLayout(baseAddress, pack)
 	if err != nil {
 		return err
 	}
@@ -249,7 +268,7 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 	// Only the last segment can grow (LINKEDIT)
 
 	// Second Phase: Writing the content
-	newFileData, exportFile, err := f.createExportFile(segMap, fileHeader, loads)
+	newFileData, exportFile, err := f.createExportFile(segMap, fileHeader, loadData)
 	if err != nil {
 		return err
 	}
@@ -272,7 +291,14 @@ func (f *File) Export(path string, dcf *fixupchains.DyldChainedFixups, baseAddre
 	return nil
 }
 
-func (f *File) createExportFileLayout(baseAddress uint64, pack bool) (exportSegMap, *types.FileHeader, []Load, error) {
+func (f *File) createExportFileLayout(
+	baseAddress uint64, pack bool,
+) (exportSegMap, *types.FileHeader, []byte, error) {
+	if pack && (f.Magic != types.Magic64 || f.CPU != types.CPUArm64) {
+		return nil, nil, nil, fmt.Errorf(
+			"reference-based export is unsupported for %s", f.CPU,
+		)
+	}
 	// Initial Layout
 	var segMap exportSegMap
 	if pack {
@@ -284,18 +310,8 @@ func (f *File) createExportFileLayout(baseAddress uint64, pack bool) (exportSegM
 		segMap = f.createCacheAddressSegmentMap()
 	}
 
-	// Copy Header
-	var headerBuf bytes.Buffer
-	err := f.FileHeader.Write(&headerBuf, f.ByteOrder)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	var fileHeader types.FileHeader
-	if err := binary.Read(&headerBuf, f.ByteOrder, &fileHeader); err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to parse header: %w", err)
-	}
+	fileHeader := f.FileHeader
 
-	// Copy Load Commands (currently no need to update fileHeader.SizeCommands)
 	loads, err := f.optimizeLoadCommands(segMap, f.FileHeader.Flags.DylibInCache())
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to optimize load commands: %w", err)
@@ -304,18 +320,35 @@ func (f *File) createExportFileLayout(baseAddress uint64, pack bool) (exportSegM
 	// Adjustments
 	fileHeader.Flags &= 0x7FFFFFFF // remove in-cache bit
 	if pack {
-		loads = addDyldChainedFixupsLoad(&fileHeader, loads)
-		loads = addSplitSegmentInfoLoad(&fileHeader, loads)
+		loads = addDyldChainedFixupsLoad(loads)
+		loads = addSplitSegmentInfoLoad(loads)
 		loads = orderLoadsLikeLinker(loads)
 	} else if f.FileHeader.Flags.DylibInCache() {
-		// The cache's fixup chains are not reconstructed without references.
-		loads = removeLoad(&fileHeader, loads, types.LC_DYLD_CHAINED_FIXUPS)
+		// Neither payload is reconstructed without references. In particular,
+		// older shared caches can carry invalid split-info offsets.
+		loads = removeLoad(loads, types.LC_DYLD_CHAINED_FIXUPS)
+		loads = removeLoad(loads, types.LC_SEGMENT_SPLIT_INFO)
 	}
 
-	return segMap, &fileHeader, loads, nil
+	var loadData bytes.Buffer
+	if err := f.writeLoadCommands(&loadData, loads); err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to write load commands: %w", err)
+	}
+	if uint64(len(loads)) > uint64(^uint32(0)) || uint64(loadData.Len()) > uint64(^uint32(0)) {
+		return nil, nil, nil, fmt.Errorf("exported load commands exceed Mach-O header limits")
+	}
+	fileHeader.NCommands = uint32(len(loads))
+	fileHeader.SizeCommands = uint32(loadData.Len())
+	return segMap, &fileHeader, loadData.Bytes(), nil
 }
 
-func (f *File) createExportFile(segMap exportSegMap, fileHeader *types.FileHeader, loads []Load) ([]byte, *File, error) {
+func (f *File) createExportFile(
+	segMap exportSegMap, fileHeader *types.FileHeader, loadData []byte,
+) ([]byte, *File, error) {
+	firstSection, err := f.textSegmentFirstSectionRelOff(f.Flags.DylibInCache())
+	if err != nil {
+		return nil, nil, err
+	}
 	var buf bytes.Buffer
 	// pre-allocate output buffer to avoid repeated doubling during writes
 	if len(segMap) > 0 {
@@ -326,9 +359,7 @@ func (f *File) createExportFile(segMap exportSegMap, fileHeader *types.FileHeade
 		return nil, nil, fmt.Errorf("failed to write file header to buffer: %v", err)
 	}
 
-	if err := f.writeLoadCommands(&buf, loads); err != nil {
-		return nil, nil, fmt.Errorf("failed to write load commands: %v", err)
-	}
+	buf.Write(loadData)
 	endOfLoadsOffset := uint64(buf.Len())
 
 	// Write out segment data to buffer
@@ -352,8 +383,14 @@ func (f *File) createExportFile(segMap exportSegMap, fileHeader *types.FileHeade
 		}
 
 		if seg.Name == "__TEXT" {
-			// write __TEXT data after the header+load commands we already wrote
-			if _, err := buf.Write(dat[endOfLoadsOffset:]); err != nil {
+			dataStart, err := textSegmentWriteStart(
+				firstSection, endOfLoadsOffset, uint64(len(dat)),
+			)
+			if err != nil {
+				return nil, nil, err
+			}
+			buf.Write(make([]byte, dataStart-endOfLoadsOffset))
+			if _, err := buf.Write(dat[dataStart:]); err != nil {
 				return nil, nil, fmt.Errorf("failed to write segment %s to export buffer: %v", seg.Name, err)
 			}
 		} else {
@@ -651,10 +688,7 @@ func (f *File) CodeSign(config *codesign.Config) error {
 	// cache __LINKEDIT data (up to but not including any existing code signature) for saving later.
 	// if the actual data doesn't go up to a page boundary (because we're adding a new signature), pad it with zeroes
 	ledata := make([]byte, uint64(cs.Offset)-linkedit.Offset)
-	size := uint64(len(ledata))
-	if size > linkedit.Filesz {
-		size = linkedit.Filesz
-	}
+	size := min(uint64(len(ledata)), linkedit.Filesz)
 	if n, err := f.cr.ReadAtAddr(ledata[:size], linkedit.Addr); err != nil {
 		return fmt.Errorf("failed to read __LINKEDIT data: read=%d, %v", n, err)
 	}
@@ -898,12 +932,15 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap, inCache bool) ([]Load, 
 			}
 			newLoad.Offset = uint32(off)
 		case types.LC_SEGMENT_SPLIT_INFO:
-			// <rdar://problem/23212513> dylibs iOS 9 dyld caches have bogus LC_SEGMENT_SPLIT_INFO
-			// off, err := segMap.Remap(uint64(l.(*SplitInfo).Offset))
-			// if err != nil {
-			// 	return fmt.Errorf("failed to remap offset in %s: %v", l.Command(), err)
-			// }
-			// l.(*SplitInfo).Offset = uint32(off)
+			newLoad := *l.(*SplitInfo)
+			if !inCache && newLoad.Size != 0 {
+				off, err := segMap.RemapLinkeditOffset(uint64(newLoad.Offset))
+				if err != nil {
+					return nil, fmt.Errorf("failed to remap offset in %s: %w", l.Command(), err)
+				}
+				newLoad.Offset = uint32(off)
+			}
+			newLoads = append(newLoads, &newLoad)
 		case types.LC_ENCRYPTION_INFO:
 			newLoad := EncryptionInfo{EncryptionInfoCmd: l.(*EncryptionInfo).EncryptionInfoCmd}
 			newLoads = append(newLoads, &newLoad)
@@ -1003,6 +1040,8 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap, inCache bool) ([]Load, 
 		case types.LC_MAIN:
 			// EntryOffset is relative to __TEXT segment start, not an absolute
 			// file offset, so it does not need remapping.
+			newLoad := *l.(*EntryPoint)
+			newLoads = append(newLoads, &newLoad)
 		case types.LC_DATA_IN_CODE:
 			newLoad := DataInCode{DataInCodeCmd: l.(*DataInCode).DataInCodeCmd}
 			newLoads = append(newLoads, &newLoad)
@@ -1125,8 +1164,7 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap, inCache bool) ([]Load, 
 				newData := make([]byte, len(thread.Data))
 				copy(newData, thread.Data)
 
-				switch thread.Flavor {
-				case types.ThreadFlavor(types.ARM_THREAD_STATE64):
+				if f.isArm64() && thread.Flavor == types.ThreadFlavor(types.ARM_THREAD_STATE64) {
 					var regs RegsARM64
 					if err := binary.Read(bytes.NewReader(thread.Data), f.ByteOrder, &regs); err != nil {
 						return nil, err
@@ -1143,8 +1181,6 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap, inCache bool) ([]Load, 
 						return nil, err
 					}
 					newData = buf.Bytes()
-				default:
-					return nil, fmt.Errorf("Unexpected Thread Flavour")
 				}
 
 				newThread := types.ThreadState{
@@ -1315,7 +1351,7 @@ func orderLoadsLikeLinker(loads []Load) []Load {
 	return ordered
 }
 
-func addSplitSegmentInfoLoad(fileHeader *types.FileHeader, loads []Load) []Load {
+func addSplitSegmentInfoLoad(loads []Load) []Load {
 	splitInfo := &SplitInfo{
 		Version: types.DYLD_CACHE_ADJ_V2_FORMAT,
 		SegmentSplitInfoCmd: types.SegmentSplitInfoCmd{
@@ -1326,33 +1362,19 @@ func addSplitSegmentInfoLoad(fileHeader *types.FileHeader, loads []Load) []Load 
 		},
 	}
 
-	for i, load := range loads {
-		if load.Command().String() == splitInfo.Command().String() {
-			loads = append(loads[:i], loads[i+1:]...)
-			fileHeader.NCommands--
-			fileHeader.SizeCommands -= splitInfo.LoadSize()
-			break
-		}
-	}
-
-	loads = append(loads, splitInfo)
-	fileHeader.NCommands++
-	fileHeader.SizeCommands += splitInfo.LoadSize()
-	return loads
+	return append(removeLoad(loads, splitInfo.Command()), splitInfo)
 }
 
-func removeLoad(fileHeader *types.FileHeader, loads []Load, cmd types.LoadCmd) []Load {
+func removeLoad(loads []Load, cmd types.LoadCmd) []Load {
 	for i, load := range loads {
 		if load.Command() == cmd {
-			fileHeader.NCommands--
-			fileHeader.SizeCommands -= load.LoadSize()
 			return append(loads[:i], loads[i+1:]...)
 		}
 	}
 	return loads
 }
 
-func addDyldChainedFixupsLoad(fileHeader *types.FileHeader, loads []Load) []Load {
+func addDyldChainedFixupsLoad(loads []Load) []Load {
 	fixups := &DyldChainedFixups{LinkEditData: LinkEditData{
 		LinkEditDataCmd: types.LinkEditDataCmd{
 			LoadCmd: types.LC_DYLD_CHAINED_FIXUPS,
@@ -1360,19 +1382,7 @@ func addDyldChainedFixupsLoad(fileHeader *types.FileHeader, loads []Load) []Load
 		},
 	}}
 
-	for i, load := range loads {
-		if load.Command() == fixups.Command() {
-			loads = append(loads[:i], loads[i+1:]...)
-			fileHeader.NCommands--
-			fileHeader.SizeCommands -= fixups.LoadSize()
-			break
-		}
-	}
-
-	loads = append(loads, fixups)
-	fileHeader.NCommands++
-	fileHeader.SizeCommands += fixups.LoadSize()
-	return loads
+	return append(removeLoad(loads, fixups.Command()), fixups)
 }
 
 type chainedFixupAuth struct {
@@ -1903,7 +1913,8 @@ func (f *File) adjustReferencesWithSourceSymbols(segMap exportSegMap, exportData
 				}
 			}
 			_, isAuth := authReferences[newSourceVmAddr]
-			if !found && !isAuth && ref.Kind == types.DYLD_CACHE_ADJ_V2_POINTER_64 {
+			if !found && !isAuth && !f.exportAddressOnlyBinds &&
+				ref.Kind == types.DYLD_CACHE_ADJ_V2_POINTER_64 {
 				sym, found = symbolWithBindAddend(symbols, targetVmAddr)
 			}
 			if ref.Kind == types.DYLD_CACHE_ADJ_V2_POINTER_64 && !f.exportAddressOnlyBinds {
@@ -2058,9 +2069,13 @@ func (f *File) optimizeLinkedit(exportData []byte, segMap exportSegMap, locals [
 				offset += sz
 				continue
 			}
-			if cmd == types.LC_SEGMENT_64 {
-				if sz < 56 {
-					return fmt.Errorf("invalid LC_SEGMENT_64 size %d", sz)
+			if cmd == types.LC_SEGMENT || cmd == types.LC_SEGMENT_64 {
+				headerSize := uint32(binary.Size(types.Segment32{}))
+				if cmd == types.LC_SEGMENT_64 {
+					headerSize = uint32(binary.Size(types.Segment64{}))
+				}
+				if sz < headerSize {
+					return fmt.Errorf("invalid %s size %d", cmd, sz)
 				}
 				// Keep the command's existing section records intact. Only the
 				// segment header changes after rebuilding __LINKEDIT.
@@ -2070,10 +2085,21 @@ func (f *File) optimizeLinkedit(exportData []byte, segMap exportSegMap, locals [
 					offset += sz
 					continue
 				}
-				f.ByteOrder.PutUint64(exportData[offset+24:], segment.Addr)
-				f.ByteOrder.PutUint64(exportData[offset+32:], segment.Memsz)
-				f.ByteOrder.PutUint64(exportData[offset+40:], segment.Offset)
-				f.ByteOrder.PutUint64(exportData[offset+48:], segment.Filesz)
+				if cmd == types.LC_SEGMENT_64 {
+					f.ByteOrder.PutUint64(exportData[offset+24:], segment.Addr)
+					f.ByteOrder.PutUint64(exportData[offset+32:], segment.Memsz)
+					f.ByteOrder.PutUint64(exportData[offset+40:], segment.Offset)
+					f.ByteOrder.PutUint64(exportData[offset+48:], segment.Filesz)
+				} else {
+					if max(segment.Addr, segment.Memsz, segment.Offset, segment.Filesz) >
+						uint64(^uint32(0)) {
+						return fmt.Errorf("segment %s exceeds 32-bit Mach-O limits", segment.Name)
+					}
+					f.ByteOrder.PutUint32(exportData[offset+24:], uint32(segment.Addr))
+					f.ByteOrder.PutUint32(exportData[offset+28:], uint32(segment.Memsz))
+					f.ByteOrder.PutUint32(exportData[offset+32:], uint32(segment.Offset))
+					f.ByteOrder.PutUint32(exportData[offset+36:], uint32(segment.Filesz))
+				}
 				offset += sz
 				continue
 			}
@@ -2338,7 +2364,7 @@ func (f *File) orderFixupsForImports(fixups []fixupchains.Fixup, segMap exportSe
 		}
 	}
 	for section, starts := range vtableStarts {
-		sort.Slice(starts, func(i, j int) bool { return starts[i] < starts[j] })
+		slices.Sort(starts)
 		vtableStarts[section] = slices.Compact(starts)
 	}
 	// ld emits copied external C++ vtables as anonymous atoms, so their starts
@@ -2385,7 +2411,7 @@ func (f *File) orderFixupsForImports(fixups []fixupchains.Fixup, segMap exportSe
 		atomStarts[section] = append(atomStarts[section], next.Offset())
 	}
 	for section, starts := range atomStarts {
-		sort.Slice(starts, func(i, j int) bool { return starts[i] < starts[j] })
+		slices.Sort(starts)
 		atomStarts[section] = slices.Compact(starts)
 	}
 
@@ -2645,9 +2671,7 @@ func (f *File) createStartsInSegmentStructure(pages map[[2]int][]fixupchains.Fix
 			// They should normally already be ordered, but make
 			// the encoding deterministic and satisfy dyld's
 			// requirement that multiple starts are ascending.
-			sort.Slice(offsets, func(i, j int) bool {
-				return offsets[i] < offsets[j]
-			})
+			slices.Sort(offsets)
 
 			if len(offsets) == 1 {
 				pageStarts[page] = offsets[0]
@@ -3648,6 +3672,7 @@ func (f *File) createSymtabLoads(symtabOffset, indirectSymtabOffset, stringPoolO
 
 func (f *File) writeLoadCommands(buf *bytes.Buffer, loads []Load) error {
 	for _, l := range loads {
+		start := buf.Len()
 		switch l.Command() {
 		case types.LC_SEGMENT:
 			fallthrough
@@ -3665,6 +3690,10 @@ func (f *File) writeLoadCommands(buf *bytes.Buffer, loads []Load) error {
 			if err := l.Write(buf, f.ByteOrder); err != nil {
 				return err
 			}
+		}
+		data := buf.Bytes()[start:]
+		if len(data) < 8 || uint64(f.ByteOrder.Uint32(data[4:8])) != uint64(len(data)) {
+			return fmt.Errorf("serialized %s size does not match cmdsize", l.Command())
 		}
 	}
 	return nil

@@ -85,6 +85,24 @@ func pointerAlign(sz uint32) uint32 {
 	return sz
 }
 
+func padLoadCommand(buf *bytes.Buffer, start int, cmd types.LoadCmd, size uint32) error {
+	written := buf.Len() - start
+	if uint64(written) > uint64(size) {
+		return fmt.Errorf(
+			"%s cmdsize %d is smaller than the %d bytes written; "+
+				"Len must be recalculated (e.g. via LoadSize) after changing Name",
+			cmd, size, written,
+		)
+	}
+	if uint64(size) > uint64(^uint(0)>>1) {
+		return fmt.Errorf("%s cmdsize %d exceeds buffer limits", cmd, size)
+	}
+	if pad := int(size) - written; pad > 0 {
+		buf.Write(make([]byte, pad))
+	}
+	return nil
+}
+
 /*******************************************************************************
  * SEGMENT
  *******************************************************************************/
@@ -682,19 +700,14 @@ func (l *LoadFvmlib) LoadSize() uint32 {
 	return pointerAlign(uint32(binary.Size(l.LoadFvmLibCmd) + len(l.Name) + 1))
 }
 func (l *LoadFvmlib) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	start := buf.Len()
 	if err := binary.Write(buf, o, l.LoadFvmLibCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
 	}
 	if _, err := buf.WriteString(l.Name + "\x00"); err != nil {
 		return fmt.Errorf("failed to write %s to %s buffer: %v", l.Name, l.Command(), err)
 	}
-	if (buf.Len() % 8) != 0 {
-		pad := 8 - (buf.Len() % 8)
-		if _, err := buf.Write(make([]byte, pad)); err != nil {
-			return fmt.Errorf("failed to write %s padding: %v", l.Command(), err)
-		}
-	}
-	return nil
+	return padLoadCommand(buf, start, l.Command(), l.Len)
 }
 func (l *LoadFvmlib) String() string {
 	return fmt.Sprintf("%s (%s), Header Addr: %#08x", l.Name, l.MinorVersion, l.HeaderAddr)
@@ -741,11 +754,12 @@ func (i *Ident) LoadSize() uint32 {
 		sz += uint32(len(str) + 1)
 	}
 	if (sz % 4) != 0 {
-		sz = 4 - (sz % 4)
+		sz += 4 - (sz % 4)
 	}
 	return sz
 }
 func (i *Ident) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	start := buf.Len()
 	if err := binary.Write(buf, o, i.IdentCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", i.Command(), err)
 	}
@@ -754,13 +768,7 @@ func (i *Ident) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 			return fmt.Errorf("failed to write %s to %s buffer: %v", str, i.Command(), err)
 		}
 	}
-	if (buf.Len() % 4) != 0 {
-		pad := 4 - (buf.Len() % 4)
-		if _, err := buf.Write(make([]byte, pad)); err != nil {
-			return fmt.Errorf("failed to write %s padding: %v", i.Command(), err)
-		}
-	}
-	return nil
+	return padLoadCommand(buf, start, i.Command(), i.Len)
 }
 func (i *Ident) String() string {
 	return fmt.Sprintf("str_count=%d", len(i.StrTable))
@@ -792,19 +800,14 @@ func (l *FvmFile) LoadSize() uint32 {
 	return pointerAlign(uint32(binary.Size(l.FvmFileCmd) + len(l.Name) + 1))
 }
 func (l *FvmFile) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	start := buf.Len()
 	if err := binary.Write(buf, o, l.FvmFileCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
 	}
 	if _, err := buf.WriteString(l.Name + "\x00"); err != nil {
 		return fmt.Errorf("failed to write %s to %s buffer: %v", l.Name, l.Command(), err)
 	}
-	if (buf.Len() % 8) != 0 {
-		pad := 8 - (buf.Len() % 8)
-		if _, err := buf.Write(make([]byte, pad)); err != nil {
-			return fmt.Errorf("failed to write %s padding: %v", l.Command(), err)
-		}
-	}
-	return nil
+	return padLoadCommand(buf, start, l.Command(), l.Len)
 }
 func (l *FvmFile) String() string {
 	return fmt.Sprintf("%s, Header Addr: %#08x", l.Name, l.HeaderAddr)
@@ -1022,8 +1025,72 @@ type PreboundDylib struct {
 	LinkedModulesBitVector string
 }
 
+// LoadSize returns the required command size. An unrepresentable layout returns
+// the largest uint32; Write reports the layout error without allocating it.
 func (d *PreboundDylib) LoadSize() uint32 {
-	return pointerAlign(uint32(binary.Size(d.PreboundDylibCmd) + len(d.Name) + 1 + len(d.LinkedModulesBitVector) + 1))
+	_, size, err := d.layout()
+	if err != nil {
+		return ^uint32(0)
+	}
+	return size
+}
+
+func (d *PreboundDylib) layout() (types.PreboundDylibCmd, uint32, error) {
+	cmd := d.PreboundDylibCmd
+	if cmd.LoadCmd == 0 {
+		cmd.LoadCmd = types.LC_PREBOUND_DYLIB
+	}
+	if cmd.NameOffset == 0 {
+		cmd.NameOffset = uint32(binary.Size(cmd))
+	}
+	nameEnd := uint64(cmd.NameOffset) + uint64(len(d.Name)) + 1
+	if cmd.LinkedModulesOffset == 0 && len(d.LinkedModulesBitVector) != 0 {
+		if nameEnd > uint64(^uint32(0)) {
+			return cmd, 0, fmt.Errorf("%s name offset overflows", cmd.LoadCmd)
+		}
+		cmd.LinkedModulesOffset = uint32(nameEnd)
+	}
+	modulesEnd := uint64(cmd.LinkedModulesOffset) + uint64(len(d.LinkedModulesBitVector))
+	size := max(uint64(binary.Size(cmd)), nameEnd, modulesEnd)
+	if size > uint64(^uint32(0))-7 {
+		return cmd, 0, fmt.Errorf("%s size exceeds Mach-O limits", cmd.LoadCmd)
+	}
+	alignedSize := pointerAlign(uint32(size))
+	if cmd.Len == 0 {
+		cmd.Len = alignedSize
+	}
+	return cmd, alignedSize, nil
+}
+
+func preboundDylibRangeValid(start, size, header, limit uint64) bool {
+	return start >= header && start <= limit && size <= limit-start
+}
+
+func (d *PreboundDylib) validateLayout(cmd types.PreboundDylibCmd) error {
+	header, limit := uint64(binary.Size(cmd)), uint64(cmd.Len)
+	nameStart, modulesStart := uint64(cmd.NameOffset), uint64(cmd.LinkedModulesOffset)
+	nameSize := uint64(len(d.Name)) + 1
+	modulesSize := (uint64(cmd.NumModules) + 7) / 8
+	if !preboundDylibRangeValid(nameStart, nameSize, header, limit) {
+		return fmt.Errorf("invalid name range in %s", cmd.LoadCmd)
+	}
+	if modulesSize != uint64(len(d.LinkedModulesBitVector)) {
+		return fmt.Errorf("invalid module bitmap size in %s", cmd.LoadCmd)
+	}
+	if modulesSize == 0 {
+		if modulesStart <= limit {
+			return nil
+		}
+		return fmt.Errorf("invalid empty module bitmap in %s", cmd.LoadCmd)
+	}
+	if !preboundDylibRangeValid(modulesStart, modulesSize, header, limit) {
+		return fmt.Errorf("invalid module bitmap range in %s", cmd.LoadCmd)
+	}
+	overlap := nameStart < modulesStart+modulesSize && modulesStart < nameStart+nameSize
+	if overlap {
+		return fmt.Errorf("overlapping name and module bitmap in %s", cmd.LoadCmd)
+	}
+	return nil
 }
 func (d *PreboundDylib) Put(b []byte, o binary.ByteOrder) int {
 	o.PutUint32(b[0*4:], uint32(d.LoadCmd))
@@ -1034,22 +1101,24 @@ func (d *PreboundDylib) Put(b []byte, o binary.ByteOrder) int {
 	return 5 * binary.Size(uint32(0))
 }
 func (d *PreboundDylib) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
-	if err := binary.Write(buf, o, d.PreboundDylibCmd); err != nil {
-		return fmt.Errorf("failed to write %s to buffer: %v", d.Command(), err)
+	cmd, _, err := d.layout()
+	if err != nil {
+		return err
 	}
-	if _, err := buf.WriteString(d.Name + "\x00"); err != nil {
-		return fmt.Errorf("failed to write %s to %s buffer: %v", d.Name, d.Command(), err)
+	if err := d.validateLayout(cmd); err != nil {
+		return err
 	}
-	if _, err := buf.WriteString(d.LinkedModulesBitVector + "\x00"); err != nil {
-		return fmt.Errorf("failed to write %s to %s buffer: %v", d.LinkedModulesBitVector, d.Command(), err)
+	if uint64(cmd.Len) > uint64(^uint(0)>>1) {
+		return fmt.Errorf("%s cmdsize %d exceeds buffer limits", cmd.LoadCmd, cmd.Len)
 	}
-	if (buf.Len() % 8) != 0 {
-		pad := 8 - (buf.Len() % 8)
-		if _, err := buf.Write(make([]byte, pad)); err != nil {
-			return fmt.Errorf("failed to write %s padding: %v", d.Command(), err)
-		}
-	}
-	return nil
+	data := make([]byte, int(cmd.Len))
+	normalized := *d
+	normalized.PreboundDylibCmd = cmd
+	normalized.Put(data, o)
+	copy(data[cmd.NameOffset:], d.Name)
+	copy(data[cmd.LinkedModulesOffset:], d.LinkedModulesBitVector)
+	_, err = buf.Write(data)
+	return err
 }
 func (d *PreboundDylib) String() string {
 	return fmt.Sprintf("%s, NumModules=%d, LinkedModulesBitVector=%v", d.Name, d.NumModules, []byte(d.LinkedModulesBitVector))
@@ -1121,19 +1190,14 @@ func (l *SubFramework) LoadSize() uint32 {
 	return pointerAlign(uint32(binary.Size(l.SubFrameworkCmd) + len(l.Framework) + 1))
 }
 func (l *SubFramework) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	start := buf.Len()
 	if err := binary.Write(buf, o, l.SubFrameworkCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
 	}
 	if _, err := buf.WriteString(l.Framework + "\x00"); err != nil {
 		return fmt.Errorf("failed to write %s to %s buffer: %v", l.Framework, l.Command(), err)
 	}
-	if (buf.Len() % 8) != 0 {
-		pad := 8 - (buf.Len() % 8)
-		if _, err := buf.Write(make([]byte, pad)); err != nil {
-			return fmt.Errorf("failed to write %s padding: %v", l.Command(), err)
-		}
-	}
-	return nil
+	return padLoadCommand(buf, start, l.Command(), l.Len)
 }
 func (l *SubFramework) String() string { return l.Framework }
 func (l *SubFramework) MarshalJSON() ([]byte, error) {
@@ -1163,19 +1227,14 @@ func (l *SubUmbrella) LoadSize() uint32 {
 	return pointerAlign(uint32(binary.Size(l.SubUmbrellaCmd)) + uint32(len(l.Umbrella)) + 1)
 }
 func (l *SubUmbrella) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	start := buf.Len()
 	if err := binary.Write(buf, o, l.SubUmbrellaCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
 	}
 	if _, err := buf.WriteString(l.Umbrella + "\x00"); err != nil {
 		return fmt.Errorf("failed to write %s to %s buffer: %v", l.Umbrella, l.Command(), err)
 	}
-	if (buf.Len() % 8) != 0 {
-		pad := 8 - (buf.Len() % 8)
-		if _, err := buf.Write(make([]byte, pad)); err != nil {
-			return fmt.Errorf("failed to write %s padding: %v", l.Command(), err)
-		}
-	}
-	return nil
+	return padLoadCommand(buf, start, l.Command(), l.Len)
 }
 func (l *SubUmbrella) String() string { return l.Umbrella }
 func (l *SubUmbrella) MarshalJSON() ([]byte, error) {
@@ -1205,19 +1264,14 @@ func (l *SubClient) LoadSize() uint32 {
 	return pointerAlign(uint32(binary.Size(l.SubClientCmd)) + uint32(len(l.Name)) + 1)
 }
 func (l *SubClient) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	start := buf.Len()
 	if err := binary.Write(buf, o, l.SubClientCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
 	}
 	if _, err := buf.WriteString(l.Name + "\x00"); err != nil {
 		return fmt.Errorf("failed to write %s to %s buffer: %v", l.Name, l.Command(), err)
 	}
-	if (buf.Len() % 8) != 0 {
-		pad := 8 - (buf.Len() % 8)
-		if _, err := buf.Write(make([]byte, pad)); err != nil {
-			return fmt.Errorf("failed to write %s padding: %v", l.Command(), err)
-		}
-	}
-	return nil
+	return padLoadCommand(buf, start, l.Command(), l.Len)
 }
 func (l *SubClient) String() string {
 	return l.Name
@@ -1249,19 +1303,14 @@ func (l *SubLibrary) LoadSize() uint32 {
 	return pointerAlign(uint32(binary.Size(l.SubLibraryCmd)) + uint32(len(l.Library)) + 1)
 }
 func (l *SubLibrary) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	start := buf.Len()
 	if err := binary.Write(buf, o, l.SubLibraryCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
 	}
 	if _, err := buf.WriteString(l.Library + "\x00"); err != nil {
 		return fmt.Errorf("failed to write %s to %s buffer: %v", l.Library, l.Command(), err)
 	}
-	if (buf.Len() % 8) != 0 {
-		pad := 8 - (buf.Len() % 8)
-		if _, err := buf.Write(make([]byte, pad)); err != nil {
-			return fmt.Errorf("failed to write %s padding: %v", l.Command(), err)
-		}
-	}
-	return nil
+	return padLoadCommand(buf, start, l.Command(), l.Len)
 }
 func (l *SubLibrary) String() string { return l.Library }
 func (l *SubLibrary) MarshalJSON() ([]byte, error) {
@@ -1444,19 +1493,14 @@ func (r *Rpath) LoadSize() uint32 {
 	return pointerAlign(uint32(binary.Size(r.RpathCmd)) + uint32(len(r.Path)) + 1)
 }
 func (r *Rpath) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	start := buf.Len()
 	if err := binary.Write(buf, o, r.RpathCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", r.Command(), err)
 	}
 	if _, err := buf.WriteString(r.Path + "\x00"); err != nil {
 		return fmt.Errorf("failed to write %s to Dylib buffer: %v", r.Path, err)
 	}
-	if (buf.Len() % 8) != 0 {
-		pad := 8 - (buf.Len() % 8)
-		if _, err := buf.Write(make([]byte, pad)); err != nil {
-			return fmt.Errorf("failed to write %s padding: %v", r.Command(), err)
-		}
-	}
-	return nil
+	return padLoadCommand(buf, start, r.Command(), r.Len)
 }
 func (r *Rpath) String() string {
 	return r.Path
@@ -1982,9 +2026,10 @@ func (l *LinkerOption) LoadSize() uint32 {
 	for _, opt := range l.Options {
 		totalStrLen += uint32(len(opt) + 1)
 	}
-	return uint32(binary.Size(l.LinkerOptionCmd)) + totalStrLen
+	return pointerAlign(uint32(binary.Size(l.LinkerOptionCmd)) + totalStrLen)
 }
 func (l *LinkerOption) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	start := buf.Len()
 	if err := binary.Write(buf, o, l.LinkerOptionCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
 	}
@@ -1993,7 +2038,7 @@ func (l *LinkerOption) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 			return fmt.Errorf("failed to write %s to %s buffer: %v", opt, l.Command(), err)
 		}
 	}
-	return nil
+	return padLoadCommand(buf, start, l.Command(), l.Len)
 }
 func (l *LinkerOption) String() string {
 	return fmt.Sprintf("Options=%s", strings.Join(l.Options, ","))
@@ -2233,19 +2278,14 @@ func (l *FilesetEntry) LoadSize() uint32 {
 	return pointerAlign(uint32(binary.Size(l.FilesetEntryCmd)) + uint32(len(l.EntryID)) + 1)
 }
 func (l *FilesetEntry) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	start := buf.Len()
 	if err := binary.Write(buf, o, l.FilesetEntryCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", l.Command(), err)
 	}
 	if _, err := buf.WriteString(l.EntryID + "\x00"); err != nil {
 		return fmt.Errorf("failed to write %s to %s buffer: %v", l.EntryID, l.Command(), err)
 	}
-	if (buf.Len() % 8) != 0 {
-		pad := 8 - (buf.Len() % 8)
-		if _, err := buf.Write(make([]byte, pad)); err != nil {
-			return fmt.Errorf("failed to write %s padding: %v", l.Command(), err)
-		}
-	}
-	return nil
+	return padLoadCommand(buf, start, l.Command(), l.Len)
 }
 func (f *FilesetEntry) String() string {
 	return fmt.Sprintf("offset=0x%09x addr=0x%016x %s", f.FileOffset, f.Addr, f.EntryID)
@@ -2525,19 +2565,14 @@ func (t *TargetTriple) LoadSize() uint32 {
 	return pointerAlign(uint32(binary.Size(t.TargetTripleCmd)) + uint32(len(t.Target)) + 1)
 }
 func (t *TargetTriple) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	start := buf.Len()
 	if err := binary.Write(buf, o, t.TargetTripleCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", t.Command(), err)
 	}
 	if _, err := buf.WriteString(t.Target + "\x00"); err != nil {
 		return fmt.Errorf("failed to write %s to LC buffer: %v", t.Target, err)
 	}
-	if (buf.Len() % 8) != 0 {
-		pad := 8 - (buf.Len() % 8)
-		if _, err := buf.Write(make([]byte, pad)); err != nil {
-			return fmt.Errorf("failed to write %s padding: %v", t.Command(), err)
-		}
-	}
-	return nil
+	return padLoadCommand(buf, start, t.Command(), t.Len)
 }
 func (t *TargetTriple) String() string {
 	return t.Target
@@ -2798,16 +2833,7 @@ func (d *Dylib) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
 	if _, err := buf.WriteString(d.Name + "\x00"); err != nil {
 		return fmt.Errorf("failed to write %s to %s buffer: %v", d.Name, d.Command(), err)
 	}
-	written := buf.Len() - start
-	if int(d.Len) < written {
-		return fmt.Errorf("%s cmdsize %d is smaller than the %d bytes written; Len must be recalculated (e.g. via LoadSize) after changing Name", d.Command(), d.Len, written)
-	}
-	if pad := int(d.Len) - written; pad > 0 {
-		if _, err := buf.Write(make([]byte, pad)); err != nil {
-			return fmt.Errorf("failed to write %s padding: %v", d.Command(), err)
-		}
-	}
-	return nil
+	return padLoadCommand(buf, start, d.Command(), d.Len)
 }
 func (d *Dylib) String() string {
 	if flags := d.Flags.List(); len(flags) > 0 {
@@ -2852,19 +2878,14 @@ func (d *Dylinker) Put(b []byte, o binary.ByteOrder) int {
 	return 3 * binary.Size(uint32(0))
 }
 func (d *Dylinker) Write(buf *bytes.Buffer, o binary.ByteOrder) error {
+	start := buf.Len()
 	if err := binary.Write(buf, o, d.DylinkerCmd); err != nil {
 		return fmt.Errorf("failed to write %s to buffer: %v", d.Command(), err)
 	}
 	if _, err := buf.WriteString(d.Name + "\x00"); err != nil {
 		return fmt.Errorf("failed to write %s to %s buffer: %v", d.Name, d.Command(), err)
 	}
-	if (buf.Len() % 8) != 0 {
-		pad := 8 - (buf.Len() % 8)
-		if _, err := buf.Write(make([]byte, pad)); err != nil {
-			return fmt.Errorf("failed to write %s padding: %v", d.Command(), err)
-		}
-	}
-	return nil
+	return padLoadCommand(buf, start, d.Command(), d.Len)
 }
 func (d *Dylinker) String() string {
 	return d.Name
