@@ -125,23 +125,49 @@ func TestStringTableLookupError(t *testing.T) {
 // LC_SYMTAB, so a test controls every n_strx, n_type and n_value and the
 // exact bytes of the string table.
 func symtabOnlyMachO(is64 bool, strtab string, syms []types.Nlist64) []byte {
+	return symtabMachO(is64, false, strtab, syms)
+}
+
+// symtabMachO is symtabOnlyMachO, optionally preceded by an empty
+// __TEXT,__gopclntab section that marks the file as a Go binary.
+func symtabMachO(is64, goBinary bool, strtab string, syms []types.Nlist64) []byte {
 	bo := binary.LittleEndian
 	hdrSize, nlistSize := types.FileHeaderSize32, 12
 	magic, cpu := types.Magic32, types.CPUI386
+	segCmdSize, sectSize := 56, 68
 	if is64 {
 		hdrSize, nlistSize = types.FileHeaderSize64, 16
 		magic, cpu = types.Magic64, types.CPUAmd64
+		segCmdSize, sectSize = 72, 80
 	}
 	const symtabCmdSize = 24
-	symoff := hdrSize + symtabCmdSize
+	ncmds, sizeofcmds := 1, symtabCmdSize
+	if goBinary {
+		ncmds, sizeofcmds = 2, symtabCmdSize+segCmdSize+sectSize
+	}
+	symoff := int(hdrSize) + sizeofcmds
 	stroff := symoff + len(syms)*nlistSize
 	buf := make([]byte, stroff+len(strtab))
 	bo.PutUint32(buf[0:], uint32(magic))
 	bo.PutUint32(buf[4:], uint32(cpu))
 	bo.PutUint32(buf[12:], uint32(types.MH_OBJECT))
-	bo.PutUint32(buf[16:], 1)
-	bo.PutUint32(buf[20:], symtabCmdSize)
+	bo.PutUint32(buf[16:], uint32(ncmds))
+	bo.PutUint32(buf[20:], uint32(sizeofcmds))
 	lc := buf[hdrSize:]
+	if goBinary {
+		cmd := types.LC_SEGMENT
+		if is64 {
+			cmd = types.LC_SEGMENT_64
+		}
+		bo.PutUint32(lc[0:], uint32(cmd))
+		bo.PutUint32(lc[4:], uint32(segCmdSize+sectSize))
+		copy(lc[8:], "__TEXT")
+		bo.PutUint32(lc[segCmdSize-8:], 1) // nsects
+		sect := lc[segCmdSize:]
+		copy(sect[0:], "__gopclntab")
+		copy(sect[16:], "__TEXT")
+		lc = lc[segCmdSize+sectSize:]
+	}
 	bo.PutUint32(lc[0:], uint32(types.LC_SYMTAB))
 	bo.PutUint32(lc[4:], symtabCmdSize)
 	bo.PutUint32(lc[8:], uint32(symoff))
@@ -214,7 +240,7 @@ func TestSymtabNames(t *testing.T) {
 		{"", ""},
 	}
 	for _, is64 := range []bool{true, false} {
-		data := symtabOnlyMachO(is64, symtabNamesStrtab, syms)
+		data := symtabMachO(is64, true, symtabNamesStrtab, syms)
 		for _, withLookup := range []bool{false, true} {
 			var calls int
 			var cfg []FileConfig
@@ -235,6 +261,26 @@ func TestSymtabNames(t *testing.T) {
 						is64, withLookup, i, got.Name, got.IndirectName, w.name, w.indirect)
 				}
 			}
+		}
+	}
+}
+
+// The Go linker workaround must not rename dotted names of other toolchains,
+// such as clang's _foo.cold.1.
+func TestSymtabNamesKeepUnderscoreOutsideGo(t *testing.T) {
+	strtab := "\x00_foo.cold.1\x00"
+	sym := nlist(1, types.N_SECT, 0x1000)
+	for _, goBinary := range []bool{false, true} {
+		f, err := NewFile(bytes.NewReader(symtabMachO(true, goBinary, strtab, []types.Nlist64{sym})))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "_foo.cold.1"
+		if goBinary {
+			want = "foo.cold.1"
+		}
+		if got := f.Symtab.Syms[0].Name; got != want {
+			t.Errorf("go=%v: name = %q, want %q", goBinary, got, want)
 		}
 	}
 }

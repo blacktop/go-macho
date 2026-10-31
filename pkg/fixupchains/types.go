@@ -72,6 +72,19 @@ type DyldChainedFixupsHeader struct {
 	SymbolsFormat DCSymbolsFormat // 0 => uncompressed, 1 => zlib compressed
 }
 
+// Data returns the little-endian encoding of the header.
+func (d *DyldChainedFixupsHeader) Data() []byte {
+	out := make([]byte, binary.Size(DyldChainedFixupsHeader{}))
+	binary.LittleEndian.PutUint32(out[0:4], d.FixupsVersion)
+	binary.LittleEndian.PutUint32(out[4:8], d.StartsOffset)
+	binary.LittleEndian.PutUint32(out[8:12], d.ImportsOffset)
+	binary.LittleEndian.PutUint32(out[12:16], d.SymbolsOffset)
+	binary.LittleEndian.PutUint32(out[16:20], d.ImportsCount)
+	binary.LittleEndian.PutUint32(out[20:24], uint32(d.ImportsFormat))
+	binary.LittleEndian.PutUint32(out[24:28], uint32(d.SymbolsFormat))
+	return out
+}
+
 // DyldChainedStartsInImage this struct is embedded in LC_DYLD_CHAINED_FIXUPS payload
 type DyldChainedStartsInImage struct {
 	SegCount       uint32
@@ -285,6 +298,33 @@ type DyldChainedPtrArm64eRebase struct {
 	Pointer uint64
 }
 
+// NewDyldChainedPtrArm64eRebase encodes a plain rebase of the fixup at address
+// to target, with next as the stride to the next fixup in the chain.
+func NewDyldChainedPtrArm64eRebase(address, target, next uint64) DyldChainedPtrArm64eRebase {
+	// dyld_chained_ptr_arm64e_rebase:
+	//
+	// target : 43
+	// high8  : 8
+	// next   : 11
+	// bind   : 1
+	// auth   : 1
+	//
+	// target is the low 43 bits of the VM address.
+	// high8 contains bits 56..63.
+	low := target & ((uint64(1) << 43) - 1)
+	high8 := (target >> 56) & 0xff
+
+	pointer := low |
+		(high8 << 43) |
+		((next & 0x7ff) << 51)
+	// bind=0, auth=0
+
+	return DyldChainedPtrArm64eRebase{
+		Fixup:   address,
+		Pointer: pointer,
+	}
+}
+
 func (d DyldChainedPtrArm64eRebase) IsRebase() bool {
 	return d.Bind() == 0
 }
@@ -338,6 +378,40 @@ type DyldChainedPtrArm64eBind struct {
 	Fixup   uint64
 	Pointer uint64
 	Import  string
+}
+
+// NewDyldChainedPtrArm64eBind encodes a plain bind to import ordinal with an
+// inline addend, which must fit into 19 signed bits.
+func NewDyldChainedPtrArm64eBind(address uint64, ordinal uint16, addend int64, next uint64, symbol string) (DyldChainedPtrArm64eBind, error) {
+	// dyld_chained_ptr_arm64e_bind:
+	//
+	// ordinal : 16
+	// zero    : 16
+	// addend  : 19
+	// next    : 11
+	// bind    : 1
+	// auth    : 1
+	//
+	// addend is signed, 19 bits, range:
+	// [-262144, +262143]
+	if addend < -(1<<18) || addend > (1<<18)-1 {
+		return DyldChainedPtrArm64eBind{}, fmt.Errorf("ARM64E embedded bind addend out of range: %d", addend)
+	}
+
+	add := uint64(addend) & ((uint64(1) << 19) - 1)
+
+	const bindBit = uint64(1) << 62
+	pointer := uint64(ordinal) |
+		(add << 32) |
+		((next & 0x7ff) << 51) |
+		bindBit
+	// auth=0
+
+	return DyldChainedPtrArm64eBind{
+		Fixup:   address,
+		Pointer: pointer,
+		Import:  symbol,
+	}, nil
 }
 
 func (d DyldChainedPtrArm64eBind) IsRebase() bool {
@@ -403,6 +477,19 @@ type DyldChainedPtrArm64eAuthRebase struct {
 	Pointer uint64
 }
 
+// NewDyldChainedPtrArm64eAuthRebase encodes an authenticated rebase. target is
+// the low 32 bits of the target (an offset in kernel formats).
+func NewDyldChainedPtrArm64eAuthRebase(address, target uint64, diversity uint16, addrDiv, key, next uint64) DyldChainedPtrArm64eAuthRebase {
+	const authBit = uint64(1) << 63
+	pointer := (target & 0xffffffff) |
+		(uint64(diversity) << 32) |
+		((addrDiv & 1) << 48) |
+		((key & 3) << 49) |
+		((next & 0x7ff) << 51) |
+		authBit
+	return DyldChainedPtrArm64eAuthRebase{Fixup: address, Pointer: pointer}
+}
+
 func (d DyldChainedPtrArm64eAuthRebase) IsRebase() bool {
 	return d.Bind() == 0
 }
@@ -461,6 +548,20 @@ type DyldChainedPtrArm64eAuthBind struct {
 	Fixup   uint64
 	Pointer uint64
 	Import  string
+}
+
+// NewDyldChainedPtrArm64eAuthBind encodes an authenticated bind to import
+// ordinal.
+func NewDyldChainedPtrArm64eAuthBind(address uint64, ordinal uint16, diversity uint16, addrDiv, key, next uint64, symbol string) DyldChainedPtrArm64eAuthBind {
+	const bindBit = uint64(1) << 62
+	const authBit = uint64(1) << 63
+	pointer := uint64(ordinal) |
+		(uint64(diversity) << 32) |
+		((addrDiv & 1) << 48) |
+		((key & 3) << 49) |
+		((next & 0x7ff) << 51) |
+		bindBit | authBit
+	return DyldChainedPtrArm64eAuthBind{Fixup: address, Pointer: pointer, Import: symbol}
 }
 
 func (d DyldChainedPtrArm64eAuthBind) IsRebase() bool {

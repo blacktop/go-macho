@@ -54,7 +54,8 @@ type File struct {
 	swiftClasses *swiftClassIndex // built lazily from GetSwiftTypes for ivar type lookups
 	ledata       *bytes.Buffer    // tmp storage of linkedit data
 
-	objcOnce sync.Once
+	objcOnce               sync.Once
+	exportAddressOnlyBinds bool // see WithAddressOnlyBinds
 
 	sharedCacheRelativeSelectorBaseVMAddress uint64 // objc_opt version 16
 	swiftAutoDemangle                        bool
@@ -1479,6 +1480,12 @@ func (f *File) parseSymtab(symdat []byte, nameAt func(uint64) string, cmddat []b
 		return s, nil
 	}
 	symtab := make([]Symbol, 0, c)
+	goBinary := false
+	for _, s := range f.Sections {
+		if s.Name == "__gopclntab" || s.Name == "__go_buildinfo" || s.Name == "__gosymtab" {
+			goBinary = true
+		}
+	}
 	b := bytes.NewReader(symdat)
 	for i := 0; i < int(hdr.Nsyms); i++ {
 		var n types.Nlist64
@@ -1502,7 +1509,8 @@ func (f *File) parseSymtab(symdat []byte, nameAt func(uint64) string, cmddat []b
 			return nil, err
 		}
 		// We add "_" to Go symbols. Strip it here. See issue 33808.
-		if strings.Contains(name, ".") && name[0] == '_' {
+		// Only Go binaries: Apple toolchains emit names like _foo.cold.1.
+		if goBinary && strings.Contains(name, ".") && name[0] == '_' {
 			name = name[1:]
 		}
 		var indirectName string
@@ -1510,7 +1518,7 @@ func (f *File) parseSymtab(symdat []byte, nameAt func(uint64) string, cmddat []b
 			if indirectName, err = boundedName(n.Value); err != nil {
 				return nil, err
 			}
-			if strings.Contains(indirectName, ".") && indirectName[0] == '_' {
+			if goBinary && strings.Contains(indirectName, ".") && indirectName[0] == '_' {
 				indirectName = indirectName[1:]
 			}
 		}
