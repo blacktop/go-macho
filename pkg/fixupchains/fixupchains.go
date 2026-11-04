@@ -713,6 +713,28 @@ func (dcf *DyldChainedFixups) parseImports() error {
 	var imports []Import
 	dcf.Imports = dcf.Imports[:0]
 
+	if int64(dcf.ImportsOffset) > dcf.r.Size() {
+		return fmt.Errorf("imports offset %d beyond fixups data size %d", dcf.ImportsOffset, dcf.r.Size())
+	}
+
+	// Each import entry needs a fixed number of bytes; ImportsCount comes
+	// from the file and must not size an allocation larger than the data.
+	entrySize := 0
+	switch dcf.ImportsFormat {
+	case DC_IMPORT:
+		entrySize = binary.Size(DyldChainedImport(0))
+	case DC_IMPORT_ADDEND:
+		entrySize = binary.Size(DyldChainedImportAddend{})
+	case DC_IMPORT_ADDEND64:
+		entrySize = binary.Size(DyldChainedImportAddend64{})
+	default:
+		return fmt.Errorf("unknown imports format %d", dcf.ImportsFormat)
+	}
+	if uint64(dcf.ImportsCount)*uint64(entrySize) > uint64(dcf.r.Size()-int64(dcf.ImportsOffset)) {
+		return fmt.Errorf("imports count %d exceeds fixups data (need %d bytes, have %d)",
+			dcf.ImportsCount, uint64(dcf.ImportsCount)*uint64(entrySize), dcf.r.Size()-int64(dcf.ImportsOffset))
+	}
+
 	if _, err := dcf.r.Seek(int64(dcf.ImportsOffset), io.SeekStart); err != nil {
 		return fmt.Errorf("failed to seek to imports offset %d: %v", dcf.ImportsOffset, err)
 	}
@@ -744,6 +766,9 @@ func (dcf *DyldChainedFixups) parseImports() error {
 		}
 	}
 
+	if int64(dcf.SymbolsOffset) > dcf.r.Size() {
+		return fmt.Errorf("symbols offset %d beyond fixups data size %d", dcf.SymbolsOffset, dcf.r.Size())
+	}
 	symbolsPool := io.NewSectionReader(dcf.r, int64(dcf.SymbolsOffset), dcf.r.Size()-int64(dcf.SymbolsOffset))
 	for _, i := range imports {
 		if _, err := symbolsPool.Seek(int64(i.NameOffset()), io.SeekStart); err != nil {

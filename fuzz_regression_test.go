@@ -225,6 +225,23 @@ func TestFuzzRegressionFixupsInvalidPageSize(t *testing.T) {
 	}
 }
 
+// A fixups header claiming billions of imports used to size a multi-GB
+// allocation before any data check (worker OOM/timeout: mutation family of
+// 4682d19f404e4ecb, seed found-ce52b1dfee28ffed).
+func TestFuzzRegressionFixupsImportCount(t *testing.T) {
+	blob := fixupsSeedBlob()
+	le := binary.LittleEndian
+	// header: FixupsVersion(4) StartsOffset(4) ImportsOffset(4) SymbolsOffset(4)
+	// ImportsCount(4) at offset 16 — claim 4 billion entries
+	le.PutUint32(blob[16:20], 0xFFFFFFFF)
+	var mr types.MachoReader = types.NewCustomSectionReader(bytes.NewReader(nil), nil, 0, 0)
+	dcf := fixupchains.NewChainedFixups(bytes.NewReader(blob), &mr, le)
+	_, err := dcf.Parse()
+	if err == nil || !strings.Contains(err.Error(), "imports count") {
+		t.Fatalf("got %v, wanted imports count error", err)
+	}
+}
+
 func TestFuzzRegressionZSectionHeaderShort(t *testing.T) {
 	le := binary.LittleEndian
 	seg := types.Segment64{
