@@ -207,6 +207,24 @@ func TestFuzzRegressionWalkTrieCycle(t *testing.T) {
 	}
 }
 
+// Chained-fixups metadata with a nonsense page size used to make every
+// page's chain walk re-read the same window of the file (PageSize=0), a
+// quadratic blowup that hung the worker for 10+ minutes (found by
+// FuzzNewFile as mutation family of 08330368c946b720).
+func TestFuzzRegressionFixupsInvalidPageSize(t *testing.T) {
+	blob := fixupsSeedBlob()
+	le := binary.LittleEndian
+	// segment starts: after header(28) + starts_in_image(8); PageSize at offset 4
+	segOff := 28 + 8
+	le.PutUint16(blob[segOff+4:], 0) // PageSize = 0
+	var mr types.MachoReader = types.NewCustomSectionReader(bytes.NewReader(nil), nil, 0, 0)
+	dcf := fixupchains.NewChainedFixups(bytes.NewReader(blob), &mr, le)
+	_, err := dcf.Parse()
+	if err == nil || !strings.Contains(err.Error(), "invalid page size") {
+		t.Fatalf("got %v, wanted invalid page size error", err)
+	}
+}
+
 func TestFuzzRegressionZSectionHeaderShort(t *testing.T) {
 	le := binary.LittleEndian
 	seg := types.Segment64{

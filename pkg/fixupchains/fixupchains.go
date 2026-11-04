@@ -52,10 +52,17 @@ func (dcf *DyldChainedFixups) Parse() (*DyldChainedFixups, error) {
 			dcf.Starts[idx].Fixups = dcf.Starts[idx].Fixups[:0]
 		}
 	}
+	dcf.walkedFixups = 0
 
 	for segIdx, start := range dcf.Starts {
 		if start.PageStarts == nil || start.PageCount == 0 {
 			continue
+		}
+		// dyld only emits 4K or 16K chained-fixup pages. Other values make
+		// every page's chain overlap the same window of the file, turning
+		// the per-page walks into a quadratic blowup.
+		if start.PageSize != 0x1000 && start.PageSize != 0x4000 {
+			return nil, fmt.Errorf("chained fixups segment %d has invalid page size %#x", segIdx, start.PageSize)
 		}
 
 		for pageIndex := uint16(0); pageIndex < start.PageCount; pageIndex++ {
@@ -366,6 +373,14 @@ func (dcf *DyldChainedFixups) decodeRebaseTarget(
 		return 0, fmt.Errorf("pointer format %d not supported for rebase lookups", format)
 	}
 }
+
+// maxFixupWalks bounds the total chain-walk work one Parse may do. Each fixup
+// slot in a real binary holds exactly one pointer, so 16M iterations covers
+// binaries up to 128MB of pointer slots; beyond that (only reachable with
+// crafted metadata, e.g. PageSize=0 re-walking the same chain once per page)
+// the walk used to burn unbounded CPU and memory.
+const maxFixupWalks = 16 << 20
+
 func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, offsetInPage DCPtrStart) error {
 
 	var dcPtr uint32
@@ -383,6 +398,10 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 	}
 
 	for !chainEnd {
+		dcf.walkedFixups++
+		if dcf.walkedFixups > maxFixupWalks {
+			return fmt.Errorf("chained fixup walk exceeds %d iterations (malformed page metadata?)", maxFixupWalks)
+		}
 		fixupLocation := pageContentStart + uint64(offsetInPage) + next
 		if _, err := dcf.sr.Seek(int64(fixupLocation), io.SeekStart); err != nil {
 			return fmt.Errorf("failed to seek to fixup location %d: %v", fixupLocation, err)
