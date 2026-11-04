@@ -65,6 +65,11 @@ func (dcf *DyldChainedFixups) Parse() (*DyldChainedFixups, error) {
 			}
 			if offsetInPage&DYLD_CHAINED_PTR_START_MULTI != 0 {
 				overflowIndex := offsetInPage & ^DYLD_CHAINED_PTR_START_MULTI
+				// overflowIndex comes from the file and indexes page_start[];
+				// it must stay inside the array, both now and as it walks on.
+				if int(overflowIndex) >= len(start.PageStarts) {
+					return nil, fmt.Errorf("chained fixups overflow start index %d out of range (%d entries)", overflowIndex, len(start.PageStarts))
+				}
 				chainEnd := false
 				for !chainEnd {
 					chainEnd = (start.PageStarts[overflowIndex] & DYLD_CHAINED_PTR_START_LAST) != 0
@@ -73,6 +78,9 @@ func (dcf *DyldChainedFixups) Parse() (*DyldChainedFixups, error) {
 						return nil, err
 					}
 					overflowIndex++
+					if !chainEnd && int(overflowIndex) >= len(start.PageStarts) {
+						return nil, fmt.Errorf("chained fixups overflow start index %d out of range (%d entries)", overflowIndex, len(start.PageStarts))
+					}
 				}
 				continue
 			}
@@ -104,6 +112,12 @@ func (dcf *DyldChainedFixups) ParseStarts() error {
 	var segCount uint32
 	if err := binary.Read(dcf.r, dcf.bo, &segCount); err != nil {
 		return err
+	}
+
+	// segCount is untrusted; every segment needs at least a 4-byte info
+	// offset entry, so cap the allocation against the data that exists.
+	if uint64(segCount)*4 > uint64(dcf.r.Len()) {
+		return fmt.Errorf("dyld chained fixups segment count %d exceeds data size %d", segCount, dcf.r.Len())
 	}
 
 	dcf.Starts = make([]DyldChainedStarts, segCount)

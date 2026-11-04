@@ -460,6 +460,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				if err := binary.Read(b, bo, &thread.Count); err != nil {
 					return nil, fmt.Errorf("failed to read LC_THREAD count: %v", err)
 				}
+				// thread.Count is untrusted and multiplied by 4 below, so it
+				// must fit in the command's remaining bytes (this also
+				// rejects counts whose *4 would overflow uint32).
+				if uint64(thread.Count)*4 > uint64(b.Len()) {
+					return nil, &FormatError{offset, fmt.Sprintf(
+						"thread state count %d extends past command data", thread.Count), nil}
+				}
 				thread.Data = make([]byte, thread.Count*uint32(binary.Size(uint32(0))))
 				if err := binary.Read(b, bo, &thread.Data); err != nil {
 					return nil, fmt.Errorf("failed to read LC_THREAD state struct data: %v", err)
@@ -492,6 +499,13 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 				}
 				if err := binary.Read(b, bo, &thread.Count); err != nil {
 					return nil, fmt.Errorf("failed to read LC_UNIXTHREAD count: %v", err)
+				}
+				// thread.Count is untrusted and multiplied by 4 below, so it
+				// must fit in the command's remaining bytes (this also
+				// rejects counts whose *4 would overflow uint32).
+				if uint64(thread.Count)*4 > uint64(b.Len()) {
+					return nil, &FormatError{offset, fmt.Sprintf(
+						"thread state count %d extends past command data", thread.Count), nil}
 				}
 				thread.Data = make([]byte, thread.Count*uint32(binary.Size(uint32(0))))
 				if err := binary.Read(b, bo, &thread.Data); err != nil {
@@ -815,6 +829,12 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.LoadCmd = cmd
 			l.Len = siz
 			l.Offset = t.Offset
+			// Each hint is 4 bytes; the table is read from the command data,
+			// so NumHints (untrusted, sizes an allocation) must fit there.
+			if uint64(t.NumHints)*4 > uint64(b.Len()) {
+				return nil, &FormatError{offset, fmt.Sprintf(
+					"two-level hint count %d extends past command data", t.NumHints), nil}
+			}
 			l.Hints = make([]types.TwolevelHint, t.NumHints)
 			if err := binary.Read(b, bo, &l.Hints); err != nil {
 				return nil, fmt.Errorf("failed to read hints data: %v", err)
@@ -910,8 +930,10 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Len = siz
 			l.Offset = hdr.Offset
 			l.Size = hdr.Size
-			csdat := make([]byte, hdr.Size)
-			if _, err := f.cr.ReadAt(csdat, int64(hdr.Offset)); err != nil {
+			// hdr.Size is untrusted; saferio avoids the huge up-front
+			// allocation and fails on data that does not exist.
+			csdat, err := saferio.ReadDataAt(f.cr, uint64(hdr.Size), int64(hdr.Offset))
+			if err != nil {
 				return nil, fmt.Errorf("failed to read CS data at offset=%#x; %v", int64(hdr.Offset), err)
 			}
 			cs, err := codesign.ParseCodeSignature(csdat)
@@ -933,8 +955,8 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Offset = hdr.Offset
 			l.Size = hdr.Size
 			if l.Size > 0 {
-				ldat := make([]byte, l.Size)
-				if _, err := f.cr.ReadAt(ldat, int64(l.Offset)); err != nil {
+				ldat, err := saferio.ReadDataAt(f.cr, uint64(l.Size), int64(l.Offset))
+				if err != nil {
 					return nil, fmt.Errorf("failed to read SplitInfo data at offset=%#x; %v", int64(hdr.Offset), err)
 				}
 				fsr := bytes.NewReader(ldat)
@@ -1140,8 +1162,8 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Len = siz
 			l.Offset = led.Offset
 			l.Size = led.Size
-			ldat := make([]byte, l.Size)
-			if _, err := f.cr.ReadAt(ldat, int64(l.Offset)); err != nil {
+			ldat, err := saferio.ReadDataAt(f.cr, uint64(l.Size), int64(l.Offset))
+			if err != nil {
 				return nil, fmt.Errorf("failed to read DataInCode data at offset=%#x; %v", int64(led.Offset), err)
 			}
 			l.Entries = make([]types.DataInCodeEntry, len(ldat)/binary.Size(types.DataInCodeEntry{}))
@@ -1264,10 +1286,14 @@ func NewFile(r io.ReaderAt, config ...FileConfig) (*File, error) {
 			l.Offset = n.Offset
 			l.Size = n.Size
 			l.bo = bo
-			l.Data = make([]byte, l.Size)
-			if _, err := f.cr.ReadAt(l.Data, int64(l.Offset)); err != nil {
+			// n.Size is untrusted; saferio rejects sizes that cannot fit in
+			// memory or extend past the reader instead of trying one huge
+			// allocation up front.
+			noteData, err := saferio.ReadDataAt(f.cr, l.Size, int64(l.Offset))
+			if err != nil {
 				return nil, fmt.Errorf("failed to read Note data at offset=%#x; %v", int64(l.Offset), err)
 			}
+			l.Data = noteData
 			f.Loads = append(f.Loads, l)
 		case types.LC_BUILD_VERSION:
 			var build types.BuildVersionCmd
@@ -1699,6 +1725,20 @@ func (a *addrReaderAt) ReadAt(p []byte, off int64) (int, error) {
 // ReadAt reads data at offset within MachO
 func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
 	return f.cr.ReadAt(p, off) // TODO: should this be f.cr  or f.sr?
+}
+
+// readDataAt reads n bytes at off via the file's cache reader. Sizes taken
+// from load commands are untrusted; saferio.ReadDataAt rejects sizes that
+// cannot fit in memory or data that does not exist, instead of attempting
+// one huge allocation up front.
+func (f *File) readDataAt(n uint64, off int64) ([]byte, error) {
+	return saferio.ReadDataAt(f.cr, n, off)
+}
+
+// readDataAtAddr reads n bytes at vmaddr via the cache reader's address
+// interface, with the same untrusted-size guarantees as readDataAt.
+func (f *File) readDataAtAddr(addr, n uint64) ([]byte, error) {
+	return saferio.ReadDataAt(&addrReaderAt{f.cr, addr}, n, 0)
 }
 
 func (f *File) ReadAtAddr(p []byte, addr uint64) (n int, err error) {
@@ -2169,8 +2209,8 @@ func (f *File) GetCStrings() (map[string]map[string]uint64, error) {
 	for _, sec := range f.Sections {
 		if sec.Flags.IsCstringLiterals() || sec.Name == "__os_log" {
 			// Thread-safe: Use ReadAtAddr which doesn't modify shared state
-			dat := make([]byte, sec.Size)
-			if _, err := f.cr.ReadAtAddr(dat, sec.Addr); err != nil {
+			dat, err := f.readDataAtAddr(sec.Addr, sec.Size)
+			if err != nil {
 				return nil, fmt.Errorf("failed to read cstring data in %s.%s: %w", sec.Seg, sec.Name, err)
 			}
 
@@ -2529,8 +2569,8 @@ func (f *File) GetFunctionVariants() (*types.FuncVarData, error) {
 	}
 
 	// Read the payload data
-	data := make([]byte, fv.Size)
-	if _, err := f.cr.ReadAt(data, int64(fv.Offset)); err != nil {
+	data, err := f.readDataAt(uint64(fv.Size), int64(fv.Offset))
+	if err != nil {
 		return nil, fmt.Errorf("failed to read function variants data: %v", err)
 	}
 
@@ -2561,8 +2601,8 @@ func (f *File) GetFunctionVariantFixups() (*types.FuncVarFixupsData, error) {
 	}
 
 	// Read the payload data
-	data := make([]byte, fv.Size)
-	if _, err := f.cr.ReadAt(data, int64(fv.Offset)); err != nil {
+	data, err := f.readDataAt(uint64(fv.Size), int64(fv.Offset))
+	if err != nil {
 		return nil, fmt.Errorf("failed to read function variant fixups data: %v", err)
 	}
 
@@ -2881,8 +2921,8 @@ func (f *File) GetFunctions(data ...byte) []types.Function {
 	if len(data) > 0 {
 		fsr = bytes.NewReader(data)
 	} else {
-		ldat := make([]byte, fs.Size)
-		if _, err := f.cr.ReadAt(ldat, int64(fs.Offset)); err != nil {
+		ldat, err := f.readDataAt(uint64(fs.Size), int64(fs.Offset))
+		if err != nil {
 			return nil
 		}
 		fsr = bytes.NewReader(ldat)
@@ -2954,8 +2994,8 @@ func (f *File) GetFunctionData(fn types.Function) ([]byte, error) {
 	if fn.EndAddr <= fn.StartAddr {
 		return nil, fmt.Errorf("invalid function range %#x - %#x", fn.StartAddr, fn.EndAddr)
 	}
-	data := make([]byte, fn.EndAddr-fn.StartAddr)
-	if _, err := f.cr.ReadAtAddr(data, fn.StartAddr); err != nil {
+	data, err := f.readDataAtAddr(fn.StartAddr, fn.EndAddr-fn.StartAddr)
+	if err != nil {
 		return nil, fmt.Errorf("failed to read data at address %#x: %v", fn.StartAddr, err)
 	}
 	return data, nil
@@ -2991,8 +3031,8 @@ func (f *File) GetDyldExport(symbol string) (*trie.TrieExport, error) {
 		if f.exptrieData != nil {
 			r = bytes.NewReader(f.exptrieData)
 		} else {
-			f.exptrieData = make([]byte, dxt.Size)
-			if _, err := f.cr.ReadAt(f.exptrieData, int64(dxt.Offset)); err != nil {
+			f.exptrieData, err = f.readDataAt(uint64(dxt.Size), int64(dxt.Offset))
+			if err != nil {
 				f.exptrieData = nil
 				return nil, fmt.Errorf("failed to read %s data at offset=%#x; %v", types.LC_DYLD_EXPORTS_TRIE, int64(dxt.Offset), err)
 			}
@@ -3007,7 +3047,6 @@ func (f *File) GetDyldExport(symbol string) (*trie.TrieExport, error) {
 
 // DyldExports returns the dyld export trie symbols
 func (f *File) DyldExports() ([]trie.TrieExport, error) {
-	var err error
 	if f.exp != nil {
 		return f.exp, nil
 	}
@@ -3015,8 +3054,8 @@ func (f *File) DyldExports() ([]trie.TrieExport, error) {
 		if dxt.Size == 0 {
 			return []trie.TrieExport{}, nil
 		}
-		data := make([]byte, dxt.Size)
-		if _, err := f.cr.ReadAt(data, int64(dxt.Offset)); err != nil {
+		data, err := f.readDataAt(uint64(dxt.Size), int64(dxt.Offset))
+		if err != nil {
 			return nil, fmt.Errorf("failed to read %s data at offset=%#x; %v", types.LC_DYLD_EXPORTS_TRIE, int64(dxt.Offset), err)
 		}
 		f.exp, err = trie.ParseTrieExports(bytes.NewReader(data), f.GetBaseAddress())
@@ -3059,8 +3098,8 @@ func (f *File) DyldChainedFixups() (*fixupchains.DyldChainedFixups, error) {
 
 	for _, l := range f.Loads {
 		if dcfLC, ok := l.(*DyldChainedFixups); ok {
-			data := make([]byte, dcfLC.Size)
-			if _, err := f.cr.ReadAt(data, int64(dcfLC.Offset)); err != nil {
+			data, err := f.readDataAt(uint64(dcfLC.Size), int64(dcfLC.Offset))
+			if err != nil {
 				return nil, fmt.Errorf("failed to read DyldChainedFixups data at offset=%#x; %v", int64(dcfLC.Offset), err)
 			}
 			dcf := fixupchains.NewChainedFixups(bytes.NewReader(data), &f.cr, f.ByteOrder)
@@ -3100,8 +3139,8 @@ func (f *File) ForEachV2SplitSegReference(handler func(fromSectionIndex, fromSec
 			if si.Size == 0 {
 				return nil
 			}
-			data := make([]byte, si.Size)
-			if _, err := f.cr.ReadAt(data, int64(si.Offset)); err != nil {
+			data, err := f.readDataAt(uint64(si.Size), int64(si.Offset))
+			if err != nil {
 				return fmt.Errorf("failed to read %s data at offset=%#x; %v", types.LC_SEGMENT_SPLIT_INFO, int64(si.Offset), err)
 			}
 
@@ -3289,6 +3328,13 @@ func (f *File) DWARF() (*dwarf.Data, error) {
 
 		if len(b) >= 12 && string(b[:4]) == "ZLIB" {
 			dlen := binary.BigEndian.Uint64(b[4:12])
+			// The declared decompressed size is untrusted; cap it (real
+			// __zdebug/__info_plist payloads are far smaller) so a malformed
+			// header cannot request an out-of-range allocation.
+			const maxDecompressedSize = 512 << 20 // 512 MiB
+			if dlen > maxDecompressedSize {
+				return nil, fmt.Errorf("%s.%s: implausible decompressed size %d", s.Seg, s.Name, dlen)
+			}
 			dbuf := make([]byte, dlen)
 			r, err := zlib.NewReader(bytes.NewBuffer(b[12:]))
 			if err != nil {
@@ -3390,8 +3436,8 @@ func (f *File) GetBindInfo() (types.Binds, error) {
 	}
 	if dinfo := f.DyldInfo(); dinfo != nil {
 		if dinfo.BindSize > 0 {
-			dat := make([]byte, dinfo.BindSize)
-			if _, err := f.cr.ReadAt(dat, int64(dinfo.BindOff)); err != nil {
+			dat, err := f.readDataAt(uint64(dinfo.BindSize), int64(dinfo.BindOff))
+			if err != nil {
 				return nil, fmt.Errorf("failed to read bind info: %v", err)
 			}
 			bs, err := f.parseBinds(bytes.NewReader(dat), types.BIND_KIND)
@@ -3401,8 +3447,8 @@ func (f *File) GetBindInfo() (types.Binds, error) {
 			f.binds = append(f.binds, bs...)
 		}
 		if dinfo.WeakBindSize > 0 {
-			dat := make([]byte, dinfo.WeakBindSize)
-			if _, err := f.cr.ReadAt(dat, int64(dinfo.WeakBindOff)); err != nil {
+			dat, err := f.readDataAt(uint64(dinfo.WeakBindSize), int64(dinfo.WeakBindOff))
+			if err != nil {
 				return nil, fmt.Errorf("failed to read weak bind info: %v", err)
 			}
 			bs, err := f.parseBinds(bytes.NewReader(dat), types.WEAK_KIND)
@@ -3412,8 +3458,8 @@ func (f *File) GetBindInfo() (types.Binds, error) {
 			f.binds = append(f.binds, bs...)
 		}
 		if dinfo.LazyBindSize > 0 {
-			dat := make([]byte, dinfo.LazyBindSize)
-			if _, err := f.cr.ReadAt(dat, int64(dinfo.LazyBindOff)); err != nil {
+			dat, err := f.readDataAt(uint64(dinfo.LazyBindSize), int64(dinfo.LazyBindOff))
+			if err != nil {
 				return nil, fmt.Errorf("failed to read lazy bind info: %v", err)
 			}
 			bs, err := f.parseBinds(bytes.NewReader(dat), types.LAZY_KIND)
@@ -3424,8 +3470,8 @@ func (f *File) GetBindInfo() (types.Binds, error) {
 		}
 	} else if dinfo := f.DyldInfoOnly(); dinfo != nil {
 		if dinfo.BindSize > 0 {
-			dat := make([]byte, dinfo.BindSize)
-			if _, err := f.cr.ReadAt(dat, int64(dinfo.BindOff)); err != nil {
+			dat, err := f.readDataAt(uint64(dinfo.BindSize), int64(dinfo.BindOff))
+			if err != nil {
 				return nil, fmt.Errorf("failed to read bind info: %v", err)
 			}
 			bs, err := f.parseBinds(bytes.NewReader(dat), types.BIND_KIND)
@@ -3435,8 +3481,8 @@ func (f *File) GetBindInfo() (types.Binds, error) {
 			f.binds = append(f.binds, bs...)
 		}
 		if dinfo.WeakBindSize > 0 {
-			dat := make([]byte, dinfo.WeakBindSize)
-			if _, err := f.cr.ReadAt(dat, int64(dinfo.WeakBindOff)); err != nil {
+			dat, err := f.readDataAt(uint64(dinfo.WeakBindSize), int64(dinfo.WeakBindOff))
+			if err != nil {
 				return nil, fmt.Errorf("failed to read weak bind info: %v", err)
 			}
 			bs, err := f.parseBinds(bytes.NewReader(dat), types.WEAK_KIND)
@@ -3446,8 +3492,8 @@ func (f *File) GetBindInfo() (types.Binds, error) {
 			f.binds = append(f.binds, bs...)
 		}
 		if dinfo.LazyBindSize > 0 {
-			dat := make([]byte, dinfo.LazyBindSize)
-			if _, err := f.cr.ReadAt(dat, int64(dinfo.LazyBindOff)); err != nil {
+			dat, err := f.readDataAt(uint64(dinfo.LazyBindSize), int64(dinfo.LazyBindOff))
+			if err != nil {
 				return nil, fmt.Errorf("failed to read lazy bind info: %v", err)
 			}
 			bs, err := f.parseBinds(bytes.NewReader(dat), types.LAZY_KIND)
@@ -3490,8 +3536,8 @@ func (f *File) GetRebaseInfo() ([]types.Rebase, error) {
 		return nil, nil
 	}
 
-	dat := make([]byte, rebaseSize)
-	if _, err := f.cr.ReadAt(dat, int64(rebaseOff)); err != nil {
+	dat, err := f.readDataAt(uint64(rebaseSize), int64(rebaseOff))
+	if err != nil {
 		return nil, fmt.Errorf("failed to read rebase info: %v", err)
 	}
 
@@ -3508,8 +3554,8 @@ func (f *File) GetRebaseInfo() ([]types.Rebase, error) {
 func (f *File) GetExports() ([]trie.TrieExport, error) {
 	if dinfo := f.DyldInfo(); dinfo != nil {
 		if dinfo.ExportSize > 0 {
-			dat := make([]byte, dinfo.ExportSize)
-			if _, err := f.cr.ReadAt(dat, int64(dinfo.ExportOff)); err != nil {
+			dat, err := f.readDataAt(uint64(dinfo.ExportSize), int64(dinfo.ExportOff))
+			if err != nil {
 				return nil, fmt.Errorf("failed to read bind info: %v", err)
 			}
 			return trie.ParseTrieExports(bytes.NewReader(dat), f.GetBaseAddress())
@@ -3517,8 +3563,8 @@ func (f *File) GetExports() ([]trie.TrieExport, error) {
 	} else if dinfo := f.DyldInfoOnly(); dinfo != nil {
 		if dinfo.ExportSize > 0 {
 			// addr := linkedit.Addr + (uint64(dinfo.ExportOff) - linkedit.Offset)
-			dat := make([]byte, dinfo.ExportSize)
-			if _, err := f.cr.ReadAt(dat, int64(dinfo.ExportOff)); err != nil {
+			dat, err := f.readDataAt(uint64(dinfo.ExportSize), int64(dinfo.ExportOff))
+			if err != nil {
 				return nil, fmt.Errorf("failed to read bind info: %v", err)
 			}
 			return trie.ParseTrieExports(bytes.NewReader(dat), f.GetBaseAddress())
@@ -3537,6 +3583,17 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 
 	useThreadedRebaseBind := false
 	bind := types.Bind{Kind: kind}
+
+	// bindSegment returns the segment the current bind belongs to. A
+	// malformed bind stream can emit a DO_BIND before any segment was
+	// established (or name an unknown one); that must not dereference nil.
+	bindSegment := func() (*Segment, error) {
+		seg := f.Segment(bind.Segment)
+		if seg == nil {
+			return nil, fmt.Errorf("bind opcode references unknown segment %q", bind.Segment)
+		}
+		return seg, nil
+	}
 
 	for {
 		ptr, err := r.ReadByte()
@@ -3591,9 +3648,13 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 			if err != nil {
 				return nil, err
 			}
-			bind.Start = f.Segments()[imm].Addr
-			bind.Segment = f.Segments()[imm].Name
-			bind.SegStart = f.Segments()[imm].Offset
+			segs := f.Segments()
+			if int(imm) >= len(segs) {
+				return nil, fmt.Errorf("bind segment index %d out of range (%d segments)", imm, len(segs))
+			}
+			bind.Start = segs[imm].Addr
+			bind.Segment = segs[imm].Name
+			bind.SegStart = segs[imm].Offset
 		case types.BIND_OPCODE_ADD_ADDR_ULEB:
 			out, err := trie.ReadUleb128(r)
 			if err != nil {
@@ -3604,7 +3665,11 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 			if useThreadedRebaseBind {
 				ordinalTable = append(ordinalTable, bind)
 			} else {
-				if sec := f.FindSectionForVMAddr(f.Segment(bind.Segment).Addr + segOffset); sec != nil {
+				seg, err := bindSegment()
+				if err != nil {
+					return nil, err
+				}
+				if sec := f.FindSectionForVMAddr(seg.Addr + segOffset); sec != nil {
 					bind.Section = sec.Name
 				}
 				bind.SegOffset = segOffset
@@ -3612,7 +3677,11 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 				segOffset += f.pointerSize()
 			}
 		case types.BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB:
-			if sec := f.FindSectionForVMAddr(f.Segment(bind.Segment).Addr + segOffset); sec != nil {
+			seg, err := bindSegment()
+			if err != nil {
+				return nil, err
+			}
+			if sec := f.FindSectionForVMAddr(seg.Addr + segOffset); sec != nil {
 				bind.Section = sec.Name
 			}
 			bind.SegOffset = segOffset
@@ -3623,7 +3692,11 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 			}
 			segOffset += off + f.pointerSize()
 		case types.BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED:
-			if sec := f.FindSectionForVMAddr(f.Segment(bind.Segment).Addr + segOffset); sec != nil {
+			seg, err := bindSegment()
+			if err != nil {
+				return nil, err
+			}
+			if sec := f.FindSectionForVMAddr(seg.Addr + segOffset); sec != nil {
 				bind.Section = sec.Name
 			}
 			bind.SegOffset = segOffset
@@ -3638,8 +3711,24 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 			if err != nil {
 				return nil, err
 			}
+			seg, err := bindSegment()
+			if err != nil {
+				return nil, err
+			}
+			// count is untrusted and the loop below does not read file data
+			// per iteration, so it must be plausible for the segment size
+			// (each bind consumes at least one pointer-sized slot).
+			if maxBinds := seg.Filesz/f.pointerSize() + 1; count > maxBinds {
+				return nil, fmt.Errorf("bind count %d implausible for segment %s (%d slots)", count, seg.Name, maxBinds)
+			}
+			// Filesz itself comes from the file, so also enforce a hard cap
+			// on total binds produced by one stream.
+			const maxTotalBinds = 16 << 20
 			for i := uint64(0); i < count; i++ {
-				if sec := f.FindSectionForVMAddr(f.Segment(bind.Segment).Addr + segOffset); sec != nil {
+				if len(binds) > maxTotalBinds {
+					return nil, fmt.Errorf("bind stream expands to more than %d binds", maxTotalBinds)
+				}
+				if sec := f.FindSectionForVMAddr(seg.Addr + segOffset); sec != nil {
 					bind.Section = sec.Name
 				}
 				bind.SegOffset = segOffset
@@ -3655,10 +3744,14 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 				}
 				useThreadedRebaseBind = true
 			case types.BIND_SUBOPCODE_THREADED_APPLY: // parse chain
+				seg, err := bindSegment()
+				if err != nil {
+					return nil, err
+				}
 				delta := uint64(0)
 				for {
 					var ptr uint64
-					f.cr.Seek(int64(f.Segment(bind.Segment).Offset+segOffset), io.SeekStart)
+					f.cr.Seek(int64(seg.Offset+segOffset), io.SeekStart)
 					if err := binary.Read(f.cr, f.ByteOrder, &ptr); err != nil {
 						return nil, fmt.Errorf("failed to read pointer: %v", err)
 					}
@@ -3686,7 +3779,7 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 						ord := ptr & 0xFFFF
 						// XXX: there is a note in LIEF source about adding +1 to ordinalTableSize
 						// when parsing it because of ld64 - I haven't investigated yet - fG!
-						if ord > ordinalTableSize { // TODO: make sure this is right
+						if ord > ordinalTableSize || ord >= uint64(len(ordinalTable)) {
 							return nil, fmt.Errorf("bind ordinal is out of range")
 						}
 						ordinalTable[ord].Value = ptr
@@ -3716,6 +3809,31 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 func (f *File) parseRebase(r *bytes.Reader) ([]types.Rebase, error) {
 	var rebase types.Rebase
 	var rebases []types.Rebase
+	// curSeg is the segment selected by REBASE_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB.
+	// A malformed stream can run a DO_REBASE before any segment was set or
+	// after naming an unknown one; both must error instead of nil-derefing.
+	var curSeg *Segment
+	curSegOrFail := func() (*Segment, error) {
+		if curSeg == nil {
+			return nil, fmt.Errorf("rebase opcode references unknown segment %q", rebase.Segment)
+		}
+		return curSeg, nil
+	}
+	// addOffset advances the rebase offset, rejecting streams whose delta
+	// wraps the offset around 2^64: a wrapping skip (e.g. skip = 2^64-8 with
+	// 8-byte pointers) would otherwise revisit the same in-bounds slot
+	// forever, appending rebases without end (hang + unbounded memory).
+	addOffset := func(delta uint64) error {
+		prev := rebase.Offset
+		rebase.Offset += delta
+		if rebase.Offset < prev {
+			return fmt.Errorf("rebase offset %#x + delta %#x wraps around", prev, delta)
+		}
+		return nil
+	}
+	// maxTotalRebounds bounds rebases produced by one stream; real images
+	// stay far below this (rebases scale with file size / pointer size).
+	const maxTotalRebases = 16 << 20
 
 	for {
 		ptr, err := r.ReadByte()
@@ -3735,8 +3853,13 @@ func (f *File) parseRebase(r *bytes.Reader) ([]types.Rebase, error) {
 		case types.REBASE_OPCODE_SET_TYPE_IMM:
 			rebase.Type = imm
 		case types.REBASE_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
-			rebase.Start = f.Segments()[imm].Addr
-			rebase.Segment = f.Segments()[imm].Name
+			segs := f.Segments()
+			if int(imm) >= len(segs) {
+				return nil, fmt.Errorf("rebase segment index %d out of range (%d segments)", imm, len(segs))
+			}
+			curSeg = segs[imm]
+			rebase.Start = segs[imm].Addr
+			rebase.Segment = segs[imm].Name
 			rebase.Offset, err = trie.ReadUleb128(r)
 			if err != nil {
 				return nil, err
@@ -3746,16 +3869,25 @@ func (f *File) parseRebase(r *bytes.Reader) ([]types.Rebase, error) {
 			if err != nil {
 				return nil, err
 			}
-			rebase.Offset += off
+			if err := addOffset(off); err != nil {
+				return nil, err
+			}
 		case types.REBASE_OPCODE_ADD_ADDR_IMM_SCALED:
 			rebase.Offset += uint64(imm) * f.pointerSize()
 		case types.REBASE_OPCODE_DO_REBASE_IMM_TIMES:
+			seg, err := curSegOrFail()
+			if err != nil {
+				return nil, err
+			}
 			for i := byte(0); i < imm; i++ {
-				f.cr.Seek(int64(f.Segment(rebase.Segment).Offset+rebase.Offset), io.SeekStart)
+				if len(rebases) > maxTotalRebases {
+					return nil, fmt.Errorf("rebase stream expands to more than %d rebases", maxTotalRebases)
+				}
+				f.cr.Seek(int64(seg.Offset+rebase.Offset), io.SeekStart)
 				if err := binary.Read(f.cr, f.ByteOrder, &rebase.Value); err != nil {
 					return nil, fmt.Errorf("failed to read pointer: %v", err)
 				}
-				if sec := f.FindSectionForVMAddr(f.Segment(rebase.Segment).Addr + rebase.Offset); sec != nil {
+				if sec := f.FindSectionForVMAddr(seg.Addr + rebase.Offset); sec != nil {
 					rebase.Section = sec.Name
 				}
 				rebases = append(rebases, rebase)
@@ -3766,23 +3898,39 @@ func (f *File) parseRebase(r *bytes.Reader) ([]types.Rebase, error) {
 			if err != nil {
 				return nil, err
 			}
+			seg, err := curSegOrFail()
+			if err != nil {
+				return nil, err
+			}
+			// count is untrusted; each rebase consumes a pointer-sized slot,
+			// so it must be plausible for the segment.
+			if maxRebases := seg.Filesz/f.pointerSize() + 1; count > maxRebases {
+				return nil, fmt.Errorf("rebase count %d implausible for segment %s (%d slots)", count, seg.Name, maxRebases)
+			}
 			for i := uint64(0); i < count; i++ {
-				f.cr.Seek(int64(f.Segment(rebase.Segment).Offset+rebase.Offset), io.SeekStart)
+				if len(rebases) > maxTotalRebases {
+					return nil, fmt.Errorf("rebase stream expands to more than %d rebases", maxTotalRebases)
+				}
+				f.cr.Seek(int64(seg.Offset+rebase.Offset), io.SeekStart)
 				if err := binary.Read(f.cr, f.ByteOrder, &rebase.Value); err != nil {
 					return nil, fmt.Errorf("failed to read pointer: %v", err)
 				}
-				if sec := f.FindSectionForVMAddr(f.Segment(rebase.Segment).Addr + rebase.Offset); sec != nil {
+				if sec := f.FindSectionForVMAddr(seg.Addr + rebase.Offset); sec != nil {
 					rebase.Section = sec.Name
 				}
 				rebases = append(rebases, rebase)
 				rebase.Offset += f.pointerSize()
 			}
 		case types.REBASE_OPCODE_DO_REBASE_ADD_ADDR_ULEB:
-			f.cr.Seek(int64(f.Segment(rebase.Segment).Offset+rebase.Offset), io.SeekStart)
+			seg, err := curSegOrFail()
+			if err != nil {
+				return nil, err
+			}
+			f.cr.Seek(int64(seg.Offset+rebase.Offset), io.SeekStart)
 			if err := binary.Read(f.cr, f.ByteOrder, &rebase.Value); err != nil {
 				return nil, fmt.Errorf("failed to read pointer: %v", err)
 			}
-			if sec := f.FindSectionForVMAddr(f.Segment(rebase.Segment).Addr + rebase.Offset); sec != nil {
+			if sec := f.FindSectionForVMAddr(seg.Addr + rebase.Offset); sec != nil {
 				rebase.Section = sec.Name
 			}
 			rebases = append(rebases, rebase)
@@ -3790,7 +3938,9 @@ func (f *File) parseRebase(r *bytes.Reader) ([]types.Rebase, error) {
 			if err != nil {
 				return nil, err
 			}
-			rebase.Offset += off + f.pointerSize()
+			if err := addOffset(off + f.pointerSize()); err != nil {
+				return nil, err
+			}
 		case types.REBASE_OPCODE_DO_REBASE_ULEB_TIMES_SKIPPING_ULEB:
 			count, err := trie.ReadUleb128(r)
 			if err != nil {
@@ -3800,16 +3950,34 @@ func (f *File) parseRebase(r *bytes.Reader) ([]types.Rebase, error) {
 			if err != nil {
 				return nil, err
 			}
+			// skip+pointerSize must not wrap, or every iteration revisits
+			// the same slot forever.
+			if skip+f.pointerSize() < skip {
+				return nil, fmt.Errorf("rebase skip %#x wraps around", skip)
+			}
+			seg, err := curSegOrFail()
+			if err != nil {
+				return nil, err
+			}
+			// count is untrusted; each rebase consumes a pointer-sized slot.
+			if maxRebases := seg.Filesz/f.pointerSize() + 1; count > maxRebases {
+				return nil, fmt.Errorf("rebase count %d implausible for segment %s (%d slots)", count, seg.Name, maxRebases)
+			}
 			for i := uint64(0); i < count; i++ {
-				f.cr.Seek(int64(f.Segment(rebase.Segment).Offset+rebase.Offset), io.SeekStart)
+				if len(rebases) > maxTotalRebases {
+					return nil, fmt.Errorf("rebase stream expands to more than %d rebases", maxTotalRebases)
+				}
+				f.cr.Seek(int64(seg.Offset+rebase.Offset), io.SeekStart)
 				if err := binary.Read(f.cr, f.ByteOrder, &rebase.Value); err != nil {
 					return nil, fmt.Errorf("failed to read pointer: %v", err)
 				}
-				if sec := f.FindSectionForVMAddr(f.Segment(rebase.Segment).Addr + rebase.Offset); sec != nil {
+				if sec := f.FindSectionForVMAddr(seg.Addr + rebase.Offset); sec != nil {
 					rebase.Section = sec.Name
 				}
 				rebases = append(rebases, rebase)
-				rebase.Offset += skip + f.pointerSize()
+				if err := addOffset(skip + f.pointerSize()); err != nil {
+					return nil, err
+				}
 			}
 		default:
 			return nil, fmt.Errorf("bad rebase opcode %#02x", opcode)

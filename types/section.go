@@ -601,61 +601,84 @@ func (s *Section) PutRelocs(b []byte, o binary.ByteOrder) int {
 	return a
 }
 
-func (s *Section) UncompressedSize() uint64 {
+// UncompressedSize returns the size of the section's data after
+// decompression, or the raw size when the section is not compressed.
+// A malformed compressed section returns an error instead of panicking.
+func (s *Section) UncompressedSize() (uint64, error) {
 	if !strings.HasPrefix(s.Name, "__z") {
-		return s.Size
+		return s.Size, nil
+	}
+	if s.sr == nil {
+		return s.Size, nil
 	}
 	b := make([]byte, 12)
 	n, err := s.sr.ReadAt(b, 0)
 	if err != nil {
-		panic("Malformed object file")
+		return 0, fmt.Errorf("section %s.%s: compressed data too short: %w", s.Seg, s.Name, err)
 	}
 	if n != len(b) {
-		return s.Size
+		return s.Size, nil
 	}
 	if string(b[:4]) == "ZLIB" {
-		return binary.BigEndian.Uint64(b[4:12])
+		return binary.BigEndian.Uint64(b[4:12]), nil
 	}
-	return s.Size
+	return s.Size, nil
 }
 
-func (s *Section) PutData(b []byte) {
+// PutData copies the section's (compressed) contents into b, which must be
+// at least as large as the section. Malformed data returns an error instead
+// of panicking.
+func (s *Section) PutData(b []byte) error {
+	if uint64(len(b)) < s.Size {
+		return fmt.Errorf("section %s.%s: buffer of %d bytes too small for %d bytes of data", s.Seg, s.Name, len(b), s.Size)
+	}
 	bb := b[0:s.Size]
 	n, err := s.sr.ReadAt(bb, 0)
 	if err != nil || uint64(n) != s.Size {
-		panic("Malformed object file (ReadAt error)")
+		return fmt.Errorf("section %s.%s: short read of section data: %w", s.Seg, s.Name, err)
 	}
+	return nil
 }
 
-func (s *Section) PutUncompressedData(b []byte) {
+// PutUncompressedData copies the section's contents into b after
+// decompressing them, for sections whose name starts with "__z" (the
+// Apple "ZLIB" wrapper). Malformed data returns an error instead of
+// panicking.
+func (s *Section) PutUncompressedData(b []byte) error {
 	if strings.HasPrefix(s.Name, "__z") {
 		bb := make([]byte, 12)
 		n, err := s.sr.ReadAt(bb, 0)
 		if err != nil {
-			panic("Malformed object file")
+			return fmt.Errorf("section %s.%s: compressed data too short: %w", s.Seg, s.Name, err)
 		}
 		if n == len(bb) && string(bb[:4]) == "ZLIB" {
 			size := binary.BigEndian.Uint64(bb[4:12])
+			if size < 12 {
+				return fmt.Errorf("section %s.%s: implausible uncompressed size %d", s.Seg, s.Name, size)
+			}
+			if uint64(len(b)) < size {
+				return fmt.Errorf("section %s.%s: buffer of %d bytes too small for %d uncompressed bytes", s.Seg, s.Name, len(b), size)
+			}
 			// Decompress starting at b[12:]
 			r, err := zlib.NewReader(io.NewSectionReader(s, 12, int64(size)-12))
 			if err != nil {
-				panic("Malformed object file (zlib.NewReader error)")
+				return fmt.Errorf("section %s.%s: invalid zlib stream: %w", s.Seg, s.Name, err)
 			}
 			n, err := io.ReadFull(r, b[0:size])
 			if err != nil {
-				panic("Malformed object file (ReadFull error)")
+				return fmt.Errorf("section %s.%s: decompression failed: %w", s.Seg, s.Name, err)
 			}
 			if uint64(n) != size {
-				panic(fmt.Sprintf("PutUncompressedData, expected to read %d bytes, instead read %d", size, n))
+				return fmt.Errorf("section %s.%s: expected to read %d bytes, instead read %d", s.Seg, s.Name, size, n)
 			}
 			if err := r.Close(); err != nil {
-				panic("Malformed object file (Close error)")
+				return fmt.Errorf("section %s.%s: closing zlib stream failed: %w", s.Seg, s.Name, err)
 			}
-			return
+			return nil
 		}
 	}
 	// Not compressed
-	s.PutData(b)
+	return s.PutData(b)
 }
 
 func (s *Section) Copy() *Section {

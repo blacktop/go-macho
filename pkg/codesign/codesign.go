@@ -110,6 +110,10 @@ func ParseCodeSignature(cmddat []byte) (*CodeSignature, error) {
 		return nil, err
 	}
 
+	// csBlob.Count is untrusted; every index entry needs 8 bytes of data.
+	if uint64(csBlob.Count)*uint64(binary.Size(types.BlobIndex{})) > uint64(r.Len()) {
+		return nil, fmt.Errorf("superblob index count %d exceeds code signature data", csBlob.Count)
+	}
 	csIndex := make([]types.BlobIndex, csBlob.Count)
 	if err := binary.Read(r, binary.BigEndian, &csIndex); err != nil {
 		return nil, err
@@ -260,6 +264,11 @@ func parseCodeDirectory(r *bytes.Reader, offset uint32, maxSize uint32) (*types.
 	if err := binary.Read(r, binary.BigEndian, &cd.Header.CdEarliest); err != nil {
 		return nil, err
 	}
+	// HashSize sizes per-slot allocations below and is untrusted; real hash
+	// algorithms use at most 64 bytes.
+	if cd.Header.HashSize > 128 {
+		return nil, fmt.Errorf("implausible CodeDirectory hash size %d", cd.Header.HashSize)
+	}
 	headoff, _ := r.Seek(0, io.SeekCurrent)
 	// Calculate the cdhashs
 	r.Seek(int64(offset), io.SeekStart)
@@ -375,6 +384,11 @@ func parseCodeDirectory(r *bytes.Reader, offset uint32, maxSize uint32) (*types.
 		}
 		if cd.Header.LinkageOffset > 0 {
 			r.Seek(int64(offset+cd.Header.LinkageOffset), io.SeekStart)
+			// LinkageSize is untrusted; it must be backed by bytes remaining
+			// in the code signature data.
+			if uint64(cd.Header.LinkageSize) > uint64(r.Len()) {
+				return nil, fmt.Errorf("SUPPORTS_LINKAGE size %d exceeds code signature data", cd.Header.LinkageSize)
+			}
 			cd.LinkageData = make([]byte, cd.Header.LinkageSize)
 			if err := binary.Read(r, binary.BigEndian, &cd.LinkageData); err != nil {
 				return nil, fmt.Errorf("failed to read SUPPORTS_LINKAGE @ %#x: %v", offset+cd.Header.LinkageOffset, err)
