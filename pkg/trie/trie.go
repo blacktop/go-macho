@@ -343,7 +343,13 @@ func WalkTrie(r *bytes.Reader, symbol string) (uint64, error) {
 	var strIndex int
 	var offset, nodeOffset uint64
 
-	for {
+	// Each hop lands on a node; a well-formed (acyclic) trie visits at most
+	// one node per byte of data. Child offsets that form a cycle would
+	// otherwise loop forever (an empty edge always "matches", so the symbol
+	// index need never advance).
+	maxHops := r.Size() + 2
+	for hop := int64(0); hop < maxHops; hop++ {
+
 		r.Seek(int64(offset), io.SeekStart)
 
 		terminalSize, err := binary.ReadUvarint(r)

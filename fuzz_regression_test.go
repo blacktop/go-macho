@@ -10,6 +10,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/blacktop/go-macho/pkg/fixupchains"
 	"github.com/blacktop/go-macho/pkg/trie"
@@ -184,6 +185,28 @@ func TestFuzzRegressionXarHugeTOC(t *testing.T) {
 
 // A __z-prefixed section whose 12-byte compressed header cannot be read used
 // to panic("Malformed object file").
+// A cyclic export trie whose empty edge hops back to itself used to make
+// WalkTrie loop forever (found by FuzzNewFile: worker hung 10m then died).
+func TestFuzzRegressionWalkTrieCycle(t *testing.T) {
+	// node@0: terminal=0, 1 child, empty edge ('\x00' matches anything),
+	// child offset 4; node@4: same shape with child offset 4 (self-cycle).
+	// The walk hops 0 -> 4 -> 4 -> ... forever without consuming the symbol.
+	cycle := []byte{0x00, 0x01, 0x00, 0x04, 0x00, 0x01, 0x00, 0x04}
+	done := make(chan struct{})
+	go func() {
+		_, err := trie.WalkTrie(bytes.NewReader(cycle), "_main")
+		if err == nil {
+			t.Error("cyclic trie walk was accepted")
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("WalkTrie hung on cyclic trie")
+	}
+}
+
 func TestFuzzRegressionZSectionHeaderShort(t *testing.T) {
 	le := binary.LittleEndian
 	seg := types.Segment64{
