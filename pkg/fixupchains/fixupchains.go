@@ -632,7 +632,10 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 				dcf.fixups[rebase.Target()] = rebase
 			} else if DcpArm64eIsBind(dcPtr64) && DcpArm64eIsAuth(dcPtr64) {
 				bind := DyldChainedPtrArm64eAuthBind24{Pointer: dcPtr64, Fixup: fixupLocation}
-				bind.Import = dcf.Imports[bind.Ordinal()].Name
+				// Ordinal comes from the file; it must index the imports table.
+				if ord := bind.Ordinal(); ord < uint64(len(dcf.Imports)) {
+					bind.Import = dcf.Imports[ord].Name
+				}
 				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, bind)
 			} else if !DcpArm64eIsBind(dcPtr64) && DcpArm64eIsAuth(dcPtr64) {
 				authRebase := DyldChainedPtrArm64eAuthRebase{
@@ -643,7 +646,10 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 				dcf.fixups[authRebase.Target()] = authRebase
 			} else if DcpArm64eIsBind(dcPtr64) && !DcpArm64eIsAuth(dcPtr64) {
 				bind := DyldChainedPtrArm64eBind24{Pointer: dcPtr64, Fixup: fixupLocation}
-				bind.Import = dcf.Imports[bind.Ordinal()].Name
+				// Ordinal comes from the file; it must index the imports table.
+				if ord := bind.Ordinal(); ord < uint64(len(dcf.Imports)) {
+					bind.Import = dcf.Imports[ord].Name
+				}
 				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, bind)
 			}
 			if DcpArm64eNext(dcPtr64) == 0 {
