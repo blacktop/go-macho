@@ -300,6 +300,56 @@ func TestFuzzRegressionFilesetSelfReference(t *testing.T) {
 	}
 }
 
+// A bind stream with a huge count and a lied segment file size used to run
+// 16M loop iterations (seconds of CPU, gigabytes of Bind structs) before the
+// old cap fired; 1M bounds malformed streams to ~1s while staying 6x above
+// the largest real binaries.
+func TestFuzzRegressionBindCountCap(t *testing.T) {
+	le := binary.LittleEndian
+	var stream bytes.Buffer
+	stream.WriteByte(types.BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB | 0)
+	trie.EncodeUleb128(&stream, 0) // seg offset 0
+	stream.WriteByte(types.BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB)
+	trie.EncodeUleb128(&stream, 1<<40) // count: 1T, under the Filesz plausibility bound
+	trie.EncodeUleb128(&stream, 0)     // skip 0
+	bindData := stream.Bytes()
+
+	var segCmd, infoCmd bytes.Buffer
+	binary.Write(&segCmd, le, types.Segment64{
+		LoadCmd: types.LC_SEGMENT_64,
+		Len:     72,
+		Name:    to16("__TEXT"),
+		Addr:    0,
+		Memsz:   0x100,
+		Offset:  0,
+		Filesz:  math.MaxInt64, // lie: makes the count "plausible"
+		Maxprot: 5,
+		Prot:    5,
+	})
+	binary.Write(&infoCmd, le, types.DyldInfoOnlyCmd{
+		LoadCmd:  types.LC_DYLD_INFO_ONLY,
+		Len:      48,
+		BindOff:  uint32(types.FileHeaderSize64 + 72 + 48),
+		BindSize: uint32(len(bindData)),
+	})
+
+	out := append(thinImage64(segCmd.Bytes(), infoCmd.Bytes()), bindData...)
+	m, err := NewFile(bytes.NewReader(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	start := time.Now()
+	binds, err := m.GetBindInfo()
+	if err == nil || !strings.Contains(err.Error(), "expands to more than") {
+		t.Fatalf("got %v (%d binds), wanted bind count cap error", err, len(binds))
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("capped bind stream took %v, want <3s", d)
+	}
+}
+
 func TestFuzzRegressionZSectionHeaderShort(t *testing.T) {
 	le := binary.LittleEndian
 	seg := types.Segment64{

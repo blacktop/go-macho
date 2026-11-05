@@ -3608,6 +3608,11 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 		}
 		return seg, nil
 	}
+	// maxTotalBinds bounds binds produced by one stream. Real binaries stay
+	// below ~150k binds per image, so 1M is generous headroom while keeping
+	// a malformed stream (huge count + lied Filesz) to ~1s of work instead
+	// of the seconds and gigabytes 16M allowed.
+	const maxTotalBinds = 1 << 20
 
 	for {
 		ptr, err := r.ReadByte()
@@ -3737,7 +3742,6 @@ func (f *File) parseBinds(r *bytes.Reader, kind types.BindKind) ([]types.Bind, e
 			}
 			// Filesz itself comes from the file, so also enforce a hard cap
 			// on total binds produced by one stream.
-			const maxTotalBinds = 16 << 20
 			for i := uint64(0); i < count; i++ {
 				if len(binds) > maxTotalBinds {
 					return nil, fmt.Errorf("bind stream expands to more than %d binds", maxTotalBinds)
