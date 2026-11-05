@@ -57,6 +57,8 @@ type File struct {
 	objcOnce               sync.Once
 	exportAddressOnlyBinds bool // see WithAddressOnlyBinds
 
+	filesetDepth int // nesting level of fileset lookups; guards entry cycles
+
 	sharedCacheRelativeSelectorBaseVMAddress uint64 // objc_opt version 16
 	swiftAutoDemangle                        bool
 
@@ -2495,11 +2497,19 @@ func (f *File) FileSets() []*FilesetEntry {
 }
 
 // GetFileSetFileByName returns the Fileset MachO for a given name.
+// maxFilesetNesting bounds recursive fileset lookups. dyld fileset entries
+// never nest, so anything deeper means a crafted (cyclic) entry whose offset
+// points back at an ancestor header; recursing on it used to loop forever.
+const maxFilesetNesting = 8
+
 func (f *File) GetFileSetFileByName(name string) (*File, error) {
+	if f.filesetDepth >= maxFilesetNesting {
+		return nil, fmt.Errorf("fileset nesting exceeds %d levels (cyclic LC_FILESET_ENTRY?)", maxFilesetNesting)
+	}
 	for _, l := range f.Loads {
 		if fs, ok := l.(*FilesetEntry); ok {
 			if strings.EqualFold(fs.EntryID, name) || strings.HasSuffix(strings.ToLower(fs.EntryID), strings.ToLower(name)) {
-				return NewFile(io.NewSectionReader(f.sr, int64(fs.FileOffset), 1<<63-1), FileConfig{
+				mfe, err := NewFile(io.NewSectionReader(f.sr, int64(fs.FileOffset), 1<<63-1), FileConfig{
 					Offset:        int64(fs.FileOffset),
 					SectionReader: f.sr,
 					CacheReader:   f.cr,
@@ -2509,6 +2519,10 @@ func (f *File) GetFileSetFileByName(name string) (*File, error) {
 						Offet2VMAddr: f.GetVMAddress,
 					},
 				})
+				if err == nil && mfe != nil {
+					mfe.filesetDepth = f.filesetDepth + 1
+				}
+				return mfe, err
 			}
 		}
 	}

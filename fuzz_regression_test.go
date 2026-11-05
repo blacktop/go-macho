@@ -242,6 +242,64 @@ func TestFuzzRegressionFixupsImportCount(t *testing.T) {
 	}
 }
 
+// An MH_FILESET whose LC_FILESET_ENTRY offset points back at its own header
+// used to recurse FindSectionForVMAddr -> GetFileSetFileByName -> NewFile
+// forever (self-nesting filesets do not exist in dyld).
+func TestFuzzRegressionFilesetSelfReference(t *testing.T) {
+	le := binary.LittleEndian
+	entryID := "self\x00"
+	var segCmd, fsCmd bytes.Buffer
+	binary.Write(&segCmd, le, types.Segment64{
+		LoadCmd: types.LC_SEGMENT_64,
+		Len:     72,
+		Name:    to16("__TEXT"),
+		Addr:    0,
+		Memsz:   0x1000,
+		Offset:  0,
+		Filesz:  0x1000,
+		Maxprot: 5,
+		Prot:    5,
+	})
+	binary.Write(&fsCmd, le, types.FilesetEntryCmd{
+		LoadCmd:       types.LC_FILESET_ENTRY,
+		Len:           uint32(32 + len(entryID)),
+		Addr:          0x1000,
+		FileOffset:    0, // points at this file's own header
+		EntryIdOffset: 32,
+	})
+	fsCmd.WriteString(entryID)
+
+	// hand-assemble the header: MH_FILESET type
+	loads := append(append([]byte(nil), segCmd.Bytes()...), fsCmd.Bytes()...)
+	out := make([]byte, types.FileHeaderSize64+len(loads))
+	le.PutUint32(out[0:4], uint32(types.Magic64))
+	le.PutUint32(out[4:8], uint32(types.CPUArm64))
+	le.PutUint32(out[12:16], uint32(types.MH_FILESET))
+	le.PutUint32(out[16:20], 2)
+	le.PutUint32(out[20:24], uint32(len(loads)))
+	copy(out[types.FileHeaderSize64:], loads)
+
+	m, err := NewFile(bytes.NewReader(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// this used to recurse forever through the self-referencing entry
+		if sec := m.FindSectionForVMAddr(0x100400088); sec != nil {
+			t.Error("section found in cyclic fileset")
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("FindSectionForVMAddr hung on cyclic fileset")
+	}
+}
+
 func TestFuzzRegressionZSectionHeaderShort(t *testing.T) {
 	le := binary.LittleEndian
 	seg := types.Segment64{
