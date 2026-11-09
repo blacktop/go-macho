@@ -52,10 +52,17 @@ func (dcf *DyldChainedFixups) Parse() (*DyldChainedFixups, error) {
 			dcf.Starts[idx].Fixups = dcf.Starts[idx].Fixups[:0]
 		}
 	}
+	dcf.walkedFixups = 0
 
 	for segIdx, start := range dcf.Starts {
 		if start.PageStarts == nil || start.PageCount == 0 {
 			continue
+		}
+		// dyld only emits 4K or 16K chained-fixup pages. Other values make
+		// every page's chain overlap the same window of the file, turning
+		// the per-page walks into a quadratic blowup.
+		if start.PageSize != 0x1000 && start.PageSize != 0x4000 {
+			return nil, fmt.Errorf("chained fixups segment %d has invalid page size %#x", segIdx, start.PageSize)
 		}
 
 		for pageIndex := uint16(0); pageIndex < start.PageCount; pageIndex++ {
@@ -65,6 +72,11 @@ func (dcf *DyldChainedFixups) Parse() (*DyldChainedFixups, error) {
 			}
 			if offsetInPage&DYLD_CHAINED_PTR_START_MULTI != 0 {
 				overflowIndex := offsetInPage & ^DYLD_CHAINED_PTR_START_MULTI
+				// overflowIndex comes from the file and indexes page_start[];
+				// it must stay inside the array, both now and as it walks on.
+				if int(overflowIndex) >= len(start.PageStarts) {
+					return nil, fmt.Errorf("chained fixups overflow start index %d out of range (%d entries)", overflowIndex, len(start.PageStarts))
+				}
 				chainEnd := false
 				for !chainEnd {
 					chainEnd = (start.PageStarts[overflowIndex] & DYLD_CHAINED_PTR_START_LAST) != 0
@@ -73,6 +85,9 @@ func (dcf *DyldChainedFixups) Parse() (*DyldChainedFixups, error) {
 						return nil, err
 					}
 					overflowIndex++
+					if !chainEnd && int(overflowIndex) >= len(start.PageStarts) {
+						return nil, fmt.Errorf("chained fixups overflow start index %d out of range (%d entries)", overflowIndex, len(start.PageStarts))
+					}
 				}
 				continue
 			}
@@ -104,6 +119,12 @@ func (dcf *DyldChainedFixups) ParseStarts() error {
 	var segCount uint32
 	if err := binary.Read(dcf.r, dcf.bo, &segCount); err != nil {
 		return err
+	}
+
+	// segCount is untrusted; every segment needs at least a 4-byte info
+	// offset entry, so cap the allocation against the data that exists.
+	if uint64(segCount)*4 > uint64(dcf.r.Len()) {
+		return fmt.Errorf("dyld chained fixups segment count %d exceeds data size %d", segCount, dcf.r.Len())
 	}
 
 	dcf.Starts = make([]DyldChainedStarts, segCount)
@@ -352,6 +373,14 @@ func (dcf *DyldChainedFixups) decodeRebaseTarget(
 		return 0, fmt.Errorf("pointer format %d not supported for rebase lookups", format)
 	}
 }
+
+// maxFixupWalks bounds the total chain-walk work one Parse may do. Each fixup
+// slot in a real binary holds exactly one pointer, so 16M iterations covers
+// binaries up to 128MB of pointer slots; beyond that (only reachable with
+// crafted metadata, e.g. PageSize=0 re-walking the same chain once per page)
+// the walk used to burn unbounded CPU and memory.
+const maxFixupWalks = 16 << 20
+
 func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, offsetInPage DCPtrStart) error {
 
 	var dcPtr uint32
@@ -369,6 +398,10 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 	}
 
 	for !chainEnd {
+		dcf.walkedFixups++
+		if dcf.walkedFixups > maxFixupWalks {
+			return fmt.Errorf("chained fixup walk exceeds %d iterations (malformed page metadata?)", maxFixupWalks)
+		}
 		fixupLocation := pageContentStart + uint64(offsetInPage) + next
 		if _, err := dcf.sr.Seek(int64(fixupLocation), io.SeekStart); err != nil {
 			return fmt.Errorf("failed to seek to fixup location %d: %v", fixupLocation, err)
@@ -618,7 +651,10 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 				dcf.fixups[rebase.Target()] = rebase
 			} else if DcpArm64eIsBind(dcPtr64) && DcpArm64eIsAuth(dcPtr64) {
 				bind := DyldChainedPtrArm64eAuthBind24{Pointer: dcPtr64, Fixup: fixupLocation}
-				bind.Import = dcf.Imports[bind.Ordinal()].Name
+				// Ordinal comes from the file; it must index the imports table.
+				if ord := bind.Ordinal(); ord < uint64(len(dcf.Imports)) {
+					bind.Import = dcf.Imports[ord].Name
+				}
 				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, bind)
 			} else if !DcpArm64eIsBind(dcPtr64) && DcpArm64eIsAuth(dcPtr64) {
 				authRebase := DyldChainedPtrArm64eAuthRebase{
@@ -629,7 +665,10 @@ func (dcf *DyldChainedFixups) walkDcFixupChain(segIdx int, pageIndex uint16, off
 				dcf.fixups[authRebase.Target()] = authRebase
 			} else if DcpArm64eIsBind(dcPtr64) && !DcpArm64eIsAuth(dcPtr64) {
 				bind := DyldChainedPtrArm64eBind24{Pointer: dcPtr64, Fixup: fixupLocation}
-				bind.Import = dcf.Imports[bind.Ordinal()].Name
+				// Ordinal comes from the file; it must index the imports table.
+				if ord := bind.Ordinal(); ord < uint64(len(dcf.Imports)) {
+					bind.Import = dcf.Imports[ord].Name
+				}
 				dcf.Starts[segIdx].Fixups = append(dcf.Starts[segIdx].Fixups, bind)
 			}
 			if DcpArm64eNext(dcPtr64) == 0 {
@@ -674,6 +713,28 @@ func (dcf *DyldChainedFixups) parseImports() error {
 	var imports []Import
 	dcf.Imports = dcf.Imports[:0]
 
+	if int64(dcf.ImportsOffset) > dcf.r.Size() {
+		return fmt.Errorf("imports offset %d beyond fixups data size %d", dcf.ImportsOffset, dcf.r.Size())
+	}
+
+	// Each import entry needs a fixed number of bytes; ImportsCount comes
+	// from the file and must not size an allocation larger than the data.
+	entrySize := 0
+	switch dcf.ImportsFormat {
+	case DC_IMPORT:
+		entrySize = binary.Size(DyldChainedImport(0))
+	case DC_IMPORT_ADDEND:
+		entrySize = binary.Size(DyldChainedImportAddend{})
+	case DC_IMPORT_ADDEND64:
+		entrySize = binary.Size(DyldChainedImportAddend64{})
+	default:
+		return fmt.Errorf("unknown imports format %d", dcf.ImportsFormat)
+	}
+	if uint64(dcf.ImportsCount)*uint64(entrySize) > uint64(dcf.r.Size()-int64(dcf.ImportsOffset)) {
+		return fmt.Errorf("imports count %d exceeds fixups data (need %d bytes, have %d)",
+			dcf.ImportsCount, uint64(dcf.ImportsCount)*uint64(entrySize), dcf.r.Size()-int64(dcf.ImportsOffset))
+	}
+
 	if _, err := dcf.r.Seek(int64(dcf.ImportsOffset), io.SeekStart); err != nil {
 		return fmt.Errorf("failed to seek to imports offset %d: %v", dcf.ImportsOffset, err)
 	}
@@ -705,6 +766,9 @@ func (dcf *DyldChainedFixups) parseImports() error {
 		}
 	}
 
+	if int64(dcf.SymbolsOffset) > dcf.r.Size() {
+		return fmt.Errorf("symbols offset %d beyond fixups data size %d", dcf.SymbolsOffset, dcf.r.Size())
+	}
 	symbolsPool := io.NewSectionReader(dcf.r, int64(dcf.SymbolsOffset), dcf.r.Size()-int64(dcf.SymbolsOffset))
 	for _, i := range imports {
 		if _, err := symbolsPool.Seek(int64(i.NameOffset()), io.SeekStart); err != nil {

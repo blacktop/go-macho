@@ -60,6 +60,17 @@ slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 
 This allows you to control go-macho's logging output in your application without it polluting stdout by default.
 
+## Fuzzing
+
+The parser treats Mach-O input as untrusted: malformed binaries must be rejected with an error, never panic or allocate out of range. Go native fuzz targets (`FuzzNewFile`, `FuzzNewFatFile`) live in `fuzz_test.go` and can be run with:
+
+```bash
+$ go test -run=XX -fuzz=FuzzNewFile -fuzztime=10m
+$ go test -run=XX -fuzz=FuzzNewFatFile -fuzztime=10m
+```
+
+Minimized crashers are committed under `testdata/fuzz/` and replayed by plain `go test`, as are the focused regression tests in `fuzz_regression_test.go`.
+
 ## License
 
 MIT Copyright (c) 2020-2026 **blacktop**
