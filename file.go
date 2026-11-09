@@ -59,6 +59,9 @@ type File struct {
 
 	filesetDepth int // nesting level of fileset lookups; guards entry cycles
 
+	filesetMu    sync.Mutex
+	filesetCache map[string]*File // EntryID -> parsed child; nil = cached failure
+
 	sharedCacheRelativeSelectorBaseVMAddress uint64 // objc_opt version 16
 	swiftAutoDemangle                        bool
 
@@ -2393,8 +2396,14 @@ func (f *File) FindSectionForVMAddr(vmAddr uint64) *types.Section {
 		for _, fs := range f.FileSets() {
 			if mfe, err := f.GetFileSetFileByName(fs.EntryID); err == nil {
 				if sec := mfe.FindSectionForVMAddr(vmAddr); sec != nil {
-					sec.Name = fmt.Sprintf("%s.%s", fs.EntryID, sec.Name)
-					return sec
+					// Return a decorated copy. Mutating the (cached)
+					// child's section in place grew its name by the entry
+					// id on every lookup - O(n^2) allocation under callers
+					// like parseBinds that look up per bind, and it
+					// corrupted the child's metadata for later readers.
+					named := *sec
+					named.Name = fmt.Sprintf("%s.%s", fs.EntryID, sec.Name)
+					return &named
 				}
 			}
 		}
@@ -2506,9 +2515,26 @@ func (f *File) GetFileSetFileByName(name string) (*File, error) {
 	if f.filesetDepth >= maxFilesetNesting {
 		return nil, fmt.Errorf("fileset nesting exceeds %d levels (cyclic LC_FILESET_ENTRY?)", maxFilesetNesting)
 	}
+
+	// Children are immutable once parsed; cache them (and failures, which
+	// would otherwise reparse per lookup). Without this, a caller doing a
+	// section lookup per entry - e.g. parseBinds, once per produced bind -
+	// reparses the whole fileset chain on every iteration.
+	f.filesetMu.Lock()
+	defer f.filesetMu.Unlock()
+	if f.filesetCache == nil {
+		f.filesetCache = make(map[string]*File)
+	}
+
 	for _, l := range f.Loads {
 		if fs, ok := l.(*FilesetEntry); ok {
 			if strings.EqualFold(fs.EntryID, name) || strings.HasSuffix(strings.ToLower(fs.EntryID), strings.ToLower(name)) {
+				if mfe, cached := f.filesetCache[fs.EntryID]; cached {
+					if mfe == nil {
+						return nil, fmt.Errorf("fileset does NOT contain %s", name)
+					}
+					return mfe, nil
+				}
 				mfe, err := NewFile(io.NewSectionReader(f.sr, int64(fs.FileOffset), 1<<63-1), FileConfig{
 					Offset:        int64(fs.FileOffset),
 					SectionReader: f.sr,
@@ -2519,10 +2545,13 @@ func (f *File) GetFileSetFileByName(name string) (*File, error) {
 						Offet2VMAddr: f.GetVMAddress,
 					},
 				})
-				if err == nil && mfe != nil {
-					mfe.filesetDepth = f.filesetDepth + 1
+				if err != nil {
+					f.filesetCache[fs.EntryID] = nil // cache the failure
+					return nil, err
 				}
-				return mfe, err
+				mfe.filesetDepth = f.filesetDepth + 1
+				f.filesetCache[fs.EntryID] = mfe
+				return mfe, nil
 			}
 		}
 	}
