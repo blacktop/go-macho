@@ -105,8 +105,8 @@ func (t *FileTOC) HdrSize() uint32 {
 		return types.FileHeaderSize32
 	case types.Magic64:
 		return types.FileHeaderSize64
-	case types.MagicFat:
-		panic("MagicFat not handled yet")
+	case types.MagicFat, types.MagicFat64:
+		panic(fmt.Sprintf("fat magic number %#x not handled yet", t.Magic))
 	default:
 		panic(fmt.Sprintf("Unexpected magic number %#x, expected Mach-O object file", t.Magic))
 	}

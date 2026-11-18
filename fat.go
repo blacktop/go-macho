@@ -7,6 +7,7 @@ package macho
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -43,9 +44,27 @@ type FatArchHeader struct {
 
 const fatArchHeaderSize = 5 * 4
 
+// A FatArch64Header is the fat header of an image in a universal binary with
+// the MagicFat64 magic number (fat_arch_64).
+type FatArch64Header struct {
+	CPU      types.CPU
+	SubCPU   types.CPUSubtype
+	Offset   uint64
+	Size     uint64
+	Align    uint32
+	Reserved uint32
+}
+
+const fatArch64HeaderSize = 2*4 + 2*8 + 2*4
+
 // A FatArch is a Mach-O File inside a FatFile.
 type FatArch struct {
+	// FatArchHeader describes the image in either format. In a MagicFat64
+	// file its Offset or Size is zero when the image's does not fit in 32
+	// bits; Offset64 and Size64 always hold them.
 	FatArchHeader
+	Offset64 uint64
+	Size64   uint64
 	*File
 	data []byte
 }
@@ -66,7 +85,7 @@ func NewFatFile(r io.ReaderAt) (*FatFile, error) {
 	err := binary.Read(sr, binary.BigEndian, &ff.Magic)
 	if err != nil {
 		return nil, &FormatError{0, "error reading magic number", nil}
-	} else if ff.Magic != types.MagicFat {
+	} else if ff.Magic != types.MagicFat && ff.Magic != types.MagicFat64 {
 		// See if this is a Mach-O file via its magic number. The magic
 		// must be converted to little endian first though.
 		var buf [4]byte
@@ -80,7 +99,7 @@ func NewFatFile(r io.ReaderAt) (*FatFile, error) {
 	}
 	offset := int64(4)
 
-	// Read the number of FatArchHeaders that come after the fat_header.
+	// Read the number of fat_arch (or fat_arch_64) headers that come after the fat_header.
 	var narch uint32
 	err = binary.Read(sr, binary.BigEndian, &narch)
 	if err != nil {
@@ -98,22 +117,35 @@ func NewFatFile(r io.ReaderAt) (*FatFile, error) {
 	// Make sure that all images are for the same MH_ type.
 	var machoType types.HeaderFileType
 
-	// Following the fat_header comes narch fat_arch structs that index
-	// Mach-O images further in the file.
+	// Following the fat_header comes narch fat_arch (or, for MagicFat64,
+	// fat_arch_64) structs that index Mach-O images further in the file.
 	c := saferio.SliceCap[FatArch](uint64(narch))
 	if c < 0 {
 		return nil, &FormatError{offset, "too many images", nil}
 	}
 	ff.Arches = make([]FatArch, 0, c)
 	for i := uint32(0); i < narch; i++ {
-		var fa FatArch
-		err = binary.Read(sr, binary.BigEndian, &fa.FatArchHeader)
+		h, n, err := readFatArch(sr, ff.Magic)
 		if err != nil {
-			return nil, &FormatError{offset, "invalid fat_arch header", nil}
+			return nil, &FormatError{offset, err.Error(), nil}
 		}
-		offset += fatArchHeaderSize
+		if h.Offset > 1<<63-1 || h.Size > 1<<63-1-h.Offset {
+			return nil, &FormatError{offset, "fat_arch_64 image out of range", nil}
+		}
+		offset += n
+		fa := FatArch{
+			FatArchHeader: FatArchHeader{CPU: h.CPU, SubCPU: h.SubCPU, Align: h.Align},
+			Offset64:      h.Offset,
+			Size64:        h.Size,
+		}
+		if h.Offset <= 1<<32-1 {
+			fa.Offset = uint32(h.Offset)
+		}
+		if h.Size <= 1<<32-1 {
+			fa.Size = uint32(h.Size)
+		}
 
-		fr := io.NewSectionReader(r, int64(fa.Offset), int64(fa.Size))
+		fr := io.NewSectionReader(r, int64(fa.Offset64), int64(fa.Size64))
 		fa.File, err = NewFile(fr)
 		if err != nil {
 			return nil, err
@@ -138,6 +170,23 @@ func NewFatFile(r io.ReaderAt) (*FatFile, error) {
 	}
 
 	return &ff, nil
+}
+
+// readFatArch reads the next fat_arch or fat_arch_64, widened to a
+// FatArch64Header, and returns its encoded size.
+func readFatArch(r io.Reader, magic types.Magic) (FatArch64Header, int64, error) {
+	if magic == types.MagicFat64 {
+		var h FatArch64Header
+		if err := binary.Read(r, binary.BigEndian, &h); err != nil {
+			return h, 0, errors.New("invalid fat_arch_64 header")
+		}
+		return h, fatArch64HeaderSize, nil
+	}
+	var h FatArchHeader
+	if err := binary.Read(r, binary.BigEndian, &h); err != nil {
+		return FatArch64Header{}, 0, errors.New("invalid fat_arch header")
+	}
+	return FatArch64Header{CPU: h.CPU, SubCPU: h.SubCPU, Offset: uint64(h.Offset), Size: uint64(h.Size), Align: h.Align}, fatArchHeaderSize, nil
 }
 
 // OpenFat opens the named file using os.Open and prepares it for use as a Mach-O
@@ -178,6 +227,10 @@ func CreateFat(name string, files ...string) (*FatFile, error) {
 		}
 		defer m.Close()
 
+		if uint64(offset) > 1<<32-1 || uint64(len(data)) > 1<<32-1 {
+			return nil, fmt.Errorf("failed to add %s: image does not fit in a 32-bit fat file", f)
+		}
+
 		fat.Count++
 
 		fat.Arches = append(fat.Arches, FatArch{
@@ -188,8 +241,10 @@ func CreateFat(name string, files ...string) (*FatFile, error) {
 				Size:   uint32(len(data)),
 				Align:  alignBits,
 			},
-			File: m,
-			data: data,
+			Offset64: uint64(offset),
+			Size64:   uint64(len(data)),
+			File:     m,
+			data:     data,
 		})
 
 		offset += int64(len(data))
