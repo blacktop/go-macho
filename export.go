@@ -435,8 +435,11 @@ func (f *File) patchExportFile(segMap exportSegMap, exportData []byte, exportFil
 	var rebases, others map[uint64]uint64
 	var auths map[uint64]chainedFixupAuth
 	if pack {
-		// Create Auth Stubs
-		if err := exportFile.writeAuthStubs(exportData); err != nil {
+		if kept := f.keptAuthStubs(); kept != nil {
+			if err := exportFile.repointAuthStubs(kept, segMap, exportData); err != nil {
+				return nil, err
+			}
+		} else if err := exportFile.writeAuthStubs(exportData); err != nil {
 			return nil, err
 		}
 
@@ -1199,20 +1202,24 @@ func (f *File) optimizeLoadCommands(segMap exportSegMap, inCache bool) ([]Load, 
 	return newLoads, nil
 }
 
-type stub struct {
-	ADRP uint64
-	LDR  uint64
-	BR   uint64
-}
+const authStubSize = 4 * sizeOfInt32
 
-type authStub struct {
-	ADRP uint32
-	ADD  uint32
-	LDR  uint32
-	BRAA uint32
+// keptAuthStubs returns the image's __auth_stubs when the kernel collection
+// kept its stubs (macOS 27 and later): the section has bytes in the
+// collection. Earlier collections reserve an empty section without a file
+// offset and call other images directly; the export then generates the stubs.
+func (f *File) keptAuthStubs() *types.Section {
+	stubs := f.Section("__TEXT_EXEC", "__auth_stubs")
+	if stubs == nil || stubs.Size == 0 || stubs.Offset == 0 {
+		return nil
+	}
+	return stubs
 }
 
 func (f *File) resizeAuthStubs(segMap exportSegMap) {
+	if f.keptAuthStubs() != nil {
+		return
+	}
 	authGOTSection := f.Section("__DATA_CONST", "__auth_got")
 	if authGOTSection == nil {
 		return
@@ -1225,8 +1232,7 @@ func (f *File) resizeAuthStubs(segMap exportSegMap) {
 	}
 
 	// We resize the section to fit all auth stubs in it.
-	stubSize := 4 * sizeOfInt32
-	authStubsSize := (authGOTSection.Size / f.pointerSize()) * uint64(stubSize)
+	authStubsSize := (authGOTSection.Size / f.pointerSize()) * authStubSize
 	authStubsSection.Size = authStubsSize
 
 	textExecSegmentInfoIndex := slices.IndexFunc(segMap, func(info segMapInfo) bool { return info.Name == "__TEXT_EXEC" })
@@ -1256,31 +1262,6 @@ func (f *File) writeAuthStubs(exportData []byte) error {
 		return nil
 	}
 
-	writeAuthStub := func(sourceAddr, targetAddress uint64) ([]byte, error) {
-		pageMask := ^uint64(0xFFF)
-		srcPage := sourceAddr & pageMask
-		dstPage := targetAddress & pageMask
-
-		deltaPages := int64(dstPage>>12) - int64(srcPage>>12)
-
-		immlo := uint32(deltaPages&0x3) << 29
-		immhi := uint32((deltaPages>>2)&0x7ffff) << 5
-		addOffset := targetAddress & 0xFFF
-
-		stub := authStub{
-			ADRP: 0x90000011 | immlo | immhi,
-			ADD:  0x91000231 | uint32(addOffset<<10),
-			LDR:  0xF9400230,
-			BRAA: 0xD71F0A11,
-		}
-		var buf bytes.Buffer
-		buf.Grow(4 * sizeOfInt32)
-		if err := binary.Write(&buf, binary.LittleEndian, stub); err != nil {
-			return nil, err
-		}
-		return buf.Bytes(), nil
-	}
-
 	// Section offsets in a fileset image refer to its cache layout.  After
 	// exporting, derive the destination from the exported VM map instead of
 	// using that stale offset (which can otherwise overwrite the Mach-O header).
@@ -1290,20 +1271,106 @@ func (f *File) writeAuthStubs(exportData []byte) error {
 	}
 	stubsAddr := authStubsSection.Addr
 	for gotAddr := authGOTSection.Addr; gotAddr < authGOTSection.Addr+authGOTSection.Size; gotAddr += f.pointerSize() {
-		stub, err := writeAuthStub(stubsAddr, gotAddr)
-		if err != nil {
-			return err
-		}
-
-		if writeOffset+uint64(len(stub)) > uint64(len(exportData)) {
+		if writeOffset+authStubSize > uint64(len(exportData)) {
 			return fmt.Errorf("auth stub at %#x exceeds exported file size", stubsAddr)
 		}
-		copy(exportData[writeOffset:], stub)
-		writeOffset += uint64(len(stub))
-		stubsAddr += uint64(len(stub))
+		putAuthStub(exportData[writeOffset:], stubsAddr, gotAddr)
+		writeOffset += authStubSize
+		stubsAddr += authStubSize
 	}
 
 	return nil
+}
+
+// repointAuthStubs re-encodes every stub the collection kept (stubs, in cache
+// addresses) so that it loads its GOT slot at the slot's exported address. The
+// slot is decoded from the stub itself: stub i does not always load __auth_got
+// slot i (a __weak_auth_got slot can come first, as in IOBufferCopyEngineFamily).
+func (f *File) repointAuthStubs(
+	stubs *types.Section, segMap exportSegMap, exportData []byte,
+) error {
+	if stubs.Size%authStubSize != 0 {
+		return fmt.Errorf("kept __auth_stubs size %#x is not a multiple of %d", stubs.Size, authStubSize)
+	}
+	for stub := stubs.Addr; stub < stubs.Addr+stubs.Size; stub += authStubSize {
+		newStub, err := segMap.RemapAddress(stub)
+		if err != nil {
+			return fmt.Errorf("failed to remap auth stub %#x: %w", stub, err)
+		}
+		offset, err := f.GetOffset(newStub)
+		if err != nil || offset+authStubSize > uint64(len(exportData)) {
+			return fmt.Errorf("auth stub %#x is not in the exported file", stub)
+		}
+		slot, ok := decodeAuthStub(stub, exportData[offset:offset+authStubSize])
+		if !ok {
+			return fmt.Errorf("auth stub at %#x is not adrp/add/ldr/braa through x17: % x",
+				stub, exportData[offset:offset+authStubSize])
+		}
+		newSlot, err := segMap.RemapAddress(slot)
+		if err != nil {
+			return fmt.Errorf("auth stub at %#x loads %#x, which is not in the exported image: %w",
+				stub, slot, err)
+		}
+		putAuthStub(exportData[offset:], newStub, newSlot)
+	}
+	return nil
+}
+
+// putAuthStub writes the stub at address stub that loads slot and branches to
+// it: adrp x17, slot@PAGE; add x17, x17, slot@PAGEOFF; ldr x16, [x17];
+// braa x16, x17.
+func putAuthStub(dst []byte, stub, slot uint64) {
+	deltaPages := int64(slot>>12) - int64(stub>>12)
+	immlo := uint32(deltaPages&0x3) << 29
+	immhi := uint32((deltaPages>>2)&0x7ffff) << 5
+	binary.LittleEndian.PutUint32(dst[0:], 0x90000011|immlo|immhi)
+	binary.LittleEndian.PutUint32(dst[4:], 0x91000231|uint32(slot&0xfff)<<10)
+	binary.LittleEndian.PutUint32(dst[8:], 0xF9400230)
+	binary.LittleEndian.PutUint32(dst[12:], 0xD71F0A11)
+}
+
+// decodeAuthStub returns the GOT slot loaded by the stub at address stub, or
+// false if the words are not the form putAuthStub writes.
+func decodeAuthStub(stub uint64, words []byte) (uint64, bool) {
+	if len(words) < authStubSize {
+		return 0, false
+	}
+	adrp := binary.LittleEndian.Uint32(words[0:])
+	add := binary.LittleEndian.Uint32(words[4:])
+	if adrp&0x9F00001F != 0x90000011 || add&0xFFC003FF != 0x91000231 ||
+		binary.LittleEndian.Uint32(words[8:]) != 0xF9400230 ||
+		binary.LittleEndian.Uint32(words[12:]) != 0xD71F0A11 {
+		return 0, false
+	}
+	pages := int64(adrp>>5&0x7ffff)<<2 | int64(adrp>>29&0x3)
+	pages = pages << 43 >> 43 // sign-extend the 21-bit page delta
+	page := uint64(int64(stub&^0xfff) + pages<<12)
+	return page + uint64(add>>10&0xfff), true
+}
+
+// authStubSlots maps each auth stub of the exported image to the GOT slot it
+// loads. Call it after writeAuthStubs or repointAuthStubs: generated and kept
+// stubs then share one form and exported addresses.
+func (f *File) authStubSlots(exportData []byte) (map[uint64]uint64, error) {
+	stubs := f.Section("__TEXT_EXEC", "__auth_stubs")
+	if stubs == nil || stubs.Size == 0 {
+		return nil, nil
+	}
+	offset, err := f.GetOffset(stubs.Addr)
+	fileSize := uint64(len(exportData))
+	if err != nil || offset > fileSize || stubs.Size > fileSize-offset {
+		return nil, fmt.Errorf("auth stubs at %#x are not in the exported file", stubs.Addr)
+	}
+	slots := make(map[uint64]uint64, int(stubs.Size)/authStubSize)
+	for i := uint64(0); i+authStubSize <= stubs.Size; i += authStubSize {
+		slot, ok := decodeAuthStub(stubs.Addr+i, exportData[offset+i:])
+		if !ok {
+			return nil, fmt.Errorf("exported auth stub at %#x is not adrp/add/ldr/braa through x17",
+				stubs.Addr+i)
+		}
+		slots[stubs.Addr+i] = slot
+	}
+	return slots, nil
 }
 
 // orderLoadsLikeLinker places the generated load commands where ld64 emits
@@ -1959,17 +2026,23 @@ func (f *File) adjustReferencesWithSourceSymbols(segMap exportSegMap, exportData
 	}
 
 	// The cache resolves cross-image calls directly. Standalone KEXTs route
-	// them through generated auth stubs, whose matching GOT slots are binds.
-	// Reconnect each external BL/B to that slot's stub after all pointer binds
-	// have been collected (reference order is not stable).
-	authGOT := f.Section("__DATA_CONST", "__auth_got")
-	authStubs := f.Section("__TEXT_EXEC", "__auth_stubs")
-	if authGOT != nil && authStubs != nil {
+	// them through auth stubs, whose GOT slots are binds. Reconnect each
+	// external BL/B to the stub of a slot bound to its target after all pointer
+	// binds have been collected (reference order is not stable).
+	stubSlots, err := f.authStubSlots(exportData)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	if len(externalBranches) > 0 && len(stubSlots) > 0 {
+		stubForSlot := make(map[uint64]uint64, len(stubSlots))
+		for stub, slot := range stubSlots {
+			stubForSlot[slot] = stub
+		}
 		// Several slots can bind the same name (aliases share a synthesized
 		// name in stripped images); use the lowest one so output is stable.
 		slotForName := make(map[string]uint64)
 		for gotAddr, gotSym := range bindReferences {
-			if gotAddr < authGOT.Addr || gotAddr >= authGOT.Addr+authGOT.Size {
+			if _, ok := stubForSlot[gotAddr]; !ok {
 				continue
 			}
 			if current, ok := slotForName[gotSym.Name]; !ok || gotAddr < current {
@@ -1981,7 +2054,7 @@ func (f *File) adjustReferencesWithSourceSymbols(segMap exportSegMap, exportData
 			if !ok {
 				continue
 			}
-			stubAddr := authStubs.Addr + ((gotAddr-authGOT.Addr)/f.pointerSize())*16
+			stubAddr := stubForSlot[gotAddr]
 			sourceOffset, err := f.GetOffset(branchAddr)
 			if err != nil {
 				return nil, nil, nil, nil, err
@@ -2225,7 +2298,14 @@ func (f *File) optimizeLinkedit(exportData []byte, segMap exportSegMap, locals [
 	}
 
 	indirectSymtabOffset := uint32(linkedit.Offset) + uint32(lebuf.Len())
-	indirectSymtabBuf, err := f.createIndirectSymtab(symIndexMap, f.indirectSymbolFromBinds(symtabBuf, stringPoolBuf, binds))
+	var stubSlots map[uint64]uint64
+	if pack {
+		if stubSlots, err = f.authStubSlots(exportData); err != nil {
+			return nil, err
+		}
+	}
+	indirectSymtabBuf, err := f.createIndirectSymtab(symIndexMap,
+		f.indirectSymbolFromBinds(symtabBuf, stringPoolBuf, binds, stubSlots))
 	if err != nil {
 		return nil, err
 	}
@@ -3150,16 +3230,14 @@ func (f *File) finalSplitInfoReferences(exportData []byte, segMap exportSegMap, 
 			}
 		}
 	}
-	// Generated auth stubs: ADRP + ADD address their __auth_got slot.
-	authGOT := f.Section("__DATA_CONST", "__auth_got")
-	authStubs := f.Section("__TEXT_EXEC", "__auth_stubs")
-	if authGOT != nil && authStubs != nil && authGOT.Size > 0 && authStubs.Size > 0 {
-		for i := uint64(0); i < authGOT.Size/f.pointerSize() && i*16+8 <= authStubs.Size; i++ {
-			gotAddr := authGOT.Addr + i*f.pointerSize()
-			stubAddr := authStubs.Addr + i*16
-			add(types.DYLD_CACHE_ADJ_V2_ARM64_ADRP, stubAddr, gotAddr)
-			add(types.DYLD_CACHE_ADJ_V2_ARM64_OFF12, stubAddr+4, gotAddr)
-		}
+	// Auth stubs: ADRP + ADD address their GOT slot.
+	stubSlots, err := f.authStubSlots(exportData)
+	if err != nil {
+		return nil, err
+	}
+	for stub, slot := range stubSlots {
+		add(types.DYLD_CACHE_ADJ_V2_ARM64_ADRP, stub, slot)
+		add(types.DYLD_CACHE_ADJ_V2_ARM64_OFF12, stub+4, slot)
 	}
 	return out, nil
 }
@@ -3598,8 +3676,10 @@ func (f *File) createIndirectSymtab(indexMap []int, fallback ...func(entry int) 
 // indirectSymbolFromBinds names indirect symbol table entries whose original
 // symbol is unknown (a stripped kernel collection keeps the table but not the
 // symbols). A pointer slot takes the import bound there; an auth stub takes the
-// import of its __auth_got slot, as written by writeAuthStubs.
-func (f *File) indirectSymbolFromBinds(symtab, strtab []byte, binds map[uint64]Symbol) func(int) (uint32, bool) {
+// import of the GOT slot it loads (stubSlots, see authStubSlots).
+func (f *File) indirectSymbolFromBinds(
+	symtab, strtab []byte, binds map[uint64]Symbol, stubSlots map[uint64]uint64,
+) func(int) (uint32, bool) {
 	undefined := make(map[string]uint32)
 	for i := 0; i+16 <= len(symtab); i += 16 {
 		strx := binary.LittleEndian.Uint32(symtab[i:])
@@ -3613,7 +3693,6 @@ func (f *File) indirectSymbolFromBinds(symtab, strtab []byte, binds map[uint64]S
 		}
 		undefined[string(name)] = uint32(i / 16)
 	}
-	authGOT := f.Section("__DATA_CONST", "__auth_got")
 	return func(entry int) (uint32, bool) {
 		for _, sec := range f.Sections {
 			start := uint64(sec.Reserved1)
@@ -3625,11 +3704,14 @@ func (f *File) indirectSymbolFromBinds(symtab, strtab []byte, binds map[uint64]S
 					continue
 				}
 				slot = sec.Addr + (uint64(entry)-start)*f.pointerSize()
-			case sec.Name == "__auth_stubs" && authGOT != nil:
-				if uint64(entry) < start || uint64(entry) >= start+sec.Size/16 {
+			case sec.Name == "__auth_stubs":
+				if uint64(entry) < start || uint64(entry) >= start+sec.Size/authStubSize {
 					continue
 				}
-				slot = authGOT.Addr + (uint64(entry)-start)*f.pointerSize()
+				var ok bool
+				if slot, ok = stubSlots[sec.Addr+(uint64(entry)-start)*authStubSize]; !ok {
+					return 0, false
+				}
 			default:
 				continue
 			}

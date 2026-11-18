@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"testing"
@@ -208,6 +209,7 @@ func TestAdjustReferencesRoutesInternalWeakBranchThroughStub(t *testing.T) {
 	f.Symtab = &Symtab{Syms: []Symbol{{Name: "_weak", Desc: types.WEAK_DEF}}}
 	f.Dysymtab = &Dysymtab{IndirectSyms: []uint32{0}}
 	binary.LittleEndian.PutUint32(data[0x8000:], 0x94000004) // BL internal weak definition
+	putAuthStub(data[0xa000:], 0xa000, 0x9000)               // written by writeAuthStubs
 
 	binds, _, handled, _, err := f.adjustReferences(segMap, data, nil, []*types.SplitInfoEntry{
 		{Kind: types.DYLD_CACHE_ADJ_V2_POINTER_64, SourceVmAddr: 0x101000, TargetVmAddr: 0x100010},
@@ -1301,12 +1303,129 @@ func TestIndirectSymbolFromBindsUsesBoundImport(t *testing.T) {
 	strtab := []byte("\x00_a\x00_b\x00")
 	binary.Write(&symtab, binary.LittleEndian, types.Nlist64{Nlist: types.Nlist{Name: 1, Type: types.N_UNDF | types.N_EXT}})
 	binary.Write(&symtab, binary.LittleEndian, types.Nlist64{Nlist: types.Nlist{Name: 4, Type: types.N_UNDF | types.N_EXT}})
-	lookup := f.indirectSymbolFromBinds(symtab.Bytes(), strtab, map[uint64]Symbol{0x1008: {Name: "_a"}})
+	binds := map[uint64]Symbol{0x1008: {Name: "_a"}}
+	lookup := f.indirectSymbolFromBinds(symtab.Bytes(), strtab, binds, nil)
 	if index, ok := lookup(3); !ok || index != 0 {
 		t.Fatalf("entry 3 = %d, %v; want _a (0)", index, ok)
 	}
 	if _, ok := lookup(2); ok {
 		t.Fatal("entry 2 has no bind but was resolved")
+	}
+}
+
+func TestIndirectSymbolFromBindsFollowsStubToItsSlot(t *testing.T) {
+	stubs := &types.Section{SectionHeader: types.SectionHeader{
+		Name: "__auth_stubs", Seg: "__TEXT_EXEC", Addr: 0x2000, Size: 32,
+	}}
+	f := &File{FileTOC: FileTOC{Sections: []*types.Section{stubs}}}
+	f.Magic = types.Magic64
+	var symtab bytes.Buffer
+	strtab := []byte("\x00_a\x00_b\x00")
+	for _, name := range []uint32{1, 4} {
+		undefined := types.Nlist{Name: name, Type: types.N_UNDF | types.N_EXT}
+		binary.Write(&symtab, binary.LittleEndian, types.Nlist64{Nlist: undefined})
+	}
+	// Stub 0 loads a __weak_auth_got slot placed after the __auth_got slot of stub 1.
+	binds := map[uint64]Symbol{0x1000: {Name: "_b"}, 0x1100: {Name: "_a"}}
+	stubSlots := map[uint64]uint64{0x2000: 0x1100, 0x2010: 0x1000}
+	lookup := f.indirectSymbolFromBinds(symtab.Bytes(), strtab, binds, stubSlots)
+	if index, ok := lookup(0); !ok || index != 0 {
+		t.Fatalf("stub 0 = %d, %v; want _a (0)", index, ok)
+	}
+	if index, ok := lookup(1); !ok || index != 1 {
+		t.Fatalf("stub 1 = %d, %v; want _b (1)", index, ok)
+	}
+}
+
+func TestAuthStubSlotsRejectsOverflowingRange(t *testing.T) {
+	f, _, data := newReferenceAdjustmentFile()
+	f.Sections = []*types.Section{{SectionHeader: types.SectionHeader{
+		Name: "__auth_stubs", Seg: "__TEXT_EXEC", Addr: 0x1000, Size: math.MaxUint64,
+	}}}
+	if _, err := f.authStubSlots(data); err == nil || !strings.Contains(err.Error(), "not in the exported file") {
+		t.Fatalf("expected auth stub range error, got %v", err)
+	}
+}
+
+func TestDecodeAuthStubReadsWhatPutAuthStubWrites(t *testing.T) {
+	for _, tc := range []struct{ stub, slot uint64 }{
+		{0xfffffe000a9d4dd0, 0xfffffe000857de08}, // slot pages below the stub
+		{0x8000, 0x1c128},                        // slot pages above the stub
+		{0x8010, 0x8018},                         // same page
+	} {
+		words := make([]byte, authStubSize)
+		putAuthStub(words, tc.stub, tc.slot)
+		if got, ok := decodeAuthStub(tc.stub, words); !ok || got != tc.slot {
+			t.Errorf("stub %#x: slot %#x, %v; want %#x", tc.stub, got, ok, tc.slot)
+		}
+	}
+	words := make([]byte, authStubSize)
+	putAuthStub(words, 0x8000, 0x9000)
+	binary.LittleEndian.PutUint32(words[12:], 0xD61F0200) // br x16
+	if _, ok := decodeAuthStub(0x8000, words); ok {
+		t.Error("a stub ending in br x16 decoded as an auth stub")
+	}
+}
+
+func TestRepointAuthStubsMovesEachStubToItsOwnSlot(t *testing.T) {
+	newKept := func() (*File, exportSegMap, []byte, *types.Section) {
+		f, segMap, data := newReferenceAdjustmentFile()
+		// Cache addresses: stubs in __TEXT at 0x100100, slots in __DATA. Stub 0
+		// loads a __weak_auth_got slot, stub 1 the first __auth_got slot.
+		putAuthStub(data[0x8100:], 0x100100, 0xfe010)
+		putAuthStub(data[0x8110:], 0x100110, 0xfe100)
+		kept := &types.Section{SectionHeader: types.SectionHeader{
+			Name: "__auth_stubs", Seg: "__TEXT_EXEC", Addr: 0x100100, Size: 0x20, Offset: 0x100,
+		}}
+		return f, segMap, data, kept
+	}
+
+	f, segMap, data, kept := newKept()
+	if err := f.repointAuthStubs(kept, segMap, data); err != nil {
+		t.Fatal(err)
+	}
+	for stub, want := range map[uint64]uint64{0x8100: 0x6010, 0x8110: 0x6100} {
+		if got, ok := decodeAuthStub(stub, data[stub:]); !ok || got != want {
+			t.Errorf("stub %#x loads %#x (%v), want %#x", stub, got, ok, want)
+		}
+	}
+
+	f, segMap, data, kept = newKept()
+	binary.LittleEndian.PutUint32(data[0x8118:], 0xF9400631) // ldr x17, [x17, #8]
+	if err := f.repointAuthStubs(kept, segMap, data); err == nil {
+		t.Error("a stub in another form was re-pointed")
+	}
+
+	f, segMap, data, kept = newKept()
+	putAuthStub(data[0x8110:], 0x100110, 0x200000)
+	if err := f.repointAuthStubs(kept, segMap, data); err == nil {
+		t.Error("a stub loading a slot outside the image was re-pointed")
+	}
+
+	f, segMap, data, kept = newKept()
+	kept.Size = 0x18
+	if err := f.repointAuthStubs(kept, segMap, data); err == nil {
+		t.Error("a stub section of 0x18 bytes was accepted")
+	}
+}
+
+func TestKeptAuthStubsNeedBytesInTheCollection(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		size, offset uint64
+		kept         bool
+	}{
+		{"reserved empty section (macOS 26)", 0, 0, false},
+		{"grown for generated stubs", 0x30, 0, false},
+		{"kept by the collection (macOS 27)", 0x30, 0x39d0dd0, true},
+	} {
+		stubs := &types.Section{SectionHeader: types.SectionHeader{
+			Name: "__auth_stubs", Seg: "__TEXT_EXEC", Size: tc.size, Offset: uint32(tc.offset),
+		}}
+		f := &File{FileTOC: FileTOC{Sections: []*types.Section{stubs}}}
+		if got := f.keptAuthStubs() != nil; got != tc.kept {
+			t.Errorf("%s: kept = %v, want %v", tc.name, got, tc.kept)
+		}
 	}
 }
 
