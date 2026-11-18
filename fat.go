@@ -132,6 +132,14 @@ func NewFatFile(r io.ReaderAt) (*FatFile, error) {
 		if h.Offset > 1<<63-1 || h.Size > 1<<63-1-h.Offset {
 			return nil, &FormatError{offset, "fat_arch_64 image out of range", nil}
 		}
+		// An io.ReaderAt has no length, so read the image's last byte to
+		// check that the image lies within the file.
+		if h.Size > 0 {
+			var last [1]byte
+			if n, _ := r.ReadAt(last[:], int64(h.Offset+h.Size-1)); n != 1 {
+				return nil, &FormatError{offset, "fat image extends past end of file", nil}
+			}
+		}
 		offset += n
 		fa := FatArch{
 			FatArchHeader: FatArchHeader{CPU: h.CPU, SubCPU: h.SubCPU, Align: h.Align},

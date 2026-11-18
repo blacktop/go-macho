@@ -767,26 +767,31 @@ func TestOpenFat64(t *testing.T) {
 	}
 }
 
-// sparseFat64 serves a fat64 header at offset 0 and one image at base, so
-// tests can place an image beyond 4 GiB without a file that large.
+// sparseFat64 serves a fat64 header at offset 0 and one image at base, padded
+// with zeros to size, so tests can use offsets and sizes beyond 4 GiB without
+// a file that large.
 type sparseFat64 struct {
 	header, image []byte
-	base          int64
+	base, size    int64
 }
 
 func (s sparseFat64) ReadAt(p []byte, off int64) (int, error) {
-	src, rel := s.header, off
+	src, end := s.header, int64(len(s.header))
 	if off >= s.base {
-		src, rel = s.image, off-s.base
+		src, end, off = s.image, s.size, off-s.base
 	}
-	if rel >= int64(len(src)) {
+	if off >= end {
 		return 0, io.EOF
 	}
-	n := copy(p, src[rel:])
-	if n < len(p) {
-		return n, io.EOF
+	var err error
+	if int64(len(p)) > end-off {
+		p, err = p[:end-off], io.EOF
 	}
-	return n, nil
+	clear(p)
+	if off < int64(len(src)) {
+		copy(p, src[off:])
+	}
+	return len(p), err
 }
 
 func fat64Header(t *testing.T, arches ...FatArch64Header) []byte {
@@ -824,7 +829,7 @@ func TestOpenFat64Large(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			header := fat64Header(t, FatArch64Header{CPU: a.CPU, SubCPU: a.SubCPU, Offset: tt.offset, Size: tt.size, Align: a.Align})
-			ff, err := NewFatFile(sparseFat64{header, image, int64(tt.offset)})
+			ff, err := NewFatFile(sparseFat64{header, image, int64(tt.offset), int64(tt.size)})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -839,6 +844,32 @@ func TestOpenFat64Large(t *testing.T) {
 				t.Errorf("header:\n\tgot %#v\n\twant %#v\n", got.FileHeader, a.FileHeader)
 			}
 		})
+	}
+}
+
+func TestOpenFatImagePastEOF(t *testing.T) {
+	data, err := obscuretestdata.ReadFile("internal/testdata/fat-gcc-386-amd64-darwin-exec.base64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := NewFatFile(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := src.Arches[len(src.Arches)-1]
+	end := a.Offset + a.Size
+	image := data[a.Offset:end]
+	header := fat64Header(t, FatArch64Header{CPU: a.CPU, SubCPU: a.SubCPU, Offset: 1 << 32, Size: uint64(len(image)) + 1, Align: a.Align})
+
+	for name, r := range map[string]io.ReaderAt{
+		"fat":   bytes.NewReader(data[:end-1]),
+		"fat64": sparseFat64{header, image, 1 << 32, int64(len(image))},
+	} {
+		_, err := NewFatFile(r)
+		var fe *FormatError
+		if !errors.As(err, &fe) || !strings.Contains(fe.msg, "past end of file") {
+			t.Errorf("%s: got error %v, want a FormatError for an image past end of file", name, err)
+		}
 	}
 }
 
