@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"hash"
 	"io"
 	"os"
@@ -32,6 +33,7 @@ var (
 	ErrBadMagic      = errors.New("xar: bad magic")
 	ErrBadVersion    = errors.New("xar: bad version")
 	ErrBadHeaderSize = errors.New("xar: bad header size")
+	ErrBadTOCLength  = errors.New("xar: table-of-contents length out of range")
 
 	ErrNoTOCChecksum        = errors.New("xar: no TOC checksum info in TOC")
 	ErrChecksumUnsupported  = errors.New("xar: unsupported checksum type")
@@ -203,6 +205,12 @@ func NewReader(r io.ReaderAt, size int64) (*Reader, error) {
 		return nil, ErrBadHeaderSize
 	}
 
+	// toc_len_zlib is untrusted; it must fit in the archive, both to size
+	// the allocation and to keep heapOffset within range.
+	if xh.toc_len_zlib > uint64(size)-xarHeaderSize {
+		return nil, ErrBadTOCLength
+	}
+
 	ztoc := make([]byte, xh.toc_len_zlib)
 	_, err = xr.xar.ReadAt(ztoc, xarHeaderSize)
 	if err != nil {
@@ -234,7 +242,12 @@ func NewReader(r io.ReaderAt, size int64) (*Reader, error) {
 		return nil, ErrNoTOCChecksum
 	}
 
-	// Check whether the XAR checksum matches
+	// Check whether the XAR checksum matches. The XML-supplied offset and
+	// size are untrusted; they must land inside the archive heap.
+	if xr.root.Toc.Checksum.Offset < 0 || xr.root.Toc.Checksum.Size < 0 ||
+		xr.root.Toc.Checksum.Offset+xr.root.Toc.Checksum.Size > size-xr.heapOffset {
+		return nil, fmt.Errorf("xar: TOC checksum offset/size out of range (offset=%d size=%d)", xr.root.Toc.Checksum.Offset, xr.root.Toc.Checksum.Size)
+	}
 	storedsum := make([]byte, xr.root.Toc.Checksum.Size)
 	_, err = io.ReadFull(io.NewSectionReader(xr.xar, xr.heapOffset+xr.root.Toc.Checksum.Offset, xr.root.Toc.Checksum.Size), storedsum)
 	if err != nil {
@@ -303,6 +316,12 @@ func (r *Reader) readAndVerifySignature(root *xmlXar, checksumKind uint32, check
 			return ErrNoCertificates
 		}
 
+		// The XML-supplied offset and size are untrusted; they must land
+		// inside the archive heap.
+		if root.Toc.Signature.Offset < 0 || root.Toc.Signature.Size < 0 ||
+			root.Toc.Signature.Offset+root.Toc.Signature.Size > r.size-r.heapOffset {
+			return fmt.Errorf("xar: signature offset/size out of range (offset=%d size=%d)", root.Toc.Signature.Offset, root.Toc.Signature.Size)
+		}
 		signature := make([]byte, root.Toc.Signature.Size)
 		_, err = r.xar.ReadAt(signature, r.heapOffset+root.Toc.Signature.Offset)
 		if err != nil {

@@ -67,14 +67,8 @@ func (f *File) GetSwiftTOC() swift.TOC {
 // GetSwiftEntry parses the __TEXT.__swift5_entry section
 func (f *File) GetSwiftEntry() (uint64, error) {
 	if sec := f.Section("__TEXT", "__swift5_entry"); sec != nil {
-		off, err := f.vma.GetOffset(sec.Addr)
+		dat, err := f.readDataAtAddr(sec.Addr, sec.Size)
 		if err != nil {
-			return 0, fmt.Errorf("failed to convert vmaddr: %v", err)
-		}
-		f.cr.Seek(int64(off), io.SeekStart)
-
-		dat := make([]byte, sec.Size)
-		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
 			return 0, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 		}
 
@@ -94,8 +88,8 @@ func (f *File) GetSwiftBuiltinTypes() (builtins []swift.BuiltinType, err error) 
 	if sec := f.Section("__TEXT", "__swift5_builtin"); sec != nil {
 		f.cr.SeekToAddr(sec.Addr)
 
-		dat := make([]byte, sec.Size)
-		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+		dat, err := f.readDataAtAddr(sec.Addr, sec.Size)
+		if err != nil {
 			return nil, fmt.Errorf("failed to read %s.%s data: %w", sec.Seg, sec.Name, err)
 		}
 
@@ -137,8 +131,8 @@ func (f *File) GetSwiftReflectionStrings() (map[uint64]string, error) {
 		}
 		f.cr.Seek(int64(off), io.SeekStart)
 
-		dat := make([]byte, sec.Size)
-		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+		dat, err := f.readDataAtAddr(sec.Addr, sec.Size)
+		if err != nil {
 			return nil, fmt.Errorf("failed to read %s.%s data: %w", sec.Seg, sec.Name, err)
 		}
 
@@ -174,9 +168,9 @@ func (f *File) GetSwiftFields() (fields []swift.Field, err error) {
 
 		f.cr.Seek(int64(off), io.SeekStart)
 
-		dat := make([]byte, sec.Size)
-		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
-			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
+		dat, err := f.readDataAtAddr(sec.Addr, sec.Size)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read %s.%s data: %w", sec.Seg, sec.Name, err)
 		}
 
 		r := bytes.NewReader(dat)
@@ -258,8 +252,8 @@ func (f *File) GetSwiftAssociatedTypes() (asstypes []swift.AssociatedType, err e
 	if sec := f.Section("__TEXT", "__swift5_assocty"); sec != nil {
 		f.cr.SeekToAddr(sec.Addr)
 
-		dat := make([]byte, sec.Size)
-		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+		dat, err := f.readDataAtAddr(sec.Addr, sec.Size)
+		if err != nil {
 			return nil, fmt.Errorf("failed to read %s.%s data: %w", sec.Seg, sec.Name, err)
 		}
 
@@ -323,8 +317,8 @@ func (f *File) GetSwiftProtocols() (protos []swift.Protocol, err error) {
 	if sec := f.Section("__TEXT", "__swift5_protos"); sec != nil {
 		f.cr.SeekToAddr(sec.Addr)
 
-		dat := make([]byte, sec.Size)
-		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+		dat, err := f.readDataAtAddr(sec.Addr, sec.Size)
+		if err != nil {
 			return nil, fmt.Errorf("failed to read %s.%s data: %w", sec.Seg, sec.Name, err)
 		}
 
@@ -376,8 +370,8 @@ func (f *File) GetSwiftProtocolConformances() (protoConfDescs []swift.Conformanc
 	if sec := f.Section("__TEXT", "__swift5_proto"); sec != nil {
 		f.cr.SeekToAddr(sec.Addr)
 
-		dat := make([]byte, sec.Size)
-		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+		dat, err := f.readDataAtAddr(sec.Addr, sec.Size)
+		if err != nil {
 			return nil, fmt.Errorf("failed to read %s.%s data: %w", sec.Seg, sec.Name, err)
 		}
 
@@ -418,10 +412,8 @@ func (f *File) GetSwiftProtocolConformances() (protoConfDescs []swift.Conformanc
 // GetSwiftClosures parses all the closure context objects in the __TEXT.__swift5_capture section
 func (f *File) GetSwiftClosures() (closures []swift.Capture, err error) {
 	if sec := f.Section("__TEXT", "__swift5_capture"); sec != nil {
-		f.cr.SeekToAddr(sec.Addr)
-
-		dat := make([]byte, sec.Size)
-		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+		dat, err := f.readDataAtAddr(sec.Addr, sec.Size)
+		if err != nil {
 			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
 		}
 
@@ -503,9 +495,9 @@ func (f *File) GetSwiftDynamicReplacementInfo() (*swift.AutomaticDynamicReplacem
 		}
 		f.cr.Seek(int64(off), io.SeekStart)
 
-		dat := make([]byte, sec.Size)
-		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
-			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
+		dat, err := f.readDataAtAddr(sec.Addr, sec.Size)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read %s.%s data: %w", sec.Seg, sec.Name, err)
 		}
 
 		var rep swift.AutomaticDynamicReplacements
@@ -535,9 +527,9 @@ func (f *File) GetSwiftDynamicReplacementInfoForOpaqueTypes() (*swift.AutomaticD
 		}
 		f.cr.Seek(int64(off), io.SeekStart)
 
-		dat := make([]byte, sec.Size)
-		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
-			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
+		dat, err := f.readDataAtAddr(sec.Addr, sec.Size)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read %s.%s data: %w", sec.Seg, sec.Name, err)
 		}
 
 		var rep2 swift.AutomaticDynamicReplacementsSome
@@ -567,9 +559,9 @@ func (f *File) GetSwiftAccessibleFunctions() (funcs []swift.AccessibleFunction, 
 		}
 		f.cr.Seek(int64(off), io.SeekStart)
 
-		dat := make([]byte, sec.Size)
-		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
-			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
+		dat, err := f.readDataAtAddr(sec.Addr, sec.Size)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read %s.%s data: %w", sec.Seg, sec.Name, err)
 		}
 
 		r := bytes.NewReader(dat)
@@ -725,9 +717,9 @@ func (f *File) GetSwiftMultiPayloadEnums() (mpenums []swift.MultiPayloadEnum, er
 		}
 		f.cr.Seek(int64(off), io.SeekStart)
 
-		dat := make([]byte, sec.Size)
-		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
-			return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
+		dat, err := f.readDataAtAddr(sec.Addr, sec.Size)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read %s.%s data: %w", sec.Seg, sec.Name, err)
 		}
 
 		r := bytes.NewReader(dat)
@@ -799,8 +791,8 @@ func (f *File) GetSwiftColocateTypeDescriptors() ([]swift.Type, error) {
 			return nil, fmt.Errorf("failed to seek to colocated type descriptors: %w", err)
 		}
 
-		dat := make([]byte, sec.Size)
-		if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
+		dat, err := f.readDataAtAddr(sec.Addr, sec.Size)
+		if err != nil {
 			return nil, fmt.Errorf("failed to read %s.%s data: %w", sec.Seg, sec.Name, err)
 		}
 
@@ -861,9 +853,9 @@ func (f *File) GetSwiftTypes() (typs []swift.Type, err error) {
 			}
 			f.cr.Seek(int64(off), io.SeekStart)
 
-			dat := make([]byte, sec.Size)
-			if err := binary.Read(f.cr, f.ByteOrder, dat); err != nil {
-				return nil, fmt.Errorf("failed to read %s.%s data: %v", sec.Seg, sec.Name, err)
+			dat, err := f.readDataAtAddr(sec.Addr, sec.Size)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read %s.%s data: %w", sec.Seg, sec.Name, err)
 			}
 
 			r := bytes.NewReader(dat)

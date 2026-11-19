@@ -234,13 +234,18 @@ func (s *Segment) Open() io.ReadSeeker { return io.NewSectionReader(s.sr, 0, 1<<
 
 // UncompressedSize returns the size of the segment with its sections uncompressed, ignoring
 // its offset within the file.  The returned size is rounded up to the power of two in align.
-func (s *Segment) UncompressedSize(t *FileTOC, align uint64) uint64 {
+// Malformed compressed sections are reported as an error.
+func (s *Segment) UncompressedSize(t *FileTOC, align uint64) (uint64, error) {
 	sz := uint64(0)
 	for j := uint32(0); j < s.Nsect; j++ {
 		c := t.Sections[j+s.Firstsect]
-		sz += c.UncompressedSize()
+		csz, err := c.UncompressedSize()
+		if err != nil {
+			return 0, err
+		}
+		sz += csz
 	}
-	return (sz + align - 1) & uint64(-int64(align))
+	return (sz + align - 1) & uint64(-int64(align)), nil
 }
 
 func (s *Segment) Copy() *Segment {
@@ -2129,23 +2134,29 @@ func (n *Note) String() string {
 		var allImageInfos types.NoteAllImageInfos
 		if err := binary.Read(r, n.bo, &allImageInfos); err == nil {
 			note = fmt.Sprintf("%sAllImageInfos: version=%d img_count=%d", padding, allImageInfos.Version, allImageInfos.InfoArrayCount)
-			entries := make([]types.NoteAllImageInfosImageEntry, allImageInfos.InfoArrayCount)
-			if err := binary.Read(r, n.bo, &entries); err == nil {
-				for _, entry := range entries {
-					var img types.NoteAllImageInfosImage
-					img.Entry = entry
-					segs := make([]types.NoteAllImageInfosSegmentVmaddr, entry.SegmentCount)
-					if err := binary.Read(r, n.bo, &segs); err == nil {
-						img.Segments = segs
+			// InfoArrayCount is untrusted; every entry must be backed by
+			// bytes remaining in the note data before it sizes an allocation.
+			if uint64(allImageInfos.InfoArrayCount)*uint64(binary.Size(types.NoteAllImageInfosImageEntry{})) <= uint64(r.Len()) {
+				entries := make([]types.NoteAllImageInfosImageEntry, allImageInfos.InfoArrayCount)
+				if err := binary.Read(r, n.bo, &entries); err == nil {
+					for _, entry := range entries {
+						var img types.NoteAllImageInfosImage
+						img.Entry = entry
+						if uint64(entry.SegmentCount)*uint64(binary.Size(types.NoteAllImageInfosSegmentVmaddr{})) <= uint64(r.Len()) {
+							segs := make([]types.NoteAllImageInfosSegmentVmaddr, entry.SegmentCount)
+							if err := binary.Read(r, n.bo, &segs); err == nil {
+								img.Segments = segs
+							}
+						}
+						imgs = append(imgs, img)
 					}
-					imgs = append(imgs, img)
-				}
-				for i := 0; i < int(allImageInfos.InfoArrayCount); i++ {
-					if name, err := readString(r); err == nil {
-						imgs[i].Name = name
+					for i := 0; i < int(allImageInfos.InfoArrayCount); i++ {
+						if name, err := readString(r); err == nil {
+							imgs[i].Name = name
+						}
 					}
+					note += "\n"
 				}
-				note += "\n"
 			}
 		}
 		for _, img := range imgs {
@@ -2405,6 +2416,11 @@ func ParseFunctionVariants(data []byte, bo binary.ByteOrder) (*types.FuncVarData
 		return &types.FuncVarData{}, nil
 	}
 
+	// tableCount is untrusted; every table offset needs 4 bytes of data.
+	if uint64(tableCount)*4 > uint64(r.Len()) {
+		return nil, fmt.Errorf("table count %d exceeds data size %d", tableCount, r.Len())
+	}
+
 	// Read table offsets
 	tableOffsets := make([]uint32, tableCount)
 	for i := uint32(0); i < tableCount; i++ {
@@ -2433,6 +2449,12 @@ func ParseFunctionVariants(data []byte, bo binary.ByteOrder) (*types.FuncVarData
 		var count uint32
 		if err := binary.Read(tableReader, bo, &count); err != nil {
 			return nil, fmt.Errorf("failed to read table %d count: %v", i, err)
+		}
+
+		// Each entry is 8 bytes (impl + 4 flag bits); count is untrusted.
+		const funcVarEntrySize = 8
+		if uint64(count)*funcVarEntrySize > uint64(tableReader.Len()) {
+			return nil, fmt.Errorf("table %d entry count %d exceeds data size %d", i, count, tableReader.Len())
 		}
 
 		result.Tables[i] = types.FuncVarTable{

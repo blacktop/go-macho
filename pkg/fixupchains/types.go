@@ -20,6 +20,7 @@ type DyldChainedFixups struct {
 	metadataParsed bool
 	importsParsed  bool
 	chainsParsed   bool
+	walkedFixups   int // total chain-walk iterations across one Parse; DoS bound
 	segmentIndex   []segmentRange
 }
 

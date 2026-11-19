@@ -250,15 +250,31 @@ func ParseTrieExports(r *bytes.Reader, loadAddress uint64) ([]TrieExport, error)
 func ParseTrie(r *bytes.Reader) ([]Node, error) {
 	data := make([]byte, 0, 32768)
 	var output []Node
-	if err := parseTrie(r, 0, data, &output); err != nil {
+	if err := parseTrie(r, 0, data, &output, 0); err != nil {
 		return nil, err
 	}
 	return output, nil
 }
 
+// maxTrieDepth bounds trie recursion. Export tries are keyed by symbol
+// names, so well-formed tries are shallow; anything deeper (or cyclic,
+// which otherwise recurses forever) is malformed data.
+const maxTrieDepth = 1024
+
+// maxTrieNodes bounds the number of terminal nodes a trie may enumerate.
+// Malformed tries with dense fan-out can otherwise expand to astronomical
+// node counts from a few kilobytes of data (a CPU denial of service).
+const maxTrieNodes = 1 << 20 // 1M terminal nodes
+
 // parseTrie appends the terminal nodes of the subtrie at pos to output: the
 // node's own terminal first, then each child's subtrie in edge order.
-func parseTrie(r *bytes.Reader, pos uint64, cummulativeString []byte, output *[]Node) error {
+func parseTrie(r *bytes.Reader, pos uint64, cummulativeString []byte, output *[]Node, depth int) error {
+	if depth > maxTrieDepth {
+		return fmt.Errorf("trie nesting exceeds maximum depth %d", maxTrieDepth)
+	}
+	if len(*output) > maxTrieNodes {
+		return fmt.Errorf("trie expands to more than %d terminal nodes", maxTrieNodes)
+	}
 
 	r.Seek(int64(pos), io.SeekStart)
 
@@ -305,7 +321,14 @@ func parseTrie(r *bytes.Reader, pos uint64, cummulativeString []byte, output *[]
 
 		curr, _ := r.Seek(0, io.SeekCurrent)
 
-		if err := parseTrie(r, childNodeOffset, append(cummulativeString, tmp...), output); err != nil {
+		// Bound the cumulative symbol length; real symbols are far shorter,
+		// and this keeps a malicious trie from duplicating huge strings into
+		// every terminal node.
+		const maxTrieSymbolLen = 4096
+		if len(cummulativeString)+len(tmp) > maxTrieSymbolLen {
+			return fmt.Errorf("trie symbol exceeds maximum length %d", maxTrieSymbolLen)
+		}
+		if err := parseTrie(r, childNodeOffset, append(cummulativeString, tmp...), output, depth+1); err != nil {
 			return fmt.Errorf("could not parse trie (recursive call): %v", err)
 		}
 
@@ -320,7 +343,13 @@ func WalkTrie(r *bytes.Reader, symbol string) (uint64, error) {
 	var strIndex int
 	var offset, nodeOffset uint64
 
-	for {
+	// Each hop lands on a node; a well-formed (acyclic) trie visits at most
+	// one node per byte of data. Child offsets that form a cycle would
+	// otherwise loop forever (an empty edge always "matches", so the symbol
+	// index need never advance).
+	maxHops := r.Size() + 2
+	for hop := int64(0); hop < maxHops; hop++ {
+
 		r.Seek(int64(offset), io.SeekStart)
 
 		terminalSize, err := binary.ReadUvarint(r)
