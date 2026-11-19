@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -714,6 +715,306 @@ func TestOpenFat(t *testing.T) {
 		if !reflect.DeepEqual(arch.FileHeader, ftArch.hdr) {
 			t.Errorf("OpenFat header:\n\tgot %#v\n\twant %#v\n", arch.FileHeader, ftArch.hdr)
 		}
+	}
+}
+
+func TestOpenFat64(t *testing.T) {
+	data, want := readFatTestdata(t)
+	for i, a := range want.Arches {
+		if a.Offset == 0 || a.Offset64 != uint64(a.Offset) || a.Size == 0 || a.Size64 != uint64(a.Size) {
+			t.Errorf("fat architecture #%d: got Offset64 %#x Size64 %#x, want %#x %#x", i, a.Offset64, a.Size64, a.Offset, a.Size)
+		}
+	}
+	var arches []fatArch64Header
+	for _, a := range want.Arches {
+		arches = append(arches, arch64(a, uint64(a.Offset), uint64(a.Size)))
+	}
+	header := fat64Header(t, arches...)
+	if len(header) > int(want.Arches[0].Offset) {
+		t.Fatalf("test setup: fat64 header (%d bytes) overlaps the first image", len(header))
+	}
+	copy(data, header)
+
+	ff, err := NewFatFile(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ff.Magic != types.MagicFat64 {
+		t.Errorf("NewFatFile: got magic number %#x, want %#x", ff.Magic, types.MagicFat64)
+	}
+	if len(ff.Arches) != len(want.Arches) {
+		t.Fatalf("NewFatFile: got %d architectures, want %d", len(ff.Arches), len(want.Arches))
+	}
+	for i := range ff.Arches {
+		got, want := &ff.Arches[i], &want.Arches[i]
+		if got.FatArchHeader != want.FatArchHeader {
+			t.Errorf("architecture #%d: got header %+v, want %+v", i, got.FatArchHeader, want.FatArchHeader)
+		}
+		if got.Offset64 != uint64(want.Offset) || got.Size64 != uint64(want.Size) {
+			t.Errorf("architecture #%d: got offset %#x size %#x, want %#x %#x", i, got.Offset64, got.Size64, want.Offset, want.Size)
+		}
+		if !reflect.DeepEqual(got.FileHeader, want.FileHeader) {
+			t.Errorf("architecture #%d header:\n\tgot %#v\n\twant %#v\n", i, got.FileHeader, want.FileHeader)
+		}
+	}
+}
+
+// sparseFat64 serves a fat64 header at offset 0 and one image at base, padded
+// with zeros to size, so tests can use offsets and sizes beyond 4 GiB without
+// a file that large.
+type sparseFat64 struct {
+	header, image []byte
+	base, size    int64
+}
+
+func (s sparseFat64) ReadAt(p []byte, off int64) (int, error) {
+	src, end := s.header, int64(len(s.header))
+	if off >= s.base {
+		src, end, off = s.image, s.size, off-s.base
+	}
+	if off >= end {
+		return 0, io.EOF
+	}
+	var err error
+	if int64(len(p)) > end-off {
+		p, err = p[:end-off], io.EOF
+	}
+	clear(p)
+	if off < int64(len(src)) {
+		copy(p, src[off:])
+	}
+	return len(p), err
+}
+
+// readFatTestdata returns the bytes of the fat test binary and the FatFile
+// parsed from a copy of them, so tests are free to modify the bytes.
+func readFatTestdata(t *testing.T) ([]byte, *FatFile) {
+	t.Helper()
+	data, err := obscuretestdata.ReadFile("internal/testdata/fat-gcc-386-amd64-darwin-exec.base64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ff, err := NewFatFile(bytes.NewReader(bytes.Clone(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data, ff
+}
+
+// arch64 returns a fat_arch_64 for a's architecture at the given offset and size.
+func arch64(a FatArch, offset, size uint64) fatArch64Header {
+	return fatArch64Header{CPU: a.CPU, SubCPU: a.SubCPU, Offset: offset, Size: size, Align: a.Align}
+}
+
+func fat64Header(t *testing.T, arches ...fatArch64Header) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	for _, v := range []any{types.MagicFat64, uint32(len(arches)), arches} {
+		if err := binary.Write(&b, binary.BigEndian, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return b.Bytes()
+}
+
+func TestOpenFat64Large(t *testing.T) {
+	data, src := readFatTestdata(t)
+	a := src.Arches[1]
+	image := data[a.Offset : a.Offset+a.Size]
+
+	tests := []struct {
+		name                 string
+		offset, size         uint64
+		wantOffset, wantSize uint32
+	}{
+		{"offset beyond 4 GiB", 1<<32 + 0x4000, uint64(len(image)), 0, uint32(len(image))},
+		{"size beyond 4 GiB", 0x4000, 1 << 40, 0x4000, 0},
+		{"both beyond 4 GiB", 1<<32 + 0x4000, 1 << 40, 0, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			header := fat64Header(t, arch64(a, tt.offset, tt.size))
+			r := sparseFat64{header, image, int64(tt.offset), int64(tt.size)}
+			// Callers that read only the 32-bit Offset and Size must not
+			// be handed an image those fields cannot describe.
+			_, err := NewFatFile(r)
+			var fe *FormatError
+			if !errors.As(err, &fe) || fe.off != 8 || !strings.Contains(fe.msg, "does not fit in 32 bits") {
+				t.Fatalf("NewFatFile without LargeImages: got error %v, want a FormatError at 8 for an image that does not fit in 32 bits", err)
+			}
+			ff, err := NewFatFileWithConfig(r, FatConfig{LargeImages: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := &ff.Arches[0]
+			if got.Offset64 != tt.offset || got.Size64 != tt.size {
+				t.Errorf("got Offset64 %#x Size64 %#x, want %#x %#x", got.Offset64, got.Size64, tt.offset, tt.size)
+			}
+			if got.Offset != tt.wantOffset || got.Size != tt.wantSize {
+				t.Errorf("got Offset %#x Size %#x, want %#x %#x", got.Offset, got.Size, tt.wantOffset, tt.wantSize)
+			}
+			if !reflect.DeepEqual(got.FileHeader, a.FileHeader) {
+				t.Errorf("header:\n\tgot %#v\n\twant %#v\n", got.FileHeader, a.FileHeader)
+			}
+		})
+	}
+}
+
+func TestOpenFatImagePastEOF(t *testing.T) {
+	data, src := readFatTestdata(t)
+	a := src.Arches[len(src.Arches)-1]
+	end := a.Offset + a.Size
+	image := data[a.Offset:end]
+	header := fat64Header(t, arch64(a, 1<<32, uint64(len(image))+1))
+
+	for name, r := range map[string]io.ReaderAt{
+		"fat":   bytes.NewReader(data[:end-1]),
+		"fat64": sparseFat64{header, image, 1 << 32, int64(len(image))},
+	} {
+		_, err := NewFatFileWithConfig(r, FatConfig{LargeImages: true})
+		var fe *FormatError
+		if !errors.As(err, &fe) || !strings.Contains(fe.msg, "past end of file") {
+			t.Errorf("%s: got error %v, want a FormatError for an image past end of file", name, err)
+		}
+	}
+}
+
+func TestOpenFat64OutOfRange(t *testing.T) {
+	tests := []struct {
+		name         string
+		offset, size uint64
+	}{
+		{"offset above MaxInt64", 1 << 63, 0x1000},
+		{"offset MaxUint64", 1<<64 - 1, 0},
+		{"end above MaxInt64", 0x1000, 1<<63 - 1},
+		{"size above MaxInt64", 0, 1 << 63},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			header := fat64Header(t, fatArch64Header{CPU: types.CPUAmd64, Offset: tt.offset, Size: tt.size})
+			for _, cfg := range []FatConfig{{}, {LargeImages: true}} {
+				_, err := NewFatFileWithConfig(bytes.NewReader(header), cfg)
+				var fe *FormatError
+				if !errors.As(err, &fe) {
+					t.Fatalf("NewFatFileWithConfig(%+v): got error %v, want *FormatError", cfg, err)
+				}
+				if fe.off != 8 || fe.msg != "fat_arch_64 image out of range" {
+					t.Errorf("NewFatFileWithConfig(%+v): got %q at offset %d, want %q at 8 (the fat_arch_64 entry)", cfg, fe.msg, fe.off, "fat_arch_64 image out of range")
+				}
+			}
+		})
+	}
+}
+
+func TestOpenFat64LargeFile(t *testing.T) {
+	data, src := readFatTestdata(t)
+	a := src.Arches[0]
+	header := fat64Header(t, arch64(a, 1<<32, uint64(a.Size)))
+	name := filepath.Join(t.TempDir(), "fat64")
+	f, err := os.Create(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Writing the image at 4 GiB leaves a hole before it, so the file is sparse.
+	_, err = f.Write(header)
+	if err == nil {
+		_, err = f.WriteAt(data[a.Offset:a.Offset+a.Size], 1<<32)
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		t.Skipf("cannot create a sparse 4 GiB file: %v", err)
+	}
+
+	if ff, err := OpenFat(name); err == nil {
+		ff.Close()
+		t.Error("OpenFat without LargeImages: succeeded on an image at 4 GiB")
+	}
+	ff, err := OpenFatWithConfig(name, FatConfig{LargeImages: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ff.Close()
+	if got := ff.Arches[0]; got.Offset64 != 1<<32 || got.Offset != 0 || got.Size64 != uint64(a.Size) {
+		t.Errorf("got Offset64 %#x Offset %#x Size64 %#x, want %#x 0 %#x", got.Offset64, got.Offset, got.Size64, uint64(1<<32), a.Size)
+	}
+}
+
+func TestCreateFatTooLarge(t *testing.T) {
+	// The inputs are sparse and not Mach-O files: were CreateFat to read
+	// one, it would allocate gigabytes and then fail to parse it rather than
+	// report that it does not fit.
+	tests := []struct {
+		name  string
+		sizes []int64
+		want  int // index of the input that does not fit
+	}{
+		{"size", []int64{1 << 32}, 0},
+		{"offset", []int64{1<<32 - align, 1}, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			var in []string
+			for i, size := range tt.sizes {
+				name := filepath.Join(dir, fmt.Sprintf("in%d", i))
+				f, err := os.Create(name)
+				if err != nil {
+					t.Fatal(err)
+				}
+				err = f.Truncate(size)
+				if cerr := f.Close(); err == nil {
+					err = cerr
+				}
+				if err != nil {
+					t.Skipf("cannot create a sparse %d-byte file: %v", size, err)
+				}
+				in = append(in, name)
+			}
+			out := filepath.Join(dir, "fat")
+			_, err := CreateFat(out, in...)
+			want := fmt.Sprintf("failed to add %s: image does not fit in a 32-bit fat file", in[tt.want])
+			if err == nil || err.Error() != want {
+				t.Errorf("CreateFat: got error %v, want %q", err, want)
+			}
+			if _, err := os.Stat(out); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("CreateFat left an output file behind: %v", err)
+			}
+		})
+	}
+}
+
+func TestOpenFatTruncatedArch(t *testing.T) {
+	for _, magic := range []types.Magic{types.MagicFat, types.MagicFat64} {
+		var b bytes.Buffer
+		binary.Write(&b, binary.BigEndian, magic)
+		binary.Write(&b, binary.BigEndian, uint32(2))
+		b.Write(make([]byte, 10))
+		_, err := NewFatFile(bytes.NewReader(b.Bytes()))
+		var fe *FormatError
+		if !errors.As(err, &fe) {
+			t.Fatalf("magic %#x: got error %v, want *FormatError", magic, err)
+		}
+		if fe.off != 8 || !strings.Contains(fe.msg, "invalid fat_arch") {
+			t.Errorf("magic %#x: got %q at offset %d, want an invalid fat_arch header at 8", magic, fe.msg, fe.off)
+		}
+	}
+}
+
+// The signatures of NewFatFile and OpenFat are part of the API: callers assign
+// them to function values.
+var (
+	_ func(io.ReaderAt) (*FatFile, error) = NewFatFile
+	_ func(string) (*FatFile, error)      = OpenFat
+)
+
+func TestFatArchHeaderSizes(t *testing.T) {
+	if got := binary.Size(FatArchHeader{}); got != fatArchHeaderSize {
+		t.Errorf("binary.Size(FatArchHeader{}) = %d, want %d", got, fatArchHeaderSize)
+	}
+	if got := binary.Size(fatArch64Header{}); got != fatArch64HeaderSize {
+		t.Errorf("binary.Size(fatArch64Header{}) = %d, want %d", got, fatArch64HeaderSize)
 	}
 }
 

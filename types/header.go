@@ -13,15 +13,17 @@ import (
 type Magic uint32
 
 const (
-	Magic32  Magic = 0xfeedface
-	Magic64  Magic = 0xfeedfacf
-	MagicFat Magic = 0xcafebabe
+	Magic32    Magic = 0xfeedface
+	Magic64    Magic = 0xfeedfacf
+	MagicFat   Magic = 0xcafebabe
+	MagicFat64 Magic = 0xcafebabf
 )
 
 var magicStrings = []IntName{
 	{uint32(Magic32), "32-bit MachO"},
 	{uint32(Magic64), "64-bit MachO"},
 	{uint32(MagicFat), "Fat MachO"},
+	{uint32(MagicFat64), "Fat64 MachO"},
 }
 
 func (i Magic) Int() uint32      { return uint32(i) }
