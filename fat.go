@@ -73,7 +73,8 @@ type FatArch struct {
 // universal binary but may be a thin binary, based on its magic number.
 var ErrNotFat = &FormatError{0, "not a fat Mach-O file", nil}
 
-// FatConfig configures how NewFatFile and OpenFat read a universal binary.
+// FatConfig configures how NewFatFileWithConfig and OpenFatWithConfig read a
+// universal binary.
 type FatConfig struct {
 	// LargeImages allows a MagicFat64 file to hold images whose offset or
 	// size does not fit in 32 bits. Callers that set it must use
@@ -86,11 +87,13 @@ type FatConfig struct {
 // NewFatFile creates a new FatFile for accessing all the Mach-O images in a
 // universal binary. The Mach-O binary is expected to start at position 0 in
 // the ReaderAt.
-func NewFatFile(r io.ReaderAt, config ...FatConfig) (*FatFile, error) {
-	var cfg FatConfig
-	if len(config) > 0 {
-		cfg = config[0]
-	}
+func NewFatFile(r io.ReaderAt) (*FatFile, error) {
+	return NewFatFileWithConfig(r, FatConfig{})
+}
+
+// NewFatFileWithConfig is like NewFatFile but reads the universal binary as
+// cfg directs.
+func NewFatFileWithConfig(r io.ReaderAt, cfg FatConfig) (*FatFile, error) {
 	var ff FatFile
 	sr := io.NewSectionReader(r, 0, 1<<63-1)
 
@@ -219,12 +222,18 @@ func (fa *FatArch) setRange(offset, size uint64) {
 
 // OpenFat opens the named file using os.Open and prepares it for use as a Mach-O
 // universal binary.
-func OpenFat(name string, config ...FatConfig) (*FatFile, error) {
+func OpenFat(name string) (*FatFile, error) {
+	return OpenFatWithConfig(name, FatConfig{})
+}
+
+// OpenFatWithConfig is like OpenFat but reads the universal binary as cfg
+// directs.
+func OpenFatWithConfig(name string, cfg FatConfig) (*FatFile, error) {
 	f, err := os.Open(name)
 	if err != nil {
 		return nil, err
 	}
-	ff, err := NewFatFile(f, config...)
+	ff, err := NewFatFileWithConfig(f, cfg)
 	if err != nil {
 		f.Close()
 		return nil, err

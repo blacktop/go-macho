@@ -842,7 +842,7 @@ func TestOpenFat64Large(t *testing.T) {
 			if !errors.As(err, &fe) || fe.off != 8 || !strings.Contains(fe.msg, "does not fit in 32 bits") {
 				t.Fatalf("NewFatFile without LargeImages: got error %v, want a FormatError at 8 for an image that does not fit in 32 bits", err)
 			}
-			ff, err := NewFatFile(r, FatConfig{LargeImages: true})
+			ff, err := NewFatFileWithConfig(r, FatConfig{LargeImages: true})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -871,7 +871,7 @@ func TestOpenFatImagePastEOF(t *testing.T) {
 		"fat":   bytes.NewReader(data[:end-1]),
 		"fat64": sparseFat64{header, image, 1 << 32, int64(len(image))},
 	} {
-		_, err := NewFatFile(r, FatConfig{LargeImages: true})
+		_, err := NewFatFileWithConfig(r, FatConfig{LargeImages: true})
 		var fe *FormatError
 		if !errors.As(err, &fe) || !strings.Contains(fe.msg, "past end of file") {
 			t.Errorf("%s: got error %v, want a FormatError for an image past end of file", name, err)
@@ -893,13 +893,13 @@ func TestOpenFat64OutOfRange(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			header := fat64Header(t, fatArch64Header{CPU: types.CPUAmd64, Offset: tt.offset, Size: tt.size})
 			for _, cfg := range []FatConfig{{}, {LargeImages: true}} {
-				_, err := NewFatFile(bytes.NewReader(header), cfg)
+				_, err := NewFatFileWithConfig(bytes.NewReader(header), cfg)
 				var fe *FormatError
 				if !errors.As(err, &fe) {
-					t.Fatalf("NewFatFile(%+v): got error %v, want *FormatError", cfg, err)
+					t.Fatalf("NewFatFileWithConfig(%+v): got error %v, want *FormatError", cfg, err)
 				}
 				if fe.off != 8 || fe.msg != "fat_arch_64 image out of range" {
-					t.Errorf("NewFatFile(%+v): got %q at offset %d, want %q at 8 (the fat_arch_64 entry)", cfg, fe.msg, fe.off, "fat_arch_64 image out of range")
+					t.Errorf("NewFatFileWithConfig(%+v): got %q at offset %d, want %q at 8 (the fat_arch_64 entry)", cfg, fe.msg, fe.off, "fat_arch_64 image out of range")
 				}
 			}
 		})
@@ -931,7 +931,7 @@ func TestOpenFat64LargeFile(t *testing.T) {
 		ff.Close()
 		t.Error("OpenFat without LargeImages: succeeded on an image at 4 GiB")
 	}
-	ff, err := OpenFat(name, FatConfig{LargeImages: true})
+	ff, err := OpenFatWithConfig(name, FatConfig{LargeImages: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1001,6 +1001,13 @@ func TestOpenFatTruncatedArch(t *testing.T) {
 		}
 	}
 }
+
+// The signatures of NewFatFile and OpenFat are part of the API: callers assign
+// them to function values.
+var (
+	_ func(io.ReaderAt) (*FatFile, error) = NewFatFile
+	_ func(string) (*FatFile, error)      = OpenFat
+)
 
 func TestFatArchHeaderSizes(t *testing.T) {
 	if got := binary.Size(FatArchHeader{}); got != fatArchHeaderSize {
